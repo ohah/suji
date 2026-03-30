@@ -41,12 +41,18 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
 
     // 백엔드 스캐폴딩
     switch (opts.backend) {
+        .zig => try scaffoldZig(project_dir),
         .rust => try scaffoldRust(project_dir),
         .go => try scaffoldGo(allocator, project_dir, name),
         .multi => {
             try project_dir.makeDir("backends");
             var backends_dir = try project_dir.openDir("backends", .{});
             defer backends_dir.close();
+
+            try backends_dir.makeDir("zig");
+            var zig_dir = try backends_dir.openDir("zig", .{});
+            defer zig_dir.close();
+            try scaffoldZig(zig_dir);
 
             try backends_dir.makeDir("rust");
             var rust_dir = try backends_dir.openDir("rust", .{});
@@ -58,7 +64,6 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
             defer go_dir.close();
             try scaffoldGo(allocator, go_dir, name);
         },
-        .zig => {},
     }
 
     // 프론트엔드
@@ -79,6 +84,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
             \\  "window": {{ "title": "{s}", "width": 800, "height": 600, "debug": true }},
             \\  "backends": [
+            \\    {{ "name": "zig", "lang": "zig", "entry": "backends/zig" }},
             \\    {{ "name": "rust", "lang": "rust", "entry": "backends/rust" }},
             \\    {{ "name": "go", "lang": "go", "entry": "backends/go" }}
             \\  ],
@@ -96,6 +102,10 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
     };
     _ = allocator;
     try writeFileContent(dir, "suji.json", content);
+}
+
+fn scaffoldZig(dir: std.fs.Dir) !void {
+    try writeFileContent(dir, "app.zig", @embedFile("../templates/zig_app.zig"));
 }
 
 fn scaffoldRust(dir: std.fs.Dir) !void {

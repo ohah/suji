@@ -122,7 +122,7 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
 - [x] 코어 → WebView 호출 (evaluate JS)
 - [x] 코어 → 백엔드 디스패치 (직접, 체인, 팬아웃, 코어 릴레이)
 - [x] 비동기 응답 처리 (Promise 기반)
-- [ ] 이벤트 시스템 (구독/발행, 어느 백엔드든 수신 가능)
+- [x] 이벤트 시스템 (EventBus: on/once/off/emit, JS ↔ 백엔드 양방향)
 - [ ] 중앙 상태 스토어 (Zig 코어에서 관리, 백엔드는 읽기 요청/쓰기 요청)
 - [ ] 바이너리 데이터 채널 (로컬 HTTP 서버)
 
@@ -158,16 +158,29 @@ const buffer = await response.arrayBuffer();
 
 **결과물**:
 ```js
-// 프론트엔드에서
-const result = await window.__suji__.invoke("greet", { name: "yoon" });
+// 프론트엔드
+const result = await __suji__.invoke("zig", '{"cmd":"greet","name":"yoon"}');
+__suji__.on("data-updated", (data) => console.log(data));
+__suji__.emit("button-clicked", { button: "save" });
 ```
 ```zig
-// Zig 백엔드에서
-fn greet(ctx: *SujiContext, args: JsonValue) JsonValue {
-    const name = args.get("name").string();
-    // 중앙 상태 업데이트 (코어 경유)
-    ctx.state.set("last_greeted", name);
-    return json.string("Hello, " ++ name);
+// Zig 백엔드 (내장)
+fn greet(req: suji.Request) suji.Response {
+    const name = req.string("name") orelse "world";
+    return req.ok(.{ .msg = name, .greeting = "Hello!" });
+}
+```
+```rust
+// Rust 백엔드 (SDK)
+#[suji::command]
+fn greet(name: String) -> String {
+    format!("Hello, {}!", name)
+}
+```
+```go
+// Go 백엔드 (SDK)
+func (a *App) Greet(name string) string {
+    return "Hello, " + name
 }
 ```
 
@@ -184,7 +197,7 @@ fn greet(ctx: *SujiContext, args: JsonValue) JsonValue {
 - [ ] 창 이벤트 (resize, close, focus 등)
 - [ ] 멀티 윈도우
 - [ ] CLI 도구
-  - [ ] `suji init` — 프로젝트 스캐폴딩
+  - [x] `suji init` — 프로젝트 스캐폴딩 (rust/go/multi)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
   - [x] `suji run` — 빌드된 앱 실행
@@ -250,11 +263,13 @@ suji dev
 
 - [x] C ABI 인터페이스 스펙 정의 (backend_init, backend_handle_ipc, backend_free, backend_destroy)
 - [x] `backends/loader.zig` — dlopen 관리자 (Backend, BackendRegistry)
-- [ ] 각 언어별 SDK 패키지 배포
-  - [ ] Rust: `suji` crate (crates.io)
-  - [ ] Go: `suji` module (go pkg)
+- [x] 각 언어별 SDK (로컬 경로 링크)
+  - [x] Rust: `crates/suji-rs` (#[suji::command] 매크로, export_commands!)
+  - [x] Go: `sdks/suji-go` (suji.Bind(&App{}), 리플렉션 기반)
+  - [x] Zig: 내장 빌더 (suji.app().command("ping", ping), req.ok())
   - [ ] C: `suji.h` 헤더
-- [ ] 각 언어별 예제 프로젝트
+  - [ ] SDK crates.io / go pkg 배포
+- [x] 각 언어별 예제 프로젝트 (examples/zig-backend, rust-backend, go-backend, multi-backend)
 
 **각 언어별 개발자 경험**:
 
@@ -318,10 +333,13 @@ app.on("ready", () => {
 
 **인터페이스 스펙**:
 ```c
-// Zig 코어가 백엔드에게 제공하는 API (백엔드 → 코어 → 다른 백엔드 호출용)
+// Zig 코어가 백엔드에게 제공하는 API
 typedef struct {
     const char* (*invoke)(const char* backend_name, const char* request);
     void (*free)(const char* response);
+    void (*emit)(const char* event_name, const char* data);
+    uint64_t (*on)(const char* event_name, EventCallback cb, void* arg);
+    void (*off)(uint64_t listener_id);
 } SujiCore;
 
 // 백엔드가 export해야 하는 C ABI 함수
