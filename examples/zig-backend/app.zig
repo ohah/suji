@@ -3,8 +3,7 @@ const suji = @import("suji");
 pub const app = suji.app()
     .command("ping", ping)
     .command("greet", greet)
-    .command("add", add)
-    .command("upper", upper);
+    .command("add", add);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong" });
@@ -21,9 +20,6 @@ fn add(req: suji.Request) suji.Response {
     return req.ok(.{ .result = a + b });
 }
 
-fn upper(req: suji.Request) suji.Response {
-    // Zig에서 대문자 변환은 런타임 버퍼 필요
-    const text = req.string("text") orelse "";
-    _ = text;
-    return req.ok(.{ .msg = "uppercase not yet implemented" });
+comptime {
+    _ = suji.exportApp(app);
 }

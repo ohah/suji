@@ -115,15 +115,7 @@ pub const Bridge = struct {
     }
 
     fn callBackend(self: *Bridge, name: []const u8, request: []const u8) ?[]const u8 {
-        // "zig" 백엔드 → 내장 처리 (arena allocator로 메모리 관리)
-        if (std.mem.eql(u8, name, "zig")) {
-            if (self.zig_app) |zig_app| {
-                return zig_app.handleIpc(std.heap.page_allocator, request);
-            }
-            return null;
-        }
-
-        // 그 외 → dlopen 백엔드
+        // 모든 백엔드 dlopen으로 통일 (Zig 포함)
         var req_buf: [8192]u8 = undefined;
         const len = @min(request.len, req_buf.len - 1);
         @memcpy(req_buf[0..len], request[0..len]);
@@ -132,8 +124,6 @@ pub const Bridge = struct {
     }
 
     fn freeBackend(self: *Bridge, name: []const u8, response: ?[]const u8) void {
-        // zig 내장 백엔드는 comptime 문자열이라 free 불필요
-        if (std.mem.eql(u8, name, "zig")) return;
         self.registry.freeResponse(name, response);
     }
 

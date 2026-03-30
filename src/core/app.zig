@@ -123,9 +123,12 @@ pub const Event = struct {
 };
 
 /// 앱 빌더 시작
-pub fn init() App {
+pub fn app() App {
     return App{};
 }
+
+// init은 app의 별칭 (root.zig 호환)
+pub const init = app;
 
 // ============================================
 // 런타임 JSON 직렬화
@@ -251,6 +254,56 @@ fn extractIntField(json: []const u8, key: []const u8) ?i64 {
     while (end < json.len and json[end] >= '0' and json[end] <= '9') end += 1;
     if (end == start) return null;
     return std.fmt.parseInt(i64, json[start..end], 10) catch null;
+}
+
+// ============================================
+// C ABI Export (dlopen용)
+// ============================================
+
+/// comptime에서 App을 C ABI export 함수로 변환
+/// 사용자 코드에서: comptime { suji.exportApp(app); }
+pub fn exportApp(comptime application: App) type {
+    return struct {
+        var arena: ?std.heap.ArenaAllocator = null;
+
+        export fn backend_init(_: ?*anyopaque) callconv(.c) void {
+            std.debug.print("[Zig] ready (suji SDK)\n", .{});
+        }
+
+        export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 {
+            const req_slice = std.mem.span(request);
+
+            // Arena per request
+            var req_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            const allocator = req_arena.allocator();
+
+            const resp = application.handleIpc(allocator, req_slice);
+            if (resp) |data| {
+                // 응답을 C 힙에 복사 (arena는 여기서 해제)
+                const c_resp = std.heap.page_allocator.allocSentinel(u8, data.len, 0) catch {
+                    req_arena.deinit();
+                    return null;
+                };
+                @memcpy(c_resp[0..data.len], data[0..data.len]);
+                req_arena.deinit();
+                return c_resp;
+            }
+
+            req_arena.deinit();
+            return null;
+        }
+
+        export fn backend_free(ptr: ?[*:0]u8) callconv(.c) void {
+            if (ptr) |p| {
+                const slice = std.mem.span(p);
+                std.heap.page_allocator.free(slice[0 .. slice.len + 1]);
+            }
+        }
+
+        export fn backend_destroy() callconv(.c) void {
+            std.debug.print("[Zig] bye (suji SDK)\n", .{});
+        }
+    };
 }
 
 fn extractFloatField(json: []const u8, key: []const u8) ?f64 {

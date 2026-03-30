@@ -167,10 +167,7 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
     if (config.isMultiBackend()) {
         if (config.backends) |backends| {
             for (backends) |be| {
-                if (std.mem.eql(u8, be.lang, "zig")) {
-                    std.debug.print("[suji] zig backend (built-in)\n", .{});
-                    continue; // Zig는 내장, dlopen 불필요
-                }
+                // Zig도 다른 언어와 동일하게 dlopen
                 std.debug.print("[suji] building {s} ({s})...\n", .{ be.name, be.lang });
                 buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
                     std.debug.print("[suji] build failed: {}\n", .{err});
@@ -188,24 +185,20 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
             }
         }
     } else if (config.backend) |be| {
-        if (std.mem.eql(u8, be.lang, "zig")) {
-            std.debug.print("[suji] zig backend (built-in)\n", .{});
-        } else {
-            std.debug.print("[suji] building {s} backend...\n", .{be.lang});
-            buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
-                std.debug.print("[suji] build failed: {}\n", .{err});
-                return;
-            };
-            const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
-            defer allocator.free(path);
-            var path_z: [1024]u8 = undefined;
-            const plen = @min(path.len, path_z.len - 1);
-            @memcpy(path_z[0..plen], path[0..plen]);
-            path_z[plen] = 0;
-            registry.register("default", path_z[0..plen :0]) catch |err| {
-                std.debug.print("[suji] load failed: {}\n", .{err});
-            };
-        }
+        std.debug.print("[suji] building {s} backend...\n", .{be.lang});
+        buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
+            std.debug.print("[suji] build failed: {}\n", .{err});
+            return;
+        };
+        const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
+        defer allocator.free(path);
+        var path_z: [1024]u8 = undefined;
+        const plen = @min(path.len, path_z.len - 1);
+        @memcpy(path_z[0..plen], path[0..plen]);
+        path_z[plen] = 0;
+        registry.register(be.lang, path_z[0..plen :0]) catch |err| {
+            std.debug.print("[suji] load failed: {}\n", .{err});
+        };
     }
 }
 
@@ -245,6 +238,26 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
             .{ "CC", "/usr/bin/clang" },
             .{ "CGO_ENABLED", "1" },
         });
+    } else if (std.mem.eql(u8, lang, "zig")) {
+        // Zig 백엔드는 자체 build.zig가 있어야 함
+        // --prefix로 빌드 결과물을 entry 디렉토리에 설치
+        const prefix = try std.fmt.allocPrint(allocator, "--prefix={s}/zig-out", .{entry});
+        defer allocator.free(prefix);
+        const dir_arg = try std.fmt.allocPrint(allocator, "--build-file", .{});
+        _ = dir_arg;
+        // entry 디렉토리에서 zig build 실행
+        var child = std.process.Child.init(&.{ "zig", "build" }, allocator);
+        const abs_entry = std.fs.cwd().realpathAlloc(allocator, entry) catch null;
+        defer if (abs_entry) |p| allocator.free(p);
+        child.cwd = abs_entry;
+        child.stderr_behavior = .Inherit;
+        child.stdout_behavior = .Inherit;
+        try child.spawn();
+        const result = try child.wait();
+        switch (result) {
+            .Exited => |code| if (code != 0) return error.CommandFailed,
+            else => return error.CommandFailed,
+        }
     }
 }
 
@@ -254,6 +267,8 @@ fn getDylibPath(allocator: std.mem.Allocator, lang: []const u8, entry: []const u
         return try std.fmt.allocPrint(allocator, "{s}/target/{s}/librust_backend.dylib", .{ entry, profile });
     } else if (std.mem.eql(u8, lang, "go")) {
         return try std.fmt.allocPrint(allocator, "{s}/libbackend.dylib", .{entry});
+    } else if (std.mem.eql(u8, lang, "zig")) {
+        return try std.fmt.allocPrint(allocator, "{s}/zig-out/lib/libbackend.dylib", .{entry});
     }
     return error.UnsupportedLang;
 }

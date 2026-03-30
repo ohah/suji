@@ -20,7 +20,7 @@ function App() {
 
   const call = async (req: string, label: string) => {
     try {
-      const r = await window.__suji__.invoke("default", req);
+      const r = await window.__suji__.invoke("rust", req);
       log(`[${label}] ${S(r)}`);
     } catch (e) {
       log(`[${label}] ERR: ${S(e)}`);

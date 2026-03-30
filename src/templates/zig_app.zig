@@ -12,3 +12,8 @@ fn greet(req: suji.Request) suji.Response {
     const name = req.string("name") orelse "world";
     return req.ok(.{ .msg = name, .greeting = "Hello from Zig!" });
 }
+
+// C ABI export (suji dev에서 dlopen으로 로드)
+comptime {
+    _ = suji.exportApp(app);
+}

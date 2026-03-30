@@ -26,6 +26,13 @@ pub fn build(b: *std.Build) void {
     });
     loader_module.addImport("events", events_module);
 
+    // 외부 패키지용 모듈 export (사용자가 @import("suji")로 가져감)
+    _ = b.addModule("suji", .{
+        .root_source_file = b.path("src/core/app.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // Suji CLI
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),

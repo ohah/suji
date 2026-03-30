@@ -6,7 +6,7 @@ pub const app = suji.app()
     .command("info", info);
 
 fn ping(req: suji.Request) suji.Response {
-    return req.ok(.{ .msg = "pong from zig (built-in)" });
+    return req.ok(.{ .msg = "pong from zig" });
 }
 
 fn greet(req: suji.Request) suji.Response {
@@ -15,9 +15,10 @@ fn greet(req: suji.Request) suji.Response {
 }
 
 fn info(req: suji.Request) suji.Response {
-    return req.ok(.{
-        .runtime = "zig",
-        .type = "built-in",
-        .dlopen = "false",
-    });
+    _ = req;
+    return req.ok(.{ .runtime = "zig", .type = "dlopen" });
+}
+
+comptime {
+    _ = suji.exportApp(app);
 }
