@@ -6,6 +6,10 @@
             .url = "https://github.com/thechampagne/webview-zig/archive/refs/heads/main.tar.gz",
             .hash = "webview-0.1.0-ImQK_8_aIABj-dmipgQ_Cw1trbEFExFQwMZetkgtT8fg",
         },
+        .toml = .{
+            .url = "https://github.com/sam701/zig-toml/archive/refs/heads/main.tar.gz",
+            .hash = "toml-0.3.0-bV14Be6EAQDr0fkyURz4jYFyTAMPcwlNN0FEPVjDnXTR",
+        },
     },
     .fingerprint = 0xa1882004288224ac,
     .paths = .{

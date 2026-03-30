@@ -9,6 +9,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const toml_dep = b.dependency("toml", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     // 공통 모듈
     const loader_module = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
@@ -25,6 +30,7 @@ pub fn build(b: *std.Build) void {
     });
     root_module.addImport("webview", webview_dep.module("webview"));
     root_module.addImport("loader", loader_module);
+    root_module.addImport("toml", toml_dep.module("toml"));
 
     const exe = b.addExecutable(.{
         .name = "suji",
@@ -87,4 +93,21 @@ pub fn build(b: *std.Build) void {
     const ipc_test = b.addTest(.{ .root_module = ipc_test_mod });
     ipc_test.linkLibrary(webview_dep.artifact("webviewStatic"));
     test_step.dependOn(&b.addRunArtifact(ipc_test).step);
+
+    // Config tests
+    const config_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/config_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const config_module = b.createModule(.{
+        .root_source_file = b.path("src/core/config.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    config_module.addImport("toml", toml_dep.module("toml"));
+    config_test_mod.addImport("config", config_module);
+    const config_test = b.addTest(.{ .root_module = config_test_mod });
+    test_step.dependOn(&b.addRunArtifact(config_test).step);
 }

@@ -3,6 +3,7 @@ pub const backends = @import("loader");
 pub const window = @import("core/window.zig");
 pub const webview = @import("core/webview.zig");
 pub const ipc = @import("core/ipc.zig");
+pub const config = @import("core/config.zig");
 
 pub const Backend = backends.Backend;
 pub const BackendRegistry = backends.BackendRegistry;
@@ -10,3 +11,4 @@ pub const Window = window.Window;
 pub const WindowConfig = window.WindowConfig;
 pub const WebView = webview.WebView;
 pub const Bridge = ipc.Bridge;
+pub const Config = config.Config;
