@@ -221,10 +221,12 @@ fn appendJsonValue(allocator: std.mem.Allocator, parts: *std.ArrayListUnmanaged(
     if (T == bool) {
         try parts.appendSlice(allocator, if (value) "true" else "false");
     } else if (info == .int or info == .comptime_int) {
-        const str = try std.fmt.allocPrint(allocator, "{d}", .{value});
+        var num_buf: [32]u8 = undefined;
+        const str = std.fmt.bufPrint(&num_buf, "{d}", .{value}) catch return error.OutOfMemory;
         try parts.appendSlice(allocator, str);
     } else if (info == .float or info == .comptime_float) {
-        const str = try std.fmt.allocPrint(allocator, "{d}", .{value});
+        var num_buf: [64]u8 = undefined;
+        const str = std.fmt.bufPrint(&num_buf, "{d}", .{value}) catch return error.OutOfMemory;
         try parts.appendSlice(allocator, str);
     } else if (info == .pointer) {
         const ptr = info.pointer;

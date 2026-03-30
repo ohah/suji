@@ -243,8 +243,6 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         // --prefix로 빌드 결과물을 entry 디렉토리에 설치
         const prefix = try std.fmt.allocPrint(allocator, "--prefix={s}/zig-out", .{entry});
         defer allocator.free(prefix);
-        const dir_arg = try std.fmt.allocPrint(allocator, "--build-file", .{});
-        _ = dir_arg;
         // entry 디렉토리에서 zig build 실행
         var child = std.process.Child.init(&.{ "zig", "build" }, allocator);
         const abs_entry = std.fs.cwd().realpathAlloc(allocator, entry) catch null;

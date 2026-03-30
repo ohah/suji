@@ -3,13 +3,11 @@ const wv = @import("webview");
 const WebView = @import("webview.zig").WebView;
 const loader = @import("loader");
 const events = @import("events");
-const app_mod = @import("app.zig");
 
 pub const Bridge = struct {
     registry: *loader.BackendRegistry,
     webview: *WebView,
     event_bus: ?*events.EventBus = null,
-    zig_app: ?*const app_mod.App = null,
 
     pub fn init(webview_ptr: *WebView, registry: *loader.BackendRegistry) Bridge {
         return .{
@@ -20,10 +18,6 @@ pub const Bridge = struct {
 
     pub fn setEventBus(self: *Bridge, bus: *events.EventBus) void {
         self.event_bus = bus;
-    }
-
-    pub fn setZigApp(self: *Bridge, zig_app: *const app_mod.App) void {
-        self.zig_app = zig_app;
     }
 
     pub fn bind(self: *Bridge) void {
