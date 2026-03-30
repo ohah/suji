@@ -23,3 +23,5 @@ pub const Request = app_mod.Request;
 pub const Response = app_mod.Response;
 pub const Event = app_mod.Event;
 pub const app = app_mod.init;
+pub const callBackend = app_mod.callBackend;
+pub const exportApp = app_mod.exportApp;

@@ -67,11 +67,22 @@ function App() {
         </section>
 
         <section>
-          <h3>3. Cross-Backend</h3>
-          <p>백엔드끼리 직접 호출</p>
+          <h3>3. Cross-Backend (모든 방향)</h3>
+          <p>백엔드끼리 SujiCore API로 직접 호출</p>
           <div className="buttons">
+            <button className="zig" onClick={() => call(() => suji.invoke("zig", '{"cmd":"call_rust"}'), "zig→rust")}>Zig→Rust</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("zig", '{"cmd":"call_go"}'), "zig→go")}>Zig→Go</button>
             <button className="rust" onClick={() => call(() => suji.invoke("rust", '{"cmd":"call_go"}'), "rust→go")}>Rust→Go</button>
             <button className="go" onClick={() => call(() => suji.invoke("go", '{"cmd":"call_rust"}'), "go→rust")}>Go→Rust</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>3.5. Chain (Zig→Rust→Go)</h3>
+          <p>Zig가 Rust와 Go를 순차/동시 호출</p>
+          <div className="buttons">
+            <button className="zig" onClick={() => call(() => suji.invoke("zig", '{"cmd":"collab","data":"hello from zig"}'), "zig-collab")}>Zig leads collab</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("zig", '{"cmd":"chain_all"}'), "zig-chain")}>Zig→Rust→Go chain</button>
           </div>
         </section>
 

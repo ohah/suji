@@ -102,6 +102,34 @@ pub const Request = struct {
         return .{ .data = json, .allocated = true };
     }
 
+    /// 다른 백엔드 호출
+    pub fn call(self: *const Request, backend: []const u8, request: []const u8) ?[]const u8 {
+        _ = self;
+        return callBackend(backend, request);
+    }
+
+    /// Raw JSON 응답 (크로스 호출 결과 포함 시)
+    pub fn okRaw(self: *const Request, json: []const u8) Response {
+        const result = std.fmt.allocPrint(self.arena, "{{\"from\":\"zig\",\"result\":{s}}}", .{json}) catch
+            return .{ .data = "{\"from\":\"zig\",\"error\":\"format failed\"}", .allocated = false };
+        return .{ .data = result, .allocated = true };
+    }
+
+    /// 여러 Raw JSON 결과를 합쳐서 응답
+    pub fn okMulti(self: *const Request, fields: []const [2][]const u8) Response {
+        var parts = std.ArrayListUnmanaged(u8){};
+        parts.appendSlice(self.arena, "{\"from\":\"zig\"") catch return .{ .data = "{}", .allocated = false };
+        for (fields) |field| {
+            parts.appendSlice(self.arena, ",\"") catch break;
+            parts.appendSlice(self.arena, field[0]) catch break;
+            parts.appendSlice(self.arena, "\":") catch break;
+            parts.appendSlice(self.arena, field[1]) catch break;
+        }
+        parts.appendSlice(self.arena, "}") catch {};
+        const result = parts.toOwnedSlice(self.arena) catch return .{ .data = "{}", .allocated = false };
+        return .{ .data = result, .allocated = true };
+    }
+
     /// 에러 응답
     pub fn err(self: *const Request, msg: []const u8) Response {
         const json = std.fmt.allocPrint(self.arena, "{{\"from\":\"zig\",\"error\":\"{s}\"}}", .{msg}) catch
@@ -262,12 +290,63 @@ fn extractIntField(json: []const u8, key: []const u8) ?i64 {
 
 /// comptime에서 App을 C ABI export 함수로 변환
 /// 사용자 코드에서: comptime { suji.exportApp(app); }
+/// Zig에서 다른 백엔드 호출 (SujiCore API 경유)
+pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
+    const core = _global_core orelse {
+        std.debug.print("[Zig callBackend] core is null\n", .{});
+        return null;
+    };
+    const invoke_fn = core.invoke orelse {
+        std.debug.print("[Zig callBackend] invoke is null\n", .{});
+        return null;
+    };
+
+    // null-terminate
+    var backend_buf: [256]u8 = undefined;
+    const blen = @min(backend.len, backend_buf.len - 1);
+    @memcpy(backend_buf[0..blen], backend[0..blen]);
+    backend_buf[blen] = 0;
+
+    var request_buf: [8192]u8 = undefined;
+    const rlen = @min(request.len, request_buf.len - 1);
+    @memcpy(request_buf[0..rlen], request[0..rlen]);
+    request_buf[rlen] = 0;
+
+    std.debug.print("[Zig callBackend] calling '{s}' with '{s}'\n", .{ backend_buf[0..blen], request_buf[0..rlen] });
+
+    const resp_ptr = invoke_fn(@ptrCast(&backend_buf), @ptrCast(&request_buf));
+
+    std.debug.print("[Zig callBackend] resp_ptr={*}\n", .{resp_ptr});
+
+    // [*c]const u8 → 체크
+    const resp: [*]const u8 = @ptrCast(resp_ptr orelse return null);
+    if (resp[0] == 0) return null;
+
+    // span으로 길이 찾기
+    var len: usize = 0;
+    while (resp[len] != 0) : (len += 1) {}
+    if (len == 0) return null;
+
+    std.debug.print("[Zig callBackend] got {d} bytes: {s}\n", .{ len, resp[0..len] });
+    return resp[0..len];
+}
+
+// SujiCore 타입 (loader.zig와 동일 레이아웃)
+const ExternSujiCore = extern struct {
+    invoke: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) [*c]const u8,
+    free: ?*const fn ([*c]const u8) callconv(.c) void,
+    emit: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
+    on: ?*const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
+    off: ?*const fn (u64) callconv(.c) void,
+};
+
+var _global_core: ?*const ExternSujiCore = null;
+
 pub fn exportApp(comptime application: App) type {
     return struct {
-        var arena: ?std.heap.ArenaAllocator = null;
-
-        export fn backend_init(_: ?*anyopaque) callconv(.c) void {
-            std.debug.print("[Zig] ready (suji SDK)\n", .{});
+        export fn backend_init(core: ?*const ExternSujiCore) callconv(.c) void {
+            _global_core = core;
+            std.debug.print("[Zig] ready (suji SDK, core API connected)\n", .{});
         }
 
         export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 {
