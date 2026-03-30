@@ -16,7 +16,9 @@ pub fn main() !void {
 
     const command = args[1];
 
-    if (std.mem.eql(u8, command, "dev")) {
+    if (std.mem.eql(u8, command, "init")) {
+        try runInit(allocator, args[2..]);
+    } else if (std.mem.eql(u8, command, "dev")) {
         try runDev(allocator);
     } else if (std.mem.eql(u8, command, "build")) {
         try runBuild(allocator);
@@ -33,13 +35,50 @@ fn printUsage() void {
         \\Suji - Zig core multi-backend desktop framework
         \\
         \\Usage:
-        \\  suji dev              Development mode (hot reload)
-        \\  suji build            Production build
-        \\  suji run              Run production build
+        \\  suji init <name> [--backend=rust|go|multi]  Create new project
+        \\  suji dev                                     Development mode
+        \\  suji build                                   Production build
+        \\  suji run                                     Run production build
         \\
-        \\Commands read suji.toml or suji.json from current directory.
+        \\Example:
+        \\  suji init my-app --backend=rust
+        \\  cd my-app && suji dev
         \\
     , .{});
+}
+
+const init_mod = @import("core/init.zig");
+
+fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
+    if (init_args.len == 0) {
+        std.debug.print("Usage: suji init <project-name> [--backend=rust|go|multi]\n", .{});
+        return;
+    }
+
+    var name: []const u8 = "";
+    var backend = init_mod.BackendLang.rust;
+
+    for (init_args) |arg| {
+        if (std.mem.startsWith(u8, arg, "--backend=")) {
+            const lang_str = arg[10..];
+            backend = init_mod.BackendLang.fromString(lang_str) orelse {
+                std.debug.print("Unknown backend: {s}. Use: rust, go, multi\n", .{lang_str});
+                return;
+            };
+        } else {
+            name = arg;
+        }
+    }
+
+    if (name.len == 0) {
+        std.debug.print("Usage: suji init <project-name> [--backend=rust|go|multi]\n", .{});
+        return;
+    }
+
+    try init_mod.run(allocator, .{
+        .name = name,
+        .backend = backend,
+    });
 }
 
 // ============================================
