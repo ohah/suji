@@ -130,6 +130,21 @@ pub fn build(b: *std.Build) void {
     const events_test = b.addTest(.{ .root_module = events_test_mod });
     test_step.dependOn(&b.addRunArtifact(events_test).step);
 
+    // App tests
+    const app_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/app_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    app_test_mod.addImport("app", b.createModule(.{
+        .root_source_file = b.path("src/core/app.zig"),
+        .target = target,
+        .optimize = optimize,
+    }));
+    const app_test = b.addTest(.{ .root_module = app_test_mod });
+    test_step.dependOn(&b.addRunArtifact(app_test).step);
+
     const config_test = b.addTest(.{ .root_module = config_test_mod });
     test_step.dependOn(&b.addRunArtifact(config_test).step);
 }

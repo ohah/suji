@@ -3,11 +3,13 @@ const wv = @import("webview");
 const WebView = @import("webview.zig").WebView;
 const loader = @import("loader");
 const events = @import("events");
+const app_mod = @import("app.zig");
 
 pub const Bridge = struct {
     registry: *loader.BackendRegistry,
     webview: *WebView,
     event_bus: ?*events.EventBus = null,
+    zig_app: ?*const app_mod.App = null,
 
     pub fn init(webview_ptr: *WebView, registry: *loader.BackendRegistry) Bridge {
         return .{
@@ -18,6 +20,10 @@ pub const Bridge = struct {
 
     pub fn setEventBus(self: *Bridge, bus: *events.EventBus) void {
         self.event_bus = bus;
+    }
+
+    pub fn setZigApp(self: *Bridge, zig_app: *const app_mod.App) void {
+        self.zig_app = zig_app;
     }
 
     pub fn bind(self: *Bridge) void {
@@ -109,6 +115,15 @@ pub const Bridge = struct {
     }
 
     fn callBackend(self: *Bridge, name: []const u8, request: []const u8) ?[]const u8 {
+        // "zig" 백엔드 → 내장 처리
+        if (std.mem.eql(u8, name, "zig")) {
+            if (self.zig_app) |zig_app| {
+                return zig_app.handleIpc(request);
+            }
+            return null;
+        }
+
+        // 그 외 → dlopen 백엔드
         var req_buf: [8192]u8 = undefined;
         const len = @min(request.len, req_buf.len - 1);
         @memcpy(req_buf[0..len], request[0..len]);
@@ -117,6 +132,8 @@ pub const Bridge = struct {
     }
 
     fn freeBackend(self: *Bridge, name: []const u8, response: ?[]const u8) void {
+        // zig 내장 백엔드는 comptime 문자열이라 free 불필요
+        if (std.mem.eql(u8, name, "zig")) return;
         self.registry.freeResponse(name, response);
     }
 
