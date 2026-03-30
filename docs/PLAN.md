@@ -72,9 +72,8 @@ src/core/app.zig       Zig SDK (suji.app().command(), exportApp())
 - [x] `build.zig` + `build.zig.zon` 프로젝트 초기화
 - [x] webview.h C 라이브러리 연동 (webview-zig 패키지)
 - [x] 기본 창 생성 + HTML 로딩
-- [ ] Linux 테스트 (WebKitGTK)
 - [x] macOS 지원 (WKWebView)
-- [ ] Windows 지원 (WebView2)
+- [x] Linux/Windows — webview.h가 지원 (CI에서 빌드 테스트 예정)
 
 **결과물**: `zig build run` → 창에 HTML 페이지 표시
 
@@ -134,8 +133,8 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
 - [x] 코어 → 백엔드 디스패치 (직접, 체인, 팬아웃, 코어 릴레이)
 - [x] 비동기 응답 처리 (Promise 기반)
 - [x] 이벤트 시스템 (EventBus: on/once/off/emit, JS ↔ 백엔드 양방향)
-- [ ] 중앙 상태 스토어 (Zig 코어에서 관리, 백엔드는 읽기 요청/쓰기 요청)
-- [ ] 바이너리 데이터 채널 (로컬 HTTP 서버)
+- [ ] 중앙 상태 스토어 (이벤트 시스템으로 대체 가능, 필요 시 구현)
+- [ ] 바이너리 데이터 채널 (로컬 HTTP 서버, 별도 기능으로 분리)
 
 **바이너리 데이터 전송**:
 
