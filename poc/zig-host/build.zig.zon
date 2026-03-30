@@ -1,0 +1,10 @@
+.{
+    .name = .suji_poc,
+    .version = "0.1.0",
+    .fingerprint = 0x35a1bfb808e38b3d,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "main.zig",
+    },
+}

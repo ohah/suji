@@ -1,0 +1,22 @@
+# Zig
+.zig-cache/
+zig-out/
+
+# Rust
+poc/rust-backend/target/
+examples/*/backends/rust/target/
+
+# Go
+poc/go-backend/*.dylib
+poc/go-backend/*.h
+examples/*/backends/go/*.dylib
+examples/*/backends/go/*.h
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+
+# Claude
+.claude/

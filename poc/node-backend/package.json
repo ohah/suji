@@ -1,0 +1,10 @@
+{
+  "name": "node-backend",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "dayjs": "^1.11.0",
+    "uuid": "^9.0.0"
+  }
+}
