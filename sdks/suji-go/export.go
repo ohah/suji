@@ -18,6 +18,9 @@ static const char* core_invoke(SujiCore* core, const char* name, const char* req
 static void core_emit(SujiCore* core, const char* channel, const char* data) {
     core->emit(channel, data);
 }
+
+// bridge.c에 정의된 함수 선언
+extern unsigned long long suji_bridge_on(void* core_ptr, const char* channel, void* arg);
 */
 import "C"
 
@@ -30,7 +33,6 @@ import (
 
 var core *C.SujiCore
 
-// Invoke calls another backend through the Zig core.
 func Invoke(backend, request string) string {
 	if core == nil {
 		return `{"error":"core not initialized"}`
@@ -39,7 +41,6 @@ func Invoke(backend, request string) string {
 	defer C.free(unsafe.Pointer(cName))
 	cReq := C.CString(request)
 	defer C.free(unsafe.Pointer(cReq))
-
 	resp := C.core_invoke(core, cName, cReq)
 	if resp == nil {
 		return "{}"
@@ -47,28 +48,26 @@ func Invoke(backend, request string) string {
 	return C.GoString(resp)
 }
 
-// On registers an event listener. Returns listener ID for Off().
+// On registers an event listener connected to EventBus.
 func On(channel string, callback func(channel, data string)) uint64 {
 	if core == nil {
 		return 0
 	}
-	cCh := C.CString(channel)
-	defer C.free(unsafe.Pointer(cCh))
 
-	// Go 콜백을 글로벌 맵에 저장하고 C 콜백으로 래핑
 	goListenerMu.Lock()
 	id := goListenerNextID
 	goListenerNextID++
 	goListeners[id] = callback
 	goListenerMu.Unlock()
 
-	// NOTE: Go closures를 C 함수 포인터로 변환 불가 (CGo 제약)
-	// 현재는 로컬 맵에만 저장. EventBus 연결은 미구현.
-	// 이벤트 수신이 필요하면 handle()로 폴링하거나 향후 CGo 래퍼 구현 필요.
+	// bridge.c → suji_bridge_on → core.on(channel, goEventBridge, id)
+	cCh := C.CString(channel)
+	defer C.free(unsafe.Pointer(cCh))
+	C.suji_bridge_on(unsafe.Pointer(core), cCh, unsafe.Pointer(uintptr(id)))
+
 	return id
 }
 
-// Off removes an event listener by ID.
 func Off(id uint64) {
 	goListenerMu.Lock()
 	delete(goListeners, id)
@@ -78,10 +77,9 @@ func Off(id uint64) {
 var (
 	goListeners      = make(map[uint64]func(string, string))
 	goListenerNextID uint64 = 1
-	goListenerMu     sync.Mutex
+	goListenerMu     sync.RWMutex
 )
 
-// Send emits an event to the frontend and other backends.
 func Send(channel, data string) {
 	if core == nil {
 		return
