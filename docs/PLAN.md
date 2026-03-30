@@ -185,9 +185,9 @@ fn greet(ctx: *SujiContext, args: JsonValue) JsonValue {
 - [ ] 멀티 윈도우
 - [ ] CLI 도구
   - [ ] `suji init` — 프로젝트 스캐폴딩
-  - [ ] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
-  - [ ] `suji build` — 프로덕션 빌드
-  - [ ] `suji run` — 빌드된 앱 실행
+  - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
+  - [x] `suji build` — 프로덕션 빌드
+  - [x] `suji run` — 빌드된 앱 실행
 - [ ] 핫 리로드 (개발 모드)
 
 **`suji init` 스펙**:
