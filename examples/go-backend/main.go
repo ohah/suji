@@ -1,70 +1,31 @@
 package main
 
-/*
-#include <stdlib.h>
+import "github.com/ohah/suji-go"
 
-typedef struct {
-    const char* (*invoke)(const char* backend_name, const char* request);
-    void (*free_fn)(const char* response);
-} SujiCore;
-*/
-import "C"
+type App struct{}
 
-import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"strings"
-	"unsafe"
-)
-
-//export backend_init
-func backend_init(c *C.SujiCore) {
-	fmt.Fprintf(os.Stderr, "[Go] ready\n")
+func (a *App) Ping() string {
+	return "pong"
 }
 
-//export backend_handle_ipc
-func backend_handle_ipc(request *C.char) *C.char {
-	reqStr := C.GoString(request)
-	var reqMap map[string]interface{}
-	json.Unmarshal([]byte(reqStr), &reqMap)
+func (a *App) Greet(name string) string {
+	return "Hello, " + name
+}
 
-	cmd, _ := reqMap["cmd"].(string)
+func (a *App) Upper(name string) string {
+	return name
+}
 
-	var result string
-	switch cmd {
-	case "ping":
-		result = `{"from":"go","msg":"pong"}`
-	case "greet":
-		name, _ := reqMap["name"].(string)
-		if name == "" {
-			name = "world"
+func (a *App) Words(name string) int {
+	count := 0
+	for _, c := range name {
+		if c == ' ' {
+			count++
 		}
-		result = fmt.Sprintf(`{"from":"go","msg":"Hello, %s!"}`, name)
-	case "upper":
-		text, _ := reqMap["text"].(string)
-		result = fmt.Sprintf(`{"from":"go","result":"%s"}`, strings.ToUpper(text))
-	case "words":
-		text, _ := reqMap["text"].(string)
-		count := len(strings.Fields(text))
-		result = fmt.Sprintf(`{"from":"go","count":%d}`, count)
-	default:
-		result = fmt.Sprintf(`{"from":"go","echo":"%s"}`, cmd)
 	}
-
-	return C.CString(result)
+	return count + 1
 }
 
-//export backend_free
-func backend_free(ptr *C.char) {
-	if ptr != nil {
-		C.free(unsafe.Pointer(ptr))
-	}
-}
-
-//export backend_destroy
-func backend_destroy() {
-	fmt.Fprintf(os.Stderr, "[Go] bye\n")
-}
+var _ = suji.Bind(&App{})
 
 func main() {}
