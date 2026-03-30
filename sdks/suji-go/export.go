@@ -24,6 +24,7 @@ import "C"
 import (
 	"fmt"
 	"os"
+	"sync"
 	"unsafe"
 )
 
@@ -45,6 +46,40 @@ func Invoke(backend, request string) string {
 	}
 	return C.GoString(resp)
 }
+
+// On registers an event listener. Returns listener ID for Off().
+func On(channel string, callback func(channel, data string)) uint64 {
+	if core == nil {
+		return 0
+	}
+	cCh := C.CString(channel)
+	defer C.free(unsafe.Pointer(cCh))
+
+	// Go 콜백을 글로벌 맵에 저장하고 C 콜백으로 래핑
+	goListenerMu.Lock()
+	id := goListenerNextID
+	goListenerNextID++
+	goListeners[id] = callback
+	goListenerMu.Unlock()
+
+	// C ABI on()은 현재 직접 호출 불가 (함수 포인터 타입 제약)
+	// 대신 emit/on은 Zig EventBus가 관리
+	// TODO: CGo 함수 포인터 래핑으로 완전 연결
+	return id
+}
+
+// Off removes an event listener by ID.
+func Off(id uint64) {
+	goListenerMu.Lock()
+	delete(goListeners, id)
+	goListenerMu.Unlock()
+}
+
+var (
+	goListeners      = make(map[uint64]func(string, string))
+	goListenerNextID uint64 = 1
+	goListenerMu     sync.Mutex
+)
 
 // Send emits an event to the frontend and other backends.
 func Send(channel, data string) {

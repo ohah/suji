@@ -48,10 +48,30 @@ pub fn send(channel: &str, data: &str) {
     }
 }
 
+/// 이벤트 수신 (Electron: ipcMain.on)
+/// 리스너 ID를 반환 (off로 해제 가능)
+pub fn on(channel: &str, callback: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char, *mut std::os::raw::c_void), arg: *mut std::os::raw::c_void) -> u64 {
+    if let Some(core) = __SUJI_CORE.get() {
+        let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
+        (core.on)(c_ch.as_ptr(), Some(callback), arg)
+    } else {
+        0
+    }
+}
+
+/// 리스너 해제
+pub fn off(listener_id: u64) {
+    if let Some(core) = __SUJI_CORE.get() {
+        (core.off)(listener_id);
+    }
+}
+
 pub mod prelude {
     pub use crate::handle;
     pub use crate::invoke;
     pub use crate::send;
+    pub use crate::on;
+    pub use crate::off;
     pub use serde_json::json;
 }
 

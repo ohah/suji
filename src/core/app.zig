@@ -77,10 +77,17 @@ pub const App = struct {
 
     pub fn registerEvents(self: *const App, bus: *events.EventBus) void {
         for (self.listeners[0..self.listener_count]) |l| {
-            _ = bus.on(l.channel, struct {
-                fn cb(_: [*:0]const u8) void {}
-            }.cb);
+            // 함수 포인터를 anyopaque로 캐스팅해서 C ABI 콜백에 전달
+            const handler_ptr: *const anyopaque = @ptrCast(l.func);
+            _ = bus.onC(l.channel, eventBridgeCallback, @constCast(handler_ptr));
         }
+    }
+
+    fn eventBridgeCallback(event_name: [*c]const u8, data: [*c]const u8, arg: ?*anyopaque) callconv(.c) void {
+        const handler: *const fn (Event) void = @ptrCast(@alignCast(arg orelse return));
+        const name = std.mem.span(@as([*:0]const u8, @ptrCast(event_name)));
+        const d = std.mem.span(@as([*:0]const u8, @ptrCast(data)));
+        handler(.{ .channel = name, .data = d });
     }
 };
 
@@ -338,6 +345,17 @@ pub fn exportApp(comptime application: App) type {
     return struct {
         export fn backend_init(core: ?*const ExternSujiCore) callconv(.c) void {
             _global_core = core;
+            // 이벤트 리스너 등록 (SujiCore.on 사용)
+            if (core) |c| {
+                if (c.on_fn) |on_fn| {
+                    for (application.listeners[0..application.listener_count]) |l| {
+                        var ch_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
+                        const ch = util.nullTerminate(l.channel, &ch_buf);
+                        const handler_ptr: *const anyopaque = @ptrCast(l.func);
+                        _ = on_fn(ch.ptr, App.eventBridgeCallback, @constCast(handler_ptr));
+                    }
+                }
+            }
             std.debug.print("[Zig] ready (suji SDK, core API connected)\n", .{});
         }
 
