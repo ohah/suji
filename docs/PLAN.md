@@ -568,6 +568,61 @@ my-app/
 
 ---
 
+## 배포 (TODO)
+
+### Suji 프레임워크 배포
+
+**Zig 패키지** (Zig 백엔드 사용자용):
+```zig
+// 사용자 build.zig.zon
+.dependencies = .{
+    .suji = .{
+        .url = "https://github.com/ohah/suji/archive/refs/tags/v0.1.0.tar.gz",
+        .hash = "...",
+    },
+},
+```
+```zig
+// 사용자 build.zig
+const suji = b.dependency("suji", .{});
+lib.root_module.addImport("suji", suji.module("suji"));
+```
+
+**Rust crate** (Rust 백엔드 사용자용):
+```toml
+# crates.io에 배포 후
+[dependencies]
+suji = "0.1"
+```
+
+**Go module** (Go 백엔드 사용자용):
+```
+# GitHub에서 직접
+go get github.com/ohah/suji-go
+```
+
+**Suji CLI 바이너리**:
+- GitHub Releases: 플랫폼별 바이너리 (macOS arm64/x86_64, Linux, Windows)
+- brew: `brew install suji`
+- npm: `npm install -g @suji/cli`
+- curl: `curl -fsSL https://suji.dev/install.sh | sh`
+
+### 앱 배포 (suji build)
+```
+suji build → 결과물:
+  dist/
+  ├── suji (코어 바이너리)
+  ├── backends/
+  │   └── libbackend.dylib (빌드된 백엔드)
+  └── frontend/
+      └── dist/ (빌드된 React)
+```
+- macOS: .app 번들 (Code Sign + Notarize)
+- Windows: .msi 인스톨러
+- Linux: .AppImage 또는 .deb
+
+---
+
 ## 참고 프로젝트
 
 | 프로젝트 | 설명 | 참고 포인트 |
