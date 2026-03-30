@@ -62,9 +62,9 @@ func On(channel string, callback func(channel, data string)) uint64 {
 	goListeners[id] = callback
 	goListenerMu.Unlock()
 
-	// C ABI on()은 현재 직접 호출 불가 (함수 포인터 타입 제약)
-	// 대신 emit/on은 Zig EventBus가 관리
-	// TODO: CGo 함수 포인터 래핑으로 완전 연결
+	// NOTE: Go closures를 C 함수 포인터로 변환 불가 (CGo 제약)
+	// 현재는 로컬 맵에만 저장. EventBus 연결은 미구현.
+	// 이벤트 수신이 필요하면 handle()로 폴링하거나 향후 CGo 래퍼 구현 필요.
 	return id
 }
 
@@ -113,5 +113,8 @@ func backend_free(ptr *C.char) {
 
 //export backend_destroy
 func backend_destroy() {
+	goListenerMu.Lock()
+	goListeners = make(map[uint64]func(string, string))
+	goListenerMu.Unlock()
 	fmt.Fprintf(os.Stderr, "[Go] bye\n")
 }
