@@ -1,12 +1,17 @@
 const std = @import("std");
 const config = @import("config");
 
+// ============================================
+// 기본값 테스트
+// ============================================
+
 test "Config default values" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("Suji App", cfg.app.name);
     try std.testing.expectEqualStrings("0.1.0", cfg.app.version);
-    try std.testing.expectEqual(@as(i32, 800), cfg.window.width);
-    try std.testing.expectEqual(@as(i32, 600), cfg.window.height);
+    try std.testing.expectEqual(@as(i64, 800), cfg.window.width);
+    try std.testing.expectEqual(@as(i64, 600), cfg.window.height);
+    try std.testing.expectEqualStrings("Suji App", cfg.window.title);
     try std.testing.expect(!cfg.window.debug);
     try std.testing.expect(cfg.backend == null);
     try std.testing.expect(cfg.backends == null);
@@ -15,10 +20,30 @@ test "Config default values" {
     try std.testing.expectEqualStrings("frontend/dist", cfg.frontend.dist_dir);
 }
 
-test "Config isMultiBackend" {
-    var cfg = config.Config{};
-    try std.testing.expect(!cfg.isMultiBackend());
+test "Config default SingleBackend" {
+    const be = config.Config.SingleBackend{};
+    try std.testing.expectEqualStrings("zig", be.lang);
+    try std.testing.expectEqualStrings("src/main.zig", be.entry);
+}
 
+test "Config default Frontend" {
+    const fe = config.Config.Frontend{};
+    try std.testing.expectEqualStrings("frontend", fe.dir);
+    try std.testing.expectEqualStrings("http://localhost:5173", fe.dev_url);
+    try std.testing.expectEqualStrings("frontend/dist", fe.dist_dir);
+}
+
+// ============================================
+// isMultiBackend / getBackendCount
+// ============================================
+
+test "Config isMultiBackend false when no backends" {
+    const cfg = config.Config{};
+    try std.testing.expect(!cfg.isMultiBackend());
+}
+
+test "Config isMultiBackend false when single backend" {
+    var cfg = config.Config{};
     cfg.backend = .{ .lang = "rust", .entry = "src/lib.rs" };
     try std.testing.expect(!cfg.isMultiBackend());
 }
@@ -34,14 +59,20 @@ test "Config getBackendCount single" {
     try std.testing.expectEqual(@as(usize, 1), cfg.getBackendCount());
 }
 
+// ============================================
+// Config.load (파일 기반)
+// ============================================
+
 test "Config load returns error when no config file" {
-    // 현재 디렉토리에 suji.toml/suji.json이 없으면 에러
     const result = config.Config.load(std.testing.allocator);
     try std.testing.expectError(error.ConfigNotFound, result);
 }
 
-test "Config loadJson parses correctly" {
-    // 임시 suji.json 생성
+// ============================================
+// JSON 파싱 검증
+// ============================================
+
+test "JSON single backend parsing" {
     const json_content =
         \\{
         \\  "app": { "name": "Test App", "version": "1.0.0" },
@@ -51,41 +82,35 @@ test "Config loadJson parses correctly" {
         \\}
     ;
 
-    // 임시 디렉토리에서 테스트
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    try tmp.dir.writeFile(.{ .sub_path = "suji.json", .data = json_content });
-
-    // cwd를 변경할 수 없으므로, 직접 파싱 테스트
-    // loadJson은 cwd 기반이라 직접 호출 대신 파서 로직 검증
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
     defer parsed.deinit();
-
     const root = parsed.value.object;
-    try std.testing.expect(root.get("app") != null);
-    try std.testing.expect(root.get("window") != null);
-    try std.testing.expect(root.get("backend") != null);
-    try std.testing.expect(root.get("frontend") != null);
 
+    // app
     const app = root.get("app").?.object;
     try std.testing.expectEqualStrings("Test App", app.get("name").?.string);
     try std.testing.expectEqualStrings("1.0.0", app.get("version").?.string);
 
+    // window
     const win = root.get("window").?.object;
+    try std.testing.expectEqualStrings("Test", win.get("title").?.string);
     try std.testing.expectEqual(@as(i64, 1024), win.get("width").?.integer);
     try std.testing.expectEqual(@as(i64, 768), win.get("height").?.integer);
     try std.testing.expect(win.get("debug").?.bool);
 
+    // backend
     const be = root.get("backend").?.object;
     try std.testing.expectEqualStrings("rust", be.get("lang").?.string);
+    try std.testing.expectEqualStrings("src/lib.rs", be.get("entry").?.string);
 
+    // frontend
     const fe = root.get("frontend").?.object;
     try std.testing.expectEqualStrings("web", fe.get("dir").?.string);
     try std.testing.expectEqualStrings("http://localhost:3000", fe.get("dev_url").?.string);
+    try std.testing.expectEqualStrings("web/build", fe.get("dist_dir").?.string);
 }
 
-test "Config JSON multi-backend parsing" {
+test "JSON multi-backend parsing" {
     const json_content =
         \\{
         \\  "backends": [
@@ -97,15 +122,45 @@ test "Config JSON multi-backend parsing" {
 
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
     defer parsed.deinit();
-
     const root = parsed.value.object;
+
     const bs = root.get("backends").?.array;
     try std.testing.expectEqual(@as(usize, 2), bs.items.len);
 
-    const first = bs.items[0].object;
-    try std.testing.expectEqualStrings("rust", first.get("name").?.string);
-    try std.testing.expectEqualStrings("rust", first.get("lang").?.string);
+    try std.testing.expectEqualStrings("rust", bs.items[0].object.get("name").?.string);
+    try std.testing.expectEqualStrings("rust", bs.items[0].object.get("lang").?.string);
+    try std.testing.expectEqualStrings("backends/rust", bs.items[0].object.get("entry").?.string);
 
-    const second = bs.items[1].object;
-    try std.testing.expectEqualStrings("go", second.get("name").?.string);
+    try std.testing.expectEqualStrings("go", bs.items[1].object.get("name").?.string);
+    try std.testing.expectEqualStrings("go", bs.items[1].object.get("lang").?.string);
+    try std.testing.expectEqualStrings("backends/go", bs.items[1].object.get("entry").?.string);
+}
+
+test "JSON minimal config" {
+    const json_content = "{}";
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    defer parsed.deinit();
+
+    // 빈 JSON도 파싱 성공 (기본값 사용)
+    try std.testing.expect(parsed.value == .object);
+    try std.testing.expectEqual(@as(usize, 0), parsed.value.object.count());
+}
+
+test "JSON partial config" {
+    const json_content =
+        \\{ "window": { "width": 1920 } }
+    ;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+
+    // window만 있고 나머지 없음
+    try std.testing.expect(root.get("app") == null);
+    try std.testing.expect(root.get("backend") == null);
+    try std.testing.expectEqual(@as(i64, 1920), root.get("window").?.object.get("width").?.integer);
+}
+
+test "Config deinit without arena" {
+    var cfg = config.Config{};
+    cfg.deinit(); // arena 없어도 크래시 안 남
 }
