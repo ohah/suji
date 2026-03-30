@@ -1,0 +1,21 @@
+{
+  "app": {
+    "name": "Multi Backend Example",
+    "version": "0.1.0"
+  },
+  "window": {
+    "title": "Suji Multi-Backend Demo",
+    "width": 900,
+    "height": 600,
+    "debug": true
+  },
+  "backends": [
+    { "name": "rust", "lang": "rust", "entry": "backends/rust" },
+    { "name": "go", "lang": "go", "entry": "backends/go" }
+  ],
+  "frontend": {
+    "dir": "frontend",
+    "dev_url": "http://localhost:5173",
+    "dist_dir": "frontend/dist"
+  }
+}

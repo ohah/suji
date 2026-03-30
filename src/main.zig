@@ -46,10 +46,11 @@ fn printUsage() void {
 // suji dev
 // ============================================
 fn runDev(allocator: std.mem.Allocator) !void {
-    const config = suji.Config.load(allocator) catch {
+    var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
         return;
     };
+    defer config.deinit();
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
@@ -79,10 +80,11 @@ fn runDev(allocator: std.mem.Allocator) !void {
 // suji build
 // ============================================
 fn runBuild(allocator: std.mem.Allocator) !void {
-    const config = suji.Config.load(allocator) catch {
+    var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
         return;
     };
+    defer config.deinit();
 
     std.debug.print("[suji] production build - {s}\n", .{config.app.name});
 
@@ -102,10 +104,11 @@ fn runBuild(allocator: std.mem.Allocator) !void {
 // suji run
 // ============================================
 fn runProd(allocator: std.mem.Allocator) !void {
-    const config = suji.Config.load(allocator) catch {
+    var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
         return;
     };
+    defer config.deinit();
 
     std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
 
@@ -191,7 +194,10 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         defer allocator.free(output);
         const go_entry = try std.fmt.allocPrint(allocator, "{s}/main.go", .{entry});
         defer allocator.free(go_entry);
-        try runCmd(allocator, &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry });
+        try runCmdEnv(allocator, &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry }, &.{
+            .{ "CC", "/usr/bin/clang" },
+            .{ "CGO_ENABLED", "1" },
+        });
     }
 }
 
@@ -209,6 +215,27 @@ fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
     var child = std.process.Child.init(argv, allocator);
     child.stderr_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
+    try child.spawn();
+    const result = try child.wait();
+    switch (result) {
+        .Exited => |code| if (code != 0) return error.CommandFailed,
+        else => return error.CommandFailed,
+    }
+}
+
+fn runCmdEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pairs: []const [2][]const u8) !void {
+    var child = std.process.Child.init(argv, allocator);
+    child.stderr_behavior = .Inherit;
+    child.stdout_behavior = .Inherit;
+
+    // 환경 변수 설정
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+    for (env_pairs) |pair| {
+        try env_map.put(pair[0], pair[1]);
+    }
+    child.env_map = &env_map;
+
     try child.spawn();
     const result = try child.wait();
     switch (result) {
@@ -265,12 +292,12 @@ const WindowMode = enum { dev, dist };
 
 fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
     var win = try suji.Window.create(.{
-        .title = @ptrCast(config.window.title),
+        .title = config.window.title,
         .width = @intCast(config.window.width),
         .height = @intCast(config.window.height),
         .debug = config.window.debug,
         .url = switch (mode) {
-            .dev => @ptrCast(config.frontend.dev_url),
+            .dev => config.frontend.dev_url,
             .dist => null,
         },
     });
