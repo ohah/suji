@@ -115,10 +115,10 @@ pub const Bridge = struct {
     }
 
     fn callBackend(self: *Bridge, name: []const u8, request: []const u8) ?[]const u8 {
-        // "zig" 백엔드 → 내장 처리
+        // "zig" 백엔드 → 내장 처리 (arena allocator로 메모리 관리)
         if (std.mem.eql(u8, name, "zig")) {
             if (self.zig_app) |zig_app| {
-                return zig_app.handleIpc(request);
+                return zig_app.handleIpc(std.heap.page_allocator, request);
             }
             return null;
         }

@@ -2,22 +2,18 @@ const std = @import("std");
 const app_mod = @import("app");
 
 fn pingHandler(req: app_mod.Request) app_mod.Response {
-    _ = req;
-    return app_mod.ok(.{ .msg = "pong" });
+    return req.ok(.{ .msg = "pong" });
 }
 
 fn greetHandler(req: app_mod.Request) app_mod.Response {
     const name = req.string("name") orelse "world";
-    _ = name;
-    return app_mod.ok(.{ .msg = "hello" });
+    return req.ok(.{ .msg = name });
 }
 
 fn addHandler(req: app_mod.Request) app_mod.Response {
     const a = req.int("a") orelse 0;
     const b = req.int("b") orelse 0;
-    _ = a;
-    _ = b;
-    return app_mod.ok(.{ .result = 30 });
+    return req.ok(.{ .result = a + b });
 }
 
 fn clickHandler(_: app_mod.Event) void {}
@@ -41,47 +37,136 @@ test "App builder creates listeners" {
 }
 
 test "App handleIpc ping" {
-    const resp = test_app.handleIpc("{\"cmd\":\"ping\"}");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"ping\"}");
     try std.testing.expect(resp != null);
     try std.testing.expect(std.mem.indexOf(u8, resp.?, "pong") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "zig") != null);
 }
 
 test "App handleIpc unknown command" {
-    const resp = test_app.handleIpc("{\"cmd\":\"unknown\"}");
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"unknown\"}");
     try std.testing.expect(resp == null);
 }
 
-test "App handleIpc greet" {
-    const resp = test_app.handleIpc("{\"cmd\":\"greet\",\"name\":\"suji\"}");
+test "App handleIpc greet with name" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"greet\",\"name\":\"suji\"}");
     try std.testing.expect(resp != null);
-    try std.testing.expect(std.mem.indexOf(u8, resp.?, "hello") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "suji") != null);
+}
+
+test "App handleIpc add" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"add\",\"a\":10,\"b\":20}");
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "30") != null);
 }
 
 test "Request string extraction" {
-    const req = app_mod.Request{ .raw = "{\"cmd\":\"test\",\"name\":\"suji\"}" };
-    const name = req.string("name");
-    try std.testing.expect(name != null);
-    try std.testing.expectEqualStrings("suji", name.?);
+    const req = app_mod.Request{
+        .raw = "{\"cmd\":\"test\",\"name\":\"suji\"}",
+        .arena = std.testing.allocator,
+    };
+    try std.testing.expectEqualStrings("suji", req.string("name").?);
 }
 
 test "Request string missing" {
-    const req = app_mod.Request{ .raw = "{\"cmd\":\"test\"}" };
+    const req = app_mod.Request{
+        .raw = "{\"cmd\":\"test\"}",
+        .arena = std.testing.allocator,
+    };
     try std.testing.expect(req.string("name") == null);
 }
 
 test "Request int extraction" {
-    const req = app_mod.Request{ .raw = "{\"a\":42,\"b\":-10}" };
+    const req = app_mod.Request{
+        .raw = "{\"a\":42,\"b\":-10}",
+        .arena = std.testing.allocator,
+    };
     try std.testing.expectEqual(@as(i64, 42), req.int("a").?);
     try std.testing.expectEqual(@as(i64, -10), req.int("b").?);
 }
 
 test "Request int missing" {
-    const req = app_mod.Request{ .raw = "{\"cmd\":\"test\"}" };
+    const req = app_mod.Request{
+        .raw = "{\"cmd\":\"test\"}",
+        .arena = std.testing.allocator,
+    };
     try std.testing.expect(req.int("a") == null);
 }
 
-test "ok response format" {
-    const resp = app_mod.ok(.{ .msg = "pong" });
+test "Request ok with string" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const req = app_mod.Request{
+        .raw = "{}",
+        .arena = arena.allocator(),
+    };
+    const resp = req.ok(.{ .msg = "hello" });
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "hello") != null);
     try std.testing.expect(std.mem.indexOf(u8, resp.data, "zig") != null);
-    try std.testing.expect(std.mem.indexOf(u8, resp.data, "pong") != null);
+}
+
+test "Request ok with int" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const req = app_mod.Request{
+        .raw = "{}",
+        .arena = arena.allocator(),
+    };
+    const resp = req.ok(.{ .count = @as(i64, 42) });
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "42") != null);
+}
+
+test "Request ok with bool" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const req = app_mod.Request{
+        .raw = "{}",
+        .arena = arena.allocator(),
+    };
+    const resp = req.ok(.{ .active = true });
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "true") != null);
+}
+
+test "Request ok with runtime variable" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const name: []const u8 = "suji";
+    const count: i64 = 99;
+
+    const req = app_mod.Request{
+        .raw = "{}",
+        .arena = arena.allocator(),
+    };
+    const resp = req.ok(.{ .name = name, .count = count });
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "suji") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "99") != null);
+}
+
+test "Request err" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const req = app_mod.Request{
+        .raw = "{}",
+        .arena = arena.allocator(),
+    };
+    const resp = req.err("not found");
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "not found") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.data, "error") != null);
 }

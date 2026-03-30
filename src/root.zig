@@ -22,5 +22,4 @@ pub const App = app_mod.App;
 pub const Request = app_mod.Request;
 pub const Response = app_mod.Response;
 pub const Event = app_mod.Event;
-pub const ok = app_mod.ok;
 pub const app = app_mod.init;
