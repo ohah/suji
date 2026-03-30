@@ -2,10 +2,12 @@ const std = @import("std");
 const wv = @import("webview");
 const WebView = @import("webview.zig").WebView;
 const loader = @import("loader");
+const events = @import("events");
 
 pub const Bridge = struct {
     registry: *loader.BackendRegistry,
     webview: *WebView,
+    event_bus: ?*events.EventBus = null,
 
     pub fn init(webview_ptr: *WebView, registry: *loader.BackendRegistry) Bridge {
         return .{
@@ -14,11 +16,16 @@ pub const Bridge = struct {
         };
     }
 
+    pub fn setEventBus(self: *Bridge, bus: *events.EventBus) void {
+        self.event_bus = bus;
+    }
+
     pub fn bind(self: *Bridge) void {
         _ = wv.raw.webview_bind(self.webview.handle.webview, "__suji_invoke__", &invokeCallback, @ptrCast(self));
         _ = wv.raw.webview_bind(self.webview.handle.webview, "__suji_chain__", &chainCallback, @ptrCast(self));
         _ = wv.raw.webview_bind(self.webview.handle.webview, "__suji_fanout__", &fanoutCallback, @ptrCast(self));
         _ = wv.raw.webview_bind(self.webview.handle.webview, "__suji_core__", &coreCallback, @ptrCast(self));
+        _ = wv.raw.webview_bind(self.webview.handle.webview, "__suji_emit__", &emitCallback, @ptrCast(self));
 
         self.webview.init(
             \\window.__suji__ = {
@@ -33,9 +40,49 @@ pub const Bridge = struct {
             \\  },
             \\  core: function(request) {
             \\    return __suji_core__(request);
+            \\  },
+            \\  emit: function(event, data) {
+            \\    return __suji_emit__(event, JSON.stringify(data || {}));
+            \\  },
+            \\  _listeners: {},
+            \\  on: function(event, callback) {
+            \\    if (!this._listeners[event]) this._listeners[event] = [];
+            \\    this._listeners[event].push(callback);
+            \\    return function() {
+            \\      var idx = window.__suji__._listeners[event].indexOf(callback);
+            \\      if (idx >= 0) window.__suji__._listeners[event].splice(idx, 1);
+            \\    };
+            \\  },
+            \\  off: function(event) {
+            \\    delete this._listeners[event];
+            \\  },
+            \\  __dispatch__: function(event, data) {
+            \\    var cbs = this._listeners[event] || [];
+            \\    for (var i = 0; i < cbs.length; i++) cbs[i](data);
             \\  }
             \\};
         );
+    }
+
+    // JS emit → 이벤트 버스
+    fn emitCallback(seq: [*c]const u8, req_raw: [*c]const u8, arg: ?*anyopaque) callconv(.c) void {
+        const self = getSelf(arg) orelse return;
+        const raw = spanC(req_raw);
+        const s: [:0]const u8 = std.mem.span(@as([*:0]const u8, @ptrCast(seq)));
+
+        var bufs: ParseBufs = undefined;
+        const parsed = parseJsonStrings(raw, &bufs, 2) catch {
+            self.retErr(seq, "parse error");
+            return;
+        };
+        const args = parsed.args();
+        if (args.len < 2) { self.retErr(seq, "need event and data"); return; }
+
+        if (self.event_bus) |bus| {
+            bus.emit(args[0], args[1]);
+        }
+
+        self.ret(s, 0, "{\"ok\":true}");
     }
 
     fn getSelf(arg: ?*anyopaque) ?*Bridge {

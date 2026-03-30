@@ -1,10 +1,15 @@
 const std = @import("std");
+const events = @import("events");
+
 
 /// Zig 코어가 백엔드에게 제공하는 API
 /// 백엔드에서 다른 백엔드를 호출할 때 사용
 pub const SujiCore = extern struct {
     invoke: *const fn ([*c]const u8, [*c]const u8) callconv(.c) [*c]const u8,
     free: *const fn ([*c]const u8) callconv(.c) void,
+    emit: *const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
+    on: *const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
+    off: *const fn (u64) callconv(.c) void,
 };
 
 /// C ABI 백엔드 인터페이스
@@ -73,8 +78,8 @@ pub const BackendRegistry = struct {
     backends: std.StringHashMap(Backend),
     allocator: std.mem.Allocator,
     core_api: SujiCore,
+    event_bus: ?*events.EventBus = null,
 
-    // 글로벌 레지스트리 참조 (C 콜백에서 접근용)
     pub var global: ?*BackendRegistry = null;
 
     pub fn init(allocator: std.mem.Allocator) BackendRegistry {
@@ -84,10 +89,17 @@ pub const BackendRegistry = struct {
             .core_api = SujiCore{
                 .invoke = coreInvoke,
                 .free = coreFree,
+                .emit = coreEmit,
+                .on = coreOn,
+                .off = coreOff,
             },
         };
         _ = &reg;
         return reg;
+    }
+
+    pub fn setEventBus(self: *BackendRegistry, bus: *events.EventBus) void {
+        self.event_bus = bus;
     }
 
     /// 글로벌 참조 설정 (C 콜백에서 접근 가능하게)
@@ -140,6 +152,33 @@ pub const BackendRegistry = struct {
             return @ptrCast(@constCast(r.ptr));
         }
         return @ptrCast(@constCast("{}"));
+    }
+
+    // C ABI 콜백: 이벤트 발행
+    fn coreEmit(event_name: [*c]const u8, data: [*c]const u8) callconv(.c) void {
+        const reg = global orelse return;
+        const bus = reg.event_bus orelse return;
+        const name = std.mem.span(@as([*:0]const u8, @ptrCast(event_name)));
+        const d = std.mem.span(@as([*:0]const u8, @ptrCast(data)));
+        bus.emit(name, d);
+    }
+
+    // C ABI 콜백: 이벤트 구독
+    fn coreOn(event_name: [*c]const u8, callback: ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, arg: ?*anyopaque) callconv(.c) u64 {
+        const reg = global orelse return 0;
+        const bus = reg.event_bus orelse return 0;
+        const name = std.mem.span(@as([*:0]const u8, @ptrCast(event_name)));
+        if (callback) |cb| {
+            return bus.onC(name, cb, arg);
+        }
+        return 0;
+    }
+
+    // C ABI 콜백: 리스너 해제
+    fn coreOff(listener_id: u64) callconv(.c) void {
+        const reg = global orelse return;
+        const bus = reg.event_bus orelse return;
+        bus.off(listener_id);
     }
 
     // C ABI 콜백: 응답 메모리 해제

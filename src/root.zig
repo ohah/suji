@@ -4,6 +4,7 @@ pub const window = @import("core/window.zig");
 pub const webview = @import("core/webview.zig");
 pub const ipc = @import("core/ipc.zig");
 pub const config = @import("core/config.zig");
+pub const events = @import("events");
 pub const init = @import("core/init.zig");
 
 pub const Backend = backends.Backend;

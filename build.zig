@@ -13,11 +13,18 @@ pub fn build(b: *std.Build) void {
     // const toml_dep = b.dependency("toml", .{ .target = target, .optimize = optimize });
 
     // 공통 모듈
+    const events_module = b.createModule(.{
+        .root_source_file = b.path("src/core/events.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const loader_module = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
         .target = target,
         .optimize = optimize,
     });
+    loader_module.addImport("events", events_module);
 
     // Suji CLI
     const root_module = b.createModule(.{
@@ -28,6 +35,7 @@ pub fn build(b: *std.Build) void {
     });
     root_module.addImport("webview", webview_dep.module("webview"));
     root_module.addImport("loader", loader_module);
+    root_module.addImport("events", events_module);
     // root_module.addImport("toml", toml_dep.module("toml"));
 
     const exe = b.addExecutable(.{
@@ -59,11 +67,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    loader_test_mod.addImport("loader", b.createModule(.{
+    const test_loader = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
         .target = target,
         .optimize = optimize,
-    }));
+    });
+    test_loader.addImport("events", events_module);
+    loader_test_mod.addImport("loader", test_loader);
     const loader_test = b.addTest(.{ .root_module = loader_test_mod });
     test_step.dependOn(&b.addRunArtifact(loader_test).step);
 
@@ -80,11 +90,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     ipc_module.addImport("webview", webview_dep.module("webview"));
-    ipc_module.addImport("loader", b.createModule(.{
+    ipc_module.addImport("events", events_module);
+    const ipc_loader_mod = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
         .target = target,
         .optimize = optimize,
-    }));
+    });
+    ipc_loader_mod.addImport("events", events_module);
+    ipc_module.addImport("loader", ipc_loader_mod);
     ipc_test_mod.addImport("ipc", ipc_module);
     ipc_test_mod.addImport("webview", webview_dep.module("webview"));
 
@@ -106,6 +119,17 @@ pub fn build(b: *std.Build) void {
     });
     // config_module.addImport("toml", toml_dep.module("toml"));
     config_test_mod.addImport("config", config_module);
+    // Events tests
+    const events_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/events_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    events_test_mod.addImport("events", events_module);
+    const events_test = b.addTest(.{ .root_module = events_test_mod });
+    test_step.dependOn(&b.addRunArtifact(events_test).step);
+
     const config_test = b.addTest(.{ .root_module = config_test_mod });
     test_step.dependOn(&b.addRunArtifact(config_test).step);
 }
