@@ -3,6 +3,7 @@ const wv = @import("webview");
 const WebView = @import("webview.zig").WebView;
 const loader = @import("loader");
 const events = @import("events");
+const util = @import("util");
 
 pub const Bridge = struct {
     registry: *loader.BackendRegistry,
@@ -94,11 +95,9 @@ pub const Bridge = struct {
     }
 
     fn ret(self: *Bridge, seq: [*c]const u8, status: i32, result: []const u8) void {
-        var buf: [16384]u8 = undefined;
-        const len = @min(result.len, buf.len - 1);
-        @memcpy(buf[0..len], result[0..len]);
-        buf[len] = 0;
-        _ = wv.raw.webview_return(self.webview.handle.webview, seq, status, &buf);
+        var buf: [util.MAX_RESPONSE]u8 = undefined;
+        const nt = util.nullTerminate(result, &buf);
+        _ = wv.raw.webview_return(self.webview.handle.webview, seq, status, nt.ptr);
     }
 
     fn retErr(self: *Bridge, seq: [*c]const u8, msg: []const u8) void {
@@ -109,12 +108,9 @@ pub const Bridge = struct {
     }
 
     fn callBackend(self: *Bridge, name: []const u8, request: []const u8) ?[]const u8 {
-        // 모든 백엔드 dlopen으로 통일 (Zig 포함)
-        var req_buf: [8192]u8 = undefined;
-        const len = @min(request.len, req_buf.len - 1);
-        @memcpy(req_buf[0..len], request[0..len]);
-        req_buf[len] = 0;
-        return self.registry.invoke(name, @ptrCast(req_buf[0..len :0]));
+        var req_buf: [util.MAX_REQUEST]u8 = undefined;
+        const nt = util.nullTerminate(request, &req_buf);
+        return self.registry.invoke(name, @ptrCast(nt.ptr));
     }
 
     fn freeBackend(self: *Bridge, name: []const u8, response: ?[]const u8) void {

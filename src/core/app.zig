@@ -1,5 +1,6 @@
 const std = @import("std");
 const events = @import("events");
+const util = @import("util");
 
 /// Suji 앱 빌더
 ///
@@ -164,17 +165,13 @@ pub fn send(channel: []const u8, data: []const u8) void {
     const core = _global_core orelse return;
     const emit_fn = core.emit orelse return;
 
-    var ch_buf: [256]u8 = undefined;
-    const clen = @min(channel.len, ch_buf.len - 1);
-    @memcpy(ch_buf[0..clen], channel[0..clen]);
-    ch_buf[clen] = 0;
+    var ch_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
+    const ch = util.nullTerminate(channel, &ch_buf);
 
-    var data_buf: [8192]u8 = undefined;
-    const dlen = @min(data.len, data_buf.len - 1);
-    @memcpy(data_buf[0..dlen], data[0..dlen]);
-    data_buf[dlen] = 0;
+    var data_buf: [util.MAX_REQUEST]u8 = undefined;
+    const d = util.nullTerminate(data, &data_buf);
 
-    emit_fn(@ptrCast(&ch_buf), @ptrCast(&data_buf));
+    emit_fn(@ptrCast(ch.ptr), @ptrCast(d.ptr));
 }
 
 /// 앱 빌더 시작
@@ -318,15 +315,11 @@ pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
     const core = _global_core orelse return null;
     const inv_fn = core.invoke_fn orelse return null;
 
-    var backend_buf: [256]u8 = undefined;
-    const blen = @min(backend.len, backend_buf.len - 1);
-    @memcpy(backend_buf[0..blen], backend[0..blen]);
-    backend_buf[blen] = 0;
+    var backend_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
+    _ = util.nullTerminate(backend, &backend_buf);
 
-    var request_buf: [8192]u8 = undefined;
-    const rlen = @min(request.len, request_buf.len - 1);
-    @memcpy(request_buf[0..rlen], request[0..rlen]);
-    request_buf[rlen] = 0;
+    var request_buf: [util.MAX_REQUEST]u8 = undefined;
+    _ = util.nullTerminate(request, &request_buf);
 
     const resp_ptr = inv_fn(@ptrCast(&backend_buf), @ptrCast(&request_buf));
     const resp: [*]const u8 = @ptrCast(resp_ptr orelse return null);

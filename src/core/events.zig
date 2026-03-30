@@ -1,4 +1,5 @@
 const std = @import("std");
+const util = @import("util");
 
 /// 이벤트 콜백 타입
 /// data: JSON 문자열 (null-terminated)
@@ -96,55 +97,54 @@ pub const EventBus = struct {
 
     /// 이벤트 발행
     pub fn emit(self: *EventBus, event_name: []const u8, data: []const u8) void {
-        self.mutex.lock();
+        // 리스너 스냅샷 복사 (mutex 범위 최소화)
+        var snapshot: [64]Listener = undefined;
+        var snapshot_len: usize = 0;
+        var once_ids: [64]u64 = undefined;
+        var once_count: usize = 0;
 
-        if (self.listeners.getPtr(event_name)) |list| {
-            // once 리스너 제거를 위해 인덱스 수집
-            var to_remove = std.ArrayListUnmanaged(usize){};
-            defer to_remove.deinit(self.allocator);
+        {
+            self.mutex.lock();
+            defer self.mutex.unlock();
 
-            for (list.items, 0..) |listener, idx| {
-                // 콜백 호출 (mutex 잠긴 상태에서 — 짧은 콜백만 가정)
-                switch (listener.callback) {
-                    .zig => |cb| {
-                        // data를 null-terminate
-                        var buf: [16384]u8 = undefined;
-                        const len = @min(data.len, buf.len - 1);
-                        @memcpy(buf[0..len], data[0..len]);
-                        buf[len] = 0;
-                        cb(buf[0..len :0]);
-                    },
-                    .c_abi => |cb| {
-                        var name_buf: [256]u8 = undefined;
-                        const nlen = @min(event_name.len, name_buf.len - 1);
-                        @memcpy(name_buf[0..nlen], event_name[0..nlen]);
-                        name_buf[nlen] = 0;
+            if (self.listeners.getPtr(event_name)) |list| {
+                snapshot_len = @min(list.items.len, 64);
+                @memcpy(snapshot[0..snapshot_len], list.items[0..snapshot_len]);
 
-                        var data_buf: [16384]u8 = undefined;
-                        const dlen = @min(data.len, data_buf.len - 1);
-                        @memcpy(data_buf[0..dlen], data[0..dlen]);
-                        data_buf[dlen] = 0;
-
-                        cb.func(&name_buf, &data_buf, cb.arg);
-                    },
+                // once 리스너 ID 수집 + 제거
+                var i: usize = list.items.len;
+                while (i > 0) {
+                    i -= 1;
+                    if (list.items[i].once) {
+                        if (once_count < 64) {
+                            once_ids[once_count] = list.items[i].id;
+                            once_count += 1;
+                        }
+                        _ = list.orderedRemove(i);
+                    }
                 }
-
-                if (listener.once) {
-                    to_remove.append(self.allocator, idx) catch {};
-                }
-            }
-
-            // once 리스너 역순 제거
-            var i = to_remove.items.len;
-            while (i > 0) {
-                i -= 1;
-                _ = list.orderedRemove(to_remove.items[i]);
             }
         }
 
-        self.mutex.unlock();
+        // 콜백 실행 (mutex 밖 — 블로킹 안전)
+        for (snapshot[0..snapshot_len]) |listener| {
+            switch (listener.callback) {
+                .zig => |cb| {
+                    var buf: [util.MAX_RESPONSE]u8 = undefined;
+                    cb(util.nullTerminate(data, &buf));
+                },
+                .c_abi => |cb| {
+                    var name_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
+                    var data_buf: [util.MAX_RESPONSE]u8 = undefined;
+                    cb.func(
+                        util.nullTerminate(event_name, &name_buf).ptr,
+                        util.nullTerminate(data, &data_buf).ptr,
+                        cb.arg,
+                    );
+                },
+            }
+        }
 
-        // JS에 이벤트 전달
         self.emitToJs(event_name, data);
     }
 

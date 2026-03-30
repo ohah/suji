@@ -13,11 +13,18 @@ pub fn build(b: *std.Build) void {
     // const toml_dep = b.dependency("toml", .{ .target = target, .optimize = optimize });
 
     // 공통 모듈
+    const util_module = b.createModule(.{
+        .root_source_file = b.path("src/core/util.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const events_module = b.createModule(.{
         .root_source_file = b.path("src/core/events.zig"),
         .target = target,
         .optimize = optimize,
     });
+    events_module.addImport("util", util_module);
 
     const loader_module = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
@@ -43,6 +50,7 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("webview", webview_dep.module("webview"));
     root_module.addImport("loader", loader_module);
     root_module.addImport("events", events_module);
+    root_module.addImport("util", util_module);
     // root_module.addImport("toml", toml_dep.module("toml"));
 
     const exe = b.addExecutable(.{
