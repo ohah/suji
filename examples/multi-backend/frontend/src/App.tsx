@@ -42,6 +42,7 @@ function App() {
         <div className="buttons">
           <button className="rust" onClick={() => call(() => suji.invoke("rust", '{"cmd":"ping"}'), "rust")}>Rust ping</button>
           <button className="go" onClick={() => call(() => suji.invoke("go", '{"cmd":"ping"}'), "go")}>Go ping</button>
+          <button className="zig" onClick={() => call(() => suji.invoke("zig", '{"cmd":"ping"}'), "zig")}>Zig ping</button>
         </div>
       </section>
 

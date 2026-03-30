@@ -1,0 +1,6 @@
+{
+  "app": { "name": "Suji Zig Example", "version": "0.1.0" },
+  "window": { "title": "Suji + Zig", "width": 800, "height": 600, "debug": true },
+  "backend": { "lang": "zig", "entry": "." },
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+}

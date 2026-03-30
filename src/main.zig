@@ -167,6 +167,10 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
     if (config.isMultiBackend()) {
         if (config.backends) |backends| {
             for (backends) |be| {
+                if (std.mem.eql(u8, be.lang, "zig")) {
+                    std.debug.print("[suji] zig backend (built-in)\n", .{});
+                    continue; // Zig는 내장, dlopen 불필요
+                }
                 std.debug.print("[suji] building {s} ({s})...\n", .{ be.name, be.lang });
                 buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
                     std.debug.print("[suji] build failed: {}\n", .{err});
@@ -184,20 +188,24 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
             }
         }
     } else if (config.backend) |be| {
-        std.debug.print("[suji] building {s} backend...\n", .{be.lang});
-        buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
-            std.debug.print("[suji] build failed: {}\n", .{err});
-            return;
-        };
-        const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
-        defer allocator.free(path);
-        var path_z: [1024]u8 = undefined;
-        const plen = @min(path.len, path_z.len - 1);
-        @memcpy(path_z[0..plen], path[0..plen]);
-        path_z[plen] = 0;
-        registry.register("default", path_z[0..plen :0]) catch |err| {
-            std.debug.print("[suji] load failed: {}\n", .{err});
-        };
+        if (std.mem.eql(u8, be.lang, "zig")) {
+            std.debug.print("[suji] zig backend (built-in)\n", .{});
+        } else {
+            std.debug.print("[suji] building {s} backend...\n", .{be.lang});
+            buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
+                std.debug.print("[suji] build failed: {}\n", .{err});
+                return;
+            };
+            const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
+            defer allocator.free(path);
+            var path_z: [1024]u8 = undefined;
+            const plen = @min(path.len, path_z.len - 1);
+            @memcpy(path_z[0..plen], path[0..plen]);
+            path_z[plen] = 0;
+            registry.register("default", path_z[0..plen :0]) catch |err| {
+                std.debug.print("[suji] load failed: {}\n", .{err});
+            };
+        }
     }
 }
 
