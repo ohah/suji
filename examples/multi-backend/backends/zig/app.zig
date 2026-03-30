@@ -1,14 +1,14 @@
 const suji = @import("suji");
 
 pub const my_app = suji.app()
-    .command("ping", ping)
-    .command("greet", greet)
-    .command("add", add)
-    .command("info", info)
-    .command("call_rust", callRust)
-    .command("call_go", callGo)
-    .command("collab", collab)
-    .command("chain_all", chainAll);
+    .handle("ping", ping)
+    .handle("greet", greet)
+    .handle("add", add)
+    .handle("info", info)
+    .handle("call_rust", callRust)
+    .handle("call_go", callGo)
+    .handle("collab", collab)
+    .handle("chain_all", chainAll);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong from zig" });
@@ -31,7 +31,7 @@ fn info(req: suji.Request) suji.Response {
 
 // Zig → Rust
 fn callRust(req: suji.Request) suji.Response {
-    const rust_resp = req.call("rust", "{\"cmd\":\"ping\"}") orelse
+    const rust_resp = req.invoke("rust", "{\"cmd\":\"ping\"}") orelse
         return req.err("rust call failed");
     return req.okMulti(&.{
         .{ "cmd", "\"call_rust\"" },
@@ -41,7 +41,7 @@ fn callRust(req: suji.Request) suji.Response {
 
 // Zig → Go
 fn callGo(req: suji.Request) suji.Response {
-    const go_resp = req.call("go", "{\"cmd\":\"ping\"}") orelse
+    const go_resp = req.invoke("go", "{\"cmd\":\"ping\"}") orelse
         return req.err("go call failed");
     return req.okMulti(&.{
         .{ "cmd", "\"call_go\"" },
@@ -51,8 +51,8 @@ fn callGo(req: suji.Request) suji.Response {
 
 // Zig → Rust + Go 협업
 fn collab(req: suji.Request) suji.Response {
-    const rust_resp = req.call("rust", "{\"cmd\":\"collab\",\"data\":\"zig initiated\"}") orelse "null";
-    const go_resp = req.call("go", "{\"cmd\":\"collab\",\"data\":\"zig initiated\"}") orelse "null";
+    const rust_resp = req.invoke("rust", "{\"cmd\":\"collab\",\"data\":\"zig initiated\"}") orelse "null";
+    const go_resp = req.invoke("go", "{\"cmd\":\"collab\",\"data\":\"zig initiated\"}") orelse "null";
     return req.okMulti(&.{
         .{ "cmd", "\"collab\"" },
         .{ "rust_collab", rust_resp },
@@ -62,8 +62,8 @@ fn collab(req: suji.Request) suji.Response {
 
 // Zig → Rust → Go 체인
 fn chainAll(req: suji.Request) suji.Response {
-    const rust_resp = req.call("rust", "{\"cmd\":\"ping\"}") orelse "null";
-    const go_resp = req.call("go", "{\"cmd\":\"ping\"}") orelse "null";
+    const rust_resp = req.invoke("rust", "{\"cmd\":\"ping\"}") orelse "null";
+    const go_resp = req.invoke("go", "{\"cmd\":\"ping\"}") orelse "null";
     return req.okMulti(&.{
         .{ "chain", "\"zig->rust->go\"" },
         .{ "step1_zig", "\"started\"" },

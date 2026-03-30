@@ -1,14 +1,19 @@
 const std = @import("std");
 const events = @import("events");
 
-/// Suji 앱 빌더 (Zig 내장 백엔드)
+/// Suji 앱 빌더
+///
+/// Electron 스타일 API:
+///   handle — 요청/응답 (ipcMain.handle)
+///   on     — 이벤트 수신 (ipcMain.on)
+///   send   — 이벤트 발신 (webContents.send)
 ///
 /// ```zig
 /// const suji = @import("suji");
 ///
 /// pub const app = suji.app()
-///     .command("ping", ping)
-///     .command("greet", greet)
+///     .handle("ping", ping)
+///     .handle("greet", greet)
 ///     .on("clicked", onClicked);
 ///
 /// fn ping(req: suji.Request) suji.Response {
@@ -16,49 +21,52 @@ const events = @import("events");
 /// }
 /// ```
 pub const App = struct {
-    commands: [MAX_COMMANDS]Command = undefined,
-    command_count: usize = 0,
+    handlers: [MAX_HANDLERS]Handler = undefined,
+    handler_count: usize = 0,
     listeners: [MAX_LISTENERS]EventListener = undefined,
     listener_count: usize = 0,
 
-    const MAX_COMMANDS = 64;
+    const MAX_HANDLERS = 64;
     const MAX_LISTENERS = 64;
 
-    const Command = struct {
-        name: []const u8,
-        handler: *const fn (Request) Response,
+    const Handler = struct {
+        channel: []const u8,
+        func: *const fn (Request) Response,
     };
 
     const EventListener = struct {
-        event: []const u8,
-        handler: *const fn (Event) void,
+        channel: []const u8,
+        func: *const fn (Event) void,
     };
 
-    pub fn command(comptime self: App, name: []const u8, handler: *const fn (Request) Response) App {
+    /// 요청/응답 핸들러 등록 (Electron: ipcMain.handle)
+    pub fn handle(comptime self: App, channel: []const u8, func: *const fn (Request) Response) App {
         var new = self;
-        new.commands[new.command_count] = .{ .name = name, .handler = handler };
-        new.command_count += 1;
+        new.handlers[new.handler_count] = .{ .channel = channel, .func = func };
+        new.handler_count += 1;
         return new;
     }
 
-    pub fn on(comptime self: App, event_name: []const u8, handler: *const fn (Event) void) App {
+    /// 이벤트 리스너 등록 (Electron: ipcMain.on)
+    pub fn on(comptime self: App, channel: []const u8, func: *const fn (Event) void) App {
         var new = self;
-        new.listeners[new.listener_count] = .{ .event = event_name, .handler = handler };
+        new.listeners[new.listener_count] = .{ .channel = channel, .func = func };
         new.listener_count += 1;
         return new;
     }
 
-    /// IPC 요청 처리 (코어에서 호출)
-    pub fn handleIpc(self: *const App, allocator: std.mem.Allocator, request_json: []const u8) ?[]const u8 {
-        const cmd_name = extractStringField(request_json, "cmd") orelse return null;
 
-        for (self.commands[0..self.command_count]) |c| {
-            if (std.mem.eql(u8, c.name, cmd_name)) {
+    /// IPC 요청 처리
+    pub fn handleIpc(self: *const App, allocator: std.mem.Allocator, request_json: []const u8) ?[]const u8 {
+        const channel = extractStringField(request_json, "cmd") orelse return null;
+
+        for (self.handlers[0..self.handler_count]) |h| {
+            if (std.mem.eql(u8, h.channel, channel)) {
                 const req = Request{
                     .raw = request_json,
                     .arena = allocator,
                 };
-                const resp = c.handler(req);
+                const resp = h.func(req);
                 return resp.data;
             }
         }
@@ -68,7 +76,7 @@ pub const App = struct {
 
     pub fn registerEvents(self: *const App, bus: *events.EventBus) void {
         for (self.listeners[0..self.listener_count]) |l| {
-            _ = bus.on(l.event, struct {
+            _ = bus.on(l.channel, struct {
                 fn cb(_: [*:0]const u8) void {}
             }.cb);
         }
@@ -102,12 +110,6 @@ pub const Request = struct {
         return .{ .data = json, .allocated = true };
     }
 
-    /// 다른 백엔드 호출
-    pub fn call(self: *const Request, backend: []const u8, request: []const u8) ?[]const u8 {
-        _ = self;
-        return callBackend(backend, request);
-    }
-
     /// Raw JSON 응답 (크로스 호출 결과 포함 시)
     pub fn okRaw(self: *const Request, json: []const u8) Response {
         const result = std.fmt.allocPrint(self.arena, "{{\"from\":\"zig\",\"result\":{s}}}", .{json}) catch
@@ -130,6 +132,13 @@ pub const Request = struct {
         return .{ .data = result, .allocated = true };
     }
 
+    /// 다른 백엔드 호출 (Electron: ipcRenderer.invoke)
+    pub fn invoke(self: *const Request, backend: []const u8, request: []const u8) ?[]const u8 {
+        _ = self;
+        return callBackend(backend, request);
+    }
+
+
     /// 에러 응답
     pub fn err(self: *const Request, msg: []const u8) Response {
         const json = std.fmt.allocPrint(self.arena, "{{\"from\":\"zig\",\"error\":\"{s}\"}}", .{msg}) catch
@@ -146,17 +155,33 @@ pub const Response = struct {
 
 /// 이벤트 데이터
 pub const Event = struct {
-    name: []const u8,
+    channel: []const u8,
     data: []const u8,
 };
+
+/// 이벤트 발신 (Electron: webContents.send)
+pub fn send(channel: []const u8, data: []const u8) void {
+    const core = _global_core orelse return;
+    const emit_fn = core.emit orelse return;
+
+    var ch_buf: [256]u8 = undefined;
+    const clen = @min(channel.len, ch_buf.len - 1);
+    @memcpy(ch_buf[0..clen], channel[0..clen]);
+    ch_buf[clen] = 0;
+
+    var data_buf: [8192]u8 = undefined;
+    const dlen = @min(data.len, data_buf.len - 1);
+    @memcpy(data_buf[0..dlen], data[0..dlen]);
+    data_buf[dlen] = 0;
+
+    emit_fn(@ptrCast(&ch_buf), @ptrCast(&data_buf));
+}
 
 /// 앱 빌더 시작
 pub fn app() App {
     return App{};
 }
 
-// init은 app의 별칭 (root.zig 호환)
-pub const init = app;
 
 // ============================================
 // 런타임 JSON 직렬화
@@ -168,31 +193,20 @@ fn toJson(allocator: std.mem.Allocator, value: anytype) ![]const u8 {
 
     if (info == .@"struct") {
         var parts = std.ArrayListUnmanaged(u8){};
-
         try parts.appendSlice(allocator, "{\"from\":\"zig\",\"result\":{");
-
         const fields = std.meta.fields(T);
         inline for (fields, 0..) |field, i| {
             const field_value = @field(value, field.name);
-
-            // 키
             try parts.appendSlice(allocator, "\"");
             try parts.appendSlice(allocator, field.name);
             try parts.appendSlice(allocator, "\":");
-
-            // 값
             try appendJsonValue(allocator, &parts, field_value);
-
-            if (i < fields.len - 1) {
-                try parts.appendSlice(allocator, ",");
-            }
+            if (i < fields.len - 1) try parts.appendSlice(allocator, ",");
         }
-
         try parts.appendSlice(allocator, "}}");
         return parts.toOwnedSlice(allocator);
     }
 
-    // 단일 값
     var parts = std.ArrayListUnmanaged(u8){};
     try parts.appendSlice(allocator, "{\"from\":\"zig\",\"result\":");
     try appendJsonValue(allocator, &parts, value);
@@ -204,36 +218,26 @@ fn appendJsonValue(allocator: std.mem.Allocator, parts: *std.ArrayListUnmanaged(
     const T = @TypeOf(value);
     const info = @typeInfo(T);
 
-    // bool 먼저 (int보다 앞에)
     if (T == bool) {
         try parts.appendSlice(allocator, if (value) "true" else "false");
-    }
-    // 정수
-    else if (info == .int or info == .comptime_int) {
+    } else if (info == .int or info == .comptime_int) {
         const str = try std.fmt.allocPrint(allocator, "{d}", .{value});
         try parts.appendSlice(allocator, str);
-    }
-    // 실수
-    else if (info == .float or info == .comptime_float) {
+    } else if (info == .float or info == .comptime_float) {
         const str = try std.fmt.allocPrint(allocator, "{d}", .{value});
         try parts.appendSlice(allocator, str);
-    }
-    // 포인터 (문자열 포함)
-    else if (info == .pointer) {
+    } else if (info == .pointer) {
         const ptr = info.pointer;
         if (ptr.size == .slice and ptr.child == u8) {
-            // []const u8
             try parts.appendSlice(allocator, "\"");
             try parts.appendSlice(allocator, value);
             try parts.appendSlice(allocator, "\"");
         } else if (ptr.size == .one and @typeInfo(ptr.child) == .array) {
-            // *const [N:0]u8 (문자열 리터럴)
             const slice: []const u8 = value;
             try parts.appendSlice(allocator, "\"");
             try parts.appendSlice(allocator, slice);
             try parts.appendSlice(allocator, "\"");
         } else if (ptr.size == .slice) {
-            // 기타 슬라이스
             try parts.appendSlice(allocator, "[");
             for (value, 0..) |item, i| {
                 try appendJsonValue(allocator, parts, item);
@@ -243,23 +247,19 @@ fn appendJsonValue(allocator: std.mem.Allocator, parts: *std.ArrayListUnmanaged(
         } else {
             try parts.appendSlice(allocator, "null");
         }
-    }
-    // optional
-    else if (info == .optional) {
+    } else if (info == .optional) {
         if (value) |v| {
             try appendJsonValue(allocator, parts, v);
         } else {
             try parts.appendSlice(allocator, "null");
         }
-    }
-    // 기타
-    else {
+    } else {
         try parts.appendSlice(allocator, "null");
     }
 }
 
 // ============================================
-// JSON 필드 추출 (간이 파서)
+// JSON 필드 추출
 // ============================================
 
 fn extractStringField(json: []const u8, key: []const u8) ?[]const u8 {
@@ -284,24 +284,38 @@ fn extractIntField(json: []const u8, key: []const u8) ?i64 {
     return std.fmt.parseInt(i64, json[start..end], 10) catch null;
 }
 
+fn extractFloatField(json: []const u8, key: []const u8) ?f64 {
+    var search_buf: [256]u8 = undefined;
+    const pattern = std.fmt.bufPrint(&search_buf, "\"{s}\":", .{key}) catch return null;
+    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
+    var start = idx + pattern.len;
+    while (start < json.len and json[start] == ' ') start += 1;
+    var end = start;
+    if (end < json.len and json[end] == '-') end += 1;
+    while (end < json.len and (json[end] >= '0' and json[end] <= '9' or json[end] == '.')) end += 1;
+    if (end == start) return null;
+    return std.fmt.parseFloat(f64, json[start..end]) catch null;
+}
+
 // ============================================
-// C ABI Export (dlopen용)
+// SujiCore (크로스 호출 + 이벤트)
 // ============================================
 
-/// comptime에서 App을 C ABI export 함수로 변환
-/// 사용자 코드에서: comptime { suji.exportApp(app); }
-/// Zig에서 다른 백엔드 호출 (SujiCore API 경유)
+const ExternSujiCore = extern struct {
+    invoke_fn: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) [*c]const u8,
+    free_fn: ?*const fn ([*c]const u8) callconv(.c) void,
+    emit: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
+    on_fn: ?*const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
+    off_fn: ?*const fn (u64) callconv(.c) void,
+};
+
+var _global_core: ?*const ExternSujiCore = null;
+
+/// 다른 백엔드 호출 (invoke)
 pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
-    const core = _global_core orelse {
-        std.debug.print("[Zig callBackend] core is null\n", .{});
-        return null;
-    };
-    const invoke_fn = core.invoke orelse {
-        std.debug.print("[Zig callBackend] invoke is null\n", .{});
-        return null;
-    };
+    const core = _global_core orelse return null;
+    const inv_fn = core.invoke_fn orelse return null;
 
-    // null-terminate
     var backend_buf: [256]u8 = undefined;
     const blen = @min(backend.len, backend_buf.len - 1);
     @memcpy(backend_buf[0..blen], backend[0..blen]);
@@ -312,35 +326,18 @@ pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
     @memcpy(request_buf[0..rlen], request[0..rlen]);
     request_buf[rlen] = 0;
 
-    std.debug.print("[Zig callBackend] calling '{s}' with '{s}'\n", .{ backend_buf[0..blen], request_buf[0..rlen] });
-
-    const resp_ptr = invoke_fn(@ptrCast(&backend_buf), @ptrCast(&request_buf));
-
-    std.debug.print("[Zig callBackend] resp_ptr={*}\n", .{resp_ptr});
-
-    // [*c]const u8 → 체크
+    const resp_ptr = inv_fn(@ptrCast(&backend_buf), @ptrCast(&request_buf));
     const resp: [*]const u8 = @ptrCast(resp_ptr orelse return null);
     if (resp[0] == 0) return null;
-
-    // span으로 길이 찾기
     var len: usize = 0;
     while (resp[len] != 0) : (len += 1) {}
     if (len == 0) return null;
-
-    std.debug.print("[Zig callBackend] got {d} bytes: {s}\n", .{ len, resp[0..len] });
     return resp[0..len];
 }
 
-// SujiCore 타입 (loader.zig와 동일 레이아웃)
-const ExternSujiCore = extern struct {
-    invoke: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) [*c]const u8,
-    free: ?*const fn ([*c]const u8) callconv(.c) void,
-    emit: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
-    on: ?*const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
-    off: ?*const fn (u64) callconv(.c) void,
-};
-
-var _global_core: ?*const ExternSujiCore = null;
+// ============================================
+// C ABI Export (dlopen용)
+// ============================================
 
 pub fn exportApp(comptime application: App) type {
     return struct {
@@ -351,14 +348,11 @@ pub fn exportApp(comptime application: App) type {
 
         export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 {
             const req_slice = std.mem.span(request);
-
-            // Arena per request
             var req_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             const allocator = req_arena.allocator();
 
             const resp = application.handleIpc(allocator, req_slice);
             if (resp) |data| {
-                // 응답을 C 힙에 복사 (arena는 여기서 해제)
                 const c_resp = std.heap.page_allocator.allocSentinel(u8, data.len, 0) catch {
                     req_arena.deinit();
                     return null;
@@ -383,17 +377,4 @@ pub fn exportApp(comptime application: App) type {
             std.debug.print("[Zig] bye (suji SDK)\n", .{});
         }
     };
-}
-
-fn extractFloatField(json: []const u8, key: []const u8) ?f64 {
-    var search_buf: [256]u8 = undefined;
-    const pattern = std.fmt.bufPrint(&search_buf, "\"{s}\":", .{key}) catch return null;
-    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
-    var start = idx + pattern.len;
-    while (start < json.len and json[start] == ' ') start += 1;
-    var end = start;
-    if (end < json.len and json[end] == '-') end += 1;
-    while (end < json.len and (json[end] >= '0' and json[end] <= '9' or json[end] == '.')) end += 1;
-    if (end == start) return null;
-    return std.fmt.parseFloat(f64, json[start..end]) catch null;
 }

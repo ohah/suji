@@ -4,12 +4,19 @@ package suji
 #include <stdlib.h>
 
 typedef struct {
-	const char* (*invoke)(const char* backend_name, const char* request);
-	void (*free_fn)(const char* response);
+    const char* (*invoke)(const char* backend_name, const char* request);
+    void (*free_fn)(const char* response);
+    void (*emit)(const char* channel, const char* data);
+    unsigned long long (*on)(const char* channel, void* cb, void* arg);
+    void (*off)(unsigned long long id);
 } SujiCore;
 
 static const char* core_invoke(SujiCore* core, const char* name, const char* req) {
-	return core->invoke(name, req);
+    return core->invoke(name, req);
+}
+
+static void core_emit(SujiCore* core, const char* channel, const char* data) {
+    core->emit(channel, data);
 }
 */
 import "C"
@@ -22,10 +29,8 @@ import (
 
 var core *C.SujiCore
 
-// CallBackend calls another backend through the Zig core.
-//
-//	result := suji.CallBackend("rust", `{"cmd":"ping"}`)
-func CallBackend(backend, request string) string {
+// Invoke calls another backend through the Zig core.
+func Invoke(backend, request string) string {
 	if core == nil {
 		return `{"error":"core not initialized"}`
 	}
@@ -41,17 +46,27 @@ func CallBackend(backend, request string) string {
 	return C.GoString(resp)
 }
 
+// Send emits an event to the frontend and other backends.
+func Send(channel, data string) {
+	if core == nil {
+		return
+	}
+	cCh := C.CString(channel)
+	defer C.free(unsafe.Pointer(cCh))
+	cData := C.CString(data)
+	defer C.free(unsafe.Pointer(cData))
+	C.core_emit(core, cCh, cData)
+}
+
 //export backend_init
 func backend_init(c *C.SujiCore) {
 	core = c
-	fmt.Fprintf(os.Stderr, "[Go] ready (suji SDK)\n")
+	fmt.Fprintf(os.Stderr, "[Go] ready\n")
 }
 
 //export backend_handle_ipc
 func backend_handle_ipc(request *C.char) *C.char {
-	reqStr := C.GoString(request)
-	response := HandleIPC(reqStr)
-	return C.CString(response)
+	return C.CString(HandleIPC(C.GoString(request)))
 }
 
 //export backend_free
@@ -63,5 +78,5 @@ func backend_free(ptr *C.char) {
 
 //export backend_destroy
 func backend_destroy() {
-	fmt.Fprintf(os.Stderr, "[Go] bye (suji SDK)\n")
+	fmt.Fprintf(os.Stderr, "[Go] bye\n")
 }

@@ -1,9 +1,9 @@
 const suji = @import("suji");
 
 pub const app = suji.app()
-    .command("ping", ping)
-    .command("greet", greet)
-    .command("add", add);
+    .handle("ping", ping)
+    .handle("greet", greet)
+    .handle("add", add);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong" });

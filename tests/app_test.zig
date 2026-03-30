@@ -18,22 +18,22 @@ fn addHandler(req: app_mod.Request) app_mod.Response {
 
 fn clickHandler(_: app_mod.Event) void {}
 
-const test_app = app_mod.init()
-    .command("ping", pingHandler)
-    .command("greet", greetHandler)
-    .command("add", addHandler)
+const test_app = app_mod.app()
+    .handle("ping", pingHandler)
+    .handle("greet", greetHandler)
+    .handle("add", addHandler)
     .on("clicked", clickHandler);
 
 test "App builder creates commands" {
-    try std.testing.expectEqual(@as(usize, 3), test_app.command_count);
-    try std.testing.expectEqualStrings("ping", test_app.commands[0].name);
-    try std.testing.expectEqualStrings("greet", test_app.commands[1].name);
-    try std.testing.expectEqualStrings("add", test_app.commands[2].name);
+    try std.testing.expectEqual(@as(usize, 3), test_app.handler_count);
+    try std.testing.expectEqualStrings("ping", test_app.handlers[0].channel);
+    try std.testing.expectEqualStrings("greet", test_app.handlers[1].channel);
+    try std.testing.expectEqualStrings("add", test_app.handlers[2].channel);
 }
 
 test "App builder creates listeners" {
     try std.testing.expectEqual(@as(usize, 1), test_app.listener_count);
-    try std.testing.expectEqualStrings("clicked", test_app.listeners[0].event);
+    try std.testing.expectEqualStrings("clicked", test_app.listeners[0].channel);
 }
 
 test "App handleIpc ping" {
@@ -153,7 +153,7 @@ test "Request ok with runtime variable" {
         .raw = "{}",
         .arena = arena.allocator(),
     };
-    const resp = req.ok(.{ .name = name, .count = count });
+    const resp = req.ok(.{ .channel = name, .count = count });
     try std.testing.expect(std.mem.indexOf(u8, resp.data, "suji") != null);
     try std.testing.expect(std.mem.indexOf(u8, resp.data, "99") != null);
 }

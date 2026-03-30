@@ -1,8 +1,8 @@
 const suji = @import("suji");
 
 pub const app = suji.app()
-    .command("ping", ping)
-    .command("greet", greet);
+    .handle("ping", ping)
+    .handle("greet", greet);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong" });
