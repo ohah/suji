@@ -1,0 +1,18 @@
+[app]
+name = "Suji Rust Example"
+version = "0.1.0"
+
+[window]
+title = "Suji + Rust"
+width = 800
+height = 600
+debug = true
+
+[backend]
+lang = "rust"
+entry = "."
+
+[frontend]
+dir = "frontend"
+dev_url = "http://localhost:5173"
+dist_dir = "frontend/dist"

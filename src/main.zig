@@ -16,10 +16,12 @@ pub fn main() !void {
 
     const command = args[1];
 
-    if (std.mem.eql(u8, command, "test")) {
-        try runBackendTest(allocator, args[2..]);
-    } else if (std.mem.eql(u8, command, "demo")) {
-        try runDemo(allocator, args[2..]);
+    if (std.mem.eql(u8, command, "dev")) {
+        try runDev(allocator);
+    } else if (std.mem.eql(u8, command, "build")) {
+        try runBuild(allocator);
+    } else if (std.mem.eql(u8, command, "run")) {
+        try runProd(allocator);
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -31,202 +33,276 @@ fn printUsage() void {
         \\Suji - Zig core multi-backend desktop framework
         \\
         \\Usage:
-        \\  suji demo                         Open demo window
-        \\  suji demo <backend:path>...        Open demo with backends
-        \\  suji test <backend:path>...        Test backend loading
+        \\  suji dev              Development mode (hot reload)
+        \\  suji build            Production build
+        \\  suji run              Run production build
         \\
-        \\Example:
-        \\  suji demo
-        \\  suji demo rust:./librust_backend.dylib
-        \\  suji test rust:./librust_backend.dylib go:./libgo_backend.dylib
+        \\Commands read suji.toml or suji.json from current directory.
         \\
     , .{});
 }
 
-/// 백엔드 로딩 테스트
-fn runBackendTest(allocator: std.mem.Allocator, backend_args: []const [:0]const u8) !void {
+// ============================================
+// suji dev
+// ============================================
+fn runDev(allocator: std.mem.Allocator) !void {
+    const config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
+        return;
+    };
+
+    std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
+
+    // 1. 백엔드 빌드 + 로드
     var registry = suji.BackendRegistry.init(allocator);
     defer registry.deinit();
-
     registry.setGlobal();
-    loadBackends(&registry, backend_args);
+    try loadBackendsFromConfig(allocator, &config, &registry, false);
 
-    std.debug.print("\nSending ping to all backends...\n", .{});
+    // 2. 프론트엔드 dev 서버
+    std.debug.print("[suji] starting frontend dev server...\n", .{});
+    var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
+        std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
+        try openWindow(allocator, &config, &registry, .dev);
+        return;
+    };
+    defer _ = frontend_proc.kill() catch {};
 
-    var iter = registry.backends.iterator();
-    while (iter.next()) |entry| {
-        const name = entry.key_ptr.*;
-        const response = registry.invoke(name, "{\"cmd\":\"ping\"}");
-        if (response) |resp| {
-            std.debug.print("  {s}: {s}\n", .{ name, resp });
-            registry.freeResponse(name, response);
-        }
-    }
+    std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
+    std.Thread.sleep(2 * std.time.ns_per_s);
 
-    std.debug.print("\nDone.\n", .{});
+    // 3. WebView
+    try openWindow(allocator, &config, &registry, .dev);
 }
 
-/// 데모 윈도우
-fn runDemo(allocator: std.mem.Allocator, backend_args: []const [:0]const u8) !void {
+// ============================================
+// suji build
+// ============================================
+fn runBuild(allocator: std.mem.Allocator) !void {
+    const config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
+        return;
+    };
+
+    std.debug.print("[suji] production build - {s}\n", .{config.app.name});
+
+    // 백엔드 릴리스 빌드
+    try buildBackendsFromConfig(allocator, &config, true);
+
+    // 프론트엔드 빌드
+    std.debug.print("[suji] building frontend...\n", .{});
+    buildFrontend(allocator, config.frontend.dir) catch |err| {
+        std.debug.print("[suji] frontend build failed: {}\n", .{err});
+    };
+
+    std.debug.print("[suji] build complete!\n", .{});
+}
+
+// ============================================
+// suji run
+// ============================================
+fn runProd(allocator: std.mem.Allocator) !void {
+    const config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
+        return;
+    };
+
+    std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
+
     var registry = suji.BackendRegistry.init(allocator);
     defer registry.deinit();
-
     registry.setGlobal();
-    if (backend_args.len > 0) {
-        loadBackends(&registry, backend_args);
-    }
+    try loadBackendsFromConfig(allocator, &config, &registry, true);
 
+    try openWindow(allocator, &config, &registry, .dist);
+}
+
+// ============================================
+// 백엔드 빌드/로드
+// ============================================
+
+fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, release: bool) !void {
+    if (config.isMultiBackend()) {
+        if (config.backends) |backends| {
+            for (backends) |be| {
+                std.debug.print("[suji] building {s} ({s})...\n", .{ be.name, be.lang });
+                buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
+                    std.debug.print("[suji] build failed: {}\n", .{err});
+                    continue;
+                };
+                const path = getDylibPath(allocator, be.lang, be.entry, release) catch continue;
+                defer allocator.free(path);
+                var path_z: [1024]u8 = undefined;
+                const plen = @min(path.len, path_z.len - 1);
+                @memcpy(path_z[0..plen], path[0..plen]);
+                path_z[plen] = 0;
+                registry.register(be.name, path_z[0..plen :0]) catch |err| {
+                    std.debug.print("[suji] load failed for {s}: {}\n", .{ be.name, err });
+                };
+            }
+        }
+    } else if (config.backend) |be| {
+        std.debug.print("[suji] building {s} backend...\n", .{be.lang});
+        buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
+            std.debug.print("[suji] build failed: {}\n", .{err});
+            return;
+        };
+        const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
+        defer allocator.free(path);
+        var path_z: [1024]u8 = undefined;
+        const plen = @min(path.len, path_z.len - 1);
+        @memcpy(path_z[0..plen], path[0..plen]);
+        path_z[plen] = 0;
+        registry.register("default", path_z[0..plen :0]) catch |err| {
+            std.debug.print("[suji] load failed: {}\n", .{err});
+        };
+    }
+}
+
+fn buildBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {
+    if (config.isMultiBackend()) {
+        if (config.backends) |backends| {
+            for (backends) |be| {
+                std.debug.print("[suji] building {s} ({s})...\n", .{ be.name, be.lang });
+                buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
+                    std.debug.print("[suji] build failed: {}\n", .{err});
+                };
+            }
+        }
+    } else if (config.backend) |be| {
+        std.debug.print("[suji] building {s}...\n", .{be.lang});
+        buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
+            std.debug.print("[suji] build failed: {}\n", .{err});
+        };
+    }
+}
+
+fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []const u8, release: bool) !void {
+    if (std.mem.eql(u8, lang, "rust")) {
+        const manifest = try std.fmt.allocPrint(allocator, "{s}/Cargo.toml", .{entry});
+        defer allocator.free(manifest);
+        if (release) {
+            try runCmd(allocator, &.{ "cargo", "build", "--release", "--manifest-path", manifest });
+        } else {
+            try runCmd(allocator, &.{ "cargo", "build", "--manifest-path", manifest });
+        }
+    } else if (std.mem.eql(u8, lang, "go")) {
+        const output = try std.fmt.allocPrint(allocator, "{s}/libbackend.dylib", .{entry});
+        defer allocator.free(output);
+        const go_entry = try std.fmt.allocPrint(allocator, "{s}/main.go", .{entry});
+        defer allocator.free(go_entry);
+        try runCmd(allocator, &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry });
+    }
+}
+
+fn getDylibPath(allocator: std.mem.Allocator, lang: []const u8, entry: []const u8, release: bool) ![]const u8 {
+    if (std.mem.eql(u8, lang, "rust")) {
+        const profile: []const u8 = if (release) "release" else "debug";
+        return try std.fmt.allocPrint(allocator, "{s}/target/{s}/librust_backend.dylib", .{ entry, profile });
+    } else if (std.mem.eql(u8, lang, "go")) {
+        return try std.fmt.allocPrint(allocator, "{s}/libbackend.dylib", .{entry});
+    }
+    return error.UnsupportedLang;
+}
+
+fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
+    var child = std.process.Child.init(argv, allocator);
+    child.stderr_behavior = .Inherit;
+    child.stdout_behavior = .Inherit;
+    try child.spawn();
+    const result = try child.wait();
+    switch (result) {
+        .Exited => |code| if (code != 0) return error.CommandFailed,
+        else => return error.CommandFailed,
+    }
+}
+
+// ============================================
+// 프론트엔드
+// ============================================
+
+fn startFrontendDev(allocator: std.mem.Allocator, frontend_dir: []const u8) !std.process.Child {
+    const has_bun = blk: {
+        var buf: [512]u8 = undefined;
+        const p = std.fmt.bufPrint(&buf, "{s}/bun.lock", .{frontend_dir}) catch break :blk false;
+        std.fs.cwd().access(p, .{}) catch break :blk false;
+        break :blk true;
+    };
+
+    var child = std.process.Child.init(
+        if (has_bun)
+            &.{ "bun", "--cwd", frontend_dir, "dev" }
+        else
+            &.{ "npm", "--prefix", frontend_dir, "run", "dev" },
+        allocator,
+    );
+    child.stderr_behavior = .Inherit;
+    child.stdout_behavior = .Inherit;
+    try child.spawn();
+    return child;
+}
+
+fn buildFrontend(allocator: std.mem.Allocator, frontend_dir: []const u8) !void {
+    var buf: [512]u8 = undefined;
+    const p = std.fmt.bufPrint(&buf, "{s}/bun.lock", .{frontend_dir}) catch return;
+    const has_bun = blk: {
+        std.fs.cwd().access(p, .{}) catch break :blk false;
+        break :blk true;
+    };
+
+    if (has_bun) {
+        try runCmd(allocator, &.{ "bun", "--cwd", frontend_dir, "run", "build" });
+    } else {
+        try runCmd(allocator, &.{ "npm", "--prefix", frontend_dir, "run", "build" });
+    }
+}
+
+// ============================================
+// WebView
+// ============================================
+
+const WindowMode = enum { dev, dist };
+
+fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
     var win = try suji.Window.create(.{
-        .title = "Suji Demo",
-        .width = 900,
-        .height = 600,
-        .debug = true,
-        .html =
-        \\<!DOCTYPE html>
-        \\<html>
-        \\<head>
-        \\<style>
-        \\  * { margin: 0; padding: 0; box-sizing: border-box; }
-        \\  body { font-family: -apple-system, system-ui, sans-serif; padding: 24px; background: #0f0f0f; color: #e0e0e0; overflow-y: auto; }
-        \\  h1 { font-size: 24px; margin-bottom: 8px; color: #fff; }
-        \\  .subtitle { color: #888; margin-bottom: 20px; font-size: 14px; }
-        \\  .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 14px; margin-bottom: 10px; }
-        \\  .card h3 { color: #4fc3f7; margin-bottom: 6px; font-size: 14px; }
-        \\  .card p { color: #666; font-size: 12px; margin-bottom: 8px; }
-        \\  button { background: #4fc3f7; color: #000; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin: 3px; font-weight: 600; font-size: 12px; }
-        \\  button:hover { background: #81d4fa; }
-        \\  button.rust { background: #ff8a65; }
-        \\  button.rust:hover { background: #ffab91; }
-        \\  button.go { background: #81c784; }
-        \\  button.go:hover { background: #a5d6a7; }
-        \\  button.zig { background: #ce93d8; }
-        \\  button.zig:hover { background: #e1bee7; }
-        \\  button.chain { background: #fff176; }
-        \\  button.chain:hover { background: #fff59d; }
-        \\  #output { background: #111; border: 1px solid #333; border-radius: 4px; padding: 12px; margin-top: 12px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 250px; overflow-y: auto; }
-        \\</style>
-        \\</head>
-        \\<body>
-        \\  <h1>Suji</h1>
-        \\  <p class="subtitle">Zig core multi-backend desktop framework</p>
-        \\
-        \\  <div class="card">
-        \\    <h3>1. Direct Call (JS -> Backend)</h3>
-        \\    <p>JS에서 각 백엔드를 직접 호출</p>
-        \\    <button class="rust" onclick="direct('rust','ping')">Rust ping</button>
-        \\    <button class="go" onclick="direct('go','ping')">Go ping</button>
-        \\    <button class="rust" onclick="direct('rust','async_work')">Rust tokio::join</button>
-        \\    <button class="go" onclick="direct('go','async_work')">Go goroutines</button>
-        \\    <button disabled style="opacity:0.4;cursor:default">Node (coming soon)</button>
-        \\  </div>
-        \\
-        \\  <div class="card">
-        \\    <h3>2. Chain Call (Backend A -> Zig Core -> Backend B)</h3>
-        \\    <p>Go가 호출 -> Zig가 결과를 Rust에 전달 (또는 반대)</p>
-        \\    <button class="chain" onclick="chain('go','rust')">Go -> Zig -> Rust</button>
-        \\    <button class="chain" onclick="chain('rust','go')">Rust -> Zig -> Go</button>
-        \\  </div>
-        \\
-        \\  <div class="card">
-        \\    <h3>3. Fan-out (Zig Core -> All Backends)</h3>
-        \\    <p>Zig 코어가 여러 백엔드에 동시 요청</p>
-        \\    <button class="zig" onclick="fanout('rust,go','ping')">Ping All</button>
-        \\    <button class="zig" onclick="fanout('rust,go','cpu_heavy')">Hash All</button>
-        \\  </div>
-        \\
-        \\  <div class="card">
-        \\    <h3>4. Zig Core Direct</h3>
-        \\    <p>Zig 코어가 직접 처리하거나 백엔드에 릴레이</p>
-        \\    <button class="zig" onclick="core('core_info')">Backend Info</button>
-        \\    <button class="zig" onclick="coreRelay('rust')">Zig -> Rust relay</button>
-        \\    <button class="zig" onclick="coreRelay('go')">Zig -> Go relay</button>
-        \\  </div>
-        \\
-        \\  <div class="card">
-        \\    <h3>5. Cross-Backend (Rust <-> Go direct call)</h3>
-        \\    <p>백엔드가 Zig 코어를 통해 다른 백엔드를 직접 호출</p>
-        \\    <button class="rust" onclick="direct('rust','call_go')">Rust calls Go</button>
-        \\    <button class="go" onclick="direct('go','call_rust')">Go calls Rust</button>
-        \\    <button class="chain" onclick="direct('rust','collab')">Rust+Go collab (hash+stats)</button>
-        \\    <button class="chain" onclick="direct('go','collab')">Go+Rust collab (stats+hash)</button>
-        \\  </div>
-        \\
-        \\  <div id="output">Ready.</div>
-        \\
-        \\  <script>
-        \\    const S = (v) => typeof v === 'object' ? JSON.stringify(v) : v;
-        \\    function log(msg) {
-        \\      const el = document.getElementById('output');
-        \\      el.textContent += '\n' + msg;
-        \\      el.scrollTop = el.scrollHeight;
-        \\    }
-        \\    async function direct(backend, cmd) {
-        \\      try {
-        \\        const r = await __suji__.invoke(backend, JSON.stringify({cmd}));
-        \\        log('[' + backend + '] ' + S(r));
-        \\      } catch(e) { log('[' + backend + '] ERR: ' + S(e)); }
-        \\    }
-        \\    async function chain(from, to) {
-        \\      try {
-        \\        const r = await __suji__.chain(from, to, JSON.stringify({cmd:'process_and_relay',msg:'hello'}));
-        \\        log('[' + from + '->' + to + '] ' + S(r));
-        \\      } catch(e) { log('[chain] ERR: ' + S(e)); }
-        \\    }
-        \\    async function fanout(backends, cmd) {
-        \\      try {
-        \\        const r = await __suji__.fanout(backends, JSON.stringify({cmd}));
-        \\        log('[fanout] ' + S(r));
-        \\      } catch(e) { log('[fanout] ERR: ' + S(e)); }
-        \\    }
-        \\    async function core(cmd) {
-        \\      try {
-        \\        const r = await __suji__.core(JSON.stringify({cmd}));
-        \\        log('[zig-core] ' + S(r));
-        \\      } catch(e) { log('[zig-core] ERR: ' + S(e)); }
-        \\    }
-        \\    async function coreRelay(target) {
-        \\      try {
-        \\        const r = await __suji__.core(JSON.stringify({cmd:'core_relay',target,data:'from zig'}));
-        \\        log('[zig->' + target + '] ' + S(r));
-        \\      } catch(e) { log('[zig->' + target + '] ERR: ' + S(e)); }
-        \\    }
-        \\  </script>
-        \\</body>
-        \\</html>
-        ,
+        .title = @ptrCast(config.window.title),
+        .width = @intCast(config.window.width),
+        .height = @intCast(config.window.height),
+        .debug = config.window.debug,
+        .url = switch (mode) {
+            .dev => @ptrCast(config.frontend.dev_url),
+            .dist => null,
+        },
     });
     defer win.destroy();
 
-    // IPC 브릿지 바인딩 (힙 할당 — 콜백에서 self 포인터 유효해야 함)
+    // dist 모드: file:// URL로 로드
+    if (mode == .dist) {
+        const dist_path = std.fmt.allocPrint(allocator, "{s}/index.html", .{config.frontend.dist_dir}) catch null;
+        if (dist_path) |dp| {
+            defer allocator.free(dp);
+            const abs = std.fs.cwd().realpathAlloc(allocator, dp) catch null;
+            if (abs) |a| {
+                defer allocator.free(a);
+                var url_buf: [2048]u8 = undefined;
+                const url = std.fmt.bufPrint(&url_buf, "file://{s}", .{a}) catch null;
+                if (url) |u| {
+                    url_buf[u.len] = 0;
+                    win.webview.navigate(url_buf[0..u.len :0]);
+                }
+            }
+        }
+    }
+
     const bridge = try allocator.create(suji.Bridge);
-    bridge.* = suji.Bridge.init(&win.webview, &registry);
+    bridge.* = suji.Bridge.init(&win.webview, registry);
     defer {
         bridge.deinit();
         allocator.destroy(bridge);
     }
     bridge.bind();
 
-    // 콘텐츠 로드 & 실행
     win.loadContent();
+    std.debug.print("[suji] window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
     win.run();
-}
-
-/// name:path 형식의 인자로 백엔드 로드
-fn loadBackends(registry: *suji.BackendRegistry, backend_args: []const [:0]const u8) void {
-    for (backend_args) |arg| {
-        var iter = std.mem.splitScalar(u8, arg, ':');
-        const name = iter.next() orelse continue;
-        const path = iter.rest();
-        if (path.len == 0) {
-            std.debug.print("Invalid format: {s} (expected name:path)\n", .{arg});
-            continue;
-        }
-
-        std.debug.print("Loading backend '{s}' from {s}...\n", .{ name, path });
-        registry.register(name, @ptrCast(path)) catch |err| {
-            std.debug.print("  Failed: {}\n", .{err});
-            continue;
-        };
-        std.debug.print("  OK\n", .{});
-    }
 }
