@@ -18,8 +18,8 @@ pub const Config = struct {
 
     pub const Window = struct {
         title: [:0]const u8 = "Suji App",
-        width: i64 = 800,
-        height: i64 = 600,
+        width: i64 = 1024,
+        height: i64 = 768,
         debug: bool = false,
     };
 

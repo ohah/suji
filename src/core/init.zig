@@ -82,7 +82,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
         .multi => try std.fmt.bufPrint(&buf,
             \\{{
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
-            \\  "window": {{ "title": "{s}", "width": 800, "height": 600, "debug": true }},
+            \\  "window": {{ "title": "{s}", "width": 1024, "height": 768, "debug": true }},
             \\  "backends": [
             \\    {{ "name": "zig", "lang": "zig", "entry": "backends/zig" }},
             \\    {{ "name": "rust", "lang": "rust", "entry": "backends/rust" }},
@@ -94,7 +94,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
         else => try std.fmt.bufPrint(&buf,
             \\{{
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
-            \\  "window": {{ "title": "{s}", "width": 800, "height": 600, "debug": true }},
+            \\  "window": {{ "title": "{s}", "width": 1024, "height": 768, "debug": true }},
             \\  "backend": {{ "lang": "{s}", "entry": "." }},
             \\  "frontend": {{ "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }}
             \\}}

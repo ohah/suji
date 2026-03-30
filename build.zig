@@ -162,4 +162,15 @@ pub fn build(b: *std.Build) void {
 
     const config_test = b.addTest(.{ .root_module = config_test_mod });
     test_step.dependOn(&b.addRunArtifact(config_test).step);
+
+    // Events integration tests
+    const events_int_mod = b.createModule(.{
+        .root_source_file = b.path("tests/events_integration_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    events_int_mod.addImport("events", events_module);
+    const events_int_test = b.addTest(.{ .root_module = events_int_mod });
+    test_step.dependOn(&b.addRunArtifact(events_int_test).step);
 }

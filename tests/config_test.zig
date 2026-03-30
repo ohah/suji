@@ -9,8 +9,8 @@ test "Config default values" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("Suji App", cfg.app.name);
     try std.testing.expectEqualStrings("0.1.0", cfg.app.version);
-    try std.testing.expectEqual(@as(i64, 800), cfg.window.width);
-    try std.testing.expectEqual(@as(i64, 600), cfg.window.height);
+    try std.testing.expectEqual(@as(i64, 1024), cfg.window.width);
+    try std.testing.expectEqual(@as(i64, 768), cfg.window.height);
     try std.testing.expectEqualStrings("Suji App", cfg.window.title);
     try std.testing.expect(!cfg.window.debug);
     try std.testing.expect(cfg.backend == null);

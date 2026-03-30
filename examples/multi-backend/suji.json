@@ -5,8 +5,8 @@
   },
   "window": {
     "title": "Suji Multi-Backend Demo",
-    "width": 900,
-    "height": 700,
+    "width": 1024,
+    "height": 768,
     "debug": true
   },
   "backends": [

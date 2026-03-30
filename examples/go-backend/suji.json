@@ -1,6 +1,6 @@
 {
   "app": { "name": "Suji Go Example", "version": "0.1.0" },
-  "window": { "title": "Suji + Go", "width": 800, "height": 600, "debug": true },
+  "window": { "title": "Suji + Go", "width": 1024, "height": 768, "debug": true },
   "backend": { "lang": "go", "entry": "." },
   "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
 }
