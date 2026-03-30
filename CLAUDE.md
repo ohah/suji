@@ -81,7 +81,7 @@ suji/
 │   └── suji-rs-macros/       # Rust proc macro
 ├── sdks/
 │   └── suji-go/              # Go SDK (suji.Bind)
-├── tests/                    # 55개 테스트
+├── tests/                    # 55개 테스트 (loader, ipc, config, events, app)
 ├── examples/
 │   ├── zig-backend/          # Zig 단독 + React
 │   ├── rust-backend/         # Rust 단독 + React

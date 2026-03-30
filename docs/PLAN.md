@@ -27,27 +27,38 @@
 ## 아키텍처
 
 ```
-┌─────────────────────────────────────────┐
-│              사용자 앱                    │
-├─────────────────────────────────────────┤
-│           Suji 프레임워크                 │
-│  ┌─────────┬──────────┬───────────┐     │
-│  │ 창 관리  │ WebView  │   IPC     │     │
-│  │ window  │ webview  │  브릿지    │     │
-│  └────┬────┴────┬─────┴─────┬─────┘     │
-│       │         │           │            │
-│  ┌────┴─────────┴───────────┴──────┐     │
-│  │        platform 추상화           │     │
-│  │  macOS │ Windows │ Linux        │     │
-│  └─────────────────────────────────┘     │
-├─────────────────────────────────────────┤
-│           백엔드 연결                     │
-│  ┌──────────────┬──────────────┐        │
-│  │ dlopen       │ libnode      │        │
-│  │ (Zig/Rust/   │ (Node.js     │        │
-│  │  Go/C)       │  임베드)     │        │
-│  └──────────────┴──────────────┘        │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│              프론트엔드 (React/Vue/Svelte)     │
+│              __suji__.invoke / emit / on       │
+├──────────────────────────────────────────────┤
+│              Suji 코어 (Zig)                   │
+│  ┌────────┬─────────┬──────────┬───────────┐  │
+│  │ Window │ WebView │ IPC      │ EventBus  │  │
+│  │        │         │ Bridge   │ (pub/sub) │  │
+│  └────┬───┴────┬────┴────┬─────┴─────┬─────┘  │
+│       │        │         │           │         │
+│  ┌────┴────────┴─────────┴───────────┴──────┐  │
+│  │           BackendRegistry (dlopen)        │  │
+│  │  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐  │  │
+│  │  │ Zig  │  │ Rust │  │  Go  │  │Node* │  │  │
+│  │  │.dylib│  │.dylib│  │.dylib│  │      │  │  │
+│  │  └──┬───┘  └──┬───┘  └──┬───┘  └──────┘  │  │
+│  │     │         │         │                 │  │
+│  │     └────┬────┘    ┌────┘                 │  │
+│  │          │ SujiCore API (크로스 호출)       │  │
+│  │          │ invoke / emit / on / off        │  │
+│  └───────────────────────────────────────────┘  │
+└──────────────────────────────────────────────┘
+
+* Node.js: libnode 임베드 (Phase 5)
+```
+
+**SDK 구조**:
+```
+crates/suji-rs/       Rust SDK (#[suji::command], export_commands!)
+crates/suji-rs-macros/ Rust proc macro
+sdks/suji-go/          Go SDK (suji.Bind(&App{}))
+src/core/app.zig       Zig SDK (suji.app().command(), exportApp())
 ```
 
 ---
@@ -436,23 +447,26 @@ app.on("ready", () => {
 
 ```
 Suji 코어 (Zig)
-  ├── dlopen("librust_backend.dylib")   ← 동시성/고성능
-  ├── libnode 임베드                     ← 스크립팅/UI 로직
-  └── IPC 라우터 (호출을 적절한 백엔드로 분배)
+  ├── dlopen("libzig_backend.dylib")    ← Zig (exportApp)
+  ├── dlopen("librust_backend.dylib")   ← Rust (tokio)
+  ├── dlopen("libgo_backend.dylib")     ← Go (goroutine)
+  ├── libnode 임베드 (Phase 5)           ← Node.js
+  └── IPC 라우터 + EventBus
 ```
 
-- [x] 멀티 백엔드 동시 로드 (POC 검증 완료: Rust tokio + Go goroutine 공존)
-- [x] IPC 라우터 (직접, 체인, 팬아웃, 코어 릴레이 — 데모 구현 완료)
-- [x] 백엔드 간 메시지 패싱 (Suji 코어 경유, 체인 호출 검증 완료)
-- [x] 이벤트 루프 공존 (POC: tokio 4 worker + Go GOMAXPROCS=12, 충돌 없음)
+- [x] 멀티 백엔드 동시 로드 (Zig + Rust + Go 검증 완료)
+- [x] IPC 라우터 (직접, 체인, 팬아웃, 코어 릴레이)
+- [x] 백엔드 간 메시지 패싱 (Rust↔Go 크로스 호출 검증 완료)
+- [x] 이벤트 루프 공존 (tokio + Go runtime + Zig, 충돌 없음)
+- [x] Zig 백엔드도 dlopen (exportApp으로 C ABI 자동 생성)
+- [ ] Zig→Rust, Zig→Go 크로스 호출 (exportApp에 SujiCore 연결 필요)
 - [ ] 공유 상태 관리
 
-**POC 검증 결과** (poc/ 디렉토리):
-- Rust(tokio) + Go(goroutine) 한 프로세스 동시 로드: 32 스레드, 3200 호출, 93만 calls/sec
+**검증 결과**:
+- Zig + Rust(tokio) + Go(goroutine) 한 프로세스 동시 로드
+- CHAOS 테스트: 20개 동시 호출 (직접+크로스+협업+팬아웃+체인)
+- RAPID FIRE: 100개 동시 핑 (3개 백엔드)
 - 시그널 충돌, 데드락, 크래시 없음
-- 외부 라이브러리(sha2 crate, npm lodash/dayjs/uuid) 포함 검증 완료
-
-**선행 조건**: Phase 4, 5 완료 후 단일 백엔드로 충분히 안정된 상태에서 시작
 
 ---
 
