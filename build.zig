@@ -9,10 +9,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const toml_dep = b.dependency("toml", .{
-        .target = target,
-        .optimize = optimize,
-    });
+    // TOML 지원은 백로그 (현재 JSON만)
+    // const toml_dep = b.dependency("toml", .{ .target = target, .optimize = optimize });
 
     // 공통 모듈
     const loader_module = b.createModule(.{
@@ -30,7 +28,7 @@ pub fn build(b: *std.Build) void {
     });
     root_module.addImport("webview", webview_dep.module("webview"));
     root_module.addImport("loader", loader_module);
-    root_module.addImport("toml", toml_dep.module("toml"));
+    // root_module.addImport("toml", toml_dep.module("toml"));
 
     const exe = b.addExecutable(.{
         .name = "suji",
@@ -106,7 +104,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    config_module.addImport("toml", toml_dep.module("toml"));
+    // config_module.addImport("toml", toml_dep.module("toml"));
     config_test_mod.addImport("config", config_module);
     const config_test = b.addTest(.{ .root_module = config_test_mod });
     test_step.dependOn(&b.addRunArtifact(config_test).step);

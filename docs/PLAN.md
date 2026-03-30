@@ -203,7 +203,7 @@ suji init my-app
 단일 백엔드 (예: `suji init my-app --backend=rust --frontend=react`):
 ```
 my-app/
-├── suji.toml
+├── suji.json
 ├── Cargo.toml
 ├── src/lib.rs
 └── frontend/          ← Vite + React (bun)
@@ -215,7 +215,7 @@ my-app/
 멀티 백엔드 (예: `suji init my-app --backend=multi`):
 ```
 my-app/
-├── suji.toml
+├── suji.json
 ├── backends/
 │   ├── rust/
 │   │   ├── Cargo.toml
@@ -231,7 +231,7 @@ my-app/
 **`suji dev` 스펙**:
 ```bash
 suji dev
-# 1. suji.toml 읽기
+# 1. suji.json 읽기 (설정 파일)
 # 2. 백엔드 빌드 (cargo build / go build / zig build)
 # 3. 프론트엔드 dev 서버 실행 (bun dev → localhost:5173)
 # 4. WebView 창 열기 (dev_url 로드)
@@ -454,7 +454,7 @@ Suji 코어 (Zig)
 
 ## 사용자 프로젝트 구조
 
-원칙: **각 언어의 관습을 따르되, frontend/ 폴더와 suji.toml만 통일**
+원칙: **각 언어의 관습을 따르되, frontend/ 폴더와 suji.json만 통일**
 
 ### 단일 백엔드
 
@@ -466,7 +466,7 @@ Rust 백엔드:                 Go 백엔드:
   ├── frontend/                ├── frontend/
   │   ├── index.html           │   ├── index.html
   │   └── package.json         │   └── package.json
-  └── suji.toml                └── suji.toml
+  └── suji.json                └── suji.json
 
 Zig 백엔드:                  Node 백엔드:
   my-app/                      my-app/
@@ -475,8 +475,8 @@ Zig 백엔드:                  Node 백엔드:
   ├── src/main.zig             ├── frontend/
   ├── frontend/                │   ├── index.html
   │   ├── index.html           │   └── package.json
-  │   └── package.json         └── suji.toml
-  └── suji.toml
+  │   └── package.json         └── suji.json
+  └── suji.json
 ```
 
 ### 멀티 백엔드 (Rust + Go 동시 사용 등)
@@ -494,42 +494,35 @@ my-app/
 │   ├── index.html
 │   ├── package.json
 │   └── src/
-└── suji.toml
+└── suji.json
 ```
 
-### suji.toml (설정 파일)
+### suji.json (설정 파일)
 
-```toml
-[app]
-name = "My App"
-version = "0.1.0"
-
-[window]
-title = "My App"
-width = 800
-height = 600
-
-# 단일 백엔드
-[backend]
-lang = "rust"
-entry = "src/lib.rs"
-
-# 또는 멀티 백엔드
-# [[backends]]
-# name = "rust"
-# lang = "rust"
-# entry = "backends/rust/src/lib.rs"
-#
-# [[backends]]
-# name = "go"
-# lang = "go"
-# entry = "backends/go/main.go"
-
-[frontend]
-dir = "frontend"
-dev_url = "http://localhost:5173"
-dist_dir = "frontend/dist"
+단일 백엔드:
+```json
+{
+  "app": { "name": "My App", "version": "0.1.0" },
+  "window": { "title": "My App", "width": 800, "height": 600, "debug": true },
+  "backend": { "lang": "rust", "entry": "." },
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+}
 ```
+
+멀티 백엔드:
+```json
+{
+  "app": { "name": "My App", "version": "0.1.0" },
+  "window": { "title": "My App", "width": 900, "height": 600, "debug": true },
+  "backends": [
+    { "name": "rust", "lang": "rust", "entry": "backends/rust" },
+    { "name": "go", "lang": "go", "entry": "backends/go" }
+  ],
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+}
+```
+
+**백로그**: TOML 지원 (적합한 zig-toml 라이브러리가 array of tables 지원 시 추가 예정)
 
 ---
 

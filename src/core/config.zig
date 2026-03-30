@@ -1,7 +1,7 @@
 const std = @import("std");
-const toml = @import("toml");
 
 /// Suji 프로젝트 설정
+/// suji.json에서 로드
 pub const Config = struct {
     app: App = .{},
     window: Window = .{},
@@ -9,7 +9,6 @@ pub const Config = struct {
     backends: ?[]const MultiBackend = null,
     frontend: Frontend = .{},
 
-    // 내부 메모리 관리
     _arena: ?std.heap.ArenaAllocator = null,
 
     pub const App = struct {
@@ -41,22 +40,8 @@ pub const Config = struct {
         dist_dir: [:0]const u8 = "frontend/dist",
     };
 
-    // TOML 파서용 struct ([]const u8 — toml 라이브러리가 [:0] 미지원)
-    const TomlApp = struct { name: []const u8 = "Suji App", version: []const u8 = "0.1.0" };
-    const TomlWindow = struct { title: []const u8 = "Suji App", width: i64 = 800, height: i64 = 600, debug: bool = false };
-    const TomlBackend = struct { lang: []const u8 = "zig", entry: []const u8 = "src/main.zig" };
-    const TomlFrontend = struct { dir: []const u8 = "frontend", dev_url: []const u8 = "http://localhost:5173", dist_dir: []const u8 = "frontend/dist" };
-    const TomlConfig = struct {
-        app: ?TomlApp = null,
-        window: ?TomlWindow = null,
-        backend: ?TomlBackend = null,
-        frontend: ?TomlFrontend = null,
-    };
-
     pub fn load(allocator: std.mem.Allocator) !Config {
-        if (loadToml(allocator)) |config| return config else |_| {}
-        if (loadJson(allocator)) |config| return config else |_| {}
-        return error.ConfigNotFound;
+        return loadJson(allocator);
     }
 
     pub fn deinit(self: *Config) void {
@@ -66,75 +51,22 @@ pub const Config = struct {
         }
     }
 
-    /// 문자열을 arena에 복사 + null terminate 보장
-    fn dupeStr(arena: std.mem.Allocator, s: []const u8) [:0]const u8 {
-        return arena.dupeZ(u8, s) catch @ptrCast(s);
-    }
-
-    fn loadToml(allocator: std.mem.Allocator) !Config {
-        const content = std.fs.cwd().readFileAlloc(allocator, "suji.toml", 1024 * 64) catch return error.TomlNotFound;
-        defer allocator.free(content);
-
-        var parser = toml.Parser(TomlConfig).init(allocator);
-        defer parser.deinit();
-
-        var result = parser.parseString(content) catch return error.TomlParseError;
-        // result의 arena에서 문자열을 빌려오므로, 우리 arena에 복사
-        defer result.deinit();
-
-        const tc = result.value;
-        var arena = std.heap.ArenaAllocator.init(allocator);
-        const a = arena.allocator();
-
-        var config = Config{
-            ._arena = arena,
-        };
-
-        if (tc.app) |app| {
-            config.app = .{
-                .name = dupeStr(a, app.name),
-                .version = dupeStr(a, app.version),
-            };
-        }
-        if (tc.window) |win| {
-            config.window = .{
-                .title = dupeStr(a, win.title),
-                .width = win.width,
-                .height = win.height,
-                .debug = win.debug,
-            };
-        }
-        if (tc.backend) |be| {
-            config.backend = .{
-                .lang = dupeStr(a, be.lang),
-                .entry = dupeStr(a, be.entry),
-            };
-        }
-        if (tc.frontend) |fe| {
-            config.frontend = .{
-                .dir = dupeStr(a, fe.dir),
-                .dev_url = dupeStr(a, fe.dev_url),
-                .dist_dir = dupeStr(a, fe.dist_dir),
-            };
-        }
-
-        return config;
+    fn dupeStr(a: std.mem.Allocator, s: []const u8) [:0]const u8 {
+        return a.dupeZ(u8, s) catch @ptrCast(s);
     }
 
     fn loadJson(allocator: std.mem.Allocator) !Config {
-        const content = std.fs.cwd().readFileAlloc(allocator, "suji.json", 1024 * 64) catch return error.JsonNotFound;
+        const content = std.fs.cwd().readFileAlloc(allocator, "suji.json", 1024 * 64) catch return error.ConfigNotFound;
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         const a = arena.allocator();
 
-        // content를 arena에 복사 (JSON 파서가 원본 슬라이스를 참조하므로)
         const owned = a.dupe(u8, content) catch return error.OutOfMemory;
         allocator.free(content);
 
         var config = Config{ ._arena = arena };
 
         const parsed = std.json.parseFromSlice(std.json.Value, a, owned, .{}) catch return error.JsonParseError;
-        // parsed는 arena 소유이므로 deinit 불필요
 
         const root = parsed.value.object;
 

@@ -3,8 +3,7 @@
 zig-out/
 
 # Rust
-poc/rust-backend/target/
-examples/*/backends/rust/target/
+**/target/
 
 # Go
 poc/go-backend/*.dylib
