@@ -45,27 +45,6 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run Suji CLI");
     run_step.dependOn(&run_cmd.step);
 
-    // Bind test
-    const bind_test_module = b.createModule(.{
-        .root_source_file = b.path("poc/webview-test/main.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    bind_test_module.addImport("webview", webview_dep.module("webview"));
-
-    const bind_test = b.addExecutable(.{
-        .name = "bind-test",
-        .root_module = bind_test_module,
-    });
-    bind_test.linkLibrary(webview_dep.artifact("webviewStatic"));
-    b.installArtifact(bind_test);
-
-    const bind_test_cmd = b.addRunArtifact(bind_test);
-    bind_test_cmd.step.dependOn(b.getInstallStep());
-    const bind_test_step = b.step("bind-test", "Run webview bind test");
-    bind_test_step.dependOn(&bind_test_cmd.step);
-
     // Unit tests
     const test_step = b.step("test", "Run unit tests");
 
