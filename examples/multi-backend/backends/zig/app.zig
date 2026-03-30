@@ -1,6 +1,6 @@
 const suji = @import("suji");
 
-pub const app = suji.app()
+pub const my_app = suji.app()
     .command("ping", ping)
     .command("greet", greet)
     .command("info", info);
@@ -15,10 +15,9 @@ fn greet(req: suji.Request) suji.Response {
 }
 
 fn info(req: suji.Request) suji.Response {
-    _ = req;
-    return req.ok(.{ .runtime = "zig", .type = "dlopen" });
+    return req.ok(.{ .runtime = "zig", .loaded_via = "dlopen" });
 }
 
 comptime {
-    _ = suji.exportApp(app);
+    _ = suji.exportApp(my_app);
 }
