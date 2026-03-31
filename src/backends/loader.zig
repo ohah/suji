@@ -10,6 +10,7 @@ pub const SujiCore = extern struct {
     emit: *const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
     on: *const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
     off: *const fn (u64) callconv(.c) void,
+    register: *const fn ([*c]const u8) callconv(.c) void,
 };
 
 /// C ABI 백엔드 인터페이스
@@ -79,6 +80,10 @@ pub const BackendRegistry = struct {
     allocator: std.mem.Allocator,
     core_api: SujiCore,
     event_bus: ?*events.EventBus = null,
+    /// 채널 → 백엔드 이름 라우팅 테이블
+    routes: std.StringHashMap([]const u8),
+    /// register 중인 백엔드 이름 (backend_init 호출 중에만 유효)
+    registering_backend: ?[]const u8 = null,
 
     pub var global: ?*BackendRegistry = null;
 
@@ -86,16 +91,33 @@ pub const BackendRegistry = struct {
         var reg = BackendRegistry{
             .backends = std.StringHashMap(Backend).init(allocator),
             .allocator = allocator,
+            .routes = std.StringHashMap([]const u8).init(allocator),
             .core_api = SujiCore{
                 .invoke = coreInvoke,
                 .free = coreFree,
                 .emit = coreEmit,
                 .on = coreOn,
                 .off = coreOff,
+                .register = coreRegister,
             },
         };
         _ = &reg;
         return reg;
+    }
+
+    /// 채널 이름으로 백엔드 자동 라우팅
+    pub fn invokeByChannel(self: *const BackendRegistry, channel: []const u8, request: [*:0]const u8) ?[]const u8 {
+        // 라우팅 테이블에서 찾기
+        if (self.routes.get(channel)) |backend_name| {
+            return self.invoke(backend_name, request);
+        }
+        // 못 찾으면 null
+        return null;
+    }
+
+    /// 채널이 어느 백엔드에 등록됐는지 조회
+    pub fn getBackendForChannel(self: *const BackendRegistry, channel: []const u8) ?[]const u8 {
+        return self.routes.get(channel);
     }
 
     pub fn setEventBus(self: *BackendRegistry, bus: *events.EventBus) void {
@@ -110,7 +132,10 @@ pub const BackendRegistry = struct {
     /// 백엔드 등록 (dlopen + init with core API)
     pub fn register(self: *BackendRegistry, name: []const u8, path: [:0]const u8) !void {
         var backend = try Backend.load(name, path);
+        // init 중 register() 콜백에서 이 이름 사용
+        self.registering_backend = name;
         backend.init(&self.core_api);
+        self.registering_backend = null;
         try self.backends.put(name, backend);
     }
 
@@ -136,6 +161,7 @@ pub const BackendRegistry = struct {
             backend.deinit();
         }
         self.backends.deinit();
+        self.routes.deinit();
         global = null;
     }
 
@@ -179,6 +205,14 @@ pub const BackendRegistry = struct {
         const reg = global orelse return;
         const bus = reg.event_bus orelse return;
         bus.off(listener_id);
+    }
+
+    // C ABI 콜백: 핸들러 등록 (채널 → 백엔드 라우팅)
+    fn coreRegister(channel_name: [*c]const u8) callconv(.c) void {
+        const reg = global orelse return;
+        const channel = std.mem.span(@as([*:0]const u8, @ptrCast(channel_name)));
+        const backend = reg.registering_backend orelse return;
+        reg.routes.put(channel, backend) catch {};
     }
 
     // C ABI 콜백: 응답 메모리 해제

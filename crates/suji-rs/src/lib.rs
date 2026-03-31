@@ -23,6 +23,7 @@ pub struct SujiCore {
     pub emit: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char),
     pub on: extern "C" fn(*const std::os::raw::c_char, Option<extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char, *mut std::os::raw::c_void)>, *mut std::os::raw::c_void) -> u64,
     pub off: extern "C" fn(u64),
+    pub register: extern "C" fn(*const std::os::raw::c_char),
 }
 
 unsafe impl Send for SujiCore {}
@@ -81,7 +82,13 @@ macro_rules! export_handlers {
         #[no_mangle]
         pub extern "C" fn backend_init(core: *const $crate::SujiCore) {
             if !core.is_null() {
-                let _ = $crate::__SUJI_CORE.set(unsafe { std::mem::transmute(&*core) });
+                let core_ref: &'static $crate::SujiCore = unsafe { std::mem::transmute(&*core) };
+                let _ = $crate::__SUJI_CORE.set(core_ref);
+                // 핸들러 채널 등록
+                $(
+                    let ch = std::ffi::CString::new(stringify!($handler)).unwrap();
+                    (core_ref.register)(ch.as_ptr());
+                )*
             }
             eprintln!("[Rust] ready");
         }

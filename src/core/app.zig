@@ -313,6 +313,7 @@ const ExternSujiCore = extern struct {
     emit: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
     on_fn: ?*const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
     off_fn: ?*const fn (u64) callconv(.c) void,
+    register_fn: ?*const fn ([*c]const u8) callconv(.c) void,
 };
 
 var _global_core: ?*const ExternSujiCore = null;
@@ -345,18 +346,24 @@ pub fn exportApp(comptime application: App) type {
     return struct {
         export fn backend_init(core: ?*const ExternSujiCore) callconv(.c) void {
             _global_core = core;
-            // 이벤트 리스너 등록 (SujiCore.on 사용)
             if (core) |c| {
+                // 핸들러 등록 (채널 → 백엔드 라우팅)
+                if (c.register_fn) |reg_fn| {
+                    for (application.handlers[0..application.handler_count]) |h| {
+                        var ch_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
+                        reg_fn(util.nullTerminate(h.channel, &ch_buf).ptr);
+                    }
+                }
+                // 이벤트 리스너 등록
                 if (c.on_fn) |on_fn| {
                     for (application.listeners[0..application.listener_count]) |l| {
                         var ch_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
-                        const ch = util.nullTerminate(l.channel, &ch_buf);
                         const handler_ptr: *const anyopaque = @ptrCast(l.func);
-                        _ = on_fn(ch.ptr, App.eventBridgeCallback, @constCast(handler_ptr));
+                        _ = on_fn(util.nullTerminate(l.channel, &ch_buf).ptr, App.eventBridgeCallback, @constCast(handler_ptr));
                     }
                 }
             }
-            std.debug.print("[Zig] ready (suji SDK, core API connected)\n", .{});
+            std.debug.print("[Zig] ready\n", .{});
         }
 
         export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 {

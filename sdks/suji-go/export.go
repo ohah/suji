@@ -9,7 +9,12 @@ typedef struct {
     void (*emit)(const char* channel, const char* data);
     unsigned long long (*on)(const char* channel, void* cb, void* arg);
     void (*off)(unsigned long long id);
+    void (*reg)(const char* channel);
 } SujiCore;
+
+static void core_register(SujiCore* core, const char* channel) {
+    core->reg(channel);
+}
 
 static const char* core_invoke(SujiCore* core, const char* name, const char* req) {
     return core->invoke(name, req);
@@ -94,6 +99,14 @@ func Send(channel, data string) {
 //export backend_init
 func backend_init(c *C.SujiCore) {
 	core = c
+	// 핸들러 채널 등록
+	mu.RLock()
+	for name := range handlers {
+		cName := C.CString(name)
+		C.core_register(c, cName)
+		C.free(unsafe.Pointer(cName))
+	}
+	mu.RUnlock()
 	fmt.Fprintf(os.Stderr, "[Go] ready\n")
 }
 

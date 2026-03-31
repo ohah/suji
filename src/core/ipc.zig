@@ -30,8 +30,14 @@ pub const Bridge = struct {
 
         self.webview.init(
             \\window.__suji__ = {
-            \\  invoke: function(backend, request) {
-            \\    return __suji_invoke__(backend, request);
+            \\  invoke: function(channelOrBackend, dataOrRequest) {
+            \\    if (dataOrRequest === undefined) {
+            \\      return __suji_invoke__(channelOrBackend);
+            \\    }
+            \\    if (typeof dataOrRequest === 'object') {
+            \\      return __suji_invoke__(JSON.stringify(Object.assign({cmd: channelOrBackend}, dataOrRequest)));
+            \\    }
+            \\    return __suji_invoke__(channelOrBackend, dataOrRequest);
             \\  },
             \\  chain: function(from, to, request) {
             \\    return __suji_chain__(from, to, request);
@@ -118,7 +124,7 @@ pub const Bridge = struct {
     }
 
     // ============================================
-    // 1. Direct: JS → Backend
+    // 1. Invoke: JS → Backend (Electron 스타일 자동 라우팅)
     // ============================================
     fn invokeCallback(seq: [*c]const u8, req_raw: [*c]const u8, arg: ?*anyopaque) callconv(.c) void {
         const self = getSelf(arg) orelse return;
@@ -130,12 +136,32 @@ pub const Bridge = struct {
             return;
         };
         const args = parsed.args();
-        if (args.len < 2) { self.retErr(seq, "need 2 args"); return; }
+        if (args.len < 1) { self.retErr(seq, "need at least 1 arg"); return; }
 
         var name_buf: [256]u8 = undefined;
-        const name = cpBuf(args[0], &name_buf);
+        var request: []const u8 = undefined;
+        var name: []const u8 = undefined;
 
-        const resp = self.callBackend(name, args[1]);
+        if (args.len >= 2) {
+            // 2인자: invoke("backend", "request") — 레거시/명시적
+            name = cpBuf(args[0], &name_buf);
+            request = args[1];
+        } else {
+            // 1인자: invoke("channel", {data}) — Electron 스타일
+            // args[0]은 JSON 문자열, cmd 필드로 라우팅
+            request = args[0];
+            const cmd = extractCmd(request) orelse {
+                self.retErr(seq, "no cmd in request");
+                return;
+            };
+            // 라우팅 테이블에서 백엔드 찾기
+            name = self.registry.getBackendForChannel(cmd) orelse {
+                self.retErr(seq, "no handler for channel");
+                return;
+            };
+        }
+
+        const resp = self.callBackend(name, request);
         if (resp) |r| {
             self.ret(seq, 0, r);
             self.freeBackend(name, resp);
@@ -274,6 +300,14 @@ pub const Bridge = struct {
     // ============================================
     // Helpers
     // ============================================
+    fn extractCmd(json: []const u8) ?[]const u8 {
+        const pattern = "\"cmd\":\"";
+        const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
+        const start = idx + pattern.len;
+        const end = std.mem.indexOfPos(u8, json, start, "\"") orelse return null;
+        return json[start..end];
+    }
+
     fn cpBuf(src: []const u8, dst: []u8) []const u8 {
         const len = @min(src.len, dst.len);
         @memcpy(dst[0..len], src[0..len]);
