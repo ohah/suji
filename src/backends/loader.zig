@@ -215,11 +215,13 @@ pub const BackendRegistry = struct {
 
         // 중복 등록 체크
         if (reg.routes.get(channel)) |existing| {
-            std.debug.print("[suji] ERROR: channel '{s}' already registered by '{s}', cannot register for '{s}'\n", .{ channel, existing, backend });
+            std.debug.print("[suji] WARN: channel '{s}' already registered by '{s}', skipping for '{s}'\n", .{ channel, existing, backend });
             return;
         }
 
-        reg.routes.put(channel, backend) catch {};
+        // 키를 allocator로 복사 (C 스택 포인터는 함수 종료 후 무효)
+        const owned_channel = reg.allocator.dupe(u8, channel) catch return;
+        reg.routes.put(owned_channel, backend) catch {};
     }
 
     // C ABI 콜백: 응답 메모리 해제

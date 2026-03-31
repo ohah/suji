@@ -173,10 +173,11 @@ const buffer = await response.arrayBuffer();
 
 **결과물**:
 ```js
-// 프론트엔드
-const result = await __suji__.invoke("zig", '{"cmd":"greet","name":"yoon"}');
-__suji__.on("data-updated", (data) => console.log(data));
-__suji__.emit("button-clicked", { button: "save" });
+// 프론트엔드 (Electron 스타일 — 자동 라우팅)
+const result = await suji.invoke("greet", { name: "yoon" });
+const result2 = await suji.invoke("greet", { name: "yoon" }, { target: "zig" });
+suji.on("data-updated", (data) => console.log(data));
+suji.emit("button-clicked", { button: "save" });
 ```
 ```zig
 // Zig 백엔드 (내장)
@@ -285,6 +286,8 @@ suji dev
   - [ ] C: `suji.h` 헤더
   - [ ] SDK crates.io / go pkg 배포
 - [x] 각 언어별 예제 프로젝트 (examples/zig-backend, rust-backend, go-backend, multi-backend)
+- [x] 자동 라우팅 (register): 백엔드가 채널을 등록하면 프론트엔드에서 채널명만으로 호출 가능
+- [x] 중복 채널 에러 처리: 동일 채널을 여러 백엔드가 등록 시 에러 반환
 
 **각 언어별 개발자 경험**:
 
@@ -467,6 +470,7 @@ Suji 코어 (Zig)
 - [ ] 공유 상태 관리
 
 **검증 결과**:
+- 총 70개 테스트 (유닛 + 통합 + 스트레스)
 - Zig + Rust(tokio) + Go(goroutine) 한 프로세스 동시 로드
 - CHAOS 테스트: 20개 동시 호출 (직접+크로스+협업+팬아웃+체인)
 - RAPID FIRE: 100개 동시 핑 (3개 백엔드)

@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (63개)
+zig build test     # 테스트 (70개)
 zig build run      # CLI 도움말
 
 # 예제 실행
@@ -63,11 +63,17 @@ var _ = suji.Bind(&App{})
 ```
 
 ```js
-// Frontend
-await __suji__.invoke("zig", '{"cmd":"ping"}')
-__suji__.on("event", (data) => console.log(data))
-__suji__.emit("event", { msg: "hello" })
+// Frontend (Electron 스타일 — 자동 라우팅)
+await suji.invoke("ping")                                    // 채널명만으로 호출 (등록된 백엔드 자동 탐색)
+await suji.invoke("greet", { name: "Suji" })                 // 인자 전달
+await suji.invoke("greet", { name: "Suji" }, { target: "rust" }) // 특정 백엔드 지정
+suji.on("event", (data) => console.log(data))
+suji.emit("event", { msg: "hello" })
 ```
+
+## 자동 라우팅
+
+각 백엔드는 초기화 시 자신이 처리할 수 있는 채널(커맨드)을 `register`로 등록한다. 프론트엔드에서 `suji.invoke("ping")`처럼 채널명만으로 호출하면, 코어가 등록 정보를 기반으로 올바른 백엔드로 자동 라우팅한다. `{ target: "rust" }` 옵션으로 특정 백엔드를 명시할 수도 있다. 동일 채널을 여러 백엔드가 중복 등록하면 에러를 반환한다.
 
 ## 폴더 구조
 
@@ -93,7 +99,7 @@ suji/
 │   └── suji-rs-macros/       # Rust proc macro
 ├── sdks/
 │   └── suji-go/              # Go SDK (bridge.c/bridge.go)
-├── tests/                    # 63개 테스트
+├── tests/                    # 70개 테스트
 ├── examples/
 │   ├── zig-backend/
 │   ├── rust-backend/
