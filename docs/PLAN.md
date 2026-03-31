@@ -132,7 +132,12 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
 - [x] 코어 → WebView 호출 (evaluate JS)
 - [x] 코어 → 백엔드 디스패치 (직접, 체인, 팬아웃, 코어 릴레이)
 - [x] 비동기 응답 처리 (Promise 기반)
-- [x] 이벤트 시스템 (EventBus: on/once/off/emit, JS ↔ 백엔드 양방향)
+- [x] 이벤트 시스템 (EventBus: on/once/off/emit)
+  - [x] Zig on/send → EventBus ↔ JS __dispatch__
+  - [x] Rust on/send → SujiCore emit/on
+  - [x] Go On/Send → bridge.c → EventBus (CGo 브릿지)
+  - [x] JS on/emit/off → WebView ↔ EventBus
+  - [x] EventBus ↔ WebView 연결 (webview_eval)
 - [ ] 중앙 상태 스토어 (이벤트 시스템으로 대체 가능, 필요 시 구현)
 - [ ] 바이너리 데이터 채널 (로컬 HTTP 서버, 별도 기능으로 분리)
 
@@ -273,10 +278,10 @@ suji dev
 
 - [x] C ABI 인터페이스 스펙 정의 (backend_init, backend_handle_ipc, backend_free, backend_destroy)
 - [x] `backends/loader.zig` — dlopen 관리자 (Backend, BackendRegistry)
-- [x] 각 언어별 SDK (로컬 경로 링크)
-  - [x] Rust: `crates/suji-rs` (#[suji::command] 매크로, export_commands!)
-  - [x] Go: `sdks/suji-go` (suji.Bind(&App{}), 리플렉션 기반)
-  - [x] Zig: 내장 빌더 (suji.app().command("ping", ping), req.ok())
+- [x] 각 언어별 SDK (Electron 스타일: handle/invoke/on/send)
+  - [x] Rust: `crates/suji-rs` (#[suji::handle], export_handlers!, invoke/send/on/off)
+  - [x] Go: `sdks/suji-go` (suji.Bind, Invoke/Send/On/Off, bridge.c로 EventBus 연결)
+  - [x] Zig: `src/core/app.zig` (suji.app().handle(), exportApp(), req.invoke/send)
   - [ ] C: `suji.h` 헤더
   - [ ] SDK crates.io / go pkg 배포
 - [x] 각 언어별 예제 프로젝트 (examples/zig-backend, rust-backend, go-backend, multi-backend)
