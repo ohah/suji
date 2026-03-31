@@ -212,6 +212,13 @@ pub const BackendRegistry = struct {
         const reg = global orelse return;
         const channel = std.mem.span(@as([*:0]const u8, @ptrCast(channel_name)));
         const backend = reg.registering_backend orelse return;
+
+        // 중복 등록 체크
+        if (reg.routes.get(channel)) |existing| {
+            std.debug.print("[suji] ERROR: channel '{s}' already registered by '{s}', cannot register for '{s}'\n", .{ channel, existing, backend });
+            return;
+        }
+
         reg.routes.put(channel, backend) catch {};
     }
 

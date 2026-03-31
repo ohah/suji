@@ -30,14 +30,13 @@ pub const Bridge = struct {
 
         self.webview.init(
             \\window.__suji__ = {
-            \\  invoke: function(channelOrBackend, dataOrRequest) {
-            \\    if (dataOrRequest === undefined) {
-            \\      return __suji_invoke__(channelOrBackend);
+            \\  invoke: function(channel, data, options) {
+            \\    var req = data ? Object.assign({cmd: channel}, data) : {cmd: channel};
+            \\    var target = options && options.target;
+            \\    if (target) {
+            \\      return __suji_invoke__(target, JSON.stringify(req));
             \\    }
-            \\    if (typeof dataOrRequest === 'object') {
-            \\      return __suji_invoke__(JSON.stringify(Object.assign({cmd: channelOrBackend}, dataOrRequest)));
-            \\    }
-            \\    return __suji_invoke__(channelOrBackend, dataOrRequest);
+            \\    return __suji_invoke__(JSON.stringify(req));
             \\  },
             \\  chain: function(from, to, request) {
             \\    return __suji_chain__(from, to, request);
