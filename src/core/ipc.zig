@@ -154,10 +154,15 @@ pub const Bridge = struct {
                 return;
             };
             // 라우팅 테이블에서 백엔드 찾기
-            name = self.registry.getBackendForChannel(cmd) orelse {
+            const routed = self.registry.getBackendForChannel(cmd) orelse {
                 self.retErr(seq, "no handler for channel");
                 return;
             };
+            if (routed.len == 0) {
+                self.retErr(seq, "duplicate channel — use { target } option");
+                return;
+            }
+            name = routed;
         }
 
         const resp = self.callBackend(name, request);

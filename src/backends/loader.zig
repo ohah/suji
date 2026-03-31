@@ -213,14 +213,15 @@ pub const BackendRegistry = struct {
         const channel = std.mem.span(@as([*:0]const u8, @ptrCast(channel_name)));
         const backend = reg.registering_backend orelse return;
 
-        // 중복 등록 체크
-        if (reg.routes.get(channel)) |existing| {
-            std.debug.print("[suji] WARN: channel '{s}' already registered by '{s}', skipping for '{s}'\n", .{ channel, existing, backend });
+        const owned_channel = reg.allocator.dupe(u8, channel) catch return;
+
+        if (reg.routes.getPtr(channel)) |existing_ptr| {
+            // 중복: 값을 빈 문자열로 덮어쓰기 (자동 라우팅 차단)
+            std.debug.print("[suji] ERROR: channel '{s}' duplicate ('{s}' and '{s}') — use target option\n", .{ channel, existing_ptr.*, backend });
+            existing_ptr.* = "";
             return;
         }
 
-        // 키를 allocator로 복사 (C 스택 포인터는 함수 종료 후 무효)
-        const owned_channel = reg.allocator.dupe(u8, channel) catch return;
         reg.routes.put(owned_channel, backend) catch {};
     }
 

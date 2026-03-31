@@ -9,7 +9,12 @@ typedef struct {
     void (*emit)(const char* channel, const char* data);
     unsigned long long (*on)(const char* channel, void* cb, void* arg);
     void (*off)(unsigned long long id);
+    void (*reg)(const char* channel);
 } SujiCore;
+
+static void core_register(SujiCore* core, const char* ch) {
+    core->reg(ch);
+}
 
 static const char* core_invoke(SujiCore* core, const char* name, const char* req) {
     return core->invoke(name, req);
@@ -48,6 +53,12 @@ func callRust(request string) string {
 //export backend_init
 func backend_init(c *C.SujiCore) {
 	core = c
+	// 핸들러 채널 등록
+	for _, name := range []string{"ping", "greet", "call_rust", "collab", "stats_for_rust", "emit_event"} {
+		cName := C.CString(name)
+		C.core_register(c, cName)
+		C.free(unsafe.Pointer(cName))
+	}
 	fmt.Fprintf(os.Stderr, "[Go] ready\n")
 }
 

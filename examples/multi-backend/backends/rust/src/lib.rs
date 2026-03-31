@@ -11,6 +11,7 @@ struct SujiCore {
     emit: extern "C" fn(*const c_char, *const c_char),
     on: extern "C" fn(*const c_char, Option<extern "C" fn(*const c_char, *const c_char, *mut std::os::raw::c_void)>, *mut std::os::raw::c_void) -> u64,
     off: extern "C" fn(u64),
+    register: extern "C" fn(*const c_char),
 }
 unsafe impl Send for SujiCore {}
 unsafe impl Sync for SujiCore {}
@@ -30,7 +31,13 @@ fn call_go(request: &str) -> String {
 #[no_mangle]
 pub extern "C" fn backend_init(core: *const SujiCore) {
     if !core.is_null() {
-        let _ = CORE.set(unsafe { std::mem::transmute(&*core) });
+        let core_ref: &'static SujiCore = unsafe { std::mem::transmute(&*core) };
+        let _ = CORE.set(core_ref);
+        // 핸들러 채널 등록
+        for name in &["ping", "greet", "call_go", "collab", "emit_event"] {
+            let ch = CString::new(*name).unwrap();
+            (core_ref.register)(ch.as_ptr());
+        }
     }
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
