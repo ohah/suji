@@ -381,8 +381,25 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
         }
     }
 
+    // EventBus 생성 + WebView eval 연결
+    var event_bus = suji.EventBus.init(allocator);
+    defer event_bus.deinit();
+
+    // webview_eval 연결: EventBus → JS __dispatch__
+    const WebViewEvalCtx = struct {
+        var wv: *suji.WebView = undefined;
+        fn eval(js: [:0]const u8) void {
+            wv.eval(js);
+        }
+    };
+    WebViewEvalCtx.wv = &win.webview;
+    event_bus.webview_eval = WebViewEvalCtx.eval;
+
+    registry.setEventBus(&event_bus);
+
     const bridge = try allocator.create(suji.Bridge);
     bridge.* = suji.Bridge.init(&win.webview, registry);
+    bridge.setEventBus(&event_bus);
     defer {
         bridge.deinit();
         allocator.destroy(bridge);

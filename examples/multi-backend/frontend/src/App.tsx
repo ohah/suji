@@ -131,7 +131,45 @@ function App() {
         </section>
 
         <section>
-          <h3>9. Stress Test</h3>
+          <h3>9. Events (on/off/emit/send)</h3>
+          <p>이벤트 구독 → 수신 확인 → 해제 → 수신 안 됨 확인</p>
+          <div className="buttons" style={{ marginBottom: 6 }}>
+            <button className="zig" onClick={() => {
+              const c1 = suji.on("zig-event", (data: unknown) => log(`  ✅ [zig-event] ${S(data)}`));
+              const c2 = suji.on("rust-event", (data: unknown) => log(`  ✅ [rust-event] ${S(data)}`));
+              const c3 = suji.on("go-event", (data: unknown) => log(`  ✅ [go-event] ${S(data)}`));
+              const c4 = suji.on("test-event", (data: unknown) => log(`  ✅ [test-event] ${S(data)}`));
+              (window as any).__cancels = { zig: c1, rust: c2, go: c3, test: c4 };
+              log("📡 ON: 4 listeners (zig-event, rust-event, go-event, test-event)");
+            }}>1. ON (register all)</button>
+            <button style={{ background: "#ef5350", fontWeight: 600, border: "none", padding: "5px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11 }} onClick={() => {
+              const c = (window as any).__cancels;
+              if (c) {
+                if (c.zig) c.zig();
+                if (c.rust) c.rust();
+                if (c.go) c.go();
+                if (c.test) c.test();
+                (window as any).__cancels = null;
+                log("🔴 OFF: all listeners removed");
+              } else {
+                log("🔴 OFF: no listeners to remove");
+              }
+            }}>OFF (remove all)</button>
+          </div>
+          <div className="buttons" style={{ marginBottom: 6 }}>
+            <button className="zig" onClick={() => call(() => suji.invoke("zig", '{"cmd":"emit_event"}'), "zig→emit")}>Zig sends event</button>
+            <button className="rust" onClick={() => call(() => suji.invoke("rust", '{"cmd":"emit_event","channel":"rust-event","msg":"hi from rust"}'), "rust→emit")}>Rust sends event</button>
+            <button className="go" onClick={() => call(() => suji.invoke("go", '{"cmd":"emit_event","msg":"hi from go"}'), "go→emit")}>Go sends event</button>
+            <button className="chain" onClick={() => {
+              suji.emit("test-event", { msg: "from JS", t: Date.now() });
+              log("📤 JS emitted test-event");
+            }}>JS emits event</button>
+          </div>
+          <p style={{ color: "#555", fontSize: 11 }}>테스트: ON → emit 3개 → ✅ 수신 확인 → OFF → emit 3개 → 수신 안 됨 확인</p>
+        </section>
+
+        <section>
+          <h3>10. Stress Test</h3>
           <p>3개 백엔드 동시 호출</p>
           <div className="buttons">
             <button className="chain" onClick={async () => {

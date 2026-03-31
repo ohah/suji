@@ -8,6 +8,9 @@ use std::sync::OnceLock;
 struct SujiCore {
     invoke: extern "C" fn(*const c_char, *const c_char) -> *const c_char,
     free: extern "C" fn(*const c_char),
+    emit: extern "C" fn(*const c_char, *const c_char),
+    on: extern "C" fn(*const c_char, Option<extern "C" fn(*const c_char, *const c_char, *mut std::os::raw::c_void)>, *mut std::os::raw::c_void) -> u64,
+    off: extern "C" fn(u64),
 }
 unsafe impl Send for SujiCore {}
 unsafe impl Sync for SujiCore {}
@@ -69,6 +72,19 @@ pub extern "C" fn backend_handle_ipc(request: *const c_char) -> *mut c_char {
                 let go_resp = call_go(&format!(r#"{{"cmd":"stats_for_rust","data":"{}"}}"#, data));
 
                 format!(r#"{{"from":"rust","hash":"{}","go_stats":{}}}"#, hash, go_resp)
+            }
+
+            // 이벤트 발신 (send)
+            "emit_event" => {
+                let channel = parsed.get("channel").and_then(|v| v.as_str()).unwrap_or("rust-event");
+                let msg = parsed.get("msg").and_then(|v| v.as_str()).unwrap_or("hello from rust");
+                if let Some(core) = CORE.get() {
+                    let c_ch = CString::new(channel).unwrap();
+                    let data = format!(r#"{{"from":"rust","msg":"{}"}}"#, msg);
+                    let c_data = CString::new(data).unwrap();
+                    (core.emit)(c_ch.as_ptr(), c_data.as_ptr());
+                }
+                json!({"from":"rust","cmd":"emit_event","sent_to":channel}).to_string()
             }
 
             _ => json!({"from":"rust","echo":cmd}).to_string(),

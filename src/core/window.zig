@@ -4,8 +4,8 @@ const WebView = @import("webview.zig").WebView;
 /// 윈도우 설정
 pub const WindowConfig = struct {
     title: [:0]const u8 = "Suji App",
-    width: i32 = 800,
-    height: i32 = 600,
+    width: i32 = 1024,
+    height: i32 = 768,
     debug: bool = false,
     url: ?[:0]const u8 = null,
     html: ?[:0]const u8 = null,

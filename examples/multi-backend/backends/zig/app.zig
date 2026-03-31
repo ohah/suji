@@ -8,7 +8,8 @@ pub const my_app = suji.app()
     .handle("call_rust", callRust)
     .handle("call_go", callGo)
     .handle("collab", collab)
-    .handle("chain_all", chainAll);
+    .handle("chain_all", chainAll)
+    .handle("emit_event", emitEvent);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong from zig" });
@@ -70,6 +71,11 @@ fn chainAll(req: suji.Request) suji.Response {
         .{ "step2_rust", rust_resp },
         .{ "step3_go", go_resp },
     });
+}
+
+fn emitEvent(req: suji.Request) suji.Response {
+    suji.send("zig-event", "{\"from\":\"zig\",\"msg\":\"hello from zig backend\"}");
+    return req.ok(.{ .sent = "zig-event" });
 }
 
 comptime {

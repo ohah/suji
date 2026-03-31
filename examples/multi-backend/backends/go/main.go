@@ -6,10 +6,17 @@ package main
 typedef struct {
     const char* (*invoke)(const char* backend_name, const char* request);
     void (*free_fn)(const char* response);
+    void (*emit)(const char* channel, const char* data);
+    unsigned long long (*on)(const char* channel, void* cb, void* arg);
+    void (*off)(unsigned long long id);
 } SujiCore;
 
 static const char* core_invoke(SujiCore* core, const char* name, const char* req) {
     return core->invoke(name, req);
+}
+
+static void core_emit(SujiCore* core, const char* channel, const char* data) {
+    core->emit(channel, data);
 }
 */
 import "C"
@@ -78,6 +85,20 @@ func backend_handle_ipc(request *C.char) *C.char {
 		words := len(strings.Fields(data))
 		chars := len(data)
 		result = fmt.Sprintf(`{"from":"go","words":%d,"chars":%d}`, words, chars)
+
+	case "emit_event":
+		msg := extractField(reqStr, "msg")
+		if msg == "" {
+			msg = "hello from go"
+		}
+		if core != nil {
+			cCh := C.CString("go-event")
+			defer C.free(unsafe.Pointer(cCh))
+			cData := C.CString(fmt.Sprintf(`{"from":"go","msg":"%s"}`, msg))
+			defer C.free(unsafe.Pointer(cData))
+			C.core_emit(core, cCh, cData)
+		}
+		result = fmt.Sprintf(`{"from":"go","cmd":"emit_event","sent_to":"go-event"}`)
 
 	default:
 		result = fmt.Sprintf(`{"from":"go","echo":"%s"}`, cmd)
