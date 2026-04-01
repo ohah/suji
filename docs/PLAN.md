@@ -809,6 +809,7 @@ await expect(page.locator('#result')).toHaveText('saved');
 - [x] Step 1: POC — CEF 프리빌트 다운로드 + Zig @cImport + 창 띄우기 (위험 검증)
 - [x] Step 2: CEF IPC 구현 (CefV8Handler + CefProcessMessage → invoke/on/send)
 - [x] Step 3: 기존 ipc.zig를 CEF IPC로 교체 (main.zig에서 --cef 플래그로 BackendRegistry 연결)
+- [x] Step 3.5: CEF 완성도 — JS Promise(JS 관리), EventBus→JS 연결, fanout/chain/core, 키보드 단축키(NSMenu Edit), 플러그인 경로 탐색, injection 방지
 - [ ] Step 4: 커스텀 프로토콜 (`suji://`) → 로컬 HTTP 에셋 서버 제거
 - [ ] Step 5: DevTools 연동 — F12로 인앱 DevTools 패널 열기 (`CefBrowserHost::ShowDevTools`), Electron과 동일한 경험
 - [ ] Step 6: E2E 테스트 지원 (CDP + Playwright)

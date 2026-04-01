@@ -874,6 +874,77 @@ fn initNSApp() void {
     const sel = objc.sel_registerName("setActivationPolicy:");
     const func: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     func(app, @ptrCast(sel), 0);
+
+    // 메뉴바 등록 (Cmd+C/V/X/A/Z 단축키용)
+    setupMainMenu(app);
+}
+
+/// macOS 메뉴바 생성 — Edit 메뉴 (Cmd+C/V/X/A/Z/Shift+Z)
+fn setupMainMenu(app: ?*anyopaque) void {
+    const NSMenu = getClass("NSMenu") orelse return;
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+
+    // 메인 메뉴바
+    const menubar = msgSend(msgSend(NSMenu, "alloc") orelse return, "init") orelse return;
+
+    // App 메뉴 (빈 항목)
+    const app_item = msgSend(msgSend(NSMenuItem, "alloc") orelse return, "init") orelse return;
+    msgSendVoid1(menubar, "addItem:", app_item);
+
+    // Edit 메뉴
+    const edit_menu = createMenu("Edit");
+    if (edit_menu) |menu| {
+        addMenuItem(menu, "Undo", "undo:", "z");
+        addMenuItem(menu, "Redo", "redo:", "Z"); // Shift+Z
+        addSeparator(menu);
+        addMenuItem(menu, "Cut", "cut:", "x");
+        addMenuItem(menu, "Copy", "copy:", "c");
+        addMenuItem(menu, "Paste", "paste:", "v");
+        addMenuItem(menu, "Select All", "selectAll:", "a");
+
+        const edit_item = msgSend(msgSend(getClass("NSMenuItem") orelse return, "alloc") orelse return, "init") orelse return;
+        msgSendVoid1(edit_item, "setSubmenu:", menu);
+        msgSendVoid1(menubar, "addItem:", edit_item);
+    }
+
+    msgSendVoid1(app, "setMainMenu:", menubar);
+}
+
+fn createMenu(title: [:0]const u8) ?*anyopaque {
+    const NSMenu = getClass("NSMenu") orelse return null;
+    const alloc = msgSend(NSMenu, "alloc") orelse return null;
+    const NSString = getClass("NSString") orelse return null;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
+    const initSel = objc.sel_registerName("initWithTitle:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    return initFn(alloc, @ptrCast(initSel), ns_title);
+}
+
+fn addMenuItem(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8) void {
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+    const NSString = getClass("NSString") orelse return;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
+    const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), key.ptr);
+
+    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
+    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action.ptr)), ns_key) orelse return;
+    msgSendVoid1(menu, "addItem:", item);
+}
+
+fn addSeparator(menu: *anyopaque) void {
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+    const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
+    msgSendVoid1(menu, "addItem:", sep);
+}
+
+fn msgSendVoid1(target: ?*anyopaque, sel_name: [:0]const u8, arg: ?*anyopaque) void {
+    const sel = objc.sel_registerName(sel_name.ptr);
+    const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    func(target, @ptrCast(sel), arg);
 }
 
 fn activateNSApp() void {
