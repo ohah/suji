@@ -2,6 +2,7 @@ const std = @import("std");
 const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
+const bundle_macos = @import("bundle_macos.zig");
 
 pub fn main() !void {
     // CEF 서브프로세스 처리 (렌더러/GPU 등 — 메인이면 통과)
@@ -14,7 +15,15 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
+    // .app 번들 안에서 실행 시 자동으로 run --cef
     if (args.len < 2) {
+        var exe_buf: [1024]u8 = undefined;
+        if (std.fs.selfExePath(&exe_buf)) |ep| {
+            if (std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null) {
+                try runProdCef(allocator);
+                return;
+            }
+        } else |_| {}
         printUsage();
         return;
     }
@@ -36,7 +45,11 @@ pub fn main() !void {
             try runDev(allocator);
         }
     } else if (std.mem.eql(u8, command, "build")) {
-        try runBuild(allocator);
+        if (use_cef) {
+            try runBuildCef(allocator);
+        } else {
+            try runBuild(allocator);
+        }
     } else if (std.mem.eql(u8, command, "run")) {
         if (use_cef) {
             try runProdCef(allocator);
@@ -157,6 +170,48 @@ fn runBuild(allocator: std.mem.Allocator) !void {
     };
 
     std.debug.print("[suji] build complete!\n", .{});
+}
+
+// ============================================
+// suji build --cef (macOS 번들)
+// ============================================
+fn runBuildCef(allocator: std.mem.Allocator) !void {
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
+        return;
+    };
+    defer config.deinit();
+
+    std.debug.print("[suji] CEF production build - {s}\n", .{config.app.name});
+
+    // 백엔드 릴리스 빌드
+    try buildBackendsFromConfig(allocator, &config, true);
+
+    // 프론트엔드 빌드
+    std.debug.print("[suji] building frontend...\n", .{});
+    buildFrontend(allocator, config.frontend.dir) catch |err| {
+        std.debug.print("[suji] frontend build failed: {}\n", .{err});
+    };
+
+    // suji 바이너리 경로
+    var exe_buf: [1024]u8 = undefined;
+    const exe_path = std.fs.selfExePath(&exe_buf) catch {
+        std.debug.print("[suji] cannot find self executable\n", .{});
+        return;
+    };
+
+    // 번들 ID: config 또는 기본값
+    const identifier = config.app.name;
+
+    // macOS .app 번들 생성
+    try bundle_macos.createBundle(
+        allocator,
+        config.app.name,
+        config.app.version,
+        identifier,
+        exe_path,
+        config.frontend.dist_dir,
+    );
 }
 
 // ============================================
@@ -523,13 +578,29 @@ fn openCefWindow(allocator: std.mem.Allocator, config: *const suji.Config, regis
     cef.setEmitHandler(&cefEmitHandler);
 
     // URL 결정
+    var url_buf: [2048]u8 = undefined;
     const url: ?[:0]const u8 = switch (mode) {
         .dev => config.frontend.dev_url,
         .dist => blk: {
-            // TODO: dist 모드에서 suji:// 커스텀 프로토콜 사용 (Step 4)
-            break :blk null;
+            // dist 디렉토리에서 index.html을 file:// URL로 로드
+            // .app 번들: Contents/Resources/frontend/dist/index.html
+            // 로컬: frontend/dist/index.html
+            const dist_path = findDistPath(allocator, config.frontend.dist_dir) orelse {
+                std.debug.print("[suji] frontend dist not found: {s}\n", .{config.frontend.dist_dir});
+                break :blk null;
+            };
+            defer allocator.free(dist_path);
+            const url_str = std.fmt.bufPrint(&url_buf, "file://{s}/index.html", .{dist_path}) catch break :blk null;
+            url_buf[url_str.len] = 0;
+            break :blk url_buf[0..url_str.len :0];
         },
     };
+
+    if (url) |u| {
+        std.debug.print("[suji] CEF URL: {s}\n", .{u});
+    } else {
+        std.debug.print("[suji] CEF URL: (null)\n", .{});
+    }
 
     // CEF 초기화 + 브라우저 생성
     const cef_config: cef.CefConfig = .{
@@ -710,6 +781,34 @@ fn cefEmitHandler(event: []const u8, data: []const u8) void {
     const registry = suji.BackendRegistry.global orelse return;
     const bus = registry.event_bus orelse return;
     bus.emit(event, data);
+}
+
+/// dist 디렉토리 절대 경로 탐색 (로컬 → .app 번들)
+fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 {
+    // 1. CWD 기준 (로컬 개발)
+    if (std.fs.cwd().realpathAlloc(allocator, dist_dir)) |p| return p else |_| {}
+
+    // 2. .app 번들: exe/../Resources/frontend/dist
+    var exe_buf: [1024]u8 = undefined;
+    const exe_path = std.fs.selfExePath(&exe_buf) catch return null;
+    const macos_dir = std.fs.path.dirname(exe_path) orelse return null;
+    const contents_dir = std.fs.path.dirname(macos_dir) orelse return null;
+    const bundle_dist = std.fmt.allocPrint(allocator, "{s}/Resources/frontend/dist", .{contents_dir}) catch return null;
+    if (std.fs.cwd().realpathAlloc(allocator, bundle_dist)) |p| {
+        allocator.free(bundle_dist);
+        return p;
+    } else |_| {}
+
+    // 3. .app 번들: Resources/frontend (dist 없이)
+    const bundle_frontend = std.fmt.allocPrint(allocator, "{s}/Resources/frontend", .{contents_dir}) catch return null;
+    if (std.fs.cwd().realpathAlloc(allocator, bundle_frontend)) |p| {
+        allocator.free(bundle_frontend);
+        return p;
+    } else |_| {}
+
+    allocator.free(bundle_dist);
+    allocator.free(bundle_frontend);
+    return null;
 }
 
 // ============================================

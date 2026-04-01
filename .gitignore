@@ -26,3 +26,4 @@ examples/*/backends/*/Cargo.lock
 .claude/
 reference/
 test-results/
+*.app/

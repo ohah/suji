@@ -345,6 +345,15 @@ fn onBeforeCommandLineProcessing(
     var wildcard: c.cef_string_t = .{};
     setCefString(&wildcard, "*");
     cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
+
+    // file:// CORS 허용 (prod 모드 file:// 로드용)
+    var file_access: c.cef_string_t = .{};
+    setCefString(&file_access, "allow-file-access-from-files");
+    cmd.append_switch.?(cmd, &file_access);
+
+    var disable_web_security: c.cef_string_t = .{};
+    setCefString(&disable_web_security, "disable-web-security");
+    cmd.append_switch.?(cmd, &disable_web_security);
 }
 
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {
