@@ -481,16 +481,11 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
     if (browser) |br| {
         if (g_browser) |main| {
-            const br_id = br.get_identifier.?(br);
-            const main_id = main.get_identifier.?(main);
-            std.debug.print("[suji] onBeforeClose: browser={d} main={d}\n", .{ br_id, main_id });
-            if (br_id != main_id) {
-                g_devtools_open = false;
-                return; // DevTools 등 서브 창
+            if (br.get_identifier.?(br) != main.get_identifier.?(main)) {
+                return; // 서브 브라우저 (DevTools 등)
             }
         }
     }
-    std.debug.print("[suji] onBeforeClose: quitting\n", .{});
     c.cef_quit_message_loop();
 }
 
@@ -534,19 +529,17 @@ fn onPreKeyEvent(
     const alt = (ev.modifiers & c.EVENTFLAG_ALT_DOWN) != 0;
     const key = ev.windows_key_code;
 
-    // F12 — DevTools
-    if (key == 123) { // VK_F12
-        toggleDevTools(br);
+    // F12 / Cmd+Shift+I / Cmd+Option+I — DevTools 토글
+    const is_devtools_key = (key == 123) or (cmd and key == 'I' and (shift or alt));
+    if (is_devtools_key) {
+        // 항상 메인 브라우저 기준으로 토글
+        if (g_browser) |main_br| {
+            toggleDevTools(main_br);
+        }
         return 1;
     }
 
     if (!cmd) return 0;
-
-    // Cmd+Shift+I / Cmd+Option+I — DevTools
-    if (key == 'I' and (shift or alt)) {
-        toggleDevTools(br);
-        return 1;
-    }
 
     // Cmd+R — Reload
     if (key == 'R' and !shift) {
@@ -609,12 +602,17 @@ fn onPreKeyEvent(
 }
 
 fn toggleDevTools(_: *c.cef_browser_t) void {
-    // CEF ALLOY 모드에서는 인앱 DevTools 창 불가 (NSApplication 크래시)
-    // CDP port를 통해 시스템 브라우저에서 DevTools 열기
-    const url = "http://localhost:9222";
-    var child = std.process.Child.init(&.{ "open", url }, std.heap.page_allocator);
-    child.spawn() catch return;
-    _ = child.wait() catch {};
+    // CEF ALLOY + macOS에서 인앱 DevTools 크래시 (CEF 144+ 알려진 이슈, Electrobun도 동일)
+    // CDP port로 시스템 브라우저에서 DevTools 열기
+    if (!g_devtools_open) {
+        const url = "http://localhost:9222";
+        var child = std.process.Child.init(&.{ "open", url }, std.heap.page_allocator);
+        child.spawn() catch return;
+        _ = child.wait() catch {};
+        g_devtools_open = true;
+    } else {
+        g_devtools_open = false;
+    }
 }
 
 fn zoomChange(browser: *c.cef_browser_t, delta: f64) void {
@@ -1024,13 +1022,42 @@ fn getClass(name: [:0]const u8) ?*anyopaque {
 
 fn initNSApp() void {
     const cls = getClass("NSApplication") orelse return;
+
+    // CEF DevTools가 호출하는 isHandlingSendEvent 메서드를 NSApplication에 추가
+    // (기본 NSApplication에는 없어서 unrecognized selector 크래시 발생)
+    const isSel = objc.sel_registerName("isHandlingSendEvent");
+    _ = objc.class_addMethod(
+        @ptrCast(cls),
+        isSel,
+        @ptrCast(&isHandlingSendEventImpl),
+        "B@:",
+    );
+    // _setHandlingSendEvent: 도 추가
+    const setSel = objc.sel_registerName("_setHandlingSendEvent:");
+    _ = objc.class_addMethod(
+        @ptrCast(cls),
+        setSel,
+        @ptrCast(&setHandlingSendEventImpl),
+        "v@:B",
+    );
+
     const app = msgSend(cls, "sharedApplication") orelse return;
     const sel = objc.sel_registerName("setActivationPolicy:");
     const func: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     func(app, @ptrCast(sel), 0);
 
-    // 메뉴바 등록 (Cmd+C/V/X/A/Z 단축키용)
+    // 메뉴바 등록
     setupMainMenu(app);
+}
+
+var g_handling_send_event: bool = false;
+
+fn isHandlingSendEventImpl(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) u8 {
+    return if (g_handling_send_event) 1 else 0;
+}
+
+fn setHandlingSendEventImpl(_: ?*anyopaque, _: ?*anyopaque, value: u8) callconv(.c) void {
+    g_handling_send_event = value != 0;
 }
 
 /// macOS 메뉴바 생성 — Edit 메뉴 (Cmd+C/V/X/A/Z/Shift+Z)
