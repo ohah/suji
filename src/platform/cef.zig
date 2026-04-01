@@ -2,10 +2,15 @@ const std = @import("std");
 
 pub const c = @cImport({
     @cDefine("CEF_API_VERSION", "999999");
+    @cDefine("char16_t", "unsigned short");
     @cInclude("include/capi/cef_app_capi.h");
     @cInclude("include/capi/cef_browser_capi.h");
     @cInclude("include/capi/cef_client_capi.h");
     @cInclude("include/capi/cef_life_span_handler_capi.h");
+    @cInclude("include/capi/cef_frame_capi.h");
+    @cInclude("include/capi/cef_v8_capi.h");
+    @cInclude("include/capi/cef_process_message_capi.h");
+    @cInclude("include/capi/cef_render_process_handler_capi.h");
 });
 
 const objc = @cImport({
@@ -27,6 +32,24 @@ pub const CefConfig = struct {
     debug: bool = false,
     remote_debugging_port: i32 = 0,
 };
+
+/// IPC 핸들러 콜백 — 메인 프로세스에서 백엔드 호출용
+/// channel, data를 받아 response_buf에 JSON 응답을 쓰고 슬라이스 반환.
+/// 에러 시 null 반환.
+pub const InvokeCallback = *const fn (channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8;
+pub const EmitCallback = *const fn (event: []const u8, data: []const u8) void;
+
+var g_invoke_callback: ?InvokeCallback = null;
+var g_emit_callback: ?EmitCallback = null;
+
+/// 메인 프로세스에서 IPC 핸들러 등록
+pub fn setInvokeHandler(cb: InvokeCallback) void {
+    g_invoke_callback = cb;
+}
+
+pub fn setEmitHandler(cb: EmitCallback) void {
+    g_emit_callback = cb;
+}
 
 var g_app: c.cef_app_t = undefined;
 var g_app_initialized: bool = false;
@@ -145,6 +168,27 @@ pub fn createBrowser(config: CefConfig) !void {
     std.debug.print("[suji] CEF browser created\n", .{});
 }
 
+/// 메인 프로세스에서 렌더러로 이벤트 푸시 (EventBus → JS)
+pub fn pushEventToRenderer(browser: *c.cef_browser_t, event: []const u8, data: []const u8) void {
+    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
+
+    var msg_name: c.cef_string_t = .{};
+    setCefString(&msg_name, "suji:event");
+    const msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&msg_name)) orelse return;
+
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return;
+
+    var ev_str: c.cef_string_t = .{};
+    setCefString(&ev_str, event);
+    _ = args.set_string.?(args, 0, &ev_str);
+
+    var data_str: c.cef_string_t = .{};
+    setCefString(&data_str, data);
+    _ = args.set_string.?(args, 1, &data_str);
+
+    frame.send_process_message.?(frame, c.PID_RENDERER, msg);
+}
+
 /// 메시지 루프 실행 (블로킹)
 pub fn run() void {
     activateNSApp();
@@ -156,6 +200,16 @@ pub fn run() void {
 pub fn shutdown() void {
     c.cef_shutdown();
     std.debug.print("[suji] CEF shutdown\n", .{});
+}
+
+// ============================================
+// C 포인터 헬퍼
+// ============================================
+
+/// [*c]T → ?*T 변환 (CEF 함수 포인터 반환값용)
+fn asPtr(comptime T: type, p: anytype) ?*T {
+    if (p == null) return null;
+    return @ptrCast(p);
 }
 
 // ============================================
@@ -178,6 +232,37 @@ fn setCefString(dest: *c.cef_string_t, src: []const u8) void {
     _ = c.cef_string_utf8_to_utf16(src.ptr, src.len, dest);
 }
 
+/// CefListValue에서 문자열 인자를 UTF-8로 추출
+fn getArgString(args: *c.cef_list_value_t, index: usize, buf: []u8) []const u8 {
+    return cefUserfreeToUtf8(args.get_string.?(args, index), buf);
+}
+
+/// 현재 V8 컨텍스트의 프레임으로 ProcessMessage 전송 (렌더러 → 브라우저)
+fn sendToBrowser(msg: *c.cef_process_message_t) void {
+    const ctx = asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context()) orelse return;
+    const frame = asPtr(c.cef_frame_t, ctx.get_frame.?(ctx)) orelse return;
+    frame.send_process_message.?(frame, c.PID_BROWSER, msg);
+}
+
+/// CEF 문자열 → UTF-8 (스택 버퍼에 복사)
+fn cefStringToUtf8(cef_str: *const c.cef_string_t, buf: []u8) []const u8 {
+    var utf8: c.cef_string_utf8_t = .{ .str = null, .length = 0, .dtor = null };
+    _ = c.cef_string_utf16_to_utf8(cef_str.str, cef_str.length, &utf8);
+    if (utf8.str == null or utf8.length == 0) return buf[0..0];
+    const len = @min(utf8.length, buf.len);
+    @memcpy(buf[0..len], utf8.str[0..len]);
+    if (utf8.dtor) |dtor| dtor(utf8.str);
+    return buf[0..len];
+}
+
+/// cef_string_userfree_t → UTF-8 (스택 버퍼에 복사, userfree 해제)
+fn cefUserfreeToUtf8(userfree: c.cef_string_userfree_t, buf: []u8) []const u8 {
+    if (userfree == null) return buf[0..0];
+    const result = cefStringToUtf8(userfree, buf);
+    c.cef_string_userfree_utf16_free(userfree);
+    return result;
+}
+
 // ============================================
 // CEF Reference Counting
 // ============================================
@@ -197,37 +282,128 @@ fn hasOneRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 { return 1; }
 fn hasAtLeastOneRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 { return 1; }
 
 // ============================================
-// CEF App
+// CEF App (메인 + 서브프로세스 공통)
 // ============================================
 
 fn initApp(app: *c.cef_app_t) void {
     zeroCefStruct(c.cef_app_t, app);
     initBaseRefCounted(&app.base);
+    app.get_render_process_handler = &getRenderProcessHandler;
+    initRenderHandler();
+}
+
+fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {
+    return &g_render_handler;
 }
 
 // ============================================
-// CEF Client
+// CEF Client (메인 프로세스)
 // ============================================
 
 fn initClient(client_ptr: *c.cef_client_t) void {
     zeroCefStruct(c.cef_client_t, client_ptr);
     initBaseRefCounted(&client_ptr.base);
     client_ptr.get_life_span_handler = &getLifeSpanHandler;
-    client_ptr.on_process_message_received = &onProcessMessageReceived;
+    client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
 }
 
 fn getLifeSpanHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_life_span_handler_t {
     return &g_life_span_handler;
 }
 
-fn onProcessMessageReceived(
+/// 메인 프로세스: 렌더러에서 온 메시지 처리
+fn onBrowserProcessMessageReceived(
     _: ?*c._cef_client_t,
-    _: ?*c._cef_browser_t,
-    _: ?*c._cef_frame_t,
+    browser: ?*c._cef_browser_t,
+    frame: ?*c._cef_frame_t,
     _: c.cef_process_id_t,
-    _: ?*c._cef_process_message_t,
+    message: ?*c._cef_process_message_t,
 ) callconv(.c) i32 {
+    const msg = message orelse return 0;
+    const name_userfree = msg.get_name.?(msg);
+    var name_buf: [64]u8 = undefined;
+    const msg_name = cefUserfreeToUtf8(name_userfree, &name_buf);
+
+    if (std.mem.eql(u8, msg_name, "suji:invoke")) {
+        return handleBrowserInvoke(browser, frame, msg);
+    } else if (std.mem.eql(u8, msg_name, "suji:emit")) {
+        return handleBrowserEmit(msg);
+    }
     return 0;
+}
+
+/// 메인 프로세스: invoke 요청 처리 → 백엔드 호출 → 응답 반환
+fn handleBrowserInvoke(
+    _: ?*c._cef_browser_t,
+    frame: ?*c._cef_frame_t,
+    msg: *c._cef_process_message_t,
+) i32 {
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
+
+    // args[0] = seq_id (int), args[1] = channel (string), args[2] = data (string)
+    const seq_id = args.get_int.?(args, 0);
+
+    var ch_buf: [256]u8 = undefined;
+    const channel = getArgString(args, 1, &ch_buf);
+
+    var data_buf: [8192]u8 = undefined;
+    const data = getArgString(args, 2, &data_buf);
+
+    std.debug.print("[suji] IPC invoke: seq={d} channel={s}\n", .{ seq_id, channel });
+
+    // 백엔드 호출
+    var response_buf: [16384]u8 = undefined;
+    var success: bool = false;
+    var result: []const u8 = "\"no handler\"";
+
+    if (g_invoke_callback) |cb| {
+        if (cb(channel, data, &response_buf)) |resp| {
+            result = resp;
+            success = true;
+        } else {
+            result = "\"backend error\"";
+        }
+    }
+
+    // 응답 CefProcessMessage 생성
+    sendInvokeResponse(frame, seq_id, success, result);
+    return 1;
+}
+
+fn sendInvokeResponse(frame: ?*c._cef_frame_t, seq_id: i32, success: bool, result: []const u8) void {
+    const f = frame orelse return;
+
+    var resp_name: c.cef_string_t = .{};
+    setCefString(&resp_name, "suji:response");
+    const resp_msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&resp_name)) orelse return;
+
+    const resp_args = asPtr(c.cef_list_value_t, resp_msg.get_argument_list.?(resp_msg)) orelse return;
+    _ = resp_args.set_int.?(resp_args, 0, seq_id);
+    _ = resp_args.set_int.?(resp_args, 1, if (success) 1 else 0);
+
+    var result_str: c.cef_string_t = .{};
+    setCefString(&result_str, result);
+    _ = resp_args.set_string.?(resp_args, 2, &result_str);
+
+    f.send_process_message.?(f, c.PID_RENDERER, resp_msg);
+}
+
+/// 메인 프로세스: emit 처리 → EventBus
+fn handleBrowserEmit(msg: *c._cef_process_message_t) i32 {
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
+
+    var ev_buf: [256]u8 = undefined;
+    const event = getArgString(args, 0, &ev_buf);
+
+    var data_buf: [8192]u8 = undefined;
+    const data = getArgString(args, 1, &data_buf);
+
+    std.debug.print("[suji] IPC emit: event={s}\n", .{event});
+
+    if (g_emit_callback) |cb| {
+        cb(event, data);
+    }
+    return 1;
 }
 
 // ============================================
@@ -244,6 +420,354 @@ fn initLifeSpanHandler() void {
 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, _: ?*c._cef_browser_t) callconv(.c) void {
     c.cef_quit_message_loop();
+}
+
+// ============================================
+// CEF Render Process Handler (렌더러 서브프로세스)
+// ============================================
+//
+// 렌더러 프로세스에서 실행되는 코드.
+// V8 컨텍스트가 생성되면 window.__suji__ 오브젝트를 바인딩하고,
+// invoke() 호출 시 CefProcessMessage로 메인 프로세스에 전달.
+// 메인에서 응답이 오면 Promise를 resolve/reject.
+
+var g_render_handler: c.cef_render_process_handler_t = undefined;
+var g_render_handler_initialized: bool = false;
+
+// V8 핸들러 (invoke, emit 함수용)
+var g_v8_handler: c.cef_v8_handler_t = undefined;
+
+// 시퀀스 카운터 (요청-응답 매칭)
+var g_seq_counter: u32 = 0;
+
+// 렌더러 V8 컨텍스트 (onContextCreated에서 저장, 이벤트 디스패치용)
+var g_renderer_context: ?*c.cef_v8_context_t = null;
+
+// 펜딩 Promise 저장소 (렌더러 프로세스, 싱글 스레드)
+const MAX_PENDING: usize = 256;
+var g_pending_promises: [MAX_PENDING]?*c.cef_v8_value_t = [_]?*c.cef_v8_value_t{null} ** MAX_PENDING;
+var g_pending_contexts: [MAX_PENDING]?*c.cef_v8_context_t = [_]?*c.cef_v8_context_t{null} ** MAX_PENDING;
+
+fn initRenderHandler() void {
+    if (g_render_handler_initialized) return;
+    zeroCefStruct(c.cef_render_process_handler_t, &g_render_handler);
+    initBaseRefCounted(&g_render_handler.base);
+    g_render_handler.on_context_created = &onContextCreated;
+    g_render_handler.on_process_message_received = &onRendererProcessMessageReceived;
+
+    zeroCefStruct(c.cef_v8_handler_t, &g_v8_handler);
+    initBaseRefCounted(&g_v8_handler.base);
+    g_v8_handler.execute = &v8Execute;
+
+    g_render_handler_initialized = true;
+}
+
+/// V8 컨텍스트 생성 시 window.__suji__ 바인딩
+fn onContextCreated(
+    _: ?*c._cef_render_process_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    context: ?*c._cef_v8_context_t,
+) callconv(.c) void {
+    const ctx = context orelse return;
+    g_renderer_context = ctx; // 이벤트 디스패치용 컨텍스트 저장
+    const global = asPtr(c.cef_v8_value_t, ctx.get_global.?(ctx)) orelse return;
+
+    // window.__suji__ 오브젝트 생성
+    const suji_obj = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_object(null, null)) orelse return;
+
+    // invoke, emit 함수 바인딩 (on/off/__dispatch__는 JS로 주입)
+    var invoke_name: c.cef_string_t = .{};
+    setCefString(&invoke_name, "invoke");
+    const invoke_fn = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_function(&invoke_name, &g_v8_handler)) orelse return;
+
+    var emit_name: c.cef_string_t = .{};
+    setCefString(&emit_name, "emit");
+    const emit_fn = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_function(&emit_name, &g_v8_handler)) orelse return;
+
+    _ = suji_obj.set_value_bykey.?(suji_obj, &invoke_name, invoke_fn, c.V8_PROPERTY_ATTRIBUTE_NONE);
+    _ = suji_obj.set_value_bykey.?(suji_obj, &emit_name, emit_fn, c.V8_PROPERTY_ATTRIBUTE_NONE);
+
+    // window.__suji__ = suji_obj
+    var suji_key: c.cef_string_t = .{};
+    setCefString(&suji_key, "__suji__");
+    _ = global.set_value_bykey.?(global, &suji_key, suji_obj, c.V8_PROPERTY_ATTRIBUTE_NONE);
+
+    // JS 헬퍼: _listeners, on, off, __dispatch__ 주입
+    injectJsHelpers(ctx);
+
+    std.debug.print("[suji] V8 context created: window.__suji__ bound\n", .{});
+}
+
+/// JS 헬퍼 코드 주입 (이벤트 리스너 시스템)
+fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
+    const js_code =
+        \\(function() {
+        \\  var s = window.__suji__;
+        \\  s._listeners = {};
+        \\  s.on = function(event, callback) {
+        \\    if (!s._listeners[event]) s._listeners[event] = [];
+        \\    s._listeners[event].push(callback);
+        \\    return function() {
+        \\      var idx = s._listeners[event].indexOf(callback);
+        \\      if (idx >= 0) s._listeners[event].splice(idx, 1);
+        \\    };
+        \\  };
+        \\  s.off = function(event) {
+        \\    delete s._listeners[event];
+        \\  };
+        \\  s.__dispatch__ = function(event, data) {
+        \\    var cbs = s._listeners[event] || [];
+        \\    for (var i = 0; i < cbs.length; i++) cbs[i](data);
+        \\  };
+        \\})();
+    ;
+    var code_str: c.cef_string_t = .{};
+    setCefString(&code_str, js_code);
+    var empty_url: c.cef_string_t = .{};
+    setCefString(&empty_url, "");
+    var retval: ?*c.cef_v8_value_t = null;
+    var exception: ?*c.cef_v8_exception_t = null;
+    _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
+}
+
+/// V8 함수 실행 콜백 (invoke, emit, on)
+fn v8Execute(
+    _: ?*c._cef_v8_handler_t,
+    name_ptr: [*c]const c.cef_string_t,
+    _: ?*c._cef_v8_value_t,
+    arguments_count: usize,
+    arguments: [*c]const ?*c.cef_v8_value_t,
+    retval: ?*?*c.cef_v8_value_t,
+    _: ?*c.cef_string_t,
+) callconv(.c) i32 {
+    var fn_name_buf: [32]u8 = undefined;
+    const fn_name = cefStringToUtf8(name_ptr, &fn_name_buf);
+
+    if (std.mem.eql(u8, fn_name, "invoke")) {
+        return v8HandleInvoke(arguments_count, arguments, retval);
+    } else if (std.mem.eql(u8, fn_name, "emit")) {
+        return v8HandleEmit(arguments_count, arguments);
+    }
+    return 0;
+}
+
+/// invoke(channel, data?, options?) → Promise
+/// channel: string, data: object (optional), options: { target: string } (optional)
+fn v8HandleInvoke(
+    argc: usize,
+    argv: [*c]const ?*c.cef_v8_value_t,
+    retval: ?*?*c.cef_v8_value_t,
+) i32 {
+    if (argc < 1) return 0;
+
+    // channel 인자
+    const channel_v8 = argv[0] orelse return 0;
+    var channel_buf: [256]u8 = undefined;
+    const channel_userfree = channel_v8.get_string_value.?(channel_v8);
+    const channel = cefUserfreeToUtf8(channel_userfree, &channel_buf);
+    if (channel.len == 0) return 0;
+
+    // data 인자 (JSON 문자열로 변환)
+    var data_buf: [8192]u8 = undefined;
+    var data: []const u8 = "{}";
+    if (argc >= 2) {
+        const data_v8 = argv[1];
+        if (data_v8 != null) {
+            if (data_v8.?.is_string.?(data_v8) == 1) {
+                const data_userfree = data_v8.?.get_string_value.?(data_v8);
+                data = cefUserfreeToUtf8(data_userfree, &data_buf);
+            } else if (data_v8.?.is_object.?(data_v8) == 1) {
+                // 오브젝트는 JSON.stringify 필요 — 렌더러에서 JS eval로 처리
+                // 간단한 구현: 문자열만 지원, 오브젝트는 프론트엔드에서 JSON.stringify 후 전달
+                data = "{}";
+            }
+        }
+    }
+
+    // target 옵션 (options.target으로 특정 백엔드 지정)
+    // TODO: target 지원 — 현재는 자동 라우팅만
+
+    // Promise 생성
+    const promise = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_promise()) orelse return 0;
+
+    // 시퀀스 ID 할당
+    const seq_id = g_seq_counter;
+    g_seq_counter +%= 1;
+    const slot = seq_id % MAX_PENDING;
+
+    // 컨텍스트 저장 (응답 시 resolve에 필요)
+    const ctx = asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context());
+
+    // 슬롯 충돌 감지: 이전 Promise가 남아있으면 reject 후 덮어쓰기
+    if (g_pending_promises[slot]) |old_promise| {
+        if (g_pending_contexts[slot]) |old_ctx| {
+            _ = old_ctx.enter.?(old_ctx);
+            var err: c.cef_string_t = .{};
+            setCefString(&err, "request superseded");
+            _ = old_promise.reject_promise.?(old_promise, &err);
+            _ = old_ctx.exit.?(old_ctx);
+        }
+    }
+    g_pending_promises[slot] = promise;
+    g_pending_contexts[slot] = ctx;
+
+    // CefProcessMessage 생성하여 메인 프로세스에 전송
+    var msg_name: c.cef_string_t = .{};
+    setCefString(&msg_name, "suji:invoke");
+    const msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&msg_name)) orelse return 0;
+
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
+    _ = args.set_int.?(args, 0, @intCast(seq_id));
+
+    var ch_str: c.cef_string_t = .{};
+    setCefString(&ch_str, channel);
+    _ = args.set_string.?(args, 1, &ch_str);
+
+    // Electron 스타일 요청 조립: {"cmd":"channel", ...data}
+    var request_buf: [8192]u8 = undefined;
+    const request = std.fmt.bufPrint(&request_buf, "{{\"cmd\":\"{s}\",\"data\":{s}}}", .{ channel, data }) catch data;
+
+    var req_str: c.cef_string_t = .{};
+    setCefString(&req_str, request);
+    _ = args.set_string.?(args, 2, &req_str);
+
+    sendToBrowser(msg);
+
+    // Promise 반환
+    if (retval) |rv| {
+        rv.* = promise;
+    }
+    return 1;
+}
+
+/// emit(event, data) → void
+fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
+    if (argc < 1) return 0;
+
+    const event_v8 = argv[0] orelse return 0;
+    var event_buf: [256]u8 = undefined;
+    const event_userfree = event_v8.get_string_value.?(event_v8);
+    const event = cefUserfreeToUtf8(event_userfree, &event_buf);
+
+    var data_buf: [8192]u8 = undefined;
+    var data: []const u8 = "{}";
+    if (argc >= 2) {
+        const data_v8 = argv[1];
+        if (data_v8 != null and data_v8.?.is_string.?(data_v8) == 1) {
+            const data_userfree = data_v8.?.get_string_value.?(data_v8);
+            data = cefUserfreeToUtf8(data_userfree, &data_buf);
+        }
+    }
+
+    // CefProcessMessage로 메인 프로세스에 전송
+    var msg_name: c.cef_string_t = .{};
+    setCefString(&msg_name, "suji:emit");
+    const msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&msg_name)) orelse return 0;
+
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
+
+    var ev_str: c.cef_string_t = .{};
+    setCefString(&ev_str, event);
+    _ = args.set_string.?(args, 0, &ev_str);
+
+    var data_str: c.cef_string_t = .{};
+    setCefString(&data_str, data);
+    _ = args.set_string.?(args, 1, &data_str);
+
+    sendToBrowser(msg);
+    return 1;
+}
+
+/// 렌더러 프로세스: 메인에서 온 응답/이벤트 처리
+fn onRendererProcessMessageReceived(
+    _: ?*c._cef_render_process_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    _: c.cef_process_id_t,
+    message: ?*c._cef_process_message_t,
+) callconv(.c) i32 {
+    const msg = message orelse return 0;
+    const name_userfree = msg.get_name.?(msg);
+    var name_buf: [64]u8 = undefined;
+    const msg_name = cefUserfreeToUtf8(name_userfree, &name_buf);
+
+    if (std.mem.eql(u8, msg_name, "suji:response")) {
+        return handleRendererResponse(msg);
+    } else if (std.mem.eql(u8, msg_name, "suji:event")) {
+        return handleRendererEvent(msg);
+    }
+    return 0;
+}
+
+/// invoke 응답 처리 → Promise resolve/reject
+fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
+
+    const seq_id: u32 = @intCast(args.get_int.?(args, 0));
+    const success = args.get_int.?(args, 1) == 1;
+
+    var result_buf: [16384]u8 = undefined;
+    const result = getArgString(args, 2, &result_buf);
+
+    const slot = seq_id % MAX_PENDING;
+    const promise = g_pending_promises[slot] orelse return 0;
+    const ctx = g_pending_contexts[slot] orelse return 0;
+
+    // 슬롯 해제
+    g_pending_promises[slot] = null;
+    g_pending_contexts[slot] = null;
+
+    // V8 컨텍스트 진입
+    _ = ctx.enter.?(ctx);
+
+    if (success) {
+        // 결과를 V8 문자열로 변환하여 resolve
+        var v8_str: c.cef_string_t = .{};
+        setCefString(&v8_str, result);
+        const v8_val = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_string(&v8_str));
+        _ = promise.resolve_promise.?(promise, v8_val);
+    } else {
+        var err_str: c.cef_string_t = .{};
+        setCefString(&err_str, result);
+        _ = promise.reject_promise.?(promise, &err_str);
+    }
+
+    _ = ctx.exit.?(ctx);
+    return 1;
+}
+
+/// 메인에서 푸시된 이벤트 → JS __dispatch__ 호출
+fn handleRendererEvent(msg: *c._cef_process_message_t) i32 {
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
+
+    var event_buf: [256]u8 = undefined;
+    const event = getArgString(args, 0, &event_buf);
+
+    var data_buf: [8192]u8 = undefined;
+    const data = getArgString(args, 1, &data_buf);
+
+    // 저장된 렌더러 컨텍스트 사용 (onContextCreated에서 저장)
+    // cef_v8_context_get_current_context()는 메시지 핸들러에서 유효하지 않을 수 있음
+    const ctx = g_renderer_context orelse return 0;
+    _ = ctx.enter.?(ctx);
+
+    var js_buf: [16384]u8 = undefined;
+    const js = std.fmt.bufPrint(&js_buf, "window.__suji__.__dispatch__(\"{s}\", {s})", .{ event, data }) catch {
+        _ = ctx.exit.?(ctx);
+        return 0;
+    };
+
+    var code_str: c.cef_string_t = .{};
+    setCefString(&code_str, js);
+    var empty_url: c.cef_string_t = .{};
+    setCefString(&empty_url, "");
+    var retval: ?*c.cef_v8_value_t = null;
+    var exception: ?*c.cef_v8_exception_t = null;
+    _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
+
+    _ = ctx.exit.?(ctx);
+    return 1;
 }
 
 // ============================================

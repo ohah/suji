@@ -51,6 +51,14 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("loader", loader_module);
     root_module.addImport("events", events_module);
     root_module.addImport("util", util_module);
+
+    // CEF 헤더 + 라이브러리 경로
+    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const cef_include = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64", .{home}) catch @panic("OOM");
+    root_module.addIncludePath(.{ .cwd_relative = cef_include });
+    const cef_fw_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64/Release", .{home}) catch @panic("OOM");
+    root_module.addFrameworkPath(.{ .cwd_relative = cef_fw_path });
+    root_module.linkFramework("Chromium Embedded Framework", .{});
     // root_module.addImport("toml", toml_dep.module("toml"));
 
     const exe = b.addExecutable(.{

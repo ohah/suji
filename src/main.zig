@@ -1,8 +1,12 @@
 const std = @import("std");
 const suji = @import("root.zig");
 const util = @import("util");
+const cef = @import("platform/cef.zig");
 
 pub fn main() !void {
+    // CEF 서브프로세스 처리 (렌더러/GPU 등 — 메인이면 통과)
+    cef.executeSubprocess();
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
@@ -17,14 +21,28 @@ pub fn main() !void {
 
     const command = args[1];
 
+    // --cef 플래그 감지
+    var use_cef = false;
+    for (args) |arg| {
+        if (std.mem.eql(u8, arg, "--cef")) use_cef = true;
+    }
+
     if (std.mem.eql(u8, command, "init")) {
         try runInit(allocator, args[2..]);
     } else if (std.mem.eql(u8, command, "dev")) {
-        try runDev(allocator);
+        if (use_cef) {
+            try runDevCef(allocator);
+        } else {
+            try runDev(allocator);
+        }
     } else if (std.mem.eql(u8, command, "build")) {
         try runBuild(allocator);
     } else if (std.mem.eql(u8, command, "run")) {
-        try runProd(allocator);
+        if (use_cef) {
+            try runProdCef(allocator);
+        } else {
+            try runProd(allocator);
+        }
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -407,6 +425,122 @@ fn buildFrontend(allocator: std.mem.Allocator, frontend_dir: []const u8) !void {
     } else {
         try runCmd(allocator, &.{ "npm", "--prefix", frontend_dir, "run", "build" });
     }
+}
+
+// ============================================
+// CEF 모드
+// ============================================
+
+fn runDevCef(allocator: std.mem.Allocator) !void {
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
+        return;
+    };
+    defer config.deinit();
+
+    std.debug.print("[suji] CEF dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
+
+    var registry = suji.BackendRegistry.init(allocator);
+    defer registry.deinit();
+    registry.setGlobal();
+    try loadPluginsFromConfig(allocator, &config, &registry, false);
+    try loadBackendsFromConfig(allocator, &config, &registry, false);
+
+    // 프론트엔드 dev 서버
+    std.debug.print("[suji] starting frontend dev server...\n", .{});
+    var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
+        std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
+        try openCefWindow(allocator, &config, &registry, .dev);
+        return;
+    };
+    defer _ = frontend_proc.kill() catch {};
+
+    std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
+    std.Thread.sleep(2 * std.time.ns_per_s);
+
+    try openCefWindow(allocator, &config, &registry, .dev);
+}
+
+fn runProdCef(allocator: std.mem.Allocator) !void {
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
+        return;
+    };
+    defer config.deinit();
+
+    std.debug.print("[suji] CEF production mode - {s}\n", .{config.app.name});
+
+    var registry = suji.BackendRegistry.init(allocator);
+    defer registry.deinit();
+    registry.setGlobal();
+    try loadPluginsFromConfig(allocator, &config, &registry, true);
+    try loadBackendsFromConfig(allocator, &config, &registry, true);
+
+    try openCefWindow(allocator, &config, &registry, .dist);
+}
+
+fn openCefWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
+    // EventBus 생성
+    var event_bus = suji.EventBus.init(allocator);
+    defer event_bus.deinit();
+    registry.setEventBus(&event_bus);
+
+    // CEF IPC 콜백 연결
+    cef.setInvokeHandler(&cefInvokeHandler);
+    cef.setEmitHandler(&cefEmitHandler);
+
+    // URL 결정
+    const url: ?[:0]const u8 = switch (mode) {
+        .dev => config.frontend.dev_url,
+        .dist => blk: {
+            // TODO: dist 모드에서 suji:// 커스텀 프로토콜 사용 (Step 4)
+            break :blk null;
+        },
+    };
+
+    // CEF 초기화 + 브라우저 생성
+    const cef_config: cef.CefConfig = .{
+        .title = config.window.title,
+        .width = @intCast(config.window.width),
+        .height = @intCast(config.window.height),
+        .url = url,
+        .debug = config.window.debug,
+    };
+    try cef.initialize(cef_config);
+    try cef.createBrowser(cef_config);
+
+    std.debug.print("[suji] CEF window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
+    cef.run();
+    cef.shutdown();
+}
+
+/// CEF invoke 콜백 — BackendRegistry로 라우팅
+fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
+    const registry = suji.BackendRegistry.global orelse return null;
+
+    // 요청 null-terminate
+    var request_buf: [8192]u8 = undefined;
+    const request_len = @min(data.len, request_buf.len - 1);
+    @memcpy(request_buf[0..request_len], data[0..request_len]);
+    request_buf[request_len] = 0;
+    const request: [*:0]const u8 = request_buf[0..request_len :0];
+
+    // 채널 라우팅으로 백엔드 찾기 (없으면 채널명을 백엔드 이름으로 직접 시도)
+    const name = registry.getBackendForChannel(channel) orelse channel;
+    if (name.len == 0) return null; // 중복 채널
+
+    const resp = registry.invoke(name, request) orelse return null;
+    const len = @min(resp.len, response_buf.len);
+    @memcpy(response_buf[0..len], resp[0..len]);
+    registry.freeResponse(name, resp);
+    return response_buf[0..len];
+}
+
+/// CEF emit 콜백 — EventBus로 전달
+fn cefEmitHandler(event: []const u8, data: []const u8) void {
+    const registry = suji.BackendRegistry.global orelse return;
+    const bus = registry.event_bus orelse return;
+    bus.emit(event, data);
 }
 
 // ============================================
