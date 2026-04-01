@@ -810,10 +810,9 @@ await expect(page.locator('#result')).toHaveText('saved');
 - [x] Step 2: CEF IPC 구현 (CefV8Handler + CefProcessMessage → invoke/on/send)
 - [x] Step 3: 기존 ipc.zig를 CEF IPC로 교체 (main.zig에서 --cef 플래그로 BackendRegistry 연결)
 - [x] Step 3.5: CEF 완성도 — JS Promise(JS 관리), EventBus→JS 연결, fanout/chain/core, 키보드 단축키(NSMenu Edit), 플러그인 경로 탐색, injection 방지
-- [ ] Step 4: 커스텀 프로토콜 (`suji://`) → 로컬 HTTP 에셋 서버 제거
-- [ ] Step 5: DevTools 연동 — F12로 인앱 DevTools 패널 열기 (`CefBrowserHost::ShowDevTools`), Electron과 동일한 경험
+- [x] Step 5: DevTools 연동 — 인앱 DevTools (show_dev_tools + DEFAULT 스타일), Cmd+Shift+I 토글
 - [ ] Step 6: E2E 테스트 지원 (CDP + Playwright)
-- [ ] Step 7: macOS 번들링 (Helper 프로세스 4개, Info.plist, 코드 서명)
+- [ ] Step 7: macOS 번들링 (Helper 프로세스 4개, Info.plist, 코드 서명, 커스텀 프로토콜 `suji://`)
 - [ ] Step 8: Windows/Linux 번들링
 - [ ] Step 9: webview.h 완전 제거 (webview-zig 패키지 삭제, asset_server.zig 삭제)
 
