@@ -129,6 +129,7 @@ pub fn initialize(config: CefConfig) !void {
 }
 
 var g_client: c.cef_client_t = undefined;
+var g_devtools_client: c.cef_client_t = undefined;
 var g_window: ?*anyopaque = null; // NSWindow 강한 참조 유지
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
 var g_devtools_open: bool = false;
@@ -138,6 +139,11 @@ pub fn createBrowser(config: CefConfig) !void {
     initLifeSpanHandler();
     initKeyboardHandler();
     initClient(&g_client);
+
+    // DevTools 전용 client (키보드만, IPC 무시)
+    zeroCefStruct(c.cef_client_t, &g_devtools_client);
+    initBaseRefCounted(&g_devtools_client.base);
+    g_devtools_client.get_keyboard_handler = &getKeyboardHandler;
 
     // NSWindow 생성
     const content_view = createMacWindow(config.title, config.width, config.height) orelse return error.WindowCreationFailed;
@@ -601,17 +607,21 @@ fn onPreKeyEvent(
     return 0;
 }
 
-fn toggleDevTools(_: *c.cef_browser_t) void {
-    // CEF ALLOY + macOS에서 인앱 DevTools 크래시 (CEF 144+ 알려진 이슈, Electrobun도 동일)
-    // CDP port로 시스템 브라우저에서 DevTools 열기
-    if (!g_devtools_open) {
-        const url = "http://localhost:9222";
-        var child = std.process.Child.init(&.{ "open", url }, std.heap.page_allocator);
-        child.spawn() catch return;
-        _ = child.wait() catch {};
-        g_devtools_open = true;
+fn toggleDevTools(browser: *c.cef_browser_t) void {
+    const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
+
+    if (host.has_dev_tools.?(host) == 1) {
+        host.close_dev_tools.?(host);
     } else {
-        g_devtools_open = false;
+        var window_info: c.cef_window_info_t = undefined;
+        zeroCefStruct(c.cef_window_info_t, &window_info);
+        window_info.runtime_style = c.CEF_RUNTIME_STYLE_DEFAULT;
+
+        var settings: c.cef_browser_settings_t = undefined;
+        zeroCefStruct(c.cef_browser_settings_t, &settings);
+
+        var point: c.cef_point_t = .{ .x = 0, .y = 0 };
+        host.show_dev_tools.?(host, &window_info, &g_devtools_client, &settings, &point);
     }
 }
 
