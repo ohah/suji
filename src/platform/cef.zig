@@ -1028,30 +1028,51 @@ fn initNSApp() void {
 /// macOS 메뉴바 생성 — Edit 메뉴 (Cmd+C/V/X/A/Z/Shift+Z)
 fn setupMainMenu(app: ?*anyopaque) void {
     const NSMenu = getClass("NSMenu") orelse return;
-    const NSMenuItem = getClass("NSMenuItem") orelse return;
 
     // 메인 메뉴바
     const menubar = msgSend(msgSend(NSMenu, "alloc") orelse return, "init") orelse return;
 
-    // App 메뉴 (빈 항목)
-    const app_item = msgSend(msgSend(NSMenuItem, "alloc") orelse return, "init") orelse return;
-    msgSendVoid1(menubar, "addItem:", app_item);
+    // 1. App 메뉴
+    const app_menu = createMenu("") orelse return;
+    addMenuItem(app_menu, "About Suji", "orderFrontStandardAboutPanel:", "");
+    addSeparator(app_menu);
+    addMenuItem(app_menu, "Hide Suji", "hide:", "h");
+    addMenuItemWithModifier(app_menu, "Hide Others", "hideOtherApplications:", "h", true);
+    addMenuItem(app_menu, "Show All", "unhideAllApplications:", "");
+    addSeparator(app_menu);
+    addMenuItem(app_menu, "Quit Suji", "terminate:", "q");
+    addSubmenuItem(menubar, "", app_menu);
 
-    // Edit 메뉴
-    const edit_menu = createMenu("Edit");
-    if (edit_menu) |menu| {
-        addMenuItem(menu, "Undo", "undo:", "z");
-        addMenuItem(menu, "Redo", "redo:", "Z"); // Shift+Z
-        addSeparator(menu);
-        addMenuItem(menu, "Cut", "cut:", "x");
-        addMenuItem(menu, "Copy", "copy:", "c");
-        addMenuItem(menu, "Paste", "paste:", "v");
-        addMenuItem(menu, "Select All", "selectAll:", "a");
+    // 2. File 메뉴
+    const file_menu = createMenu("File") orelse return;
+    addMenuItem(file_menu, "Close Window", "performClose:", "w");
+    addSubmenuItem(menubar, "File", file_menu);
 
-        const edit_item = msgSend(msgSend(getClass("NSMenuItem") orelse return, "alloc") orelse return, "init") orelse return;
-        msgSendVoid1(edit_item, "setSubmenu:", menu);
-        msgSendVoid1(menubar, "addItem:", edit_item);
-    }
+    // 3. Edit 메뉴
+    const edit_menu = createMenu("Edit") orelse return;
+    addMenuItem(edit_menu, "Undo", "undo:", "z");
+    addMenuItemWithModifier(edit_menu, "Redo", "redo:", "z", true);
+    addSeparator(edit_menu);
+    addMenuItem(edit_menu, "Cut", "cut:", "x");
+    addMenuItem(edit_menu, "Copy", "copy:", "c");
+    addMenuItem(edit_menu, "Paste", "paste:", "v");
+    addMenuItem(edit_menu, "Delete", "delete:", "");
+    addMenuItem(edit_menu, "Select All", "selectAll:", "a");
+    addSubmenuItem(menubar, "Edit", edit_menu);
+
+    // 4. View 메뉴
+    const view_menu = createMenu("View") orelse return;
+    addMenuItem(view_menu, "Reload", "reload:", "r");
+    addMenuItem(view_menu, "Toggle Full Screen", "toggleFullScreen:", "f");
+    addSubmenuItem(menubar, "View", view_menu);
+
+    // 5. Window 메뉴
+    const window_menu = createMenu("Window") orelse return;
+    addMenuItem(window_menu, "Minimize", "performMiniaturize:", "m");
+    addMenuItem(window_menu, "Zoom", "performZoom:", "");
+    addSeparator(window_menu);
+    addMenuItem(window_menu, "Bring All to Front", "arrangeInFront:", "");
+    addSubmenuItem(menubar, "Window", window_menu);
 
     msgSendVoid1(app, "setMainMenu:", menubar);
 }
@@ -1065,6 +1086,40 @@ fn createMenu(title: [:0]const u8) ?*anyopaque {
     const initSel = objc.sel_registerName("initWithTitle:");
     const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     return initFn(alloc, @ptrCast(initSel), ns_title);
+}
+
+fn addSubmenuItem(menubar: *anyopaque, title: [:0]const u8, submenu: *anyopaque) void {
+    const item = msgSend(msgSend(getClass("NSMenuItem") orelse return, "alloc") orelse return, "init") orelse return;
+    msgSendVoid1(item, "setSubmenu:", submenu);
+    if (title.len > 0) {
+        const NSString = getClass("NSString") orelse return;
+        const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+        const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
+        msgSendVoid1(item, "setTitle:", ns_title);
+    }
+    msgSendVoid1(menubar, "addItem:", item);
+}
+
+fn addMenuItemWithModifier(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8, shift: bool) void {
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+    const NSString = getClass("NSString") orelse return;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
+    const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), key.ptr);
+
+    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
+    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action.ptr)), ns_key) orelse return;
+
+    if (shift) {
+        // NSCommandKeyMask | NSShiftKeyMask = (1 << 20) | (1 << 17)
+        const setModSel = objc.sel_registerName("setKeyEquivalentModifierMask:");
+        const setModFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+        setModFn(item, @ptrCast(setModSel), (1 << 20) | (1 << 17));
+    }
+
+    msgSendVoid1(menu, "addItem:", item);
 }
 
 fn addMenuItem(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8) void {
