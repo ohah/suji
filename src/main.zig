@@ -485,6 +485,9 @@ fn openCefWindow(allocator: std.mem.Allocator, config: *const suji.Config, regis
     defer event_bus.deinit();
     registry.setEventBus(&event_bus);
 
+    // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
+    event_bus.webview_eval = &cef.evalJs;
+
     // CEF IPC 콜백 연결
     cef.setInvokeHandler(&cefInvokeHandler);
     cef.setEmitHandler(&cefEmitHandler);
@@ -518,6 +521,13 @@ fn openCefWindow(allocator: std.mem.Allocator, config: *const suji.Config, regis
 fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
     const registry = suji.BackendRegistry.global orelse return null;
 
+    // 특수 채널: fanout, chain, core
+    if (std.mem.eql(u8, channel, "__fanout__")) {
+        return cefHandleFanout(registry, data, response_buf);
+    } else if (std.mem.eql(u8, channel, "__core__")) {
+        return cefHandleCore(registry, data, response_buf);
+    }
+
     // 요청 null-terminate
     var request_buf: [8192]u8 = undefined;
     const request_len = @min(data.len, request_buf.len - 1);
@@ -534,6 +544,102 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
     @memcpy(response_buf[0..len], resp[0..len]);
     registry.freeResponse(name, resp);
     return response_buf[0..len];
+}
+
+/// fanout: 여러 백엔드에 동시 요청
+fn cefHandleFanout(registry: *const suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
+    // data: {"__fanout":true,"backends":"zig,rust,go","request":"{\"cmd\":\"ping\"}"}
+    // backends와 request 추출
+    const backends_str = extractJsonString(data, "\"backends\":\"") orelse return null;
+    const request_str = extractJsonString(data, "\"request\":\"") orelse return null;
+
+    // request에서 이스케이프된 따옴표 복원
+    var req_buf: [4096]u8 = undefined;
+    const req_clean = unescapeJson(request_str, &req_buf);
+    var req_nt: [4096]u8 = undefined;
+    const req_len = @min(req_clean.len, req_nt.len - 1);
+    @memcpy(req_nt[0..req_len], req_clean[0..req_len]);
+    req_nt[req_len] = 0;
+
+    var out_pos: usize = 0;
+    const out = response_buf;
+    out_pos += (std.fmt.bufPrint(out[out_pos..], "{{\"fanout\":[", .{}) catch return null).len;
+
+    var iter = std.mem.splitScalar(u8, backends_str, ',');
+    var first = true;
+    while (iter.next()) |name| {
+        const resp = registry.invoke(name, req_nt[0..req_len :0]);
+        if (resp) |r| {
+            if (!first) out_pos += (std.fmt.bufPrint(out[out_pos..], ",", .{}) catch break).len;
+            out_pos += (std.fmt.bufPrint(out[out_pos..], "{s}", .{r}) catch break).len;
+            first = false;
+            registry.freeResponse(name, resp);
+        }
+    }
+    out_pos += (std.fmt.bufPrint(out[out_pos..], "]}}", .{}) catch return null).len;
+    return out[0..out_pos];
+}
+
+/// core: Zig 코어 직접 호출
+fn cefHandleCore(registry: *const suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
+    // data: {"__core":true,"request":"{\"cmd\":\"core_info\"}"}
+    const request_str = extractJsonString(data, "\"request\":\"") orelse return null;
+    var req_buf: [4096]u8 = undefined;
+    const req_clean = unescapeJson(request_str, &req_buf);
+
+    if (std.mem.indexOf(u8, req_clean, "core_info") != null) {
+        var out_pos: usize = 0;
+        const out = response_buf;
+        out_pos += (std.fmt.bufPrint(out[out_pos..], "{{\"from\":\"zig-core\",\"backends\":[", .{}) catch return null).len;
+        var it = registry.backends.iterator();
+        var first = true;
+        while (it.next()) |entry| {
+            if (!first) out_pos += (std.fmt.bufPrint(out[out_pos..], ",", .{}) catch break).len;
+            out_pos += (std.fmt.bufPrint(out[out_pos..], "\"{s}\"", .{entry.key_ptr.*}) catch break).len;
+            first = false;
+        }
+        out_pos += (std.fmt.bufPrint(out[out_pos..], "]}}", .{}) catch return null).len;
+        return out[0..out_pos];
+    } else {
+        const result = "{\"from\":\"zig-core\",\"msg\":\"hello from zig\"}";
+        @memcpy(response_buf[0..result.len], result);
+        return response_buf[0..result.len];
+    }
+}
+
+/// JSON 문자열에서 "key":"value" 패턴의 value 추출
+fn extractJsonString(json: []const u8, pattern: []const u8) ?[]const u8 {
+    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
+    const start = idx + pattern.len;
+    // 이스케이프되지 않은 " 찾기
+    var i = start;
+    while (i < json.len) : (i += 1) {
+        if (json[i] == '\\') { i += 1; continue; }
+        if (json[i] == '"') return json[start..i];
+    }
+    return null;
+}
+
+/// JSON 이스케이프 복원: \" → ", \\ → \
+fn unescapeJson(src: []const u8, buf: []u8) []const u8 {
+    var i: usize = 0;
+    var o: usize = 0;
+    while (i < src.len and o < buf.len) {
+        if (src[i] == '\\' and i + 1 < src.len) {
+            buf[o] = switch (src[i + 1]) {
+                '"' => '"',
+                '\\' => '\\',
+                'n' => '\n',
+                else => src[i + 1],
+            };
+            i += 2;
+        } else {
+            buf[o] = src[i];
+            i += 1;
+        }
+        o += 1;
+    }
+    return buf[0..o];
 }
 
 /// CEF emit 콜백 — EventBus로 전달

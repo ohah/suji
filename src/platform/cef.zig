@@ -129,6 +129,7 @@ pub fn initialize(config: CefConfig) !void {
 
 var g_client: c.cef_client_t = undefined;
 var g_window: ?*anyopaque = null; // NSWindow 강한 참조 유지
+var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
 
 /// 브라우저 창 생성
 pub fn createBrowser(config: CefConfig) !void {
@@ -187,6 +188,17 @@ pub fn pushEventToRenderer(browser: *c.cef_browser_t, event: []const u8, data: [
     _ = args.set_string.?(args, 1, &data_str);
 
     frame.send_process_message.?(frame, c.PID_RENDERER, msg);
+}
+
+/// 메인 프로세스에서 렌더러의 JS 실행 (EventBus → JS __dispatch__ 용)
+pub fn evalJs(js: [:0]const u8) void {
+    const browser = g_browser orelse return;
+    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
+    var code: c.cef_string_t = .{};
+    setCefString(&code, js);
+    var url: c.cef_string_t = .{};
+    setCefString(&url, "");
+    frame.execute_java_script.?(frame, &code, &url, 0);
 }
 
 /// 메시지 루프 실행 (블로킹)
@@ -402,6 +414,7 @@ fn handleBrowserInvoke(
     }
 
     // 응답 CefProcessMessage 생성
+    std.debug.print("[suji] IPC response: seq={d} success={} result={s}\n", .{ seq_id, success, result });
     sendInvokeResponse(frame, seq_id, success, result);
     return 1;
 }
@@ -451,7 +464,13 @@ var g_life_span_handler: c.cef_life_span_handler_t = undefined;
 fn initLifeSpanHandler() void {
     zeroCefStruct(c.cef_life_span_handler_t, &g_life_span_handler);
     initBaseRefCounted(&g_life_span_handler.base);
+    g_life_span_handler.on_after_created = &onAfterCreated;
     g_life_span_handler.on_before_close = &onBeforeClose;
+}
+
+fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
+    g_browser = browser;
+    std.debug.print("[suji] CEF browser after_created\n", .{});
 }
 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, _: ?*c._cef_browser_t) callconv(.c) void {
@@ -479,9 +498,9 @@ var g_seq_counter: u32 = 0;
 // 렌더러 V8 컨텍스트 (onContextCreated에서 저장, 이벤트 디스패치용)
 var g_renderer_context: ?*c.cef_v8_context_t = null;
 
-// 펜딩 Promise 저장소 (렌더러 프로세스, 싱글 스레드)
+// 펜딩 컨텍스트 저장소 (렌더러 프로세스, 싱글 스레드)
+// Promise는 JS 측에서 관리 (_pending 맵), 네이티브는 컨텍스트만 보관
 const MAX_PENDING: usize = 256;
-var g_pending_promises: [MAX_PENDING]?*c.cef_v8_value_t = [_]?*c.cef_v8_value_t{null} ** MAX_PENDING;
 var g_pending_contexts: [MAX_PENDING]?*c.cef_v8_context_t = [_]?*c.cef_v8_context_t{null} ** MAX_PENDING;
 
 fn initRenderHandler() void {
@@ -545,25 +564,37 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\  var raw_invoke = window.__suji__.invoke;
         \\  var raw_emit = window.__suji__.emit;
         \\  var s = window.__suji__;
+        \\  s._pending = {};
+        \\  s._nextResolve = function(seq, json) {
+        \\    var p = s._pending[seq];
+        \\    if (p) { delete s._pending[seq]; try { p.resolve(JSON.parse(json)); } catch(e) { p.resolve(json); } }
+        \\  };
+        \\  s._nextReject = function(seq, err) {
+        \\    var p = s._pending[seq];
+        \\    if (p) { delete s._pending[seq]; p.reject(new Error(err)); }
+        \\  };
         \\  s.invoke = function(channel, data, options) {
         \\    var req = data ? Object.assign({cmd: channel}, data) : {cmd: channel};
         \\    var target = options && options.target;
-        \\    if (target) {
-        \\      return raw_invoke(target, JSON.stringify(req));
-        \\    }
-        \\    return raw_invoke(channel, JSON.stringify(req));
+        \\    var seq = raw_invoke(target || channel, JSON.stringify(req));
+        \\    return new Promise(function(resolve, reject) {
+        \\      s._pending[seq] = { resolve: resolve, reject: reject };
+        \\    });
         \\  };
         \\  s.emit = function(event, data) {
         \\    return raw_emit(event, JSON.stringify(data || {}));
         \\  };
         \\  s.chain = function(from, to, request) {
-        \\    return raw_invoke("__chain__", JSON.stringify({__chain:true,from:from,to:to,request:request}));
+        \\    var seq = raw_invoke("__chain__", JSON.stringify({__chain:true,from:from,to:to,request:request}));
+        \\    return new Promise(function(resolve, reject) { s._pending[seq] = { resolve: resolve, reject: reject }; });
         \\  };
         \\  s.fanout = function(backends, request) {
-        \\    return raw_invoke("__fanout__", JSON.stringify({__fanout:true,backends:backends,request:request}));
+        \\    var seq = raw_invoke("__fanout__", JSON.stringify({__fanout:true,backends:backends,request:request}));
+        \\    return new Promise(function(resolve, reject) { s._pending[seq] = { resolve: resolve, reject: reject }; });
         \\  };
         \\  s.core = function(request) {
-        \\    return raw_invoke("__core__", JSON.stringify({__core:true,request:request}));
+        \\    var seq = raw_invoke("__core__", JSON.stringify({__core:true,request:request}));
+        \\    return new Promise(function(resolve, reject) { s._pending[seq] = { resolve: resolve, reject: reject }; });
         \\  };
         \\  s._listeners = {};
         \\  s.on = function(event, callback) {
@@ -648,28 +679,13 @@ fn v8HandleInvoke(
     }
     if (channel.len == 0) return 0;
 
-    // Promise 생성
-    const promise = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_promise()) orelse return 0;
-
-    // 시퀀스 ID 할당
+    // 시퀀스 ID 할당 (JS에서 Promise 관리)
     const seq_id = g_seq_counter;
     g_seq_counter +%= 1;
+
+    // 컨텍스트 저장 (응답 시 eval에 필요)
     const slot = seq_id % MAX_PENDING;
-
-    // 컨텍스트 저장 (응답 시 resolve에 필요)
     const ctx = asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context());
-
-    // 슬롯 충돌 감지: 이전 Promise가 남아있으면 reject 후 덮어쓰기
-    if (g_pending_promises[slot]) |old_promise| {
-        if (g_pending_contexts[slot]) |old_ctx| {
-            _ = old_ctx.enter.?(old_ctx);
-            var err: c.cef_string_t = .{};
-            setCefString(&err, "request superseded");
-            _ = old_promise.reject_promise.?(old_promise, &err);
-            _ = old_ctx.exit.?(old_ctx);
-        }
-    }
-    g_pending_promises[slot] = promise;
     g_pending_contexts[slot] = ctx;
 
     // CefProcessMessage 생성하여 메인 프로세스에 전송
@@ -692,8 +708,9 @@ fn v8HandleInvoke(
     sendToBrowser(msg);
 
     // Promise 반환
+    // seq_id를 JS에 반환 (JS가 이걸로 Promise를 _pending에 등록)
     if (retval) |rv| {
-        rv.* = promise;
+        rv.* = c.cef_v8_value_create_int(@intCast(seq_id));
     }
     return 1;
 }
@@ -749,6 +766,8 @@ fn onRendererProcessMessageReceived(
     var name_buf: [64]u8 = undefined;
     const msg_name = cefUserfreeToUtf8(name_userfree, &name_buf);
 
+    std.debug.print("[suji:renderer] got message: {s}\n", .{msg_name});
+
     if (std.mem.eql(u8, msg_name, "suji:response")) {
         return handleRendererResponse(msg);
     } else if (std.mem.eql(u8, msg_name, "suji:event")) {
@@ -757,7 +776,7 @@ fn onRendererProcessMessageReceived(
     return 0;
 }
 
-/// invoke 응답 처리 → Promise resolve/reject
+/// invoke 응답 처리 → JS _nextResolve/_nextReject 호출
 fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
     const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return 0;
 
@@ -767,28 +786,35 @@ fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
     var result_buf: [16384]u8 = undefined;
     const result = getArgString(args, 2, &result_buf);
 
-    const slot = seq_id % MAX_PENDING;
-    const promise = g_pending_promises[slot] orelse return 0;
-    const ctx = g_pending_contexts[slot] orelse return 0;
+    std.debug.print("[suji:renderer] response: seq={d} success={} result_len={d}\n", .{ seq_id, success, result.len });
 
-    // 슬롯 해제
-    g_pending_promises[slot] = null;
+    const slot = seq_id % MAX_PENDING;
+    const ctx = g_pending_contexts[slot] orelse g_renderer_context orelse return 0;
     g_pending_contexts[slot] = null;
 
-    // V8 컨텍스트 진입
     _ = ctx.enter.?(ctx);
 
-    if (success) {
-        // 결과를 V8 문자열로 변환하여 resolve
-        var v8_str: c.cef_string_t = .{};
-        setCefString(&v8_str, result);
-        const v8_val = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_string(&v8_str));
-        _ = promise.resolve_promise.?(promise, v8_val);
-    } else {
-        var err_str: c.cef_string_t = .{};
-        setCefString(&err_str, result);
-        _ = promise.reject_promise.?(promise, &err_str);
-    }
+    // JS에서 Promise resolve/reject (webview.h와 동일한 동작)
+    var js_buf: [16384]u8 = undefined;
+    const js = if (success)
+        // result에 single quote가 있을 수 있으므로 이스케이프
+        std.fmt.bufPrint(&js_buf, "window.__suji__._nextResolve({d},'{s}')", .{ seq_id, result }) catch {
+            _ = ctx.exit.?(ctx);
+            return 0;
+        }
+    else
+        std.fmt.bufPrint(&js_buf, "window.__suji__._nextReject({d},'{s}')", .{ seq_id, result }) catch {
+            _ = ctx.exit.?(ctx);
+            return 0;
+        };
+
+    var code_str: c.cef_string_t = .{};
+    setCefString(&code_str, js);
+    var empty_url: c.cef_string_t = .{};
+    setCefString(&empty_url, "");
+    var retval: ?*c.cef_v8_value_t = null;
+    var exception: ?*c.cef_v8_exception_t = null;
+    _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
 
     _ = ctx.exit.?(ctx);
     return 1;

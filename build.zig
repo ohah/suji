@@ -65,21 +65,31 @@ pub fn build(b: *std.Build) void {
         .name = "suji",
         .root_module = root_module,
     });
+    // install_name_tool용 헤더 패딩
+    exe.headerpad_max_install_names = true;
 
     // webview C++ 라이브러리 링크
     exe.linkLibrary(webview_dep.artifact("webviewStatic"));
 
     b.installArtifact(exe);
 
-    // macOS: ad-hoc 코드서명 (키체인 팝업 방지)
-    // zig build sign 으로 실행, 또는 run 시 자동 적용
+    // macOS: CEF 프레임워크 로드 경로 수정 + ad-hoc 코드서명
+    const fix_rpath = b.addSystemCommand(&.{
+        "install_name_tool", "-change",
+        "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
+    });
+    const cef_fw_abs = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{home}) catch @panic("OOM");
+    fix_rpath.addArg(cef_fw_abs);
+    fix_rpath.addArg("zig-out/bin/suji");
+    fix_rpath.step.dependOn(b.getInstallStep());
+
     const codesign = b.addSystemCommand(&.{
         "codesign", "--force", "--sign", "-",
         "--entitlements", "macos-entitlements.plist",
         "--deep",
         "zig-out/bin/suji",
     });
-    codesign.step.dependOn(b.getInstallStep());
+    codesign.step.dependOn(&fix_rpath.step);
 
     const sign_step = b.step("sign", "Ad-hoc codesign for macOS");
     sign_step.dependOn(&codesign.step);
@@ -245,4 +255,13 @@ pub fn build(b: *std.Build) void {
     asset_test_mod.addImport("asset_server", asset_server_module);
     const asset_test = b.addTest(.{ .root_module = asset_test_mod });
     test_step.dependOn(&b.addRunArtifact(asset_test).step);
+
+    // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
+    const cef_ipc_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/cef_ipc_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
+    test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
 }
