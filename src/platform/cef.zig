@@ -11,6 +11,7 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_v8_capi.h");
     @cInclude("include/capi/cef_process_message_capi.h");
     @cInclude("include/capi/cef_render_process_handler_capi.h");
+    @cInclude("include/capi/cef_keyboard_handler_capi.h");
 });
 
 const objc = @cImport({
@@ -134,6 +135,7 @@ var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸�
 /// 브라우저 창 생성
 pub fn createBrowser(config: CefConfig) !void {
     initLifeSpanHandler();
+    initKeyboardHandler();
     initClient(&g_client);
 
     // NSWindow 생성
@@ -350,7 +352,12 @@ fn initClient(client_ptr: *c.cef_client_t) void {
     zeroCefStruct(c.cef_client_t, client_ptr);
     initBaseRefCounted(&client_ptr.base);
     client_ptr.get_life_span_handler = &getLifeSpanHandler;
+    client_ptr.get_keyboard_handler = &getKeyboardHandler;
     client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
+}
+
+fn getKeyboardHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_keyboard_handler_t {
+    return &g_keyboard_handler;
 }
 
 fn getLifeSpanHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_life_span_handler_t {
@@ -472,6 +479,145 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, _: ?*c._cef_browser_t) callconv(.c) void {
     c.cef_quit_message_loop();
+}
+
+// ============================================
+// CEF Keyboard Handler (Electron 호환 단축키)
+// ============================================
+// Cmd+Shift+I / F12  — DevTools
+// Cmd+R              — Reload
+// Cmd+Shift+R        — Hard Reload (캐시 무시)
+// Cmd+W              — 창 닫기
+// Cmd+Q              — 앱 종료
+// Cmd+Plus/Minus/0   — 줌 인/아웃/리셋
+// Cmd+[ / ]          — 뒤로/앞으로
+
+var g_keyboard_handler: c.cef_keyboard_handler_t = undefined;
+var g_keyboard_handler_initialized: bool = false;
+
+fn initKeyboardHandler() void {
+    if (g_keyboard_handler_initialized) return;
+    zeroCefStruct(c.cef_keyboard_handler_t, &g_keyboard_handler);
+    initBaseRefCounted(&g_keyboard_handler.base);
+    g_keyboard_handler.on_pre_key_event = &onPreKeyEvent;
+    g_keyboard_handler_initialized = true;
+}
+
+fn onPreKeyEvent(
+    _: ?*c._cef_keyboard_handler_t,
+    browser: ?*c._cef_browser_t,
+    event: ?*const c.cef_key_event_t,
+    _: c.cef_event_handle_t,
+    is_keyboard_shortcut: ?*i32,
+) callconv(.c) i32 {
+    const ev = event orelse return 0;
+    const br = browser orelse return 0;
+
+    // RawKeyDown만 처리
+    if (ev.type != c.KEYEVENT_RAWKEYDOWN) return 0;
+
+    const cmd = (ev.modifiers & c.EVENTFLAG_COMMAND_DOWN) != 0;
+    const shift = (ev.modifiers & c.EVENTFLAG_SHIFT_DOWN) != 0;
+    const alt = (ev.modifiers & c.EVENTFLAG_ALT_DOWN) != 0;
+    const key = ev.windows_key_code;
+
+    // F12 — DevTools
+    if (key == 123) { // VK_F12
+        openDevTools(br);
+        return 1;
+    }
+
+    if (!cmd) return 0;
+
+    // Cmd+Shift+I / Cmd+Option+I — DevTools
+    if (key == 'I' and (shift or alt)) {
+        openDevTools(br);
+        return 1;
+    }
+
+    // Cmd+R — Reload
+    if (key == 'R' and !shift) {
+        br.reload.?(br);
+        return 1;
+    }
+
+    // Cmd+Shift+R — Hard Reload
+    if (key == 'R' and shift) {
+        br.reload_ignore_cache.?(br);
+        return 1;
+    }
+
+    // Cmd+W — 창 닫기
+    if (key == 'W' and !shift) {
+        const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+        if (host) |h| h.close_browser.?(h, 0);
+        return 1;
+    }
+
+    // Cmd+Q — 앱 종료
+    if (key == 'Q') {
+        c.cef_quit_message_loop();
+        return 1;
+    }
+
+    // Cmd+Plus (=+) — 줌 인
+    if (key == 187 or key == '+' or key == '=') {
+        zoomChange(br, 0.5);
+        return 1;
+    }
+
+    // Cmd+Minus — 줌 아웃
+    if (key == 189 or key == '-') {
+        zoomChange(br, -0.5);
+        return 1;
+    }
+
+    // Cmd+0 — 줌 리셋
+    if (key == '0') {
+        zoomSet(br, 0.0);
+        return 1;
+    }
+
+    // Cmd+[ — 뒤로
+    if (key == 219) { // VK_OEM_4 = [
+        br.go_back.?(br);
+        return 1;
+    }
+
+    // Cmd+] — 앞으로
+    if (key == 221) { // VK_OEM_6 = ]
+        br.go_forward.?(br);
+        return 1;
+    }
+
+    // 나머지 Cmd 단축키는 macOS Edit 메뉴에서 처리 (C/V/X/A/Z)
+    if (is_keyboard_shortcut) |ks| ks.* = 1;
+    return 0;
+}
+
+fn openDevTools(browser: *c.cef_browser_t) void {
+    const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
+
+    var window_info: c.cef_window_info_t = undefined;
+    zeroCefStruct(c.cef_window_info_t, &window_info);
+    window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
+
+    var settings: c.cef_browser_settings_t = undefined;
+    zeroCefStruct(c.cef_browser_settings_t, &settings);
+
+    var point: c.cef_point_t = .{ .x = 0, .y = 0 };
+    host.show_dev_tools.?(host, &window_info, null, &settings, &point);
+}
+
+fn zoomChange(browser: *c.cef_browser_t, delta: f64) void {
+    const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
+    const current = host.get_zoom_level.?(host);
+    host.set_zoom_level.?(host, current + delta);
+}
+
+fn zoomSet(browser: *c.cef_browser_t, level: f64) void {
+    const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
+    host.set_zoom_level.?(host, level);
 }
 
 // ============================================
