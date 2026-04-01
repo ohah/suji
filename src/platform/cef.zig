@@ -477,7 +477,17 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
     std.debug.print("[suji] CEF browser after_created\n", .{});
 }
 
-fn onBeforeClose(_: ?*c._cef_life_span_handler_t, _: ?*c._cef_browser_t) callconv(.c) void {
+fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
+    // DevTools 창 닫힘은 무시 — 메인 브라우저만 앱 종료
+    if (browser) |br| {
+        if (g_browser) |main| {
+            const br_host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            const main_host = asPtr(c.cef_browser_host_t, main.get_host.?(main));
+            if (br_host != null and main_host != null) {
+                if (br_host.? != main_host.?) return; // DevTools 창
+            }
+        }
+    }
     c.cef_quit_message_loop();
 }
 
