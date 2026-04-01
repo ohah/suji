@@ -71,8 +71,21 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    // macOS: ad-hoc 코드서명 (키체인 팝업 방지)
+    // zig build sign 으로 실행, 또는 run 시 자동 적용
+    const codesign = b.addSystemCommand(&.{
+        "codesign", "--force", "--sign", "-",
+        "--entitlements", "macos-entitlements.plist",
+        "--deep",
+        "zig-out/bin/suji",
+    });
+    codesign.step.dependOn(b.getInstallStep());
+
+    const sign_step = b.step("sign", "Ad-hoc codesign for macOS");
+    sign_step.dependOn(&codesign.step);
+
     const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(b.getInstallStep());
+    run_cmd.step.dependOn(&codesign.step);
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }

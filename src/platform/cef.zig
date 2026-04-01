@@ -289,7 +289,34 @@ fn initApp(app: *c.cef_app_t) void {
     zeroCefStruct(c.cef_app_t, app);
     initBaseRefCounted(&app.base);
     app.get_render_process_handler = &getRenderProcessHandler;
+    app.on_before_command_line_processing = &onBeforeCommandLineProcessing;
     initRenderHandler();
+}
+
+/// CEF 커맨드라인 플래그 주입 (키체인 팝업 방지 등)
+fn onBeforeCommandLineProcessing(
+    _: ?*c._cef_app_t,
+    _: [*c]const c.cef_string_t,
+    command_line: ?*c._cef_command_line_t,
+) callconv(.c) void {
+    const cmd = command_line orelse return;
+
+    // macOS 키체인 접근 시 팝업 방지
+    var mock_keychain: c.cef_string_t = .{};
+    setCefString(&mock_keychain, "use-mock-keychain");
+    cmd.append_switch.?(cmd, &mock_keychain);
+
+    // Helper 프로세스가 Dock에 나타나지 않게
+    var disable_bg: c.cef_string_t = .{};
+    setCefString(&disable_bg, "disable-background-mode");
+    cmd.append_switch.?(cmd, &disable_bg);
+
+    // localhost DevTools 허용
+    var remote_origins: c.cef_string_t = .{};
+    setCefString(&remote_origins, "remote-allow-origins");
+    var wildcard: c.cef_string_t = .{};
+    setCefString(&wildcard, "*");
+    cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
 }
 
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {
