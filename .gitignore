@@ -25,3 +25,4 @@ examples/*/backends/*/Cargo.lock
 # Claude
 .claude/
 reference/
+test-results/

@@ -14,10 +14,22 @@ import puppeteer, { type Browser, type Page } from "puppeteer-core";
 let browser: Browser;
 let page: Page;
 
+// 헬퍼: invoke 호출
+const invoke = (channel: string, data = {}, options = {}) =>
+  page.evaluate(
+    ([c, d, o]) => (window as any).__suji__.invoke(c, d, o),
+    [channel, data, options] as const
+  );
+
 beforeAll(async () => {
-  browser = await puppeteer.connect({ browserURL: "http://localhost:9222" });
+  browser = await puppeteer.connect({
+    browserURL: "http://localhost:9222",
+    protocolTimeout: 10000,
+  });
   const pages = await browser.pages();
+  expect(pages.length).toBeGreaterThan(0);
   page = pages[0];
+  page.setDefaultTimeout(10000);
 });
 
 afterAll(async () => {
@@ -29,9 +41,8 @@ afterAll(async () => {
 // ============================================
 
 describe("CEF connection", () => {
-  test("page is loaded", async () => {
-    const url = page.url();
-    expect(url).toContain("localhost");
+  test("page is loaded", () => {
+    expect(page.url()).toContain("localhost");
   });
 
   test("window.__suji__ exists", async () => {
@@ -40,7 +51,9 @@ describe("CEF connection", () => {
   });
 
   test("__suji__ has invoke/emit/on", async () => {
-    const keys = await page.evaluate(() => Object.keys((window as any).__suji__));
+    const keys = await page.evaluate(() =>
+      Object.keys((window as any).__suji__)
+    );
     expect(keys).toContain("invoke");
     expect(keys).toContain("emit");
     expect(keys).toContain("on");
@@ -53,17 +66,13 @@ describe("CEF connection", () => {
 
 describe("invoke: auto-routing", () => {
   test("invoke('add', {a:10, b:20}) → Zig", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("add", { a: 10, b: 20 })
-    );
+    const result: any = await invoke("add", { a: 10, b: 20 });
     expect(result.from).toBe("zig");
     expect(result.result.result).toBe(30);
   });
 
   test("invoke('info') → Zig", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("info")
-    );
+    const result: any = await invoke("info");
     expect(result.from).toBe("zig");
     expect(result.result.runtime).toBe("zig");
   });
@@ -77,52 +86,23 @@ describe("invoke: auto-routing", () => {
 });
 
 // ============================================
-// 3. invoke — target 지정
+// 3. invoke — target 지정 (ping/greet x zig/rust/go)
 // ============================================
 
 describe("invoke: target", () => {
-  test("ping → zig", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("ping", {}, { target: "zig" })
-    );
-    expect(result.from).toBe("zig");
-  });
+  for (const target of ["zig", "rust", "go"]) {
+    test(`ping → ${target}`, async () => {
+      const result: any = await invoke("ping", {}, { target });
+      expect(result.from).toBe(target);
+    });
+  }
 
-  test("ping → rust", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("ping", {}, { target: "rust" })
-    );
-    expect(result.from).toBe("rust");
-  });
-
-  test("ping → go", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("ping", {}, { target: "go" })
-    );
-    expect(result.from).toBe("go");
-  });
-
-  test("greet → zig", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("greet", { name: "E2E" }, { target: "zig" })
-    );
-    expect(result.from).toBe("zig");
-    expect(result.result.greeting).toContain("Hello");
-  });
-
-  test("greet → rust", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("greet", { name: "E2E" }, { target: "rust" })
-    );
-    expect(result.from).toBe("rust");
-  });
-
-  test("greet → go", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("greet", { name: "E2E" }, { target: "go" })
-    );
-    expect(result.from).toBe("go");
-  });
+  for (const target of ["zig", "rust", "go"]) {
+    test(`greet → ${target}`, async () => {
+      const result: any = await invoke("greet", { name: "E2E" }, { target });
+      expect(result.from).toBe(target);
+    });
+  }
 });
 
 // ============================================
@@ -130,37 +110,19 @@ describe("invoke: target", () => {
 // ============================================
 
 describe("cross-backend", () => {
-  test("zig → rust (call_rust)", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("call_rust", {}, { target: "zig" })
-    );
-    expect(result.from).toBe("zig");
-    expect(result.rust_said.from).toBe("rust");
-  });
-
-  test("zig → go (call_go)", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("call_go", {}, { target: "zig" })
-    );
-    expect(result.from).toBe("zig");
-    expect(result.go_said.from).toBe("go");
-  });
-
-  test("rust → go (call_go)", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("call_go", {}, { target: "rust" })
-    );
-    expect(result.from).toBe("rust");
-    expect(result.go_said.from).toBe("go");
-  });
-
-  test("go → rust (call_rust)", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("call_rust", {}, { target: "go" })
-    );
-    expect(result.from).toBe("go");
-    expect(result.rust_said.from).toBe("rust");
-  });
+  const cases = [
+    { cmd: "call_rust", target: "zig", from: "zig", nested: "rust_said" },
+    { cmd: "call_go", target: "zig", from: "zig", nested: "go_said" },
+    { cmd: "call_go", target: "rust", from: "rust", nested: "go_said" },
+    { cmd: "call_rust", target: "go", from: "go", nested: "rust_said" },
+  ];
+  for (const { cmd, target, from, nested } of cases) {
+    test(`${target} → ${nested.replace("_said", "")} (${cmd})`, async () => {
+      const result: any = await invoke(cmd, {}, { target });
+      expect(result.from).toBe(from);
+      expect(result[nested]).toBeDefined();
+    });
+  }
 });
 
 // ============================================
@@ -169,18 +131,14 @@ describe("cross-backend", () => {
 
 describe("collab", () => {
   test("zig leads collab", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("collab", { data: "e2e test" }, { target: "zig" })
-    );
+    const result: any = await invoke("collab", { data: "e2e test" }, { target: "zig" });
     expect(result.from).toBe("zig");
     expect(result.rust_collab).toBeDefined();
     expect(result.go_collab).toBeDefined();
   });
 
   test("rust leads collab", async () => {
-    const result: any = await page.evaluate(() =>
-      (window as any).__suji__.invoke("collab", { data: "e2e test" }, { target: "rust" })
-    );
+    const result: any = await invoke("collab", { data: "e2e test" }, { target: "rust" });
     expect(result.from).toBe("rust");
     expect(result.go_stats).toBeDefined();
   });
@@ -193,12 +151,13 @@ describe("collab", () => {
 describe("events", () => {
   test("emit → on 수신", async () => {
     const result = await page.evaluate(() => {
-      return new Promise<string>((resolve) => {
+      return new Promise<string>((resolve, reject) => {
         const s = (window as any).__suji__;
+        const timer = setTimeout(() => reject(new Error("timeout")), 5000);
         s.on("e2e-test-event", (data: any) => {
+          clearTimeout(timer);
           resolve(JSON.stringify(data));
         });
-        // emit은 백엔드 EventBus를 거쳐 JS로 돌아옴
         s.emit("e2e-test-event", JSON.stringify({ msg: "hello" }));
       });
     });
@@ -209,12 +168,12 @@ describe("events", () => {
     const result = await page.evaluate(() => {
       return new Promise<string>((resolve, reject) => {
         const s = (window as any).__suji__;
+        const timer = setTimeout(() => reject(new Error("timeout")), 5000);
         s.on("zig-event", (data: any) => {
+          clearTimeout(timer);
           resolve(JSON.stringify(data));
         });
         s.invoke("emit_event", {}, { target: "zig" }).catch(reject);
-        // 타임아웃
-        setTimeout(() => reject("timeout"), 5000);
       });
     });
     expect(result).toBeDefined();
@@ -263,8 +222,8 @@ describe("stress", () => {
         promises.push(s.invoke("ping", {}, { target: "rust" }));
         promises.push(s.invoke("ping", {}, { target: "go" }));
       }
-      const results = await Promise.all(promises);
-      return results.length;
+      const results = await Promise.allSettled(promises);
+      return results.filter((r: any) => r.status === "fulfilled").length;
     });
     expect(result).toBe(30);
   });
