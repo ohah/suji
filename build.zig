@@ -190,4 +190,38 @@ pub fn build(b: *std.Build) void {
     events_int_mod.addImport("events", events_module);
     const events_int_test = b.addTest(.{ .root_module = events_int_mod });
     test_step.dependOn(&b.addRunArtifact(events_int_test).step);
+
+    // State plugin tests
+    const state_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/state_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const state_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    state_loader.addImport("events", events_module);
+    state_test_mod.addImport("loader", state_loader);
+    state_test_mod.addImport("events", events_module);
+    const state_test = b.addTest(.{ .root_module = state_test_mod });
+    test_step.dependOn(&b.addRunArtifact(state_test).step);
+
+    // Asset server tests
+    const asset_server_module = b.createModule(.{
+        .root_source_file = b.path("src/core/asset_server.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const asset_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/asset_server_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    asset_test_mod.addImport("asset_server", asset_server_module);
+    const asset_test = b.addTest(.{ .root_module = asset_test_mod });
+    test_step.dependOn(&b.addRunArtifact(asset_test).step);
 }

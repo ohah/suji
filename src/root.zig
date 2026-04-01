@@ -12,6 +12,7 @@ pub const ipc = @import("core/ipc.zig");
 pub const config = @import("core/config.zig");
 pub const events = @import("events");
 pub const scaffold = @import("core/init.zig");
+pub const asset_server_mod = @import("core/asset_server.zig");
 pub const app_mod = @import("core/app.zig");
 
 // 타입 re-export
@@ -23,6 +24,7 @@ pub const WebView = webview.WebView;
 pub const Bridge = ipc.Bridge;
 pub const Config = config.Config;
 pub const EventBus = events.EventBus;
+pub const AssetServer = asset_server_mod.AssetServer;
 
 // Zig 백엔드 API (Electron 스타일)
 pub const App = app_mod.App;

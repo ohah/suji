@@ -1,5 +1,6 @@
 const std = @import("std");
 const suji = @import("root.zig");
+const util = @import("util");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -93,10 +94,11 @@ fn runDev(allocator: std.mem.Allocator) !void {
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
-    // 1. 백엔드 빌드 + 로드
+    // 1. 백엔드 + 플러그인 빌드 + 로드
     var registry = suji.BackendRegistry.init(allocator);
     defer registry.deinit();
     registry.setGlobal();
+    try loadPluginsFromConfig(allocator, &config, &registry, false);
     try loadBackendsFromConfig(allocator, &config, &registry, false);
 
     // 2. 프론트엔드 dev 서버
@@ -154,9 +156,76 @@ fn runProd(allocator: std.mem.Allocator) !void {
     var registry = suji.BackendRegistry.init(allocator);
     defer registry.deinit();
     registry.setGlobal();
+    try loadPluginsFromConfig(allocator, &config, &registry, true);
     try loadBackendsFromConfig(allocator, &config, &registry, true);
 
     try openWindow(allocator, &config, &registry, .dist);
+}
+
+// ============================================
+// 플러그인 빌드/로드
+// ============================================
+
+fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, release: bool) !void {
+    const plugins = config.plugins orelse return;
+
+    for (plugins) |plugin_name| {
+        std.debug.print("[suji] loading plugin: {s}\n", .{plugin_name});
+
+        // suji-plugin.json 읽어서 lang 결정
+        const plugin_dir = getPluginDir(allocator, plugin_name) orelse {
+            std.debug.print("[suji] plugin '{s}' not found\n", .{plugin_name});
+            continue;
+        };
+        defer allocator.free(plugin_dir);
+
+        const lang = readPluginLang(allocator, plugin_dir) orelse {
+            std.debug.print("[suji] plugin '{s}': cannot read suji-plugin.json\n", .{plugin_name});
+            continue;
+        };
+        defer allocator.free(lang);
+
+        const entry = std.fmt.allocPrint(allocator, "{s}/{s}", .{ plugin_dir, lang }) catch continue;
+        defer allocator.free(entry);
+
+        buildBackendByLang(allocator, lang, entry, release) catch |err| {
+            std.debug.print("[suji] plugin '{s}' build failed: {}\n", .{ plugin_name, err });
+            continue;
+        };
+
+        const dylib_path = getDylibPath(allocator, lang, entry, release) catch continue;
+        defer allocator.free(dylib_path);
+
+        var path_z: [1024]u8 = undefined;
+        const path_zt = util.nullTerminate(dylib_path, &path_z);
+
+        registry.register(plugin_name, path_zt) catch |err| {
+            std.debug.print("[suji] plugin '{s}' load failed: {}\n", .{ plugin_name, err });
+        };
+    }
+}
+
+/// 플러그인 디렉토리 탐색: plugins/{name}/ 찾기
+fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
+    // 프로젝트 로컬 plugins/ (존재 여부는 하류에서 확인)
+    return std.fmt.allocPrint(allocator, "plugins/{s}", .{name}) catch null;
+}
+
+/// suji-plugin.json에서 lang 읽기
+fn readPluginLang(allocator: std.mem.Allocator, plugin_dir: []const u8) ?[]const u8 {
+    const json_path = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{plugin_dir}) catch return null;
+    defer allocator.free(json_path);
+
+    const content = std.fs.cwd().readFileAlloc(allocator, json_path, 1024 * 16) catch return null;
+    defer allocator.free(content);
+
+    const parsed = std.json.parseFromSlice(std.json.Value, allocator, content, .{}) catch return null;
+    defer parsed.deinit();
+
+    if (parsed.value != .object) return null;
+    const lang_val = parsed.value.object.get("lang") orelse return null;
+    if (lang_val != .string) return null;
+    return allocator.dupe(u8, lang_val.string) catch null;
 }
 
 // ============================================
@@ -176,10 +245,8 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
                 const path = getDylibPath(allocator, be.lang, be.entry, release) catch continue;
                 defer allocator.free(path);
                 var path_z: [1024]u8 = undefined;
-                const plen = @min(path.len, path_z.len - 1);
-                @memcpy(path_z[0..plen], path[0..plen]);
-                path_z[plen] = 0;
-                registry.register(be.name, path_z[0..plen :0]) catch |err| {
+                const path_zt = util.nullTerminate(path, &path_z);
+                registry.register(be.name, path_zt) catch |err| {
                     std.debug.print("[suji] load failed for {s}: {}\n", .{ be.name, err });
                 };
             }
@@ -193,10 +260,8 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
         const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
         defer allocator.free(path);
         var path_z: [1024]u8 = undefined;
-        const plen = @min(path.len, path_z.len - 1);
-        @memcpy(path_z[0..plen], path[0..plen]);
-        path_z[plen] = 0;
-        registry.register(be.lang, path_z[0..plen :0]) catch |err| {
+        const path_zt = util.nullTerminate(path, &path_z);
+        registry.register(be.lang, path_zt) catch |err| {
             std.debug.print("[suji] load failed: {}\n", .{err});
         };
     }
@@ -405,6 +470,24 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
         allocator.destroy(bridge);
     }
     bridge.bind();
+
+    // 에셋 서버 시작 + JS에 URL 주입
+    const asset_server = suji.AssetServer.start(allocator, config.asset_dir) catch |err| blk: {
+        std.debug.print("[suji] asset server failed: {}, continuing without it\n", .{err});
+        break :blk null;
+    };
+    defer if (asset_server) |srv| srv.stop();
+
+    if (asset_server) |srv| {
+        var url_buf: [128]u8 = undefined;
+        const base_url = srv.getBaseUrl(&url_buf);
+        var js_buf: [256]u8 = undefined;
+        const js = std.fmt.bufPrint(&js_buf, "window.__suji__.assetUrl = \"{s}\";", .{base_url}) catch null;
+        if (js) |j| {
+            js_buf[j.len] = 0;
+            win.webview.init(js_buf[0..j.len :0]);
+        }
+    }
 
     win.loadContent();
     std.debug.print("[suji] window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});

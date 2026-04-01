@@ -303,6 +303,68 @@ fn extractFloatField(json: []const u8, key: []const u8) ?f64 {
     return std.fmt.parseFloat(f64, json[start..end]) catch null;
 }
 
+/// JSON 값 추출 (문자열/숫자/bool/object/array 등): {"key":value} → value 슬라이스
+pub fn extractJsonValue(json: []const u8, field: []const u8) ?[]const u8 {
+    var pattern_buf: [128]u8 = undefined;
+    const pattern = std.fmt.bufPrint(&pattern_buf, "\"{s}\":", .{field}) catch return null;
+    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
+    const start = idx + pattern.len;
+
+    var i = start;
+    while (i < json.len and json[i] == ' ') i += 1;
+    if (i >= json.len) return null;
+
+    const first = json[i];
+    if (first == '"') {
+        return json[i..findStringEnd(json, i)];
+    } else if (first == '{' or first == '[') {
+        return json[i..findMatchingBrace(json, i)];
+    } else {
+        const end = std.mem.indexOfAnyPos(u8, json, i, ",}]") orelse json.len;
+        var e = end;
+        while (e > i and json[e - 1] == ' ') e -= 1;
+        return json[i..e];
+    }
+}
+
+fn findStringEnd(json: []const u8, start: usize) usize {
+    var i = start + 1;
+    while (i < json.len) {
+        if (json[i] == '\\') {
+            i += 2;
+        } else if (json[i] == '"') {
+            return i + 1;
+        } else {
+            i += 1;
+        }
+    }
+    return json.len;
+}
+
+fn findMatchingBrace(json: []const u8, start: usize) usize {
+    const open = json[start];
+    const close: u8 = if (open == '{') '}' else ']';
+    var depth: usize = 0;
+    var i = start;
+    var in_str = false;
+    while (i < json.len) {
+        if (json[i] == '\\' and in_str) {
+            i += 2;
+            continue;
+        }
+        if (json[i] == '"') in_str = !in_str;
+        if (!in_str) {
+            if (json[i] == open) depth += 1;
+            if (json[i] == close) {
+                depth -= 1;
+                if (depth == 0) return i + 1;
+            }
+        }
+        i += 1;
+    }
+    return json.len;
+}
+
 // ============================================
 // SujiCore (크로스 호출 + 이벤트)
 // ============================================

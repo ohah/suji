@@ -7,6 +7,8 @@ pub const Config = struct {
     window: Window = .{},
     backend: ?SingleBackend = null,
     backends: ?[]const MultiBackend = null,
+    plugins: ?[]const [:0]const u8 = null,
+    asset_dir: [:0]const u8 = "assets",
     frontend: Frontend = .{},
 
     _arena: ?std.heap.ArenaAllocator = null,
@@ -111,6 +113,22 @@ pub const Config = struct {
                     }
                 }
                 config.backends = list.toOwnedSlice(a) catch null;
+            }
+        }
+
+        if (root.get("asset_dir")) |v| {
+            if (v == .string) config.asset_dir = dupeStr(a, v.string);
+        }
+
+        if (root.get("plugins")) |pl_val| {
+            if (pl_val == .array) {
+                var list = std.ArrayListUnmanaged([:0]const u8){};
+                for (pl_val.array.items) |item| {
+                    if (item == .string) {
+                        list.append(a, dupeStr(a, item.string)) catch continue;
+                    }
+                }
+                config.plugins = list.toOwnedSlice(a) catch null;
             }
         }
 

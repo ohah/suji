@@ -9,6 +9,7 @@
     "height": 768,
     "debug": true
   },
+  "plugins": ["state"],
   "backends": [
     { "name": "zig", "lang": "zig", "entry": "backends/zig" },
     { "name": "rust", "lang": "rust", "entry": "backends/rust" },

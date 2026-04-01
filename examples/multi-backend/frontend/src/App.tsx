@@ -128,7 +128,32 @@ function App() {
         </section>
 
         <section>
-          <h3>7. Stress</h3>
+          <h3>7. State Plugin</h3>
+          <p>KV Store — 모든 백엔드 + Renderer 공유</p>
+          <div className="buttons">
+            <button className="zig" onClick={() => call(() => suji.invoke("state:set", { key: "user", value: "yoon" }), "state:set")}>set("user", "yoon")</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("state:get", { key: "user" }), "state:get")}>get("user")</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("state:set", { key: "count", value: 42 }), "state:set")}>set("count", 42)</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("state:get", { key: "count" }), "state:get")}>get("count")</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("state:keys"), "state:keys")}>keys()</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("state:delete", { key: "user" }), "state:delete")}>delete("user")</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("state:clear"), "state:clear")}>clear()</button>
+          </div>
+          <div className="buttons" style={{ marginTop: 6 }}>
+            <button className="zig" onClick={() => {
+              const cancel = suji.on("state:user", (data: unknown) => log(`  [state:user] ${S(data)}`));
+              (window as any).__stateCancel = cancel;
+              log("state:user watch ON");
+            }}>watch("user")</button>
+            <button style={{ background: "#ef5350", color: "#fff", fontWeight: 600, border: "none", padding: "5px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11 }} onClick={() => {
+              const c = (window as any).__stateCancel;
+              if (c) { c(); (window as any).__stateCancel = null; log("state:user watch OFF"); }
+            }}>unwatch</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>8. Stress</h3>
           <div className="buttons">
             <button className="chain" onClick={async () => {
               log("--- 30 calls ---");
