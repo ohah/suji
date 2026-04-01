@@ -232,6 +232,15 @@ fn setCefString(dest: *c.cef_string_t, src: []const u8) void {
     _ = c.cef_string_utf8_to_utf16(src.ptr, src.len, dest);
 }
 
+/// JSON에서 "cmd":"value" 추출
+fn extractCmd(json: []const u8) ?[]const u8 {
+    const pattern = "\"cmd\":\"";
+    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
+    const start = idx + pattern.len;
+    const end = std.mem.indexOfPos(u8, json, start, "\"") orelse return null;
+    return json[start..end];
+}
+
 /// CefListValue에서 문자열 인자를 UTF-8로 추출
 fn getArgString(args: *c.cef_list_value_t, index: usize, buf: []u8) []const u8 {
     return cefUserfreeToUtf8(args.get_string.?(args, index), buf);
@@ -526,11 +535,36 @@ fn onContextCreated(
     std.debug.print("[suji] V8 context created: window.__suji__ bound\n", .{});
 }
 
-/// JS 헬퍼 코드 주입 (이벤트 리스너 시스템)
+/// JS 헬퍼 코드 주입 — 기존 webview ipc.zig와 동일한 window.__suji__ API
 fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
+    // __suji_raw_invoke__(json) → Promise<string>  (네이티브 V8 바인딩)
+    // __suji_raw_emit__(event, data) → void         (네이티브 V8 바인딩)
+    // 이 위에 기존 webview와 동일한 JS 인터페이스를 구성
     const js_code =
         \\(function() {
+        \\  var raw_invoke = window.__suji__.invoke;
+        \\  var raw_emit = window.__suji__.emit;
         \\  var s = window.__suji__;
+        \\  s.invoke = function(channel, data, options) {
+        \\    var req = data ? Object.assign({cmd: channel}, data) : {cmd: channel};
+        \\    var target = options && options.target;
+        \\    if (target) {
+        \\      return raw_invoke(target, JSON.stringify(req));
+        \\    }
+        \\    return raw_invoke(channel, JSON.stringify(req));
+        \\  };
+        \\  s.emit = function(event, data) {
+        \\    return raw_emit(event, JSON.stringify(data || {}));
+        \\  };
+        \\  s.chain = function(from, to, request) {
+        \\    return raw_invoke("__chain__", JSON.stringify({__chain:true,from:from,to:to,request:request}));
+        \\  };
+        \\  s.fanout = function(backends, request) {
+        \\    return raw_invoke("__fanout__", JSON.stringify({__fanout:true,backends:backends,request:request}));
+        \\  };
+        \\  s.core = function(request) {
+        \\    return raw_invoke("__core__", JSON.stringify({__core:true,request:request}));
+        \\  };
         \\  s._listeners = {};
         \\  s.on = function(event, callback) {
         \\    if (!s._listeners[event]) s._listeners[event] = [];
@@ -579,8 +613,10 @@ fn v8Execute(
     return 0;
 }
 
-/// invoke(channel, data?, options?) → Promise
-/// channel: string, data: object (optional), options: { target: string } (optional)
+/// raw invoke(channel, json_request) → Promise
+/// JS 래퍼가 {cmd: channel, ...data}를 조립해서 json_request로 전달.
+/// 1인자: invoke(json_request) — 자동 라우팅
+/// 2인자: invoke(target, json_request) — 명시적 백엔드 지정
 fn v8HandleInvoke(
     argc: usize,
     argv: [*c]const ?*c.cef_v8_value_t,
@@ -588,32 +624,29 @@ fn v8HandleInvoke(
 ) i32 {
     if (argc < 1) return 0;
 
-    // channel 인자
-    const channel_v8 = argv[0] orelse return 0;
     var channel_buf: [256]u8 = undefined;
-    const channel_userfree = channel_v8.get_string_value.?(channel_v8);
-    const channel = cefUserfreeToUtf8(channel_userfree, &channel_buf);
-    if (channel.len == 0) return 0;
+    var channel: []const u8 = "";
+    var request_buf: [8192]u8 = undefined;
+    var request: []const u8 = "{}";
 
-    // data 인자 (JSON 문자열로 변환)
-    var data_buf: [8192]u8 = undefined;
-    var data: []const u8 = "{}";
     if (argc >= 2) {
-        const data_v8 = argv[1];
-        if (data_v8 != null) {
-            if (data_v8.?.is_string.?(data_v8) == 1) {
-                const data_userfree = data_v8.?.get_string_value.?(data_v8);
-                data = cefUserfreeToUtf8(data_userfree, &data_buf);
-            } else if (data_v8.?.is_object.?(data_v8) == 1) {
-                // 오브젝트는 JSON.stringify 필요 — 렌더러에서 JS eval로 처리
-                // 간단한 구현: 문자열만 지원, 오브젝트는 프론트엔드에서 JSON.stringify 후 전달
-                data = "{}";
-            }
+        // 2인자: invoke(target_or_channel, json_request)
+        const arg0 = argv[0] orelse return 0;
+        channel = cefUserfreeToUtf8(arg0.get_string_value.?(arg0), &channel_buf);
+        const arg1 = argv[1] orelse return 0;
+        if (arg1.is_string.?(arg1) == 1) {
+            request = cefUserfreeToUtf8(arg1.get_string_value.?(arg1), &request_buf);
+        }
+    } else {
+        // 1인자: invoke(json_request) — cmd 필드에서 채널 추출
+        const arg0 = argv[0] orelse return 0;
+        if (arg0.is_string.?(arg0) == 1) {
+            request = cefUserfreeToUtf8(arg0.get_string_value.?(arg0), &request_buf);
+            // {"cmd":"ping",...} 에서 cmd 추출
+            channel = extractCmd(request) orelse "";
         }
     }
-
-    // target 옵션 (options.target으로 특정 백엔드 지정)
-    // TODO: target 지원 — 현재는 자동 라우팅만
+    if (channel.len == 0) return 0;
 
     // Promise 생성
     const promise = asPtr(c.cef_v8_value_t, c.cef_v8_value_create_promise()) orelse return 0;
@@ -651,10 +684,7 @@ fn v8HandleInvoke(
     setCefString(&ch_str, channel);
     _ = args.set_string.?(args, 1, &ch_str);
 
-    // Electron 스타일 요청 조립: {"cmd":"channel", ...data}
-    var request_buf: [8192]u8 = undefined;
-    const request = std.fmt.bufPrint(&request_buf, "{{\"cmd\":\"{s}\",\"data\":{s}}}", .{ channel, data }) catch data;
-
+    // JS에서 이미 {cmd: channel, ...data}로 조립된 JSON을 그대로 전달
     var req_str: c.cef_string_t = .{};
     setCefString(&req_str, request);
     _ = args.set_string.?(args, 2, &req_str);
