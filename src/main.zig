@@ -793,21 +793,16 @@ fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 
     const exe_path = std.fs.selfExePath(&exe_buf) catch return null;
     const macos_dir = std.fs.path.dirname(exe_path) orelse return null;
     const contents_dir = std.fs.path.dirname(macos_dir) orelse return null;
+
     const bundle_dist = std.fmt.allocPrint(allocator, "{s}/Resources/frontend/dist", .{contents_dir}) catch return null;
-    if (std.fs.cwd().realpathAlloc(allocator, bundle_dist)) |p| {
-        allocator.free(bundle_dist);
-        return p;
-    } else |_| {}
+    defer allocator.free(bundle_dist);
+    if (std.fs.cwd().realpathAlloc(allocator, bundle_dist)) |p| return p else |_| {}
 
     // 3. .app 번들: Resources/frontend (dist 없이)
     const bundle_frontend = std.fmt.allocPrint(allocator, "{s}/Resources/frontend", .{contents_dir}) catch return null;
-    if (std.fs.cwd().realpathAlloc(allocator, bundle_frontend)) |p| {
-        allocator.free(bundle_frontend);
-        return p;
-    } else |_| {}
+    defer allocator.free(bundle_frontend);
+    if (std.fs.cwd().realpathAlloc(allocator, bundle_frontend)) |p| return p else |_| {}
 
-    allocator.free(bundle_dist);
-    allocator.free(bundle_frontend);
     return null;
 }
 

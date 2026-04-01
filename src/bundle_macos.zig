@@ -118,7 +118,10 @@ fn copyCefFramework(allocator: std.mem.Allocator, app_name: []const u8) !void {
     defer allocator.free(dst);
 
     std.debug.print("[suji] copying CEF framework...\n", .{});
-    try runCmd(allocator, &.{ "cp", "-R", src, dst });
+    // APFS clone (-c) で instant copy, fallback to regular cp
+    runCmd(allocator, &.{ "cp", "-Rc", src, dst }) catch {
+        try runCmd(allocator, &.{ "cp", "-R", src, dst });
+    };
 }
 
 fn createHelperApp(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, suffix: []const u8, identifier: []const u8) !void {
@@ -131,12 +134,14 @@ fn createHelperApp(allocator: std.mem.Allocator, app_name: []const u8, name: []c
 
     std.fs.cwd().makePath(helper_macos) catch {};
 
-    // Helper 바이너리 = 메인 바이너리 복사 (codesign이 심링크 거부)
+    // Helper 바이너리 = 메인 바이너리 hardlink (codesign은 hardlink OK, symlink 거부)
     const helper_exe = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ helper_macos, helper_name });
     defer allocator.free(helper_exe);
     const main_src = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
     defer allocator.free(main_src);
-    try runCmd(allocator, &.{ "cp", main_src, helper_exe });
+    runCmd(allocator, &.{ "ln", main_src, helper_exe }) catch {
+        try runCmd(allocator, &.{ "cp", main_src, helper_exe });
+    };
     try runCmd(allocator, &.{ "chmod", "+x", helper_exe });
 
     // Helper Info.plist
