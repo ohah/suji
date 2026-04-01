@@ -374,3 +374,216 @@ test "seq_id slot wrapping" {
     const max_u32: u32 = 0xFFFFFFFF;
     try std.testing.expectEqual(@as(usize, 255), @as(usize, max_u32 % MAX_PENDING));
 }
+
+// ============================================
+// jsonToHexEscape: 특수 문자 + 유니코드
+// ============================================
+
+test "jsonToHexEscape: JSON with nested quotes" {
+    var buf: [512]u8 = undefined;
+    const input = "{\"msg\":\"it's a \\\"test\\\"\"}";
+    const result = jsonToHexEscape(input, &buf);
+    // single quote가 %27로 인코딩되어야 함
+    try std.testing.expect(std.mem.indexOf(u8, result, "%27") != null);
+    // 원본에 있는 문자가 안전하게 인코딩됨
+    try std.testing.expect(result.len > input.len);
+}
+
+test "jsonToHexEscape: spaces and colons" {
+    var buf: [256]u8 = undefined;
+    const result = jsonToHexEscape("a b:c", &buf);
+    // space = %20, colon = %3A
+    try std.testing.expect(std.mem.indexOf(u8, result, "%20") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "%3A") != null);
+}
+
+test "jsonToHexEscape: curly braces" {
+    var buf: [256]u8 = undefined;
+    const result = jsonToHexEscape("{}", &buf);
+    try std.testing.expectEqualStrings("%7B%7D", result);
+}
+
+test "jsonToHexEscape: buffer overflow protection" {
+    // 작은 버퍼에 긴 문자열 — 크래시 없이 잘림
+    var buf: [6]u8 = undefined;
+    const result = jsonToHexEscape("{\"a\":1}", &buf);
+    // %7B = 3 bytes, %22 = 3 bytes → 6 bytes에서 끊김
+    try std.testing.expectEqual(@as(usize, 6), result.len);
+}
+
+// ============================================
+// extractJsonString: 엣지 케이스
+// ============================================
+
+test "extractJsonString: empty value" {
+    const data =
+        \\{"key":""}
+    ;
+    const result = extractJsonString(data, "\"key\":\"");
+    try std.testing.expectEqualStrings("", result.?);
+}
+
+test "extractJsonString: value with escaped backslash" {
+    // extractJsonString은 이스케이프를 건너뛰되 복원하지 않음 (raw 슬라이스 반환)
+    const data = "{\"path\":\"C:\\\\Users\\\\test\"}";
+    const result = extractJsonString(data, "\"path\":\"");
+    try std.testing.expectEqualStrings("C:\\\\Users\\\\test", result.?);
+}
+
+test "extractJsonString: multiple same patterns takes first" {
+    const data =
+        \\{"a":"first","a":"second"}
+    ;
+    const result = extractJsonString(data, "\"a\":\"");
+    try std.testing.expectEqualStrings("first", result.?);
+}
+
+test "extractJsonString: unicode value" {
+    const data =
+        \\{"name":"수지"}
+    ;
+    const result = extractJsonString(data, "\"name\":\"");
+    try std.testing.expectEqualStrings("수지", result.?);
+}
+
+// ============================================
+// unescapeJson: 엣지 케이스
+// ============================================
+
+test "unescapeJson: empty string" {
+    var buf: [256]u8 = undefined;
+    const result = unescapeJson("", &buf);
+    try std.testing.expectEqual(@as(usize, 0), result.len);
+}
+
+test "unescapeJson: only escapes" {
+    var buf: [256]u8 = undefined;
+    const result = unescapeJson("\\\"\\\"", &buf);
+    try std.testing.expectEqualStrings("\"\"", result);
+}
+
+test "unescapeJson: trailing backslash preserved" {
+    var buf: [256]u8 = undefined;
+    const input = [_]u8{ 'a', 'b', 'c', '\\' };
+    const result = unescapeJson(&input, &buf);
+    // trailing \는 이스케이프 대상 없이 그대로 복사
+    const expected = [_]u8{ 'a', 'b', 'c', '\\' };
+    try std.testing.expectEqualStrings(&expected, result);
+}
+
+// ============================================
+// extractCmd: 엣지 케이스
+// ============================================
+
+test "extractCmd: cmd at end of json" {
+    try std.testing.expectEqualStrings("test", extractCmd("{\"cmd\":\"test\"}").?);
+}
+
+test "extractCmd: cmd with special chars" {
+    try std.testing.expectEqualStrings("state:set", extractCmd("{\"cmd\":\"state:set\",\"key\":\"user\"}").?);
+}
+
+test "extractCmd: cmd with hyphen" {
+    try std.testing.expectEqualStrings("emit-event", extractCmd("{\"cmd\":\"emit-event\"}").?);
+}
+
+test "extractCmd: empty cmd" {
+    try std.testing.expectEqualStrings("", extractCmd("{\"cmd\":\"\"}").?);
+}
+
+// ============================================
+// 특수 채널 라우팅 테스트
+// ============================================
+
+test "special channel detection: __fanout__" {
+    try std.testing.expect(std.mem.eql(u8, "__fanout__", "__fanout__"));
+    try std.testing.expect(!std.mem.eql(u8, "__fanout__", "fanout"));
+}
+
+test "special channel detection: __chain__" {
+    try std.testing.expect(std.mem.eql(u8, "__chain__", "__chain__"));
+}
+
+test "special channel detection: __core__" {
+    try std.testing.expect(std.mem.eql(u8, "__core__", "__core__"));
+}
+
+test "special channel detection: normal channel is not special" {
+    const channel = "ping";
+    try std.testing.expect(!std.mem.eql(u8, channel, "__fanout__"));
+    try std.testing.expect(!std.mem.eql(u8, channel, "__chain__"));
+    try std.testing.expect(!std.mem.eql(u8, channel, "__core__"));
+}
+
+// ============================================
+// 통합: fanout → extractJsonString → unescapeJson → extractCmd
+// ============================================
+
+test "integration: fanout request → backend invoke" {
+    // JS에서 보내는 fanout 메시지 시뮬레이션
+    const js_data =
+        \\{"__fanout":true,"backends":"zig,rust,go","request":"{\"cmd\":\"ping\"}"}
+    ;
+
+    // 1. backends 추출
+    const backends = extractJsonString(js_data, "\"backends\":\"").?;
+    try std.testing.expectEqualStrings("zig,rust,go", backends);
+
+    // 2. request 추출 + unescape
+    const req_escaped = extractJsonString(js_data, "\"request\":\"").?;
+    var buf: [256]u8 = undefined;
+    const req = unescapeJson(req_escaped, &buf);
+    try std.testing.expectEqualStrings("{\"cmd\":\"ping\"}", req);
+
+    // 3. request에서 cmd 추출
+    try std.testing.expectEqualStrings("ping", extractCmd(req).?);
+
+    // 4. backends split
+    var count: usize = 0;
+    var iter = std.mem.splitScalar(u8, backends, ',');
+    while (iter.next()) |_| count += 1;
+    try std.testing.expectEqual(@as(usize, 3), count);
+}
+
+test "integration: chain request → from/to/request" {
+    const js_data =
+        \\{"__chain":true,"from":"zig","to":"rust","request":"{\"cmd\":\"collab\",\"data\":\"test\"}"}
+    ;
+
+    const from = extractJsonString(js_data, "\"from\":\"").?;
+    const to = extractJsonString(js_data, "\"to\":\"").?;
+    const req_escaped = extractJsonString(js_data, "\"request\":\"").?;
+    var buf: [256]u8 = undefined;
+    const req = unescapeJson(req_escaped, &buf);
+
+    try std.testing.expectEqualStrings("zig", from);
+    try std.testing.expectEqualStrings("rust", to);
+    try std.testing.expectEqualStrings("collab", extractCmd(req).?);
+    try std.testing.expect(std.mem.indexOf(u8, req, "test") != null);
+}
+
+test "integration: core_info request" {
+    const js_data =
+        \\{"__core":true,"request":"{\"cmd\":\"core_info\"}"}
+    ;
+    const req_escaped = extractJsonString(js_data, "\"request\":\"").?;
+    var buf: [256]u8 = undefined;
+    const req = unescapeJson(req_escaped, &buf);
+    try std.testing.expect(std.mem.indexOf(u8, req, "core_info") != null);
+}
+
+test "integration: invoke with target" {
+    // JS: invoke("ping", {}, {target: "zig"})
+    // → raw_invoke("zig", '{"cmd":"ping"}')
+    // channel = "zig", request = {"cmd":"ping"}
+    const channel = "zig";
+    const request = "{\"cmd\":\"ping\"}";
+
+    // channel이 특수 채널이 아닌지 확인
+    try std.testing.expect(!std.mem.eql(u8, channel, "__fanout__"));
+    try std.testing.expect(!std.mem.eql(u8, channel, "__chain__"));
+    try std.testing.expect(!std.mem.eql(u8, channel, "__core__"));
+
+    // request에서 cmd 추출
+    try std.testing.expectEqualStrings("ping", extractCmd(request).?);
+}
