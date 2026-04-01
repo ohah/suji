@@ -225,12 +225,15 @@ fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Confi
 
 /// 플러그인 디렉토리 탐색: 로컬 → suji 설치 경로 순
 fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
-    // 1. 프로젝트 로컬 plugins/
+    // 1. 프로젝트 로컬 plugins/{name}/
     const local = std.fmt.allocPrint(allocator, "plugins/{s}", .{name}) catch return null;
-    if (std.fs.cwd().statFile(std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{local}) catch {
+    const local_json = std.fmt.allocPrint(allocator, "plugins/{s}/suji-plugin.json", .{name}) catch {
         allocator.free(local);
         return null;
-    })) |_| {
+    };
+    defer allocator.free(local_json);
+    if (std.fs.cwd().readFileAlloc(allocator, local_json, 1024)) |content| {
+        allocator.free(content);
         return local;
     } else |_| {}
     allocator.free(local);
@@ -238,17 +241,17 @@ fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
     // 2. suji 바이너리 기준 (zig-out/bin/suji → ../../plugins/{name})
     var exe_buf: [1024]u8 = undefined;
     const exe_path = std.fs.selfExePath(&exe_buf) catch return null;
-    // bin/ → zig-out/ → project root
     const bin_dir = std.fs.path.dirname(exe_path) orelse return null;
     const zig_out_dir = std.fs.path.dirname(bin_dir) orelse return null;
     const project_root = std.fs.path.dirname(zig_out_dir) orelse return null;
     const builtin = std.fmt.allocPrint(allocator, "{s}/plugins/{s}", .{ project_root, name }) catch return null;
-    const check = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{builtin}) catch {
+    const builtin_json = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{builtin}) catch {
         allocator.free(builtin);
         return null;
     };
-    defer allocator.free(check);
-    if (std.fs.cwd().statFile(check)) |_| {
+    defer allocator.free(builtin_json);
+    if (std.fs.cwd().readFileAlloc(allocator, builtin_json, 1024)) |content| {
+        allocator.free(content);
         return builtin;
     } else |_| {}
     allocator.free(builtin);
@@ -551,6 +554,8 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
     // 특수 채널: fanout, chain, core
     if (std.mem.eql(u8, channel, "__fanout__")) {
         return cefHandleFanout(registry, data, response_buf);
+    } else if (std.mem.eql(u8, channel, "__chain__")) {
+        return cefHandleChain(registry, data, response_buf);
     } else if (std.mem.eql(u8, channel, "__core__")) {
         return cefHandleCore(registry, data, response_buf);
     }
@@ -605,6 +610,37 @@ fn cefHandleFanout(registry: *const suji.BackendRegistry, data: []const u8, resp
     }
     out_pos += (std.fmt.bufPrint(out[out_pos..], "]}}", .{}) catch return null).len;
     return out[0..out_pos];
+}
+
+/// chain: Backend A → Core → Backend B
+fn cefHandleChain(registry: *const suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
+    const from = extractJsonString(data, "\"from\":\"") orelse return null;
+    const to = extractJsonString(data, "\"to\":\"") orelse return null;
+    const request_escaped = extractJsonString(data, "\"request\":\"") orelse return null;
+    var req_buf: [4096]u8 = undefined;
+    const req_clean = unescapeJson(request_escaped, &req_buf);
+    var req_nt: [4096]u8 = undefined;
+    const req_len = @min(req_clean.len, req_nt.len - 1);
+    @memcpy(req_nt[0..req_len], req_clean[0..req_len]);
+    req_nt[req_len] = 0;
+
+    const resp1 = registry.invoke(from, req_nt[0..req_len :0]) orelse return null;
+    var r1_buf: [8192]u8 = undefined;
+    const r1_len = @min(resp1.len, r1_buf.len);
+    @memcpy(r1_buf[0..r1_len], resp1[0..r1_len]);
+    registry.freeResponse(from, resp1);
+
+    const resp2 = registry.invoke(to, req_nt[0..req_len :0]);
+    var r2_buf: [8192]u8 = undefined;
+    const r2: []const u8 = if (resp2) |r| blk: {
+        const l = @min(r.len, r2_buf.len);
+        @memcpy(r2_buf[0..l], r[0..l]);
+        registry.freeResponse(to, resp2);
+        break :blk r2_buf[0..l];
+    } else "null";
+
+    const result = std.fmt.bufPrint(response_buf, "{{\"chain\":\"{s}->{s}\",\"step1\":{s},\"step2\":{s}}}", .{ from, to, r1_buf[0..r1_len], r2 }) catch return null;
+    return result;
 }
 
 /// core: Zig 코어 직접 호출

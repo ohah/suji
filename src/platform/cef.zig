@@ -169,27 +169,6 @@ pub fn createBrowser(config: CefConfig) !void {
     std.debug.print("[suji] CEF browser created\n", .{});
 }
 
-/// 메인 프로세스에서 렌더러로 이벤트 푸시 (EventBus → JS)
-pub fn pushEventToRenderer(browser: *c.cef_browser_t, event: []const u8, data: []const u8) void {
-    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
-
-    var msg_name: c.cef_string_t = .{};
-    setCefString(&msg_name, "suji:event");
-    const msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&msg_name)) orelse return;
-
-    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return;
-
-    var ev_str: c.cef_string_t = .{};
-    setCefString(&ev_str, event);
-    _ = args.set_string.?(args, 0, &ev_str);
-
-    var data_str: c.cef_string_t = .{};
-    setCefString(&data_str, data);
-    _ = args.set_string.?(args, 1, &data_str);
-
-    frame.send_process_message.?(frame, c.PID_RENDERER, msg);
-}
-
 /// 메인 프로세스에서 렌더러의 JS 실행 (EventBus → JS __dispatch__ 용)
 pub fn evalJs(js: [:0]const u8) void {
     const browser = g_browser orelse return;
@@ -256,6 +235,25 @@ fn extractCmd(json: []const u8) ?[]const u8 {
 /// CefListValue에서 문자열 인자를 UTF-8로 추출
 fn getArgString(args: *c.cef_list_value_t, index: usize, buf: []u8) []const u8 {
     return cefUserfreeToUtf8(args.get_string.?(args, index), buf);
+}
+
+/// JSON 문자열을 URI percent-encode (single-quote/backslash injection 방지)
+fn jsonToHexEscape(src: []const u8, buf: []u8) []const u8 {
+    const hex = "0123456789ABCDEF";
+    var o: usize = 0;
+    for (src) |ch| {
+        if (o + 3 > buf.len) break;
+        if ((ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z') or (ch >= '0' and ch <= '9') or ch == '-' or ch == '_' or ch == '.' or ch == '~') {
+            buf[o] = ch;
+            o += 1;
+        } else {
+            buf[o] = '%';
+            buf[o + 1] = hex[ch >> 4];
+            buf[o + 2] = hex[ch & 0x0f];
+            o += 3;
+        }
+    }
+    return buf[0..o];
 }
 
 /// 현재 V8 컨텍스트의 프레임으로 ProcessMessage 전송 (렌더러 → 브라우저)
@@ -397,7 +395,7 @@ fn handleBrowserInvoke(
     var data_buf: [8192]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
 
-    std.debug.print("[suji] IPC invoke: seq={d} channel={s}\n", .{ seq_id, channel });
+    // std.debug.print("[suji] IPC invoke: seq={d} channel={s}\n", .{ seq_id, channel });
 
     // 백엔드 호출
     var response_buf: [16384]u8 = undefined;
@@ -414,7 +412,6 @@ fn handleBrowserInvoke(
     }
 
     // 응답 CefProcessMessage 생성
-    std.debug.print("[suji] IPC response: seq={d} success={} result={s}\n", .{ seq_id, success, result });
     sendInvokeResponse(frame, seq_id, success, result);
     return 1;
 }
@@ -766,7 +763,6 @@ fn onRendererProcessMessageReceived(
     var name_buf: [64]u8 = undefined;
     const msg_name = cefUserfreeToUtf8(name_userfree, &name_buf);
 
-    std.debug.print("[suji:renderer] got message: {s}\n", .{msg_name});
 
     if (std.mem.eql(u8, msg_name, "suji:response")) {
         return handleRendererResponse(msg);
@@ -786,7 +782,6 @@ fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
     var result_buf: [16384]u8 = undefined;
     const result = getArgString(args, 2, &result_buf);
 
-    std.debug.print("[suji:renderer] response: seq={d} success={} result_len={d}\n", .{ seq_id, success, result.len });
 
     const slot = seq_id % MAX_PENDING;
     const ctx = g_pending_contexts[slot] orelse g_renderer_context orelse return 0;
@@ -794,16 +789,19 @@ fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
 
     _ = ctx.enter.?(ctx);
 
-    // JS에서 Promise resolve/reject (webview.h와 동일한 동작)
-    var js_buf: [16384]u8 = undefined;
+    // JS에서 Promise resolve/reject
+    // result를 hex-escape하여 single-quote injection 방지
+    var hex_buf: [32768]u8 = undefined;
+    const hex = jsonToHexEscape(result, &hex_buf);
+
+    var js_buf: [33000]u8 = undefined;
     const js = if (success)
-        // result에 single quote가 있을 수 있으므로 이스케이프
-        std.fmt.bufPrint(&js_buf, "window.__suji__._nextResolve({d},'{s}')", .{ seq_id, result }) catch {
+        std.fmt.bufPrint(&js_buf, "window.__suji__._nextResolve({d},decodeURIComponent('{s}'))", .{ seq_id, hex }) catch {
             _ = ctx.exit.?(ctx);
             return 0;
         }
     else
-        std.fmt.bufPrint(&js_buf, "window.__suji__._nextReject({d},'{s}')", .{ seq_id, result }) catch {
+        std.fmt.bufPrint(&js_buf, "window.__suji__._nextReject({d},decodeURIComponent('{s}'))", .{ seq_id, hex }) catch {
             _ = ctx.exit.?(ctx);
             return 0;
         };
@@ -835,8 +833,11 @@ fn handleRendererEvent(msg: *c._cef_process_message_t) i32 {
     const ctx = g_renderer_context orelse return 0;
     _ = ctx.enter.?(ctx);
 
-    var js_buf: [16384]u8 = undefined;
-    const js = std.fmt.bufPrint(&js_buf, "window.__suji__.__dispatch__(\"{s}\", {s})", .{ event, data }) catch {
+    // data를 hex-escape하여 injection 방지
+    var hex_buf: [16384]u8 = undefined;
+    const hex_data = jsonToHexEscape(data, &hex_buf);
+    var js_buf: [33000]u8 = undefined;
+    const js = std.fmt.bufPrint(&js_buf, "window.__suji__.__dispatch__(\"{s}\",JSON.parse(decodeURIComponent('{s}')))", .{ event, hex_data }) catch {
         _ = ctx.exit.?(ctx);
         return 0;
     };
