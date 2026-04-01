@@ -608,17 +608,13 @@ fn onPreKeyEvent(
     return 0;
 }
 
-fn toggleDevTools(browser: *c.cef_browser_t) void {
-    const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
-
-    if (g_devtools_open) {
-        host.close_dev_tools.?(host);
-        g_devtools_open = false;
-    } else {
-        // DevTools는 window_info/settings를 NULL로 전달 — CEF가 기본 창 생성
-        host.show_dev_tools.?(host, null, null, null, null);
-        g_devtools_open = true;
-    }
+fn toggleDevTools(_: *c.cef_browser_t) void {
+    // CEF ALLOY 모드에서는 인앱 DevTools 창 불가 (NSApplication 크래시)
+    // CDP port를 통해 시스템 브라우저에서 DevTools 열기
+    const url = "http://localhost:9222";
+    var child = std.process.Child.init(&.{ "open", url }, std.heap.page_allocator);
+    child.spawn() catch return;
+    _ = child.wait() catch {};
 }
 
 fn zoomChange(browser: *c.cef_browser_t, delta: f64) void {
