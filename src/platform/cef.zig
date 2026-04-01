@@ -131,6 +131,7 @@ pub fn initialize(config: CefConfig) !void {
 var g_client: c.cef_client_t = undefined;
 var g_window: ?*anyopaque = null; // NSWindow 강한 참조 유지
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
+var g_devtools_open: bool = false;
 
 /// 브라우저 창 생성
 pub fn createBrowser(config: CefConfig) !void {
@@ -481,10 +482,9 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
     // DevTools 창 닫힘은 무시 — 메인 브라우저만 앱 종료
     if (browser) |br| {
         if (g_browser) |main| {
-            const br_host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
-            const main_host = asPtr(c.cef_browser_host_t, main.get_host.?(main));
-            if (br_host != null and main_host != null) {
-                if (br_host.? != main_host.?) return; // DevTools 창
+            if (br.get_identifier.?(br) != main.get_identifier.?(main)) {
+                g_devtools_open = false;
+                return; // DevTools 창
             }
         }
     }
@@ -533,7 +533,7 @@ fn onPreKeyEvent(
 
     // F12 — DevTools
     if (key == 123) { // VK_F12
-        openDevTools(br);
+        toggleDevTools(br);
         return 1;
     }
 
@@ -541,7 +541,7 @@ fn onPreKeyEvent(
 
     // Cmd+Shift+I / Cmd+Option+I — DevTools
     if (key == 'I' and (shift or alt)) {
-        openDevTools(br);
+        toggleDevTools(br);
         return 1;
     }
 
@@ -605,18 +605,24 @@ fn onPreKeyEvent(
     return 0;
 }
 
-fn openDevTools(browser: *c.cef_browser_t) void {
+fn toggleDevTools(browser: *c.cef_browser_t) void {
     const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
 
-    var window_info: c.cef_window_info_t = undefined;
-    zeroCefStruct(c.cef_window_info_t, &window_info);
-    window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
+    if (g_devtools_open) {
+        host.close_dev_tools.?(host);
+        g_devtools_open = false;
+    } else {
+        var window_info: c.cef_window_info_t = undefined;
+        zeroCefStruct(c.cef_window_info_t, &window_info);
+        window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
 
-    var settings: c.cef_browser_settings_t = undefined;
-    zeroCefStruct(c.cef_browser_settings_t, &settings);
+        var settings: c.cef_browser_settings_t = undefined;
+        zeroCefStruct(c.cef_browser_settings_t, &settings);
 
-    var point: c.cef_point_t = .{ .x = 0, .y = 0 };
-    host.show_dev_tools.?(host, &window_info, null, &settings, &point);
+        var point: c.cef_point_t = .{ .x = 0, .y = 0 };
+        host.show_dev_tools.?(host, &window_info, null, &settings, &point);
+        g_devtools_open = true;
+    }
 }
 
 fn zoomChange(browser: *c.cef_browser_t, delta: f64) void {
@@ -1066,13 +1072,39 @@ fn setupMainMenu(app: ?*anyopaque) void {
     addMenuItem(edit_menu, "Cut", "cut:", "x");
     addMenuItem(edit_menu, "Copy", "copy:", "c");
     addMenuItem(edit_menu, "Paste", "paste:", "v");
+    addMenuItemWithModifiers(edit_menu, "Paste and Match Style", "pasteAsPlainText:", "v", true, true); // Opt+Shift+Cmd+V
     addMenuItem(edit_menu, "Delete", "delete:", "");
     addMenuItem(edit_menu, "Select All", "selectAll:", "a");
+    addSeparator(edit_menu);
+    // Substitutions 서브메뉴
+    if (createMenu("Substitutions")) |sub_menu| {
+        addMenuItem(sub_menu, "Show Substitutions", "orderFrontSubstitutionsPanel:", "");
+        addSeparator(sub_menu);
+        addMenuItem(sub_menu, "Smart Copy/Paste", "toggleSmartInsertDelete:", "");
+        addMenuItem(sub_menu, "Smart Quotes", "toggleAutomaticQuoteSubstitution:", "");
+        addMenuItem(sub_menu, "Smart Dashes", "toggleAutomaticDashSubstitution:", "");
+        addMenuItem(sub_menu, "Smart Links", "toggleAutomaticLinkDetection:", "");
+        addMenuItem(sub_menu, "Text Replacement", "toggleAutomaticTextReplacement:", "");
+        addSubmenuItem(edit_menu, "Substitutions", sub_menu);
+    }
+    // Speech 서브메뉴
+    if (createMenu("Speech")) |speech_menu| {
+        addMenuItem(speech_menu, "Start Speaking", "startSpeaking:", "");
+        addMenuItem(speech_menu, "Stop Speaking", "stopSpeaking:", "");
+        addSubmenuItem(edit_menu, "Speech", speech_menu);
+    }
     addSubmenuItem(menubar, "Edit", edit_menu);
 
     // 4. View 메뉴
     const view_menu = createMenu("View") orelse return;
     addMenuItem(view_menu, "Reload", "reload:", "r");
+    addMenuItemWithModifier(view_menu, "Force Reload", "reloadIgnoringCache:", "r", true);
+    addMenuItemWithModifiers(view_menu, "Toggle Developer Tools", "toggleDeveloperTools:", "i", false, true); // Alt+Cmd+I
+    addSeparator(view_menu);
+    addMenuItem(view_menu, "Actual Size", "resetZoom:", "0");
+    addMenuItem(view_menu, "Zoom In", "zoomIn:", "+");
+    addMenuItem(view_menu, "Zoom Out", "zoomOut:", "-");
+    addSeparator(view_menu);
     addMenuItem(view_menu, "Toggle Full Screen", "toggleFullScreen:", "f");
     addSubmenuItem(menubar, "View", view_menu);
 
@@ -1083,6 +1115,10 @@ fn setupMainMenu(app: ?*anyopaque) void {
     addSeparator(window_menu);
     addMenuItem(window_menu, "Bring All to Front", "arrangeInFront:", "");
     addSubmenuItem(menubar, "Window", window_menu);
+
+    // 6. Help 메뉴
+    const help_menu = createMenu("Help") orelse return;
+    addSubmenuItem(menubar, "Help", help_menu);
 
     msgSendVoid1(app, "setMainMenu:", menubar);
 }
@@ -1128,6 +1164,29 @@ fn addMenuItemWithModifier(menu: *anyopaque, title: [:0]const u8, action: [:0]co
         const setModFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
         setModFn(item, @ptrCast(setModSel), (1 << 20) | (1 << 17));
     }
+
+    msgSendVoid1(menu, "addItem:", item);
+}
+
+fn addMenuItemWithModifiers(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8, shift: bool, alt: bool) void {
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+    const NSString = getClass("NSString") orelse return;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
+    const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), key.ptr);
+
+    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
+    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action.ptr)), ns_key) orelse return;
+
+    // NSCommandKeyMask=1<<20, NSShiftKeyMask=1<<17, NSAlternateKeyMask=1<<19
+    var mask: u64 = 1 << 20; // Cmd
+    if (shift) mask |= 1 << 17;
+    if (alt) mask |= 1 << 19;
+    const setModSel = objc.sel_registerName("setKeyEquivalentModifierMask:");
+    const setModFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setModFn(item, @ptrCast(setModSel), mask);
 
     msgSendVoid1(menu, "addItem:", item);
 }
