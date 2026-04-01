@@ -479,15 +479,18 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
 }
 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
-    // DevTools 창 닫힘은 무시 — 메인 브라우저만 앱 종료
     if (browser) |br| {
         if (g_browser) |main| {
-            if (br.get_identifier.?(br) != main.get_identifier.?(main)) {
+            const br_id = br.get_identifier.?(br);
+            const main_id = main.get_identifier.?(main);
+            std.debug.print("[suji] onBeforeClose: browser={d} main={d}\n", .{ br_id, main_id });
+            if (br_id != main_id) {
                 g_devtools_open = false;
-                return; // DevTools 창
+                return; // DevTools 등 서브 창
             }
         }
     }
+    std.debug.print("[suji] onBeforeClose: quitting\n", .{});
     c.cef_quit_message_loop();
 }
 
@@ -612,15 +615,8 @@ fn toggleDevTools(browser: *c.cef_browser_t) void {
         host.close_dev_tools.?(host);
         g_devtools_open = false;
     } else {
-        var window_info: c.cef_window_info_t = undefined;
-        zeroCefStruct(c.cef_window_info_t, &window_info);
-        window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
-
-        var settings: c.cef_browser_settings_t = undefined;
-        zeroCefStruct(c.cef_browser_settings_t, &settings);
-
-        var point: c.cef_point_t = .{ .x = 0, .y = 0 };
-        host.show_dev_tools.?(host, &window_info, null, &settings, &point);
+        // DevTools는 window_info/settings를 NULL로 전달 — CEF가 기본 창 생성
+        host.show_dev_tools.?(host, null, null, null, null);
         g_devtools_open = true;
     }
 }
