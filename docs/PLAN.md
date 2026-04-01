@@ -138,7 +138,20 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
   - [x] Go On/Send → bridge.c → EventBus (CGo 브릿지)
   - [x] JS on/emit/off → WebView ↔ EventBus
   - [x] EventBus ↔ WebView 연결 (webview_eval)
-- [ ] 중앙 상태 스토어 (이벤트 시스템으로 대체 가능, 필요 시 구현)
+- [ ] 플러그인 시스템
+  - [ ] suji.json `plugins` 필드 파싱 (문자열 또는 객체)
+  - [ ] main.zig에서 플러그인 빌드 + dlopen + BackendRegistry 등록
+  - [ ] 채널 접두사 컨벤션 (`state:get`, `fs:read` 등)
+  - [ ] `suji-plugin.json` 스펙 (플러그인 메타데이터)
+  - [ ] 권한 시스템 (나중에)
+- [ ] State 플러그인
+  - [ ] Zig 구현 — `plugins/state/zig/` (HashMap + Mutex + EventBus + JSON 파일)
+  - [ ] 경합 테스트 (멀티 백엔드 동시 접근)
+  - [ ] JS 래퍼 — `plugins/state/js/`
+  - [ ] Rust 래퍼 — `plugins/state/rust/`
+  - [ ] Go 래퍼 — `plugins/state/go/`
+  - [ ] Node 래퍼 (Phase 5 이후)
+  - [ ] SQLite 플러그인 (별도, 나중에)
 - [ ] 바이너리 데이터 채널 (로컬 HTTP 서버, 별도 기능으로 분리)
 
 **바이너리 데이터 전송**:
@@ -200,18 +213,209 @@ func (a *App) Greet(name string) string {
 }
 ```
 
+**플러그인 시스템 설계**:
+
+플러그인 = 백엔드와 동일한 구조 (dlopen + C ABI + invoke 라우팅).
+차이는 역할뿐: 백엔드는 앱 로직, 플러그인은 재사용 가능한 기능 모듈.
+
+**핵심 원칙**:
+- 플러그인은 백엔드와 동일한 C ABI (`backend_init`, `backend_handle_ipc`, `backend_free`, `backend_destroy`)
+- 모든 통신은 `invoke` 경유 (SujiCore 변경 없음, 플러그인 추가해도 코어 수정 없음)
+- 채널 접두사 컨벤션: `state:get`, `fs:read`, `tray:set-icon` 등
+- 어떤 언어로 만들었든 사용자에겐 이름만 노출
+
+**동작 흐름**:
+```
+Renderer  → invoke("state:get", {key:"user"}) ──┐
+Rust 백엔드 → invoke("state:set", {key,value}) ──┼→ BackendRegistry → state 플러그인 (dlopen)
+Go 백엔드  → invoke("state:get", {key:"user"}) ──┘
+```
+
+플러그인도 백엔드도 같은 `BackendRegistry`에 등록. 별도 PluginRegistry 없음.
+
+**suji.json (앱 사용자)**:
+```json
+{
+  "app": { "name": "My App", "version": "0.1.0" },
+  "plugins": [
+    "state",
+    "fs",
+    { "name": "analytics", "source": "github.com/someone/suji-plugin-analytics" }
+  ],
+  "backends": [
+    { "name": "rust", "lang": "rust", "entry": "." }
+  ],
+  "frontend": { "dir": "frontend" }
+}
+```
+
+공식 플러그인은 이름만, 외부 플러그인은 source 지정.
+CLI가 다운로드 + 빌드 + dlopen을 알아서 처리.
+사용자는 플러그인이 어떤 언어로 만들어졌는지 알 필요 없음.
+
+**suji-plugin.json (플러그인 개발자)**:
+```json
+{
+  "name": "analytics",
+  "lang": "rust"
+}
+```
+
+플러그인 프로젝트 루트에 위치. 코어가 이 파일을 읽고 빌드 방법을 결정.
+
+**플러그인 개발자 경험**:
+
+기존 백엔드 개발과 동일. 새로 배울 것 없음.
+
+```rust
+// Rust로 플러그인 개발
+use suji::prelude::*;
+
+#[suji::handle]
+fn track(event: String) -> String {
+    format!(r#"{{"ok":true}}"#)
+}
+
+suji::export_handlers!(track);  // → 자동으로 "analytics:track" 채널 등록
+```
+
+```go
+// Go로 플러그인 개발
+type Plugin struct{}
+func (p *Plugin) Track(event string) string {
+    return `{"ok":true}`
+}
+var _ = suji.Bind(&Plugin{})  // → 자동으로 "analytics:track" 채널 등록
+```
+
+**앱에서 플러그인 사용**:
+
+각 백엔드 개발자는 자기 언어의 래퍼만 설치하면 끝.
+
+```rust
+// Rust 백엔드에서 state 플러그인 사용
+suji::invoke("state:set", r#"{"key":"user","value":"yoon"}"#);
+let val = suji::invoke("state:get", r#"{"key":"user"}"#);
+
+// SDK 래퍼 사용 시 (suji-plugin-state crate)
+suji_state::set("user", r#""yoon""#);
+let val = suji_state::get("user");
+```
+
+```go
+// Go 백엔드에서
+suji.Invoke("state:set", `{"key":"user","value":"yoon"}`)
+
+// SDK 래퍼 사용 시
+state.Set("user", `"yoon"`)
+```
+
+```js
+// Renderer — @suji/plugin-state (npm)
+await suji.invoke("state:set", { key: "user", value: "yoon" })
+
+// SDK 래퍼 사용 시
+import { state } from '@suji/plugin-state'
+await state.set("user", "yoon")
+```
+
+**플러그인 폴더 구조**:
+```
+plugins/
+└── state/
+    ├── suji-plugin.json         # 메타데이터 { "name": "state", "lang": "zig" }
+    ├── zig/                     # Zig 구현 (C ABI export)
+    ├── rust/                    # Rust SDK 래퍼 (suji-plugin-state crate)
+    ├── go/                      # Go SDK 래퍼
+    └── js/                      # Renderer SDK 래퍼 (@suji/plugin-state)
+```
+
+구현은 하나의 언어로만 존재 (state는 Zig, 다른 플러그인은 Rust나 Go 가능).
+SDK 래퍼는 각 언어에서 `invoke` 호출을 편하게 감싸주는 얇은 레이어.
+
+**권한 시스템 (나중에)**:
+```json
+{
+  "plugins": [
+    {
+      "name": "analytics",
+      "source": "github.com/someone/suji-plugin-analytics",
+      "permissions": ["state:get", "state:set"]
+    }
+  ]
+}
+```
+명시적으로 허용한 채널만 호출 가능. 외부 플러그인이 허가 없이 `fs:delete` 등 호출 시 코어가 차단.
+
+**고성능 확장 포인트 (필요 시 추가)**:
+SujiCore에 `get_plugin` 함수를 추가해 C ABI 함수 테이블을 직접 노출하는 방식.
+JSON 직렬화 없이 직접 함수 호출 가능. 현재는 invoke로 충분하므로 실제 수요가 나타나면 추가.
+
+---
+
+**State 플러그인 상세 설계**:
+
+KV Store + JSON 파일 영속성. 첫 번째 공식 플러그인.
+
+모든 영역(Zig/Rust/Go/Renderer)에서 `invoke("state:*")` 채널로 접근.
+
+```
+Renderer (JS)  ──┐
+Zig backend    ──┤
+Rust backend   ──┼── invoke("state:*") → BackendRegistry → state 플러그인
+Go backend     ──┘
+```
+
+두 계층 구조:
+```
+┌─────────────────────────────┐
+│  Runtime State (메모리)      │  ← 앱 실행 중 공유 (빠름)
+│  HashMap + Mutex + EventBus  │
+├─────────────────────────────┤
+│  Persistent State (디스크)   │  ← 앱 종료 후에도 유지
+│  JSON 파일 (→ 나중에 SQLite) │
+└─────────────────────────────┘
+```
+
+채널:
+| 채널 | 요청 | 응답 |
+|------|------|------|
+| `state:get` | `{"key":"foo"}` | `{"value":"bar"}` |
+| `state:set` | `{"key":"foo","value":"bar"}` | `{"ok":true}` |
+| `state:delete` | `{"key":"foo"}` | `{"ok":true}` |
+| `state:keys` | `{}` | `{"keys":["a","b"]}` |
+
+watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
+
+동작 방식:
+1. 앱 시작 → 디스크에서 JSON 읽어 메모리에 로드
+2. `state:set` → 메모리 업데이트 + EventBus `state:{key}` 알림 + 디스크 쓰기
+3. `state:get` → 메모리에서 읽기 (빠름)
+4. 앱 종료 → 이미 디스크에 반영돼 있으므로 별도 처리 없음
+
+저장 경로 (OS 표준):
+| OS | 경로 |
+|-----|-----|
+| macOS | `~/Library/Application Support/{app-name}/state.json` |
+| Linux | `~/.local/share/{app-name}/state.json` (XDG_DATA_HOME) |
+| Windows | `%APPDATA%\{app-name}\state.json` |
+
+경합 테스트 (필수):
+- 멀티 백엔드(Rust + Go)에서 동시에 state:set/get
+- 동시 쓰기 100회 후 값 일관성 검증
+- EventBus 알림이 모든 백엔드에 도달하는지 검증
+
 ---
 
 ### Phase 3: Zig 백엔드 완성
 
 **목표**: Zig 전용 프레임워크로 완성도 올리기
 
-- [ ] 파일 시스템 API
-- [ ] 시스템 다이얼로그 (열기, 저장, 알림)
-- [ ] 트레이 아이콘
-- [ ] 메뉴바
-- [ ] 창 이벤트 (resize, close, focus 등)
-- [ ] 멀티 윈도우
+- [ ] 플러그인: fs — 파일 시스템 (`plugins/fs/`)
+- [ ] 플러그인: dialog — 시스템 다이얼로그 (`plugins/dialog/`)
+- [ ] 플러그인: tray — 트레이 아이콘 (`plugins/tray/`)
+- [ ] 플러그인: menu — 메뉴바 (`plugins/menu/`)
+- [ ] 플러그인: window — 창 이벤트, 멀티 윈도우 (`plugins/window/`)
 - [ ] CLI 도구
   - [x] `suji init` — 프로젝트 스캐폴딩 (rust/go/multi)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
@@ -478,17 +682,153 @@ Suji 코어 (Zig)
 
 ---
 
-### Phase 7 (선택): CEF 지원
+### Phase 7: CEF 전환 (webview.h → CEF 단일)
 
-**목표**: 렌더링 일관성이 필요한 경우 Chromium 사용
+**목표**: webview.h를 CEF(Chromium)로 완전 교체. 3개 OS 모두 CEF 단일.
 
-- [ ] CEF C API (`cef_capi.h`) 연동
-- [ ] `build.zig`에 `-Dwith-cef` 플래그
-- [ ] macOS 번들 구조 (Helper 프로세스, Framework 로딩)
-- [ ] Windows/Linux CEF 번들링
-- [ ] 코드 서명 가이드
+**동기**:
+- 데스크톱 앱에서는 번들 크기(150MB)보다 **렌더링 일관성**이 중요
+- OS별 WebView 차이(Safari WebKit vs Chrome vs GTK WebKit)로 프론트엔드 개발 경험 저하
+- CEF 단일이면 구현/테스트/버그 수정 모두 **1벌** — OS별 분기 없음
+- Windows WebView2도 Chromium이지만, CEF와 API가 달라 관리 포인트 2개 → CEF 통일로 1개
+- CEF는 커스텀 프로토콜, DevTools, 메뉴, 다이얼로그, E2E 테스트(CDP) 등 대부분의 기능을 내장
 
-**참고**: Tauri도 cef-rs로 수천 시간 투자했으나 아직 본체 미통합. 난이도 최상.
+**CEF 프리빌트 사용 (소스 빌드 아님)**:
+```
+CEF 프리빌트 (Spotify CDN에서 다운로드, ~120MB)
+├── include/capi/*.h     ← Zig @cImport로 가져올 C API 헤더
+├── Release/
+│   ├── libcef.dylib     ← macOS
+│   ├── libcef.so        ← Linux
+│   └── libcef.dll       ← Windows
+└── Resources/*.pak      ← Chromium 리소스
+```
+
+`suji build` 첫 실행 시 `~/.suji/cef/{platform}/` 에 자동 다운로드.
+
+**3개 OS 동일 엔진**:
+| OS | 엔진 | DevTools | E2E (CDP) | 렌더링 |
+|---|---|---|---|---|
+| macOS | CEF (Chromium) | ✅ | ✅ Playwright | 동일 |
+| Windows | CEF (Chromium) | ✅ | ✅ Playwright | 동일 |
+| Linux | CEF (Chromium) | ✅ | ✅ Playwright | 동일 |
+
+**폴더 구조**:
+```
+src/
+├── core/
+│   ├── app.zig           # Zig SDK (변경 없음)
+│   ├── config.zig        # 설정 파서 (변경 없음)
+│   ├── events.zig        # EventBus (변경 없음)
+│   └── ipc.zig           # IPC → CEF CefProcessMessage 기반으로 재구현
+├── platform/
+│   └── cef.zig           # CEF 통합 (창, WebView, IPC, 프로토콜)
+├── backends/
+│   └── loader.zig        # BackendRegistry (변경 없음)
+└── main.zig              # CLI (CEF 초기화/종료 추가)
+```
+
+**CEF 멀티 프로세스 아키텍처**:
+
+webview.h (현재, 단일 프로세스):
+```
+┌───────────────────────┐
+│ 하나의 프로세스         │
+│ Suji 코어 + WebView   │
+│                       │
+│ JS invoke("ping")     │
+│  → 같은 프로세스 콜백   │
+│  → 바로 응답           │
+└───────────────────────┘
+```
+
+CEF (전환 후, 멀티 프로세스):
+```
+┌──────────────┐   CefProcessMessage   ┌──────────────────┐
+│ 메인 프로세스  │ ◄═══════════════════► │ 렌더러 프로세스    │
+│              │                       │                  │
+│ Suji 코어    │                       │ V8 (JS 엔진)     │
+│ 백엔드 관리   │                       │ window.__suji__  │
+│ 창 관리      │                       │                  │
+└──────────────┘                       └──────────────────┘
+```
+
+JS `invoke("ping")` 호출 시:
+1. 렌더러 프로세스: V8 → CefV8Handler 실행
+2. CefProcessMessage로 메인 프로세스에 전송
+3. 메인 프로세스: 백엔드 invoke 실행
+4. 결과를 CefProcessMessage로 렌더러에 반환
+5. 렌더러: JS Promise resolve
+
+webview.h에서 1줄이면 되는 IPC가, CEF에서는 프로세스 간 메시지 전달 + 요청-응답 매칭을 직접 구현해야 함. 이것이 핵심 난관.
+
+**CEF가 제공하는 기능 (Phase 3 플러그인 다수를 대체)**:
+| 기능 | CEF API | Phase 3 플러그인 |
+|------|---------|-----------------|
+| 커스텀 프로토콜 | `CefSchemeHandlerFactory` | 에셋 서버 대체 |
+| DevTools | `CefBrowserHost::ShowDevTools` | - |
+| 메뉴 | `cef_menu_model_capi.h` | menu 플러그인 대체 |
+| 다이얼로그 | `cef_dialog_handler_capi.h` | dialog 플러그인 대체 |
+| 키보드 단축키 | `cef_keyboard_handler_capi.h` | - |
+| E2E 테스트 | CDP (port 9222) | - |
+| 네트워크 가로채기 | `CefResourceRequestHandler` | - |
+| 멀티 웹뷰 | 여러 `CefBrowser` 인스턴스 | window 플러그인 대체 |
+
+**macOS 번들 구조**:
+```
+MyApp.app/
+├── Contents/
+│   ├── Info.plist
+│   ├── MacOS/MyApp                              ← 메인 바이너리
+│   ├── Frameworks/
+│   │   ├── Chromium Embedded Framework.framework/ ← CEF (~120MB)
+│   │   ├── MyApp Helper.app/                     ← 렌더러 프로세스
+│   │   ├── MyApp Helper (GPU).app/               ← GPU 프로세스
+│   │   ├── MyApp Helper (Renderer).app/
+│   │   └── MyApp Helper (Plugin).app/
+│   └── Resources/
+│       ├── backends/                             ← dlopen 백엔드
+│       ├── plugins/                              ← 플러그인
+│       └── frontend/dist/                        ← 프론트엔드
+```
+
+**E2E 테스트**:
+```zig
+// CEF 초기화 시 리모트 디버깅 포트 열기
+settings.remote_debugging_port = 9222;
+```
+```ts
+// Playwright로 Suji 앱 E2E 테스트
+const browser = await chromium.connectOverCDP('http://localhost:9222');
+const page = browser.contexts()[0].pages()[0];
+await page.click('button#save');
+await expect(page.locator('#result')).toHaveText('saved');
+```
+
+**구현 순서**:
+- [ ] Step 1: POC — CEF 프리빌트 다운로드 + Zig @cImport + 창 띄우기 (위험 검증)
+- [ ] Step 2: CEF IPC 구현 (CefV8Handler + CefProcessMessage → invoke/on/send)
+- [ ] Step 3: 기존 ipc.zig를 CEF IPC로 교체
+- [ ] Step 4: 커스텀 프로토콜 (`suji://`) → 로컬 HTTP 에셋 서버 제거
+- [ ] Step 5: DevTools 연동 — F12로 인앱 DevTools 패널 열기 (`CefBrowserHost::ShowDevTools`), Electron과 동일한 경험
+- [ ] Step 6: E2E 테스트 지원 (CDP + Playwright)
+- [ ] Step 7: macOS 번들링 (Helper 프로세스 4개, Info.plist, 코드 서명)
+- [ ] Step 8: Windows/Linux 번들링
+- [ ] Step 9: webview.h 완전 제거 (webview-zig 패키지 삭제, asset_server.zig 삭제)
+
+Step 1에서 CEF가 Zig와 호환되는지 확인 — 안 되면 여기서 중단하고 webview.h 유지.
+Step 2가 핵심 난관 (멀티 프로세스 IPC).
+Step 9 이후 코드베이스에서 OS WebView 관련 코드 완전 제거.
+
+**참고 프로젝트**:
+- [cefcapi](https://github.com/cztomczak/cefcapi): CEF C API 예제 (메인+렌더러 프로세스 통신 포함)
+- [Electrobun](https://github.com/blackboardsh/electrobun): CEF 통합 구현체 (Zig + ObjC + C++)
+- [CEF 프리빌트](https://cef-builds.spotifycdn.com/index.html): Spotify CDN 배포
+
+**다른 프레임워크와의 비교**:
+- Electron: Chromium 소스를 직접 포크/빌드 (전담 팀 필요). Suji는 CEF 프리빌트 사용 (1인 가능).
+- Tauri: wry(OS WebView)에 깊이 결합, CEF 전환 수천 시간 투자했으나 미완. Suji는 처음부터 CEF 단일.
+- Electrobun: OS WebView + CEF 듀얼 지원. Suji는 CEF 단일로 유지보수 절감.
 
 ---
 
@@ -642,6 +982,80 @@ suji build → 결과물:
 - macOS: .app 번들 (Code Sign + Notarize)
 - Windows: .msi 인스톨러
 - Linux: .AppImage 또는 .deb
+
+---
+
+## Electron / Tauri 대비 부족한 기능
+
+현재 Suji는 IPC + EventBus + 멀티 백엔드(Phase 2, 4, 6)가 동작하지만, 실제 앱을 만들어 배포하려면 아래 기능들이 필요하다.
+
+### 네이티브 데스크톱 API (Phase 3 미완성)
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ❌ |
+| 시스템 다이얼로그 (열기/저장/알림) | `dialog` | `dialog` 플러그인 | ❌ |
+| 트레이 아이콘 | `Tray` | `tray-icon` | ❌ |
+| 메뉴바 | `Menu` | `menu` | ❌ |
+| 창 이벤트 (resize/close/focus) | `BrowserWindow` 이벤트 | `Window` 이벤트 | ❌ |
+| 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ❌ |
+| 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ❌ |
+
+### 보안
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | ❌ |
+| CSP (Content Security Policy) | 수동 설정 | 빌트인 | ❌ |
+| IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ❌ |
+
+### 앱 배포 & 패키징
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| macOS .app 번들 | electron-builder | `tauri build` | ❌ (계획만) |
+| Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
+| Linux .deb/.AppImage | electron-builder | `tauri build` | ❌ |
+| 코드 서명 & 공증 | electron-notarize | 빌트인 | ❌ |
+| 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
+
+### 플러그인 / 확장 API
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| 클립보드 | `clipboard` | `clipboard-manager` | ❌ |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ |
+| 알림 (Notification) | `Notification` | `notification` | ❌ |
+| 셸 명령 실행 | `child_process` | `shell` 플러그인 | ❌ |
+| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ |
+| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ |
+| 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | ❌ |
+| 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ❌ |
+
+### 개발자 경험 (DX)
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| DevTools | Chromium 내장 | WebView inspect | ❌ (debug 플래그만) |
+| TypeScript 타입 자동 생성 | - | specta 연동 | ❌ |
+| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ❌ (init은 있지만 제한적) |
+| 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | ❌ |
+| CI/CD 템플릿 | - | GitHub Actions 공식 제공 | ❌ |
+
+### 바이너리 데이터 / 고급 기능
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| 바이너리 IPC | Buffer 직접 전송 | `asset://` 커스텀 프로토콜 | ❌ (로컬 HTTP 서버 계획) |
+| 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ❌ |
+
+### 우선순위 제안
+
+1. **파일 시스템 + 다이얼로그** — 가장 기본적인 네이티브 API
+2. **앱 패키징** (.app/.exe) — 배포 불가능하면 프레임워크로서 의미 없음
+3. **트레이 + 메뉴바** — 데스크톱 앱의 기본 요소
+4. **보안 모델** — 프로덕션 사용 전 필수
+5. **자동 업데이트** — 배포 후 유지보수에 필수
 
 ---
 
