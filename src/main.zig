@@ -223,10 +223,37 @@ fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Confi
     }
 }
 
-/// 플러그인 디렉토리 탐색: plugins/{name}/ 찾기
+/// 플러그인 디렉토리 탐색: 로컬 → suji 설치 경로 순
 fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
-    // 프로젝트 로컬 plugins/ (존재 여부는 하류에서 확인)
-    return std.fmt.allocPrint(allocator, "plugins/{s}", .{name}) catch null;
+    // 1. 프로젝트 로컬 plugins/
+    const local = std.fmt.allocPrint(allocator, "plugins/{s}", .{name}) catch return null;
+    if (std.fs.cwd().statFile(std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{local}) catch {
+        allocator.free(local);
+        return null;
+    })) |_| {
+        return local;
+    } else |_| {}
+    allocator.free(local);
+
+    // 2. suji 바이너리 기준 (zig-out/bin/suji → ../../plugins/{name})
+    var exe_buf: [1024]u8 = undefined;
+    const exe_path = std.fs.selfExePath(&exe_buf) catch return null;
+    // bin/ → zig-out/ → project root
+    const bin_dir = std.fs.path.dirname(exe_path) orelse return null;
+    const zig_out_dir = std.fs.path.dirname(bin_dir) orelse return null;
+    const project_root = std.fs.path.dirname(zig_out_dir) orelse return null;
+    const builtin = std.fmt.allocPrint(allocator, "{s}/plugins/{s}", .{ project_root, name }) catch return null;
+    const check = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{builtin}) catch {
+        allocator.free(builtin);
+        return null;
+    };
+    defer allocator.free(check);
+    if (std.fs.cwd().statFile(check)) |_| {
+        return builtin;
+    } else |_| {}
+    allocator.free(builtin);
+
+    return null;
 }
 
 /// suji-plugin.json에서 lang 읽기
