@@ -84,6 +84,8 @@ pub const BackendRegistry = struct {
     routes: std.StringHashMap([]const u8),
     /// register 중인 백엔드 이름 (backend_init 호출 중에만 유효)
     registering_backend: ?[]const u8 = null,
+    /// 핫 리로드: invoke 중 언로드 방지
+    rw_lock: std.Thread.RwLock = .{},
 
     pub var global: ?*BackendRegistry = null;
 
@@ -106,7 +108,7 @@ pub const BackendRegistry = struct {
     }
 
     /// 채널 이름으로 백엔드 자동 라우팅
-    pub fn invokeByChannel(self: *const BackendRegistry, channel: []const u8, request: [*:0]const u8) ?[]const u8 {
+    pub fn invokeByChannel(self: *BackendRegistry, channel: []const u8, request: [*:0]const u8) ?[]const u8 {
         // 라우팅 테이블에서 찾기
         if (self.routes.get(channel)) |backend_name| {
             return self.invoke(backend_name, request);
@@ -144,7 +146,9 @@ pub const BackendRegistry = struct {
         return null;
     }
 
-    pub fn invoke(self: *const BackendRegistry, backend_name: []const u8, request: [*:0]const u8) ?[]const u8 {
+    pub fn invoke(self: *BackendRegistry, backend_name: []const u8, request: [*:0]const u8) ?[]const u8 {
+        self.rw_lock.lockShared();
+        defer self.rw_lock.unlockShared();
         const backend = self.get(backend_name) orelse return null;
         return backend.invoke(request);
     }
@@ -152,6 +156,38 @@ pub const BackendRegistry = struct {
     pub fn freeResponse(self: *const BackendRegistry, backend_name: []const u8, response: ?[]const u8) void {
         const backend = self.get(backend_name) orelse return;
         backend.freeResponse(response);
+    }
+
+    /// 백엔드 핫 리로드: 언로드 → 라우팅 정리 → 재로드
+    pub fn reload(self: *BackendRegistry, name: []const u8, path: [:0]const u8) !void {
+        self.rw_lock.lock();
+        defer self.rw_lock.unlock();
+
+        // 1. 기존 백엔드 언로드
+        if (self.backends.getPtr(name)) |backend| {
+            backend.deinit();
+            _ = self.backends.remove(name);
+        }
+
+        // 2. 라우팅 테이블에서 해당 백엔드의 채널 제거
+        self.clearRoutesFor(name);
+
+        // 3. 새 dylib 로드
+        var backend = try Backend.load(name, path);
+        self.registering_backend = name;
+        backend.init(&self.core_api);
+        self.registering_backend = null;
+        try self.backends.put(name, backend);
+    }
+
+    /// 특정 백엔드의 라우팅 엔트리 제거
+    pub fn clearRoutesFor(self: *BackendRegistry, backend_name: []const u8) void {
+        var iter = self.routes.iterator();
+        while (iter.next()) |entry| {
+            if (std.mem.eql(u8, entry.value_ptr.*, backend_name)) {
+                entry.value_ptr.* = ""; // 자동 라우팅 차단
+            }
+        }
     }
 
     pub fn deinit(self: *BackendRegistry) void {
