@@ -173,13 +173,7 @@ pub fn createBrowser(config: CefConfig) !void {
     zeroCefStruct(c.cef_window_info_t, &window_info);
     window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
     window_info.bounds = .{ .x = 0, .y = 0, .width = config.width, .height = config.height };
-
-    if (comptime is_macos) {
-        // macOS: NSWindow 생성 + CEF 임베딩
-        const content_view = createMacWindow(config.title, config.width, config.height) orelse return error.WindowCreationFailed;
-        @field(window_info, "parent_view") = content_view;
-    }
-    // Linux/Windows: CEF가 자체 윈도우 생성
+    initWindowInfo(&window_info, config);
 
     setCefString(&window_info.window_name, config.title);
 
@@ -1315,6 +1309,20 @@ fn mimeTypeForPath(path: []const u8) [:0]const u8 {
     if (std.mem.endsWith(u8, path, ".map")) return "application/json";
     return "application/octet-stream";
 }
+
+/// 플랫폼별 윈도우 초기화
+const initWindowInfo = if (is_macos) struct {
+    fn call(window_info: *c.cef_window_info_t, config: CefConfig) void {
+        const content_view = createMacWindow(config.title, config.width, config.height);
+        if (content_view) |cv| {
+            window_info.parent_view = cv;
+        }
+    }
+}.call else struct {
+    fn call(_: *c.cef_window_info_t, _: CefConfig) void {
+        // Linux/Windows: CEF 자체 윈도우 생성
+    }
+}.call;
 
 // ============================================
 // macOS Objective-C Helpers
