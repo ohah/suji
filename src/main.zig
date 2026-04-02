@@ -3,6 +3,7 @@ const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
 const Watcher = @import("platform/watcher.zig").Watcher;
+const NodeRuntime = @import("platform/node.zig").NodeRuntime;
 const bundle_macos = if (@import("builtin").os.tag == .macos) @import("bundle_macos.zig") else struct {
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
@@ -246,16 +247,27 @@ fn readPluginLang(allocator: std.mem.Allocator, plugin_dir: []const u8) ?[]const
 // 백엔드 빌드/로드
 // ============================================
 
+/// Node 런타임 글로벌 참조 (dev 모드에서 정리용)
+var g_node_runtime: ?*NodeRuntime = null;
+
 fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, release: bool) !void {
     if (config.isMultiBackend()) {
         if (config.backends) |backends| {
             for (backends) |be| {
-                // Zig도 다른 언어와 동일하게 dlopen
                 std.debug.print("[suji] building {s} ({s})...\n", .{ be.name, be.lang });
                 buildBackendByLang(allocator, be.lang, be.entry, release) catch |err| {
                     std.debug.print("[suji] build failed: {}\n", .{err});
                     continue;
                 };
+
+                if (std.mem.eql(u8, be.lang, "node")) {
+                    // Node 백엔드: libnode로 JS 실행
+                    startNodeBackend(allocator, be.entry) catch |err| {
+                        std.debug.print("[suji] node start failed for {s}: {}\n", .{ be.name, err });
+                    };
+                    continue;
+                }
+
                 const path = getDylibPath(allocator, be.lang, be.entry, release) catch continue;
                 defer allocator.free(path);
                 var path_z: [1024]u8 = undefined;
@@ -271,6 +283,14 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
             std.debug.print("[suji] build failed: {}\n", .{err});
             return;
         };
+
+        if (std.mem.eql(u8, be.lang, "node")) {
+            startNodeBackend(allocator, be.entry) catch |err| {
+                std.debug.print("[suji] node start failed: {}\n", .{err});
+            };
+            return;
+        }
+
         const path = getDylibPath(allocator, be.lang, be.entry, release) catch return;
         defer allocator.free(path);
         var path_z: [1024]u8 = undefined;
@@ -279,6 +299,21 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
             std.debug.print("[suji] load failed: {}\n", .{err});
         };
     }
+}
+
+fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
+    // entry 경로를 절대 경로로 변환 (createRequire가 절대 경로 필요)
+    const abs_entry = try std.fs.cwd().realpathAlloc(allocator, entry);
+    defer allocator.free(abs_entry);
+    const entry_js_str = try std.fmt.allocPrint(allocator, "{s}/main.js", .{abs_entry});
+    defer allocator.free(entry_js_str);
+    const entry_js = try allocator.dupeZ(u8, entry_js_str);
+    // entry_js는 NodeRuntime이 소유 (해제하지 않음)
+
+    const rt = try allocator.create(NodeRuntime);
+    rt.* = NodeRuntime.init(allocator, entry_js);
+    try rt.start();
+    g_node_runtime = rt;
 }
 
 fn buildBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {
@@ -317,6 +352,14 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
             .{ "CC", "/usr/bin/clang" },
             .{ "CGO_ENABLED", "1" },
         });
+    } else if (std.mem.eql(u8, lang, "node")) {
+        // Node 백엔드: npm install (빌드 불필요, 런타임에 JS 실행)
+        const pkg_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{entry});
+        defer allocator.free(pkg_path);
+        std.fs.cwd().access(pkg_path, .{}) catch return; // package.json 없으면 skip
+        std.debug.print("[suji] installing npm packages...\n", .{});
+        const npm_cmd = if (release) &[_][]const u8{ "npm", "install", "--prefix", entry, "--production" } else &[_][]const u8{ "npm", "install", "--prefix", entry };
+        try runCmd(allocator, npm_cmd);
     } else if (std.mem.eql(u8, lang, "zig")) {
         // Zig 백엔드는 자체 build.zig가 있어야 함
         // --prefix로 빌드 결과물을 entry 디렉토리에 설치
@@ -656,11 +699,25 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
     const name = registry.getBackendForChannel(channel) orelse channel;
     if (name.len == 0) return null; // 중복 채널
 
-    const resp = registry.invoke(name, request) orelse return null;
-    const len = @min(resp.len, response_buf.len);
-    @memcpy(response_buf[0..len], resp[0..len]);
-    registry.freeResponse(name, resp);
-    return response_buf[0..len];
+    // 네이티브 백엔드 (Zig/Rust/Go) 시도
+    if (registry.invoke(name, request)) |resp| {
+        const len = @min(resp.len, response_buf.len);
+        @memcpy(response_buf[0..len], resp[0..len]);
+        registry.freeResponse(name, resp);
+        return response_buf[0..len];
+    }
+
+    // Node.js 백엔드 폴백
+    if (g_node_runtime != null) {
+        if (NodeRuntime.invoke(channel, data)) |resp| {
+            const len = @min(resp.len, response_buf.len);
+            @memcpy(response_buf[0..len], resp[0..len]);
+            NodeRuntime.freeResponse(resp);
+            return response_buf[0..len];
+        }
+    }
+
+    return null;
 }
 
 /// fanout: 여러 백엔드에 동시 요청
