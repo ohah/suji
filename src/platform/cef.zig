@@ -187,7 +187,7 @@ pub fn createBrowser(config: CefConfig) !void {
     var browser_settings: c.cef_browser_settings_t = undefined;
     zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
 
-    std.debug.print("[suji] CEF creating browser... size={d} parent={?}\n", .{ window_info.size, window_info.parent_view });
+    std.debug.print("[suji] CEF creating browser... size={d}\n", .{window_info.size});
     const browser = c.cef_browser_host_create_browser_sync(
         &window_info, &g_client, &cef_url, &browser_settings, null, null,
     );
