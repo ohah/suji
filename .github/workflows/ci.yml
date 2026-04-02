@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+env:
+  NODE_VERSION: '24.14.1'
+
 jobs:
   ci:
     strategy:
@@ -15,12 +18,15 @@ jobs:
           - os: macos-14
             cef_platform: macos-arm64
             cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_macosarm64_minimal.tar.bz2"
+            node_platform: macos-arm64
           - os: ubuntu-24.04
             cef_platform: linux-x86_64
             cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_linux64_minimal.tar.bz2"
+            node_platform: linux-x86_64
           - os: windows-latest
             cef_platform: windows-x86_64
             cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_windows64_minimal.tar.bz2"
+            node_platform: windows-x86_64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -65,6 +71,34 @@ jobs:
           Copy-Item -Recurse "$($extracted.FullName)\include" "$cefDir\" -Force
           Copy-Item "$($extracted.FullName)\Release\*" "$cefDir\Release\" -Force -ErrorAction SilentlyContinue
           Copy-Item "$($extracted.FullName)\Resources\*" "$cefDir\Resources\" -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Download libnode (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          NODE_DIR="$HOME/.suji/node/${{ env.NODE_VERSION }}"
+          mkdir -p "$NODE_DIR"
+          ASSET="libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
+          URL="https://github.com/${{ github.repository }}/releases/download/libnode-v${{ env.NODE_VERSION }}/$ASSET"
+          curl -fSL "$URL" -o /tmp/libnode.tar.gz 2>/dev/null && \
+            tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
+            echo "libnode installed: $NODE_DIR" || \
+            echo "libnode not available for ${{ matrix.node_platform }}, skipping Node backend"
+
+      - name: Download libnode (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
+          New-Item -ItemType Directory -Force -Path $nodeDir
+          $asset = "libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
+          $url = "https://github.com/${{ github.repository }}/releases/download/libnode-v${{ env.NODE_VERSION }}/$asset"
+          try {
+            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\libnode.tar.gz"
+            tar xzf "$env:TEMP\libnode.tar.gz" -C $nodeDir
+            Write-Host "libnode installed: $nodeDir"
+          } catch {
+            Write-Host "libnode not available for ${{ matrix.node_platform }}, skipping"
+          }
 
       - name: Build
         run: zig build
