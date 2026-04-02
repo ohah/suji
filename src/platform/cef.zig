@@ -74,7 +74,9 @@ pub fn executeSubprocess() void {
         g_app_initialized = true;
     }
 
-    var main_args: c.cef_main_args_t = .{
+    var main_args: c.cef_main_args_t = if (comptime builtin.os.tag == .windows) .{
+        .instance = null, // Windows: HINSTANCE (null = GetModuleHandle)
+    } else .{
         .argc = @intCast(std.os.argv.len),
         .argv = @ptrCast(std.os.argv.ptr),
     };
@@ -93,7 +95,9 @@ pub fn initialize(config: CefConfig) !void {
         g_app_initialized = true;
     }
 
-    var main_args: c.cef_main_args_t = .{
+    var main_args: c.cef_main_args_t = if (comptime builtin.os.tag == .windows) .{
+        .instance = null,
+    } else .{
         .argc = @intCast(std.os.argv.len),
         .argv = @ptrCast(std.os.argv.ptr),
     };
@@ -116,7 +120,10 @@ pub fn initialize(config: CefConfig) !void {
     } else |_| {}
 
     // CEF 경로 설정 (OS/arch별)
-    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const home = if (comptime builtin.os.tag == .windows)
+        std.posix.getenv("USERPROFILE") orelse "C:\\Users\\Default"
+    else
+        std.posix.getenv("HOME") orelse "/tmp";
     const cef_platform = comptime switch (builtin.os.tag) {
         .macos => "macos-arm64",
         .linux => "linux-x86_64",

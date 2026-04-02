@@ -132,7 +132,8 @@ suji/
 
 - macOS: Cocoa + ObjC + CEF Framework 링크, `.app` 번들링
 - Linux: GTK3 + X11 + CEF 공유 라이브러리, CEF 자체 윈도우
-- CI: GitHub Actions (macos-14 + ubuntu-24.04)
+- Windows: Win32 + CEF DLL 링크
+- CI: GitHub Actions (macos-14 + ubuntu-24.04 + windows-latest)
 
 ## 알려진 이슈
 
