@@ -18,11 +18,14 @@ pub const Config = struct {
         version: [:0]const u8 = "0.1.0",
     };
 
+    pub const Protocol = enum { suji, file };
+
     pub const Window = struct {
         title: [:0]const u8 = "Suji App",
         width: i64 = 1024,
         height: i64 = 768,
         debug: bool = false,
+        protocol: Protocol = .file,
     };
 
     pub const SingleBackend = struct {
@@ -87,6 +90,15 @@ pub const Config = struct {
                 if (win.get("width")) |v| if (v == .integer) { config.window.width = v.integer; };
                 if (win.get("height")) |v| if (v == .integer) { config.window.height = v.integer; };
                 if (win.get("debug")) |v| if (v == .bool) { config.window.debug = v.bool; };
+                if (win.get("protocol")) |v| if (v == .string) {
+                    if (std.mem.eql(u8, v.string, "file")) {
+                        config.window.protocol = .file;
+                    } else if (std.mem.eql(u8, v.string, "suji")) {
+                        config.window.protocol = .suji;
+                    } else {
+                        std.debug.print("[suji] warning: unknown protocol '{s}', using default 'file'\n", .{v.string});
+                    }
+                };
             }
         }
 

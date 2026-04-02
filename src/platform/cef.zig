@@ -12,6 +12,8 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_process_message_capi.h");
     @cInclude("include/capi/cef_render_process_handler_capi.h");
     @cInclude("include/capi/cef_keyboard_handler_capi.h");
+    @cInclude("include/capi/cef_scheme_capi.h");
+    @cInclude("include/capi/cef_resource_handler_capi.h");
 });
 
 const objc = @cImport({
@@ -126,6 +128,11 @@ pub fn initialize(config: CefConfig) !void {
         return error.CefInitFailed;
     }
     std.debug.print("[suji] CEF initialized\n", .{});
+
+    // 커스텀 프로토콜 핸들러 등록 (dist 경로가 설정된 경우)
+    if (g_dist_path_len > 0) {
+        registerSchemeHandlerFactory();
+    }
 }
 
 var g_client: c.cef_client_t = undefined;
@@ -176,6 +183,15 @@ pub fn createBrowser(config: CefConfig) !void {
         return error.BrowserCreationFailed;
     }
     std.debug.print("[suji] CEF browser created\n", .{});
+}
+
+/// 런타임 URL 네비게이션
+pub fn navigate(url: [:0]const u8) void {
+    const browser = g_browser orelse return;
+    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
+    var cef_url: c.cef_string_t = .{};
+    setCefString(&cef_url, url);
+    frame.load_url.?(frame, &cef_url);
 }
 
 /// 메인 프로세스에서 렌더러의 JS 실행 (EventBus → JS __dispatch__ 용)
@@ -318,6 +334,7 @@ fn initApp(app: *c.cef_app_t) void {
     initBaseRefCounted(&app.base);
     app.get_render_process_handler = &getRenderProcessHandler;
     app.on_before_command_line_processing = &onBeforeCommandLineProcessing;
+    app.on_register_custom_schemes = &onRegisterCustomSchemes;
     initRenderHandler();
 }
 
@@ -345,11 +362,6 @@ fn onBeforeCommandLineProcessing(
     var wildcard: c.cef_string_t = .{};
     setCefString(&wildcard, "*");
     cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
-
-    // file:// CORS 허용 (prod 모드 file:// 로드용)
-    var file_access: c.cef_string_t = .{};
-    setCefString(&file_access, "allow-file-access-from-files");
-    cmd.append_switch.?(cmd, &file_access);
 
 }
 
@@ -1020,6 +1032,269 @@ fn handleRendererEvent(msg: *c._cef_process_message_t) i32 {
 
     _ = ctx.exit.?(ctx);
     return 1;
+}
+
+// ============================================
+// Custom Scheme: suji://
+// ============================================
+//
+// suji://app/path → dist 디렉토리에서 파일 서빙
+// file:// 대신 사용하여 CORS, fetch, cookie 등 정상 동작
+
+/// dist 경로 설정 (main.zig에서 호출)
+var g_dist_path: [1024]u8 = undefined;
+var g_dist_path_len: usize = 0;
+
+pub fn setDistPath(path: []const u8) void {
+    const len = @min(path.len, g_dist_path.len);
+    @memcpy(g_dist_path[0..len], path[0..len]);
+    g_dist_path_len = len;
+}
+
+fn getDistPath() []const u8 {
+    return g_dist_path[0..g_dist_path_len];
+}
+
+/// on_register_custom_schemes — "suji" 스킴 등록 (모든 프로세스에서 호출됨)
+fn onRegisterCustomSchemes(
+    _: ?*c._cef_app_t,
+    registrar: ?*c._cef_scheme_registrar_t,
+) callconv(.c) void {
+    const reg = registrar orelse return;
+    var scheme_name: c.cef_string_t = .{};
+    setCefString(&scheme_name, "suji");
+    // STANDARD + LOCAL + SECURE + CORS_ENABLED + FETCH_ENABLED + CSP_BYPASSING
+    const options = c.CEF_SCHEME_OPTION_STANDARD |
+        c.CEF_SCHEME_OPTION_LOCAL |
+        c.CEF_SCHEME_OPTION_SECURE |
+        c.CEF_SCHEME_OPTION_CORS_ENABLED |
+        c.CEF_SCHEME_OPTION_FETCH_ENABLED |
+        c.CEF_SCHEME_OPTION_CSP_BYPASSING;
+    const result = reg.add_custom_scheme.?(reg, &scheme_name, options);
+    std.debug.print("[suji] register scheme 'suji': {d}\n", .{result});
+}
+
+/// cef_initialize 후 호출 — scheme handler factory 등록
+pub fn registerSchemeHandlerFactory() void {
+    var scheme_name: c.cef_string_t = .{};
+    setCefString(&scheme_name, "suji");
+    var domain_name: c.cef_string_t = .{};
+    setCefString(&domain_name, "app");
+
+    initSchemeHandlerFactory();
+    const result = c.cef_register_scheme_handler_factory(&scheme_name, &domain_name, &g_scheme_factory);
+    std.debug.print("[suji] register scheme handler factory: {d}\n", .{result});
+}
+
+// --- Scheme Handler Factory ---
+
+var g_scheme_factory: c.cef_scheme_handler_factory_t = undefined;
+var g_scheme_factory_initialized: bool = false;
+
+fn initSchemeHandlerFactory() void {
+    if (g_scheme_factory_initialized) return;
+    zeroCefStruct(c.cef_scheme_handler_factory_t, &g_scheme_factory);
+    initBaseRefCounted(&g_scheme_factory.base);
+    g_scheme_factory.create = &schemeFactoryCreate;
+    g_scheme_factory_initialized = true;
+}
+
+fn schemeFactoryCreate(
+    _: ?*c._cef_scheme_handler_factory_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    _: [*c]const c.cef_string_t,
+    request: ?*c._cef_request_t,
+) callconv(.c) ?*c._cef_resource_handler_t {
+    const req = request orelse return null;
+
+    // URL에서 경로 추출: suji://app/path → /path
+    const url_userfree = req.get_url.?(req);
+    var url_buf: [2048]u8 = undefined;
+    const url = cefUserfreeToUtf8(url_userfree, &url_buf);
+
+    // "suji://app" 이후의 경로 추출
+    var path: []const u8 = "/index.html";
+    if (std.mem.indexOf(u8, url, "suji://app")) |idx| {
+        const after = url[idx + "suji://app".len ..];
+        if (after.len > 0 and after[0] == '/') {
+            path = after;
+        }
+    }
+
+    // "/" → "/index.html"
+    if (std.mem.eql(u8, path, "/")) {
+        path = "/index.html";
+    }
+
+    std.debug.print("[suji] scheme request: {s} → {s}\n", .{ url, path });
+
+    // dist 경로 + 요청 경로 → 파일 시스템 경로
+    const dist = getDistPath();
+    if (dist.len == 0) return null;
+
+    var file_path_buf: [2048]u8 = undefined;
+    const file_path = std.fmt.bufPrint(&file_path_buf, "{s}{s}", .{ dist, path }) catch return null;
+
+    // 파일 읽기 (동기 — IO 스레드에서 실행됨)
+    const file = std.fs.openFileAbsolute(file_path, .{}) catch {
+        std.debug.print("[suji] scheme 404: {s}\n", .{file_path});
+        return createErrorHandler(404);
+    };
+    defer file.close();
+
+    const stat = file.stat() catch return null;
+    const file_size = stat.size;
+
+    // 파일 내용 읽기 (최대 64MB)
+    const max_size: usize = 64 * 1024 * 1024;
+    const read_size = @min(file_size, max_size);
+    const data = std.heap.page_allocator.alloc(u8, read_size) catch return null;
+    const bytes_read = file.readAll(data) catch {
+        std.heap.page_allocator.free(data);
+        return null;
+    };
+
+    // MIME type 결정
+    const mime = mimeTypeForPath(path);
+
+    // ResourceHandler 생성
+    return createResourceHandler(data[0..bytes_read], mime) orelse {
+        std.heap.page_allocator.free(data);
+        return null;
+    };
+}
+
+// --- Resource Handler ---
+
+const ResourceHandlerData = struct {
+    handler: c.cef_resource_handler_t,
+    data: []u8,
+    mime: [:0]const u8,
+    offset: usize,
+    status_code: i32,
+};
+
+fn createResourceHandler(data: []u8, mime: [:0]const u8) ?*c.cef_resource_handler_t {
+    const rh = std.heap.page_allocator.create(ResourceHandlerData) catch return null;
+    zeroCefStruct(c.cef_resource_handler_t, &rh.handler);
+    initBaseRefCounted(&rh.handler.base);
+    rh.handler.open = &rhOpen;
+    rh.handler.get_response_headers = &rhGetResponseHeaders;
+    rh.handler.read = &rhRead;
+    rh.handler.cancel = &rhCancel;
+    // deprecated 콜백은 null로 (Zig가 0으로 초기화)
+    rh.data = data;
+    rh.mime = mime;
+    rh.offset = 0;
+    rh.status_code = 200;
+    return &rh.handler;
+}
+
+fn createErrorHandler(status: i32) ?*c.cef_resource_handler_t {
+    const body = std.heap.page_allocator.alloc(u8, 0) catch return null;
+    const rh = std.heap.page_allocator.create(ResourceHandlerData) catch {
+        std.heap.page_allocator.free(body);
+        return null;
+    };
+    zeroCefStruct(c.cef_resource_handler_t, &rh.handler);
+    initBaseRefCounted(&rh.handler.base);
+    rh.handler.open = &rhOpen;
+    rh.handler.get_response_headers = &rhGetResponseHeaders;
+    rh.handler.read = &rhRead;
+    rh.handler.cancel = &rhCancel;
+    rh.data = body;
+    rh.mime = "text/plain";
+    rh.offset = 0;
+    rh.status_code = status;
+    return &rh.handler;
+}
+
+fn getRhData(self: ?*c._cef_resource_handler_t) ?*ResourceHandlerData {
+    const ptr = self orelse return null;
+    return @fieldParentPtr("handler", ptr);
+}
+
+fn rhOpen(
+    self: ?*c._cef_resource_handler_t,
+    _: ?*c._cef_request_t,
+    handle_request: ?*i32,
+    _: ?*c._cef_callback_t,
+) callconv(.c) i32 {
+    _ = getRhData(self) orelse return 0;
+    if (handle_request) |hr| hr.* = 1; // 즉시 처리
+    return 1;
+}
+
+fn rhGetResponseHeaders(
+    self: ?*c._cef_resource_handler_t,
+    response: ?*c._cef_response_t,
+    response_length: ?*i64,
+    _: ?*c.cef_string_t,
+) callconv(.c) void {
+    const rh = getRhData(self) orelse return;
+    const resp = response orelse return;
+
+    resp.set_status.?(resp, rh.status_code);
+
+    var mime_str: c.cef_string_t = .{};
+    setCefString(&mime_str, rh.mime);
+    resp.set_mime_type.?(resp, &mime_str);
+
+    if (response_length) |rl| {
+        rl.* = @intCast(rh.data.len);
+    }
+}
+
+fn rhRead(
+    self: ?*c._cef_resource_handler_t,
+    data_out: ?*anyopaque,
+    bytes_to_read: i32,
+    bytes_read: ?*i32,
+    _: ?*c._cef_resource_read_callback_t,
+) callconv(.c) i32 {
+    const rh = getRhData(self) orelse return 0;
+    const br = bytes_read orelse return 0;
+    const out: [*]u8 = @ptrCast(data_out orelse return 0);
+
+    if (rh.offset >= rh.data.len) {
+        br.* = 0;
+        return 0; // 완료
+    }
+
+    const remaining = rh.data.len - rh.offset;
+    const to_read = @min(remaining, @as(usize, @intCast(bytes_to_read)));
+    @memcpy(out[0..to_read], rh.data[rh.offset..][0..to_read]);
+    rh.offset += to_read;
+    br.* = @intCast(to_read);
+    return 1;
+}
+
+fn rhCancel(self: ?*c._cef_resource_handler_t) callconv(.c) void {
+    const rh = getRhData(self) orelse return;
+    if (rh.data.len > 0) {
+        std.heap.page_allocator.free(rh.data);
+        rh.data = &.{};
+    }
+    std.heap.page_allocator.destroy(rh);
+}
+
+fn mimeTypeForPath(path: []const u8) [:0]const u8 {
+    if (std.mem.endsWith(u8, path, ".html") or std.mem.endsWith(u8, path, ".htm")) return "text/html";
+    if (std.mem.endsWith(u8, path, ".js") or std.mem.endsWith(u8, path, ".mjs")) return "application/javascript";
+    if (std.mem.endsWith(u8, path, ".css")) return "text/css";
+    if (std.mem.endsWith(u8, path, ".json")) return "application/json";
+    if (std.mem.endsWith(u8, path, ".png")) return "image/png";
+    if (std.mem.endsWith(u8, path, ".jpg") or std.mem.endsWith(u8, path, ".jpeg")) return "image/jpeg";
+    if (std.mem.endsWith(u8, path, ".gif")) return "image/gif";
+    if (std.mem.endsWith(u8, path, ".svg")) return "image/svg+xml";
+    if (std.mem.endsWith(u8, path, ".ico")) return "image/x-icon";
+    if (std.mem.endsWith(u8, path, ".woff")) return "font/woff";
+    if (std.mem.endsWith(u8, path, ".woff2")) return "font/woff2";
+    if (std.mem.endsWith(u8, path, ".ttf")) return "font/ttf";
+    if (std.mem.endsWith(u8, path, ".wasm")) return "application/wasm";
+    if (std.mem.endsWith(u8, path, ".map")) return "application/json";
+    return "application/octet-stream";
 }
 
 // ============================================

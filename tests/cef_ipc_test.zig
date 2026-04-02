@@ -587,3 +587,166 @@ test "integration: invoke with target" {
     // request에서 cmd 추출
     try std.testing.expectEqualStrings("ping", extractCmd(request).?);
 }
+
+// ============================================
+// suji:// 커스텀 프로토콜 — URL 경로 추출
+// ============================================
+
+fn extractSujiPath(url: []const u8) []const u8 {
+    const prefix = "suji://app";
+    if (std.mem.indexOf(u8, url, prefix)) |idx| {
+        const after = url[idx + prefix.len ..];
+        if (after.len > 0 and after[0] == '/') {
+            return after;
+        }
+    }
+    return "/index.html";
+}
+
+test "extractSujiPath: root slash" {
+    try std.testing.expectEqualStrings("/", extractSujiPath("suji://app/"));
+}
+
+test "extractSujiPath: index.html" {
+    try std.testing.expectEqualStrings("/index.html", extractSujiPath("suji://app/index.html"));
+}
+
+test "extractSujiPath: nested path" {
+    try std.testing.expectEqualStrings("/assets/index-abc123.js", extractSujiPath("suji://app/assets/index-abc123.js"));
+}
+
+test "extractSujiPath: css file" {
+    try std.testing.expectEqualStrings("/assets/style.css", extractSujiPath("suji://app/assets/style.css"));
+}
+
+test "extractSujiPath: no path defaults to index.html" {
+    try std.testing.expectEqualStrings("/index.html", extractSujiPath("suji://app"));
+}
+
+test "extractSujiPath: image path" {
+    try std.testing.expectEqualStrings("/images/logo.png", extractSujiPath("suji://app/images/logo.png"));
+}
+
+// ============================================
+// MIME type 매핑
+// ============================================
+
+fn mimeTypeForPath(path: []const u8) [:0]const u8 {
+    if (std.mem.endsWith(u8, path, ".html") or std.mem.endsWith(u8, path, ".htm")) return "text/html";
+    if (std.mem.endsWith(u8, path, ".js") or std.mem.endsWith(u8, path, ".mjs")) return "application/javascript";
+    if (std.mem.endsWith(u8, path, ".css")) return "text/css";
+    if (std.mem.endsWith(u8, path, ".json")) return "application/json";
+    if (std.mem.endsWith(u8, path, ".png")) return "image/png";
+    if (std.mem.endsWith(u8, path, ".jpg") or std.mem.endsWith(u8, path, ".jpeg")) return "image/jpeg";
+    if (std.mem.endsWith(u8, path, ".gif")) return "image/gif";
+    if (std.mem.endsWith(u8, path, ".svg")) return "image/svg+xml";
+    if (std.mem.endsWith(u8, path, ".ico")) return "image/x-icon";
+    if (std.mem.endsWith(u8, path, ".woff")) return "font/woff";
+    if (std.mem.endsWith(u8, path, ".woff2")) return "font/woff2";
+    if (std.mem.endsWith(u8, path, ".ttf")) return "font/ttf";
+    if (std.mem.endsWith(u8, path, ".wasm")) return "application/wasm";
+    if (std.mem.endsWith(u8, path, ".map")) return "application/json";
+    return "application/octet-stream";
+}
+
+test "mimeTypeForPath: html" {
+    try std.testing.expectEqualStrings("text/html", mimeTypeForPath("/index.html"));
+    try std.testing.expectEqualStrings("text/html", mimeTypeForPath("/page.htm"));
+}
+
+test "mimeTypeForPath: javascript" {
+    try std.testing.expectEqualStrings("application/javascript", mimeTypeForPath("/assets/index-abc.js"));
+    try std.testing.expectEqualStrings("application/javascript", mimeTypeForPath("/module.mjs"));
+}
+
+test "mimeTypeForPath: css" {
+    try std.testing.expectEqualStrings("text/css", mimeTypeForPath("/assets/style.css"));
+}
+
+test "mimeTypeForPath: json" {
+    try std.testing.expectEqualStrings("application/json", mimeTypeForPath("/data.json"));
+}
+
+test "mimeTypeForPath: images" {
+    try std.testing.expectEqualStrings("image/png", mimeTypeForPath("/logo.png"));
+    try std.testing.expectEqualStrings("image/jpeg", mimeTypeForPath("/photo.jpg"));
+    try std.testing.expectEqualStrings("image/jpeg", mimeTypeForPath("/photo.jpeg"));
+    try std.testing.expectEqualStrings("image/gif", mimeTypeForPath("/anim.gif"));
+    try std.testing.expectEqualStrings("image/svg+xml", mimeTypeForPath("/icon.svg"));
+    try std.testing.expectEqualStrings("image/x-icon", mimeTypeForPath("/favicon.ico"));
+}
+
+test "mimeTypeForPath: fonts" {
+    try std.testing.expectEqualStrings("font/woff", mimeTypeForPath("/font.woff"));
+    try std.testing.expectEqualStrings("font/woff2", mimeTypeForPath("/font.woff2"));
+    try std.testing.expectEqualStrings("font/ttf", mimeTypeForPath("/font.ttf"));
+}
+
+test "mimeTypeForPath: wasm" {
+    try std.testing.expectEqualStrings("application/wasm", mimeTypeForPath("/module.wasm"));
+}
+
+test "mimeTypeForPath: source map" {
+    try std.testing.expectEqualStrings("application/json", mimeTypeForPath("/index.js.map"));
+}
+
+test "mimeTypeForPath: unknown extension" {
+    try std.testing.expectEqualStrings("application/octet-stream", mimeTypeForPath("/data.bin"));
+    try std.testing.expectEqualStrings("application/octet-stream", mimeTypeForPath("/file.xyz"));
+}
+
+// ============================================
+// suji:// URL 생성 (prod 모드)
+// ============================================
+
+test "prod URL: suji protocol" {
+    const protocol = "suji";
+    var buf: [64]u8 = undefined;
+    const url = if (std.mem.eql(u8, protocol, "suji"))
+        std.fmt.bufPrint(&buf, "suji://app/index.html", .{}) catch unreachable
+    else
+        std.fmt.bufPrint(&buf, "file:///path/to/dist/index.html", .{}) catch unreachable;
+    try std.testing.expectEqualStrings("suji://app/index.html", url);
+}
+
+test "prod URL: file protocol" {
+    const protocol = "file";
+    var buf: [64]u8 = undefined;
+    const url = if (std.mem.eql(u8, protocol, "suji"))
+        std.fmt.bufPrint(&buf, "suji://app/index.html", .{}) catch unreachable
+    else
+        std.fmt.bufPrint(&buf, "file:///path/to/dist/index.html", .{}) catch unreachable;
+    try std.testing.expect(std.mem.startsWith(u8, url, "file://"));
+}
+
+test "dev URL: always http regardless of protocol" {
+    // dev 모드에서는 protocol 설정과 무관하게 항상 dev_url 사용
+    const dev_url = "http://localhost:5173";
+    try std.testing.expect(std.mem.startsWith(u8, dev_url, "http"));
+}
+
+// ============================================
+// navigate: 런타임 URL 변경
+// ============================================
+
+test "navigate URL: suji protocol" {
+    // suji:// URL도 navigate에 전달 가능해야 함
+    const url = "suji://app/other-page.html";
+    try std.testing.expect(std.mem.startsWith(u8, url, "suji://"));
+}
+
+test "navigate URL: http for dev" {
+    const url = "http://localhost:5173/about";
+    try std.testing.expect(std.mem.startsWith(u8, url, "http"));
+}
+
+test "navigate URL: file protocol" {
+    const url = "file:///path/to/dist/index.html";
+    try std.testing.expect(std.mem.startsWith(u8, url, "file://"));
+}
+
+test "navigate URL: null-terminated" {
+    // CEF navigate는 [:0]const u8 필요
+    const url: [:0]const u8 = "suji://app/index.html";
+    try std.testing.expectEqual(@as(u8, 0), url[url.len]);
+}

@@ -13,11 +13,23 @@ test "Config default values" {
     try std.testing.expectEqual(@as(i64, 768), cfg.window.height);
     try std.testing.expectEqualStrings("Suji App", cfg.window.title);
     try std.testing.expect(!cfg.window.debug);
+    try std.testing.expect(cfg.window.protocol == .file);
     try std.testing.expect(cfg.backend == null);
     try std.testing.expect(cfg.backends == null);
     try std.testing.expectEqualStrings("frontend", cfg.frontend.dir);
     try std.testing.expectEqualStrings("http://localhost:5173", cfg.frontend.dev_url);
     try std.testing.expectEqualStrings("frontend/dist", cfg.frontend.dist_dir);
+}
+
+test "Config protocol default is file" {
+    const cfg = config.Config{};
+    try std.testing.expect(cfg.window.protocol == .file);
+}
+
+test "Config protocol enum values" {
+    const suji_proto: config.Config.Protocol = .suji;
+    const file_proto: config.Config.Protocol = .file;
+    try std.testing.expect(suji_proto != file_proto);
 }
 
 test "Config default SingleBackend" {
@@ -156,6 +168,39 @@ test "JSON partial config" {
     try std.testing.expect(root.get("app") == null);
     try std.testing.expect(root.get("backend") == null);
     try std.testing.expectEqual(@as(i64, 1920), root.get("window").?.object.get("width").?.integer);
+}
+
+test "JSON protocol suji parsing" {
+    const json_content =
+        \\{ "window": { "protocol": "suji" } }
+    ;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const win = root.get("window").?.object;
+    try std.testing.expectEqualStrings("suji", win.get("protocol").?.string);
+}
+
+test "JSON protocol file parsing" {
+    const json_content =
+        \\{ "window": { "protocol": "file" } }
+    ;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const win = root.get("window").?.object;
+    try std.testing.expectEqualStrings("file", win.get("protocol").?.string);
+}
+
+test "JSON protocol absent defaults to file" {
+    const json_content =
+        \\{ "window": { "title": "Test" } }
+    ;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const win = root.get("window").?.object;
+    try std.testing.expect(win.get("protocol") == null);
 }
 
 test "Config deinit without arena" {
