@@ -2,7 +2,11 @@ const std = @import("std");
 
 pub const c = @cImport({
     @cDefine("CEF_API_VERSION", "999999");
-    @cDefine("char16_t", "unsigned short");
+    // macOS: uchar.h 없어서 CEF가 char16_t를 typedef → 매크로로 선회피
+    // Linux: uchar.h가 있으므로 매크로 불필요 (충돌 방지)
+    if (!is_linux) {
+        @cDefine("char16_t", "unsigned short");
+    }
     @cInclude("include/capi/cef_app_capi.h");
     @cInclude("include/capi/cef_browser_capi.h");
     @cInclude("include/capi/cef_client_capi.h");
