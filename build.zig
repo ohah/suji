@@ -210,7 +210,9 @@ pub fn build(b: *std.Build) void {
     const state_test = b.addTest(.{ .root_module = state_test_mod });
     const state_test_run = b.addRunArtifact(state_test);
     state_test_run.setCwd(b.path("."));
-    test_step.dependOn(&state_test_run.step);
+    // state_plugin 테스트는 별도 스텝 (dylib 빌드 필요)
+    const state_test_step = b.step("test-state", "Run state plugin tests (requires built dylib)");
+    state_test_step.dependOn(&state_test_run.step);
 
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{
