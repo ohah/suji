@@ -811,10 +811,11 @@ await expect(page.locator('#result')).toHaveText('saved');
 - [x] Step 3: 기존 ipc.zig를 CEF IPC로 교체 (main.zig에서 --cef 플래그로 BackendRegistry 연결)
 - [x] Step 3.5: CEF 완성도 — JS Promise(JS 관리), EventBus→JS 연결, fanout/chain/core, 키보드 단축키(NSMenu Edit), 플러그인 경로 탐색, injection 방지
 - [x] Step 5: DevTools 연동 — 인앱 DevTools (show_dev_tools + DEFAULT 스타일), Cmd+Shift+I 토글
-- [ ] Step 6: E2E 테스트 지원 (CDP + Playwright)
-- [ ] Step 7: macOS 번들링 (Helper 프로세스 4개, Info.plist, 코드 서명, 커스텀 프로토콜 `suji://`)
+- [x] Step 6: E2E 테스트 지원 (Puppeteer + CDP, `tests/e2e/cef-ipc.test.ts`)
+- [x] Step 7: macOS 번들링 (Helper 프로세스 4개, Info.plist, 코드 서명) — `bundle_macos.zig`
+- [x] Step 7.5: 커스텀 프로토콜 `suji://` (CefSchemeHandlerFactory, `"protocol": "suji"|"file"` 옵션, 기본 file)
 - [ ] Step 8: Windows/Linux 번들링
-- [ ] Step 9: webview.h 완전 제거 (webview-zig 패키지 삭제, asset_server.zig 삭제)
+- [x] Step 9: webview.h 완전 제거 (webview-zig, ipc.zig, window.zig, asset_server.zig 삭제, CEF 단일 경로)
 
 Step 1에서 CEF가 Zig와 호환되는지 확인 — 안 되면 여기서 중단하고 webview.h 유지.
 Step 2가 핵심 난관 (멀티 프로세스 IPC).

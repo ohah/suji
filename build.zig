@@ -4,11 +4,6 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const webview_dep = b.dependency("webview", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     // TOML 지원은 백로그 (현재 JSON만)
     // const toml_dep = b.dependency("toml", .{ .target = target, .optimize = optimize });
 
@@ -47,7 +42,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    root_module.addImport("webview", webview_dep.module("webview"));
     root_module.addImport("loader", loader_module);
     root_module.addImport("events", events_module);
     root_module.addImport("util", util_module);
@@ -59,6 +53,10 @@ pub fn build(b: *std.Build) void {
     const cef_fw_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64/Release", .{home}) catch @panic("OOM");
     root_module.addFrameworkPath(.{ .cwd_relative = cef_fw_path });
     root_module.linkFramework("Chromium Embedded Framework", .{});
+    root_module.link_libcpp = true;
+    // macOS: Objective-C 런타임 (NSWindow, NSApp 등)
+    root_module.linkSystemLibrary("objc", .{});
+    root_module.linkFramework("Cocoa", .{});
     // root_module.addImport("toml", toml_dep.module("toml"));
 
     const exe = b.addExecutable(.{
@@ -68,12 +66,10 @@ pub fn build(b: *std.Build) void {
     // install_name_tool용 헤더 패딩
     exe.headerpad_max_install_names = true;
 
-    // webview C++ 라이브러리 링크
-    exe.linkLibrary(webview_dep.artifact("webviewStatic"));
-
-    b.installArtifact(exe);
-
     // macOS: CEF 프레임워크 로드 경로 수정 + ad-hoc 코드서명
+    // 주의: installArtifact가 바이너리를 복사한 후에 실행해야 함
+    const install_artifact = b.addInstallArtifact(exe, .{});
+
     const fix_rpath = b.addSystemCommand(&.{
         "install_name_tool", "-change",
         "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
@@ -81,7 +77,7 @@ pub fn build(b: *std.Build) void {
     const cef_fw_abs = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{home}) catch @panic("OOM");
     fix_rpath.addArg(cef_fw_abs);
     fix_rpath.addArg("zig-out/bin/suji");
-    fix_rpath.step.dependOn(b.getInstallStep());
+    fix_rpath.step.dependOn(&install_artifact.step);
 
     const codesign = b.addSystemCommand(&.{
         "codesign", "--force", "--sign", "-",
@@ -90,6 +86,8 @@ pub fn build(b: *std.Build) void {
         "zig-out/bin/suji",
     });
     codesign.step.dependOn(&fix_rpath.step);
+
+    b.getInstallStep().dependOn(&codesign.step);
 
     const sign_step = b.step("sign", "Ad-hoc codesign for macOS");
     sign_step.dependOn(&codesign.step);
@@ -122,34 +120,6 @@ pub fn build(b: *std.Build) void {
     loader_test_mod.addImport("loader", test_loader);
     const loader_test = b.addTest(.{ .root_module = loader_test_mod });
     test_step.dependOn(&b.addRunArtifact(loader_test).step);
-
-    // IPC tests
-    const ipc_test_mod = b.createModule(.{
-        .root_source_file = b.path("tests/ipc_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    const ipc_module = b.createModule(.{
-        .root_source_file = b.path("src/core/ipc.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    ipc_module.addImport("webview", webview_dep.module("webview"));
-    ipc_module.addImport("events", events_module);
-    const ipc_loader_mod = b.createModule(.{
-        .root_source_file = b.path("src/backends/loader.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    ipc_loader_mod.addImport("events", events_module);
-    ipc_module.addImport("loader", ipc_loader_mod);
-    ipc_test_mod.addImport("ipc", ipc_module);
-    ipc_test_mod.addImport("webview", webview_dep.module("webview"));
-
-    const ipc_test = b.addTest(.{ .root_module = ipc_test_mod });
-    ipc_test.linkLibrary(webview_dep.artifact("webviewStatic"));
-    test_step.dependOn(&b.addRunArtifact(ipc_test).step);
 
     // Config tests
     const config_test_mod = b.createModule(.{
@@ -238,23 +208,9 @@ pub fn build(b: *std.Build) void {
     state_test_mod.addImport("loader", state_loader);
     state_test_mod.addImport("events", events_module);
     const state_test = b.addTest(.{ .root_module = state_test_mod });
-    test_step.dependOn(&b.addRunArtifact(state_test).step);
-
-    // Asset server tests
-    const asset_server_module = b.createModule(.{
-        .root_source_file = b.path("src/core/asset_server.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const asset_test_mod = b.createModule(.{
-        .root_source_file = b.path("tests/asset_server_test.zig"),
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-    });
-    asset_test_mod.addImport("asset_server", asset_server_module);
-    const asset_test = b.addTest(.{ .root_module = asset_test_mod });
-    test_step.dependOn(&b.addRunArtifact(asset_test).step);
+    const state_test_run = b.addRunArtifact(state_test);
+    state_test_run.setCwd(b.path("."));
+    test_step.dependOn(&state_test_run.step);
 
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{

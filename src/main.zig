@@ -15,12 +15,12 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    // .app 번들 안에서 실행 시 자동으로 run --cef
+    // .app 번들 안에서 실행 시 자동으로 run
     if (args.len < 2) {
         var exe_buf: [1024]u8 = undefined;
         if (std.fs.selfExePath(&exe_buf)) |ep| {
             if (std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null) {
-                try runProdCef(allocator);
+                try runProd(allocator);
                 return;
             }
         } else |_| {}
@@ -30,32 +30,14 @@ pub fn main() !void {
 
     const command = args[1];
 
-    // --cef 플래그 감지
-    var use_cef = false;
-    for (args) |arg| {
-        if (std.mem.eql(u8, arg, "--cef")) use_cef = true;
-    }
-
     if (std.mem.eql(u8, command, "init")) {
         try runInit(allocator, args[2..]);
     } else if (std.mem.eql(u8, command, "dev")) {
-        if (use_cef) {
-            try runDevCef(allocator);
-        } else {
-            try runDev(allocator);
-        }
+        try runDev(allocator);
     } else if (std.mem.eql(u8, command, "build")) {
-        if (use_cef) {
-            try runBuildCef(allocator);
-        } else {
-            try runBuild(allocator);
-        }
+        try runBuild(allocator);
     } else if (std.mem.eql(u8, command, "run")) {
-        if (use_cef) {
-            try runProdCef(allocator);
-        } else {
-            try runProd(allocator);
-        }
+        try runProd(allocator);
     } else {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
@@ -116,41 +98,6 @@ fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void 
 // ============================================
 // suji dev
 // ============================================
-fn runDev(allocator: std.mem.Allocator) !void {
-    var config = suji.Config.load(allocator) catch {
-        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
-        return;
-    };
-    defer config.deinit();
-
-    std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
-
-    // 1. 백엔드 + 플러그인 빌드 + 로드
-    var registry = suji.BackendRegistry.init(allocator);
-    defer registry.deinit();
-    registry.setGlobal();
-    try loadPluginsFromConfig(allocator, &config, &registry, false);
-    try loadBackendsFromConfig(allocator, &config, &registry, false);
-
-    // 2. 프론트엔드 dev 서버
-    std.debug.print("[suji] starting frontend dev server...\n", .{});
-    var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
-        std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
-        try openWindow(allocator, &config, &registry, .dev);
-        return;
-    };
-    defer _ = frontend_proc.kill() catch {};
-
-    std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
-    std.Thread.sleep(2 * std.time.ns_per_s);
-
-    // 3. WebView
-    try openWindow(allocator, &config, &registry, .dev);
-}
-
-// ============================================
-// suji build
-// ============================================
 fn runBuild(allocator: std.mem.Allocator) !void {
     var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
@@ -159,30 +106,6 @@ fn runBuild(allocator: std.mem.Allocator) !void {
     defer config.deinit();
 
     std.debug.print("[suji] production build - {s}\n", .{config.app.name});
-
-    // 백엔드 릴리스 빌드
-    try buildBackendsFromConfig(allocator, &config, true);
-
-    // 프론트엔드 빌드
-    std.debug.print("[suji] building frontend...\n", .{});
-    buildFrontend(allocator, config.frontend.dir) catch |err| {
-        std.debug.print("[suji] frontend build failed: {}\n", .{err});
-    };
-
-    std.debug.print("[suji] build complete!\n", .{});
-}
-
-// ============================================
-// suji build --cef (macOS 번들)
-// ============================================
-fn runBuildCef(allocator: std.mem.Allocator) !void {
-    var config = suji.Config.load(allocator) catch {
-        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
-        return;
-    };
-    defer config.deinit();
-
-    std.debug.print("[suji] CEF production build - {s}\n", .{config.app.name});
 
     // 백엔드 릴리스 빌드
     try buildBackendsFromConfig(allocator, &config, true);
@@ -212,27 +135,6 @@ fn runBuildCef(allocator: std.mem.Allocator) !void {
         exe_path,
         config.frontend.dist_dir,
     );
-}
-
-// ============================================
-// suji run
-// ============================================
-fn runProd(allocator: std.mem.Allocator) !void {
-    var config = suji.Config.load(allocator) catch {
-        std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
-        return;
-    };
-    defer config.deinit();
-
-    std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
-
-    var registry = suji.BackendRegistry.init(allocator);
-    defer registry.deinit();
-    registry.setGlobal();
-    try loadPluginsFromConfig(allocator, &config, &registry, true);
-    try loadBackendsFromConfig(allocator, &config, &registry, true);
-
-    try openWindow(allocator, &config, &registry, .dist);
 }
 
 // ============================================
@@ -516,14 +418,14 @@ fn buildFrontend(allocator: std.mem.Allocator, frontend_dir: []const u8) !void {
 // CEF 모드
 // ============================================
 
-fn runDevCef(allocator: std.mem.Allocator) !void {
+fn runDev(allocator: std.mem.Allocator) !void {
     var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
         return;
     };
     defer config.deinit();
 
-    std.debug.print("[suji] CEF dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
+    std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
     var registry = suji.BackendRegistry.init(allocator);
     defer registry.deinit();
@@ -535,7 +437,7 @@ fn runDevCef(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] starting frontend dev server...\n", .{});
     var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
-        try openCefWindow(allocator, &config, &registry, .dev);
+        try openWindow(allocator, &config, &registry, .dev);
         return;
     };
     defer _ = frontend_proc.kill() catch {};
@@ -543,17 +445,17 @@ fn runDevCef(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
     std.Thread.sleep(2 * std.time.ns_per_s);
 
-    try openCefWindow(allocator, &config, &registry, .dev);
+    try openWindow(allocator, &config, &registry, .dev);
 }
 
-fn runProdCef(allocator: std.mem.Allocator) !void {
+fn runProd(allocator: std.mem.Allocator) !void {
     var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
         return;
     };
     defer config.deinit();
 
-    std.debug.print("[suji] CEF production mode - {s}\n", .{config.app.name});
+    std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
 
     var registry = suji.BackendRegistry.init(allocator);
     defer registry.deinit();
@@ -561,10 +463,12 @@ fn runProdCef(allocator: std.mem.Allocator) !void {
     try loadPluginsFromConfig(allocator, &config, &registry, true);
     try loadBackendsFromConfig(allocator, &config, &registry, true);
 
-    try openCefWindow(allocator, &config, &registry, .dist);
+    try openWindow(allocator, &config, &registry, .dist);
 }
 
-fn openCefWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
+const WindowMode = enum { dev, dist };
+
+fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
     // EventBus 생성
     var event_bus = suji.EventBus.init(allocator);
     defer event_bus.deinit();
@@ -580,17 +484,25 @@ fn openCefWindow(allocator: std.mem.Allocator, config: *const suji.Config, regis
     // URL 결정
     var url_buf: [2048]u8 = undefined;
     const url: ?[:0]const u8 = switch (mode) {
-        .dev => config.frontend.dev_url,
+        .dev => config.frontend.dev_url, // dev 모드: protocol 설정 무관, 항상 HTTP dev 서버
         .dist => blk: {
-            // dist 디렉토리에서 index.html을 file:// URL로 로드
-            // .app 번들: Contents/Resources/frontend/dist/index.html
-            // 로컬: frontend/dist/index.html
+            // dist 디렉토리 경로 탐색
             const dist_path = findDistPath(allocator, config.frontend.dist_dir) orelse {
                 std.debug.print("[suji] frontend dist not found: {s}\n", .{config.frontend.dist_dir});
                 break :blk null;
             };
             defer allocator.free(dist_path);
-            const url_str = std.fmt.bufPrint(&url_buf, "file://{s}/index.html", .{dist_path}) catch break :blk null;
+
+            const url_str = switch (config.window.protocol) {
+                .suji => s: {
+                    // suji:// 커스텀 프로토콜 (CORS/fetch/cookie/ServiceWorker 정상 동작)
+                    cef.setDistPath(dist_path);
+                    break :s std.fmt.bufPrint(&url_buf, "suji://app/index.html", .{}) catch break :blk null;
+                },
+                .file => s: {
+                    break :s std.fmt.bufPrint(&url_buf, "file://{s}/index.html", .{dist_path}) catch break :blk null;
+                },
+            };
             url_buf[url_str.len] = 0;
             break :blk url_buf[0..url_str.len :0];
         },
@@ -806,87 +718,3 @@ fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 
     return null;
 }
 
-// ============================================
-// WebView
-// ============================================
-
-const WindowMode = enum { dev, dist };
-
-fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
-    var win = try suji.Window.create(.{
-        .title = config.window.title,
-        .width = @intCast(config.window.width),
-        .height = @intCast(config.window.height),
-        .debug = config.window.debug,
-        .url = switch (mode) {
-            .dev => config.frontend.dev_url,
-            .dist => null,
-        },
-    });
-    defer win.destroy();
-
-    // dist 모드: file:// URL로 로드
-    if (mode == .dist) {
-        const dist_path = std.fmt.allocPrint(allocator, "{s}/index.html", .{config.frontend.dist_dir}) catch null;
-        if (dist_path) |dp| {
-            defer allocator.free(dp);
-            const abs = std.fs.cwd().realpathAlloc(allocator, dp) catch null;
-            if (abs) |a| {
-                defer allocator.free(a);
-                var url_buf: [2048]u8 = undefined;
-                const url = std.fmt.bufPrint(&url_buf, "file://{s}", .{a}) catch null;
-                if (url) |u| {
-                    url_buf[u.len] = 0;
-                    win.webview.navigate(url_buf[0..u.len :0]);
-                }
-            }
-        }
-    }
-
-    // EventBus 생성 + WebView eval 연결
-    var event_bus = suji.EventBus.init(allocator);
-    defer event_bus.deinit();
-
-    // webview_eval 연결: EventBus → JS __dispatch__
-    const WebViewEvalCtx = struct {
-        var wv: *suji.WebView = undefined;
-        fn eval(js: [:0]const u8) void {
-            wv.eval(js);
-        }
-    };
-    WebViewEvalCtx.wv = &win.webview;
-    event_bus.webview_eval = WebViewEvalCtx.eval;
-
-    registry.setEventBus(&event_bus);
-
-    const bridge = try allocator.create(suji.Bridge);
-    bridge.* = suji.Bridge.init(&win.webview, registry);
-    bridge.setEventBus(&event_bus);
-    defer {
-        bridge.deinit();
-        allocator.destroy(bridge);
-    }
-    bridge.bind();
-
-    // 에셋 서버 시작 + JS에 URL 주입
-    const asset_server = suji.AssetServer.start(allocator, config.asset_dir) catch |err| blk: {
-        std.debug.print("[suji] asset server failed: {}, continuing without it\n", .{err});
-        break :blk null;
-    };
-    defer if (asset_server) |srv| srv.stop();
-
-    if (asset_server) |srv| {
-        var url_buf: [128]u8 = undefined;
-        const base_url = srv.getBaseUrl(&url_buf);
-        var js_buf: [256]u8 = undefined;
-        const js = std.fmt.bufPrint(&js_buf, "window.__suji__.assetUrl = \"{s}\";", .{base_url}) catch null;
-        if (js) |j| {
-            js_buf[j.len] = 0;
-            win.webview.init(js_buf[0..j.len :0]);
-        }
-    }
-
-    win.loadContent();
-    std.debug.print("[suji] window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
-    win.run();
-}

@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (70개)
+zig build test     # 테스트 (164개)
 zig build run      # CLI 도움말
 
 # 예제 실행
@@ -71,6 +71,28 @@ suji.on("event", (data) => console.log(data))
 suji.emit("event", { msg: "hello" })
 ```
 
+## suji.json 설정
+
+```json
+{
+  "app": { "name": "My App", "version": "1.0.0" },
+  "window": {
+    "title": "My App",
+    "width": 1024,
+    "height": 768,
+    "debug": false,
+    "protocol": "file"       // "file" (기본, file://) | "suji" (suji:// 커스텀 프로토콜)
+  },
+  "frontend": {
+    "dir": "frontend",
+    "dev_url": "http://localhost:5173",
+    "dist_dir": "frontend/dist"
+  }
+}
+```
+
+`protocol: "suji"` — CORS, fetch, Cookie, Service Worker가 정상 동작하는 커스텀 프로토콜. prod 빌드 시 `suji://app/` URL로 프론트엔드 로드.
+
 ## 자동 라우팅
 
 각 백엔드는 초기화 시 자신이 처리할 수 있는 채널(커맨드)을 `register`로 등록한다. 프론트엔드에서 `suji.invoke("ping")`처럼 채널명만으로 호출하면, 코어가 등록 정보를 기반으로 올바른 백엔드로 자동 라우팅한다. `{ target: "rust" }` 옵션으로 특정 백엔드를 명시할 수도 있다. 동일 채널을 여러 백엔드가 중복 등록하면 에러를 반환한다.
@@ -80,17 +102,16 @@ suji.emit("event", { msg: "hello" })
 ```
 suji/
 ├── src/
-│   ├── main.zig              # CLI + EventBus↔WebView 연결
+│   ├── main.zig              # CLI + CEF 윈도우 관리
 │   ├── root.zig
 │   ├── core/
 │   │   ├── app.zig           # Zig SDK (handle/on/send/exportApp)
 │   │   ├── config.zig        # JSON 설정 파서
 │   │   ├── events.zig        # EventBus (pub/sub, mutex snapshot)
 │   │   ├── init.zig          # suji init 스캐폴딩
-│   │   ├── util.zig          # nullTerminate, 버퍼 상수
-│   │   ├── window.zig        # 창 관리
-│   │   ├── webview.zig       # WebView API
-│   │   └── ipc.zig           # IPC 브릿지
+│   │   └── util.zig          # nullTerminate, 버퍼 상수
+│   ├── platform/
+│   │   └── cef.zig           # CEF 통합 (창, IPC, 렌더러, 커스텀 프로토콜)
 │   ├── backends/
 │   │   └── loader.zig        # BackendRegistry + SujiCore
 │   └── templates/
@@ -99,7 +120,7 @@ suji/
 │   └── suji-rs-macros/       # Rust proc macro
 ├── sdks/
 │   └── suji-go/              # Go SDK (bridge.c/bridge.go)
-├── tests/                    # 70개 테스트
+├── tests/                    # 테스트
 ├── examples/
 │   ├── zig-backend/
 │   ├── rust-backend/
