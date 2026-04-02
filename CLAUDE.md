@@ -128,6 +128,12 @@ suji/
 │   └── multi-backend/        # Zig+Rust+Go + 이벤트 예제
 └── docs/PLAN.md
 
+## 크로스 플랫폼
+
+- macOS: Cocoa + ObjC + CEF Framework 링크, `.app` 번들링
+- Linux: GTK3 + X11 + CEF 공유 라이브러리, CEF 자체 윈도우
+- CI: GitHub Actions (macos-14 + ubuntu-24.04)
+
 ## 알려진 이슈
 
 - macOS 26.4 + Xcode 26.4: Zig 링커 버그 (Xcode 26.2 필요)
