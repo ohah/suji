@@ -27,8 +27,8 @@ jobs:
           tar xjf /tmp/cef.tar.bz2 -C /tmp
           CEF_DIR=$(ls -d /tmp/cef_binary_* | head -1)
           cp -R "$CEF_DIR/include" ~/.suji/cef/macos-arm64/
-          cp -R "$CEF_DIR/Release/"* ~/.suji/cef/macos-arm64/Release/
-          cp -R "$CEF_DIR/Resources/"* ~/.suji/cef/macos-arm64/Resources/
+          cp -R "$CEF_DIR/Release/"* ~/.suji/cef/macos-arm64/Release/ || true
+          cp -R "$CEF_DIR/Resources/"* ~/.suji/cef/macos-arm64/Resources/ || true
 
       - name: Build
         run: zig build
