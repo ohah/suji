@@ -22,8 +22,8 @@ jobs:
           mkdir -p ~/.suji/cef/macos-arm64/Release
           mkdir -p ~/.suji/cef/macos-arm64/Resources/locales
           mkdir -p ~/.suji/cef/cache
-          # CEF 프리빌트 다운로드 (CI용 — 헤더만 필요하면 빌드 테스트, 전체 필요하면 런타임 테스트)
-          curl -sL "https://cef-builds.spotifycdn.com/cef_binary_134.3.8%2Bgb170827%2Bchromium-134.0.6998.166_macosarm64_minimal.tar.bz2" -o /tmp/cef.tar.bz2
+          CEF_FILE="cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_macosarm64_minimal.tar.bz2"
+          curl -fSL "https://cef-builds.spotifycdn.com/$CEF_FILE" -o /tmp/cef.tar.bz2
           tar xjf /tmp/cef.tar.bz2 -C /tmp
           CEF_DIR=$(ls -d /tmp/cef_binary_* | head -1)
           cp -R "$CEF_DIR/include" ~/.suji/cef/macos-arm64/
