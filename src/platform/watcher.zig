@@ -81,16 +81,20 @@ pub const Watcher = struct {
 
         if (builtin.os.tag == .linux) {
             if (self.os.inotify_fd < 0) {
-                self.os.inotify_fd = try std.posix.inotify_init1(.{ .CLOEXEC = true, .NONBLOCK = true });
+                const IN_CLOEXEC = @as(u32, 0o2000000);
+                const IN_NONBLOCK = @as(u32, 0o4000);
+                const fd = std.os.linux.inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+                if (@as(isize, @bitCast(fd)) < 0) return error.WatchFailed;
+                self.os.inotify_fd = @intCast(fd);
             }
             // 디렉토리 감시 등록
             var path_buf: [std.fs.max_path_bytes]u8 = undefined;
             const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.PathTooLong;
-            _ = std.posix.inotify_add_watch(self.os.inotify_fd, path_z, .{
-                .MODIFY = true,
-                .CREATE = true,
-                .MOVED_TO = true,
-            }) catch return error.WatchFailed;
+            const IN_MODIFY = @as(u32, 0x00000002);
+            const IN_CREATE = @as(u32, 0x00000100);
+            const IN_MOVED_TO = @as(u32, 0x00000080);
+            const wd = std.os.linux.inotify_add_watch(self.os.inotify_fd, path_z, IN_MODIFY | IN_CREATE | IN_MOVED_TO);
+            if (@as(isize, @bitCast(wd)) < 0) return error.WatchFailed;
         }
     }
 
@@ -119,34 +123,39 @@ pub const Watcher = struct {
     // Linux: inotify
     // ============================================
 
+    const InotifyEvent = extern struct {
+        wd: i32,
+        mask: u32,
+        cookie: u32,
+        len: u32,
+    };
+
     fn watchLoopLinux(self: *Watcher) void {
         const fd = self.os.inotify_fd;
         if (fd < 0) return;
 
-        var buf: [4096]u8 align(@alignOf(std.os.linux.inotify_event)) = undefined;
+        var buf: [4096]u8 align(@alignOf(InotifyEvent)) = undefined;
 
         while (!self.should_stop.load(.acquire)) {
             const len = std.posix.read(fd, &buf) catch |err| {
                 if (err == error.WouldBlock) {
-                    // 이벤트 없음 — 100ms 대기
                     std.Thread.sleep(100 * std.time.ns_per_ms);
                     continue;
                 }
-                break; // 에러
+                break;
             };
             if (len == 0) {
                 std.Thread.sleep(100 * std.time.ns_per_ms);
                 continue;
             }
 
-            // inotify 이벤트 파싱
             var offset: usize = 0;
             while (offset < len) {
-                const event: *const std.os.linux.inotify_event = @alignCast(@ptrCast(buf[offset..]));
-                const event_size = @sizeOf(std.os.linux.inotify_event) + event.len;
+                const event: *const InotifyEvent = @alignCast(@ptrCast(buf[offset..]));
+                const event_size = @sizeOf(InotifyEvent) + event.len;
 
                 if (event.len > 0) {
-                    const name_ptr: [*]const u8 = @ptrCast(@as([*]const u8, &buf) + offset + @sizeOf(std.os.linux.inotify_event));
+                    const name_ptr: [*]const u8 = buf[offset + @sizeOf(InotifyEvent) ..].ptr;
                     const name = std.mem.sliceTo(name_ptr[0..event.len], 0);
                     if (self.callback) |cb| cb(name);
                 }
