@@ -91,10 +91,34 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("shell32", .{});
     }
 
+    // libnode (Node.js 임베딩) — 선택적
+    const node_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/node/24.14.1", .{home}) catch @panic("OOM");
+    const node_available = blk: {
+        const dylib = std.fmt.allocPrint(b.allocator, "{s}/libnode.dylib", .{node_path}) catch break :blk false;
+        std.fs.cwd().access(dylib, .{}) catch break :blk false;
+        break :blk true;
+    };
+    if (node_available) {
+        // Node.js C++ 브릿지 + 헤더
+        root_module.addIncludePath(.{ .cwd_relative = "src/platform/node" });
+        const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
+        root_module.addIncludePath(.{ .cwd_relative = node_include });
+    }
+
     const exe = b.addExecutable(.{
         .name = "suji",
         .root_module = root_module,
     });
+
+    if (node_available) {
+        // bridge.cc를 C++ 오브젝트로 컴파일 + 링크
+        exe.addCSourceFile(.{
+            .file = b.path("src/platform/node/bridge.cc"),
+            .flags = &.{"-std=c++20"},
+        });
+        exe.addLibraryPath(.{ .cwd_relative = node_path });
+        exe.linkSystemLibrary("node");
+    }
 
     if (os_tag == .macos) {
         exe.headerpad_max_install_names = true;
