@@ -8,6 +8,9 @@ on:
         required: true
         default: '24.14.1'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -26,12 +29,14 @@ jobs:
       # ---- Unix (macOS + Linux) ----
       - name: Build libnode (Unix)
         if: runner.os != 'Windows'
+        timeout-minutes: 120
         run: |
           curl -fSL "https://nodejs.org/dist/v${{ inputs.node_version }}/node-v${{ inputs.node_version }}.tar.gz" -o /tmp/node.tar.gz
           tar xzf /tmp/node.tar.gz -C /tmp
           cd /tmp/node-v${{ inputs.node_version }}
           ./configure --shared --prefix=/tmp/node-install
-          make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
+          JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+          make -j$JOBS
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
