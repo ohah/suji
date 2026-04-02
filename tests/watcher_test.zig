@@ -28,9 +28,12 @@ test "Watcher addPath multiple" {
     var w = Watcher.init(std.testing.allocator);
     defer w.deinit();
 
-    try w.addPath("/tmp/a");
-    try w.addPath("/tmp/b");
-    try w.addPath("/tmp/c");
+    // 실제 존재하는 디렉토리 사용 (Linux inotify는 존재하지 않는 경로 거부)
+    const dirs = [_][]const u8{ "/tmp/suji-watch-a", "/tmp/suji-watch-b", "/tmp/suji-watch-c" };
+    for (dirs) |d| std.fs.cwd().makePath(d) catch {};
+    defer for (dirs) |d| std.fs.cwd().deleteTree(d) catch {};
+
+    for (dirs) |d| try w.addPath(d);
     try std.testing.expectEqual(@as(usize, 3), w.paths.items.len);
 }
 
@@ -38,13 +41,17 @@ test "Watcher addPath owns memory" {
     var w = Watcher.init(std.testing.allocator);
     defer w.deinit();
 
+    const tmp_dir = "/tmp/suji-watch-own";
+    std.fs.cwd().makePath(tmp_dir) catch {};
+    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+
     // 스택 문자열 전달 — Watcher가 복제해야 함
-    var buf: [16]u8 = undefined;
-    const path = std.fmt.bufPrint(&buf, "/tmp/{d}", .{42}) catch unreachable;
+    var buf: [32]u8 = undefined;
+    const path = std.fmt.bufPrint(&buf, "{s}", .{tmp_dir}) catch unreachable;
     try w.addPath(path);
     // buf를 수정해도 watcher의 경로는 영향 없어야 함
     buf[0] = 'X';
-    try std.testing.expectEqualStrings("/tmp/42", w.paths.items[0]);
+    try std.testing.expectEqualStrings(tmp_dir, w.paths.items[0]);
 }
 
 // ============================================
