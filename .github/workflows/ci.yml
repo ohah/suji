@@ -18,6 +18,9 @@ jobs:
           - os: ubuntu-24.04
             cef_platform: linux-x86_64
             cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_linux64_minimal.tar.bz2"
+          - os: windows-latest
+            cef_platform: windows-x86_64
+            cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_windows64_minimal.tar.bz2"
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -34,7 +37,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libx11-dev libnss3 libatk-bridge2.0-0 libdrm2 libgbm1
 
-      - name: Download CEF
+      - name: Download CEF (Unix)
+        if: runner.os != 'Windows'
         run: |
           mkdir -p ~/.suji/cef/${{ matrix.cef_platform }}/Release
           mkdir -p ~/.suji/cef/${{ matrix.cef_platform }}/Resources/locales
@@ -45,6 +49,22 @@ jobs:
           cp -R "$CEF_DIR/include" ~/.suji/cef/${{ matrix.cef_platform }}/
           cp -R "$CEF_DIR/Release/"* ~/.suji/cef/${{ matrix.cef_platform }}/Release/ || true
           cp -R "$CEF_DIR/Resources/"* ~/.suji/cef/${{ matrix.cef_platform }}/Resources/ || true
+
+      - name: Download CEF (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cefDir = "$env:USERPROFILE\.suji\cef\windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "$cefDir\Release"
+          New-Item -ItemType Directory -Force -Path "$cefDir\Resources\locales"
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.suji\cef\cache"
+          $url = "https://cef-builds.spotifycdn.com/${{ matrix.cef_file }}"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\cef.tar.bz2"
+          tar xjf "$env:TEMP\cef.tar.bz2" -C "$env:TEMP"
+          $extracted = Get-ChildItem "$env:TEMP\cef_binary_*" -Directory | Select-Object -First 1
+          Copy-Item -Recurse "$($extracted.FullName)\include" "$cefDir\" -Force
+          Copy-Item "$($extracted.FullName)\Release\*" "$cefDir\Release\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$($extracted.FullName)\Resources\*" "$cefDir\Resources\" -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Build
         run: zig build

@@ -47,9 +47,11 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("util", util_module);
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
-    const home = std.posix.getenv("HOME") orelse
-        (if (@import("builtin").os.tag == .windows) std.posix.getenv("USERPROFILE") orelse "C:\\Users\\Default" else "/tmp");
     const os_tag = @import("builtin").os.tag;
+    const home = if (os_tag == .windows)
+        (std.process.getEnvMap(b.allocator) catch @panic("OOM")).get("USERPROFILE") orelse "C:\\Users\\Default"
+    else
+        std.posix.getenv("HOME") orelse "/tmp";
     const cef_platform = switch (os_tag) {
         .macos => "macos-arm64",
         .linux => "linux-x86_64",
@@ -76,6 +78,14 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("gtk-3", .{});
         root_module.linkSystemLibrary("gdk-3.0", .{});
         root_module.linkSystemLibrary("X11", .{});
+    } else if (os_tag == .windows) {
+        // Windows: CEF DLL + Win32
+        const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
+        root_module.addLibraryPath(.{ .cwd_relative = cef_lib_path });
+        root_module.linkSystemLibrary("libcef", .{});
+        root_module.linkSystemLibrary("user32", .{});
+        root_module.linkSystemLibrary("gdi32", .{});
+        root_module.linkSystemLibrary("shell32", .{});
     }
 
     const exe = b.addExecutable(.{

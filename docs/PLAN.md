@@ -814,7 +814,7 @@ await expect(page.locator('#result')).toHaveText('saved');
 - [x] Step 6: E2E 테스트 지원 (Puppeteer + CDP, `tests/e2e/cef-ipc.test.ts`)
 - [x] Step 7: macOS 번들링 (Helper 프로세스 4개, Info.plist, 코드 서명) — `bundle_macos.zig`
 - [x] Step 7.5: 커스텀 프로토콜 `suji://` (CefSchemeHandlerFactory, `"protocol": "suji"|"file"` 옵션, 기본 file)
-- [x] Step 8: 크로스 플랫폼 빌드 (macOS + Linux CI, 조건부 컴파일, GTK/X11 링크)
+- [x] Step 8: 크로스 플랫폼 빌드 (macOS + Linux + Windows CI, 조건부 컴파일, GTK/X11/Win32 링크)
 - [x] Step 9: webview.h 완전 제거 (webview-zig, ipc.zig, window.zig, asset_server.zig 삭제, CEF 단일 경로)
 
 Step 1에서 CEF가 Zig와 호환되는지 확인 — 안 되면 여기서 중단하고 webview.h 유지.
