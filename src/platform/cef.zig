@@ -177,9 +177,9 @@ pub fn createBrowser(config: CefConfig) !void {
     if (comptime is_macos) {
         // macOS: NSWindow 생성 + CEF 임베딩
         const content_view = createMacWindow(config.title, config.width, config.height) orelse return error.WindowCreationFailed;
-        window_info.parent_view = content_view;
+        @field(window_info, "parent_view") = content_view;
     }
-    // Linux/Windows: parent_view = null → CEF가 자체 윈도우 생성
+    // Linux/Windows: CEF가 자체 윈도우 생성
 
     setCefString(&window_info.window_name, config.title);
 
