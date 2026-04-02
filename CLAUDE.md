@@ -93,6 +93,23 @@ suji.emit("event", { msg: "hello" })
 
 `protocol: "suji"` — CORS, fetch, Cookie, Service Worker가 정상 동작하는 커스텀 프로토콜. prod 빌드 시 `suji://app/` URL로 프론트엔드 로드.
 
+## Node.js 백엔드
+
+```json
+{ "backend": { "lang": "node", "entry": "backends/node" } }
+```
+
+```js
+// backends/node/main.js
+suji.handle('hello', (data) => {
+  const req = JSON.parse(data);
+  return JSON.stringify({ message: 'Hello!', echo: req });
+});
+```
+
+libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.
+`package.json` + `npm install` + `node_modules` 완전 호환.
+
 ## 자동 라우팅
 
 각 백엔드는 초기화 시 자신이 처리할 수 있는 채널(커맨드)을 `register`로 등록한다. 프론트엔드에서 `suji.invoke("ping")`처럼 채널명만으로 호출하면, 코어가 등록 정보를 기반으로 올바른 백엔드로 자동 라우팅한다. `{ target: "rust" }` 옵션으로 특정 백엔드를 명시할 수도 있다. 동일 채널을 여러 백엔드가 중복 등록하면 에러를 반환한다.
