@@ -16,10 +16,14 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_resource_handler_capi.h");
 });
 
-const objc = @cImport({
+const builtin = @import("builtin");
+const is_macos = builtin.os.tag == .macos;
+const is_linux = builtin.os.tag == .linux;
+
+const objc = if (is_macos) @cImport({
     @cInclude("objc/runtime.h");
     @cInclude("objc/message.h");
-});
+}) else struct {};
 
 // ============================================
 // Public API
@@ -107,21 +111,29 @@ pub fn initialize(config: CefConfig) !void {
         setCefString(&settings.browser_subprocess_path, ep);
     } else |_| {}
 
-    // CEF 경로 설정
-    // TODO: macOS arm64 하드코딩 — 크로스 플랫폼 지원 시 OS/arch 감지로 변경
+    // CEF 경로 설정 (OS/arch별)
     const home = std.posix.getenv("HOME") orelse "/tmp";
+    const cef_platform = comptime switch (builtin.os.tag) {
+        .macos => "macos-arm64",
+        .linux => "linux-x86_64",
+        .windows => "windows-x86_64",
+        else => @compileError("unsupported OS"),
+    };
+
     var fw_buf: [1024]u8 = undefined;
     var res_buf: [1024]u8 = undefined;
     var loc_buf: [1024]u8 = undefined;
     var cache_buf: [1024]u8 = undefined;
 
-    setCefString(&settings.framework_dir_path, std.fmt.bufPrint(&fw_buf, "{s}/.suji/cef/macos-arm64/Release/Chromium Embedded Framework.framework", .{home}) catch return error.PathTooLong);
-    setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/macos-arm64/Resources", .{home}) catch return error.PathTooLong);
-    setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/macos-arm64/Resources/locales", .{home}) catch return error.PathTooLong);
+    if (is_macos) {
+        setCefString(&settings.framework_dir_path, std.fmt.bufPrint(&fw_buf, "{s}/.suji/cef/{s}/Release/Chromium Embedded Framework.framework", .{ home, cef_platform }) catch return error.PathTooLong);
+    }
+    setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/{s}/Resources", .{ home, cef_platform }) catch return error.PathTooLong);
+    setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/{s}/Resources/locales", .{ home, cef_platform }) catch return error.PathTooLong);
     setCefString(&settings.root_cache_path, std.fmt.bufPrint(&cache_buf, "{s}/.suji/cef/cache", .{home}) catch return error.PathTooLong);
 
     // macOS: NSApplication 초기화 (cef_initialize 전에 필수)
-    initNSApp();
+    if (comptime is_macos) initNSApp();
 
     std.debug.print("[suji] CEF initializing...\n", .{});
     if (c.cef_initialize(&main_args, &settings, &g_app, null) != 1) {
@@ -152,15 +164,18 @@ pub fn createBrowser(config: CefConfig) !void {
     initBaseRefCounted(&g_devtools_client.base);
     g_devtools_client.get_keyboard_handler = &getKeyboardHandler;
 
-    // NSWindow 생성
-    const content_view = createMacWindow(config.title, config.width, config.height) orelse return error.WindowCreationFailed;
-
     // Window info
     var window_info: c.cef_window_info_t = undefined;
     zeroCefStruct(c.cef_window_info_t, &window_info);
-    window_info.parent_view = content_view;
     window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
     window_info.bounds = .{ .x = 0, .y = 0, .width = config.width, .height = config.height };
+
+    if (comptime is_macos) {
+        // macOS: NSWindow 생성 + CEF 임베딩
+        const content_view = createMacWindow(config.title, config.width, config.height) orelse return error.WindowCreationFailed;
+        window_info.parent_view = content_view;
+    }
+    // Linux/Windows: parent_view = null → CEF가 자체 윈도우 생성
 
     setCefString(&window_info.window_name, config.title);
 
@@ -207,7 +222,7 @@ pub fn evalJs(js: [:0]const u8) void {
 
 /// 메시지 루프 실행 (블로킹)
 pub fn run() void {
-    activateNSApp();
+    if (comptime is_macos) activateNSApp();
     std.debug.print("[suji] CEF running\n", .{});
     c.cef_run_message_loop();
 }

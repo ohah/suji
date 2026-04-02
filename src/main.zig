@@ -2,7 +2,11 @@ const std = @import("std");
 const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
-const bundle_macos = @import("bundle_macos.zig");
+const bundle_macos = if (@import("builtin").os.tag == .macos) @import("bundle_macos.zig") else struct {
+    pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
+        @panic("macOS bundle not supported on this platform");
+    }
+};
 
 pub fn main() !void {
     // CEF 서브프로세스 처리 (렌더러/GPU 등 — 메인이면 통과)
@@ -15,11 +19,15 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    // .app 번들 안에서 실행 시 자동으로 run
+    // 번들에서 실행 시 자동으로 run (macOS .app / Linux AppImage)
     if (args.len < 2) {
         var exe_buf: [1024]u8 = undefined;
         if (std.fs.selfExePath(&exe_buf)) |ep| {
-            if (std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null) {
+            const is_bundle = switch (comptime @import("builtin").os.tag) {
+                .macos => std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null,
+                else => false, // Linux/Windows: 향후 AppImage 등 감지 추가
+            };
+            if (is_bundle) {
                 try runProd(allocator);
                 return;
             }
