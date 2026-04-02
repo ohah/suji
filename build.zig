@@ -48,10 +48,13 @@ pub fn build(b: *std.Build) void {
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
     const os_tag = @import("builtin").os.tag;
-    const home = if (os_tag == .windows)
-        (std.process.getEnvMap(b.allocator) catch @panic("OOM")).get("USERPROFILE") orelse "C:\\Users\\Default"
-    else
-        std.posix.getenv("HOME") orelse "/tmp";
+    const home: []const u8 = blk: {
+        if (os_tag == .windows) {
+            const env = std.process.getEnvMap(b.allocator) catch break :blk "C:\\Users\\Default";
+            break :blk env.get("USERPROFILE") orelse "C:\\Users\\Default";
+        }
+        break :blk std.posix.getenv("HOME") orelse "/tmp";
+    };
     const cef_platform = switch (os_tag) {
         .macos => "macos-arm64",
         .linux => "linux-x86_64",

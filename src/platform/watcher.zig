@@ -198,18 +198,17 @@ pub const Watcher = struct {
         var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
         defer dir.close();
 
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind != .file) continue;
-            const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name });
-            const stat = std.fs.cwd().statFile(full) catch {
-                allocator.free(full);
-                continue;
-            };
-            if (mtimes.contains(full)) {
-                allocator.free(full);
-            } else {
-                try mtimes.put(full, stat.mtime);
+            const full_stack = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
+            const stat = std.fs.cwd().statFile(full_stack) catch continue;
+            if (!mtimes.contains(full_stack)) {
+                const owned = allocator.dupe(u8, full_stack) catch continue;
+                mtimes.put(owned, stat.mtime) catch {
+                    allocator.free(owned);
+                };
             }
         }
     }
@@ -223,27 +222,29 @@ pub const Watcher = struct {
         var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
         defer dir.close();
 
+        // 스택 버퍼로 경로 조립 (매 주기 heap 할당 방지)
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+
         var iter = dir.iterate();
         while (try iter.next()) |entry| {
             if (entry.kind != .file) continue;
-            const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name });
-            const stat = std.fs.cwd().statFile(full) catch {
-                allocator.free(full);
-                continue;
-            };
+            const full_stack = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
 
-            if (mtimes.getPtr(full)) |mtime_ptr| {
+            const stat = std.fs.cwd().statFile(full_stack) catch continue;
+
+            if (mtimes.getPtr(full_stack)) |mtime_ptr| {
                 if (stat.mtime != mtime_ptr.*) {
                     mtime_ptr.* = stat.mtime;
-                    if (callback) |cb| cb(full);
+                    if (callback) |cb| cb(full_stack);
                 }
-                allocator.free(full); // 기존 키 재사용, 새 할당 해제
             } else {
-                // 새 파일 — 키 소유권 이전
-                mtimes.put(full, stat.mtime) catch {
-                    allocator.free(full);
+                // 새 파일 — heap 할당은 HashMap 키로만
+                const owned = allocator.dupe(u8, full_stack) catch continue;
+                mtimes.put(owned, stat.mtime) catch {
+                    allocator.free(owned);
+                    continue;
                 };
-                if (callback) |cb| cb(full);
+                if (callback) |cb| cb(full_stack);
             }
         }
     }

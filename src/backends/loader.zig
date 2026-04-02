@@ -160,20 +160,24 @@ pub const BackendRegistry = struct {
 
     /// 백엔드 핫 리로드: 언로드 → 라우팅 정리 → 재로드
     pub fn reload(self: *BackendRegistry, name: []const u8, path: [:0]const u8) !void {
+        // 1. 새 dylib 로드 (lock 밖에서 — I/O + 심볼 해석이 느림)
+        var backend = try Backend.load(name, path);
+        errdefer backend.deinit();
+
+        // 2. lock 획득 → 스왑
         self.rw_lock.lock();
         defer self.rw_lock.unlock();
 
-        // 1. 기존 백엔드 언로드
-        if (self.backends.getPtr(name)) |backend| {
-            backend.deinit();
+        // 기존 백엔드 언로드
+        if (self.backends.getPtr(name)) |old| {
+            old.deinit();
             _ = self.backends.remove(name);
         }
 
-        // 2. 라우팅 테이블에서 해당 백엔드의 채널 제거
+        // 라우팅 테이블 정리
         self.clearRoutesFor(name);
 
-        // 3. 새 dylib 로드
-        var backend = try Backend.load(name, path);
+        // 새 백엔드 등록 + 초기화
         self.registering_backend = name;
         defer self.registering_backend = null;
         backend.init(&self.core_api);

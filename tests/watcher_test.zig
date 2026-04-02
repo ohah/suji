@@ -231,6 +231,120 @@ test "BackendRegistry clearRoutesFor nonexistent backend" {
 // RwLock 동시성 테스트
 // ============================================
 
+// ============================================
+// Watcher 추가 테스트
+// ============================================
+
+test "Watcher detects multiple file changes" {
+    const allocator = std.testing.allocator;
+    const tmp_dir = "/tmp/suji-watcher-test-multi";
+    std.fs.cwd().deleteTree(tmp_dir) catch {};
+    try std.fs.cwd().makePath(tmp_dir);
+    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+
+    var w = Watcher.init(allocator);
+    defer w.deinit();
+    try w.addPath(tmp_dir);
+
+    var change_count = std.atomic.Value(u32).init(0);
+    const Ctx = struct {
+        var counter: *std.atomic.Value(u32) = undefined;
+        fn cb(_: []const u8) void {
+            _ = counter.fetchAdd(1, .monotonic);
+        }
+    };
+    Ctx.counter = &change_count;
+    try w.start(&Ctx.cb);
+
+    std.Thread.sleep(800 * std.time.ns_per_ms);
+
+    // 여러 파일 생성
+    const files = [_][]const u8{ "/a.txt", "/b.txt", "/c.txt" };
+    for (files) |suffix| {
+        var path_buf: [128]u8 = undefined;
+        const file_path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ tmp_dir, suffix }) catch continue;
+        var f = std.fs.cwd().createFile(file_path, .{}) catch continue;
+        _ = f.write("data") catch {};
+        f.close();
+    }
+
+    var waited: usize = 0;
+    while (change_count.load(.acquire) < 3 and waited < 40) : (waited += 1) {
+        std.Thread.sleep(100 * std.time.ns_per_ms);
+    }
+    w.stop();
+    try std.testing.expect(change_count.load(.acquire) >= 2); // 최소 2개 감지
+}
+
+test "Watcher empty directory no crash" {
+    const allocator = std.testing.allocator;
+    const tmp_dir = "/tmp/suji-watcher-test-empty";
+    std.fs.cwd().deleteTree(tmp_dir) catch {};
+    try std.fs.cwd().makePath(tmp_dir);
+    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+
+    var w = Watcher.init(allocator);
+    defer w.deinit();
+    try w.addPath(tmp_dir);
+
+    const noop = struct {
+        fn cb(_: []const u8) void {}
+    }.cb;
+    try w.start(&noop);
+    std.Thread.sleep(700 * std.time.ns_per_ms); // 폴링 한 바퀴 돌 때까지
+    w.stop();
+}
+
+test "Watcher double stop no crash" {
+    var w = Watcher.init(std.testing.allocator);
+    defer w.deinit();
+    try w.addPath("/tmp");
+    const noop = struct {
+        fn cb(_: []const u8) void {}
+    }.cb;
+    try w.start(&noop);
+    w.stop();
+    w.stop(); // 두 번 호출해도 안전
+}
+
+// ============================================
+// BackendRegistry reload 추가 테스트
+// ============================================
+
+test "BackendRegistry reload nonexistent backend loads fresh" {
+    const loader = @import("loader");
+    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    defer reg.deinit();
+
+    // 존재하지 않는 백엔드 reload → load 시도 → dylib 없으면 에러
+    const result = reg.reload("nonexistent", "nonexistent.dylib");
+    try std.testing.expect(std.meta.isError(result));
+}
+
+test "BackendRegistry clearRoutesFor multiple calls safe" {
+    const loader = @import("loader");
+    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    defer {
+        var iter = reg.routes.iterator();
+        while (iter.next()) |entry| std.testing.allocator.free(entry.key_ptr.*);
+        reg.deinit();
+    }
+
+    const ch = try std.testing.allocator.dupe(u8, "test");
+    try reg.routes.put(ch, "backend");
+
+    // 여러 번 호출해도 크래시 안 남
+    reg.clearRoutesFor("backend");
+    reg.clearRoutesFor("backend");
+    reg.clearRoutesFor("other");
+
+    try std.testing.expectEqualStrings("", reg.routes.get("test").?);
+}
+
+// ============================================
+// RwLock 동시성 테스트
+// ============================================
+
 test "BackendRegistry concurrent invoke safety" {
     // RwLock이 shared 접근을 허용하는지 확인
     const loader = @import("loader");
