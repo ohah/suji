@@ -136,8 +136,8 @@ pub const BackendRegistry = struct {
         var backend = try Backend.load(name, path);
         // init 중 register() 콜백에서 이 이름 사용
         self.registering_backend = name;
+        defer self.registering_backend = null;
         backend.init(&self.core_api);
-        self.registering_backend = null;
         try self.backends.put(name, backend);
     }
 
@@ -175,8 +175,8 @@ pub const BackendRegistry = struct {
         // 3. 새 dylib 로드
         var backend = try Backend.load(name, path);
         self.registering_backend = name;
+        defer self.registering_backend = null;
         backend.init(&self.core_api);
-        self.registering_backend = null;
         try self.backends.put(name, backend);
     }
 

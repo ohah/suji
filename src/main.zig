@@ -492,42 +492,22 @@ const HotReloadCtx = struct {
 };
 
 fn reloadBackend(allocator: std.mem.Allocator, backend: suji.Config.MultiBackend, registry: *suji.BackendRegistry) void {
-    std.debug.print("[suji] rebuilding {s}...\n", .{backend.name});
-
-    // 재빌드
-    buildBackendByLang(allocator, backend.lang, backend.entry, false) catch |err| {
-        std.debug.print("[suji] rebuild failed: {}\n", .{err});
-        return;
-    };
-
-    // dylib 경로
-    const dylib_path = getDylibPath(allocator, backend.lang, backend.entry, false) catch {
-        std.debug.print("[suji] dylib path not found\n", .{});
-        return;
-    };
-    defer allocator.free(dylib_path);
-
-    var path_buf: [1024]u8 = undefined;
-    const path_z = util.nullTerminate(dylib_path, &path_buf);
-
-    // 리로드 (언로드 + 재로드)
-    registry.reload(backend.name, path_z) catch |err| {
-        std.debug.print("[suji] reload failed: {}\n", .{err});
-        return;
-    };
-
-    std.debug.print("[suji] {s} reloaded\n", .{backend.name});
+    reloadBackendCommon(allocator, backend.name, backend.lang, backend.entry, registry);
 }
 
 fn reloadSingleBackend(allocator: std.mem.Allocator, backend: suji.Config.SingleBackend, registry: *suji.BackendRegistry) void {
-    std.debug.print("[suji] rebuilding backend...\n", .{});
+    reloadBackendCommon(allocator, "default", backend.lang, backend.entry, registry);
+}
 
-    buildBackendByLang(allocator, backend.lang, backend.entry, false) catch |err| {
+fn reloadBackendCommon(allocator: std.mem.Allocator, name: []const u8, lang: [:0]const u8, entry: [:0]const u8, registry: *suji.BackendRegistry) void {
+    std.debug.print("[suji] rebuilding {s}...\n", .{name});
+
+    buildBackendByLang(allocator, lang, entry, false) catch |err| {
         std.debug.print("[suji] rebuild failed: {}\n", .{err});
         return;
     };
 
-    const dylib_path = getDylibPath(allocator, backend.lang, backend.entry, false) catch {
+    const dylib_path = getDylibPath(allocator, lang, entry, false) catch {
         std.debug.print("[suji] dylib path not found\n", .{});
         return;
     };
@@ -536,12 +516,12 @@ fn reloadSingleBackend(allocator: std.mem.Allocator, backend: suji.Config.Single
     var path_buf: [1024]u8 = undefined;
     const path_z = util.nullTerminate(dylib_path, &path_buf);
 
-    registry.reload("default", path_z) catch |err| {
+    registry.reload(name, path_z) catch |err| {
         std.debug.print("[suji] reload failed: {}\n", .{err});
         return;
     };
 
-    std.debug.print("[suji] backend reloaded\n", .{});
+    std.debug.print("[suji] {s} reloaded\n", .{name});
 }
 
 fn startBackendWatcher(allocator: std.mem.Allocator, config: *const suji.Config, watcher: *Watcher, registry: *suji.BackendRegistry) void {
