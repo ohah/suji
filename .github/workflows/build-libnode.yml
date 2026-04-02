@@ -18,26 +18,27 @@ jobs:
             platform: macos-arm64
           - os: ubuntu-24.04
             platform: linux-x86_64
+          - os: windows-latest
+            platform: windows-x86_64
 
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Download Node.js source
+      # ---- Unix (macOS + Linux) ----
+      - name: Build libnode (Unix)
+        if: runner.os != 'Windows'
         run: |
           curl -fSL "https://nodejs.org/dist/v${{ inputs.node_version }}/node-v${{ inputs.node_version }}.tar.gz" -o /tmp/node.tar.gz
           tar xzf /tmp/node.tar.gz -C /tmp
-
-      - name: Build libnode (--shared)
-        run: |
           cd /tmp/node-v${{ inputs.node_version }}
           ./configure --shared --prefix=/tmp/node-install
           make -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)
 
-      - name: Package
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
         run: |
           NODE_SRC="/tmp/node-v${{ inputs.node_version }}"
           mkdir -p /tmp/libnode-pkg/include
 
-          # dylib/so 복사
           if [ "${{ matrix.platform }}" = "macos-arm64" ]; then
             cp "$NODE_SRC/out/Release/libnode."*.dylib /tmp/libnode-pkg/libnode.dylib
           else
@@ -45,32 +46,76 @@ jobs:
             cp "$NODE_SRC/out/Release/libnode.so."* /tmp/libnode-pkg/libnode.so || true
           fi
 
-          # 헤더 복사
           cp -R "$NODE_SRC/deps/v8/include/"* /tmp/libnode-pkg/include/
           cp -R "$NODE_SRC/deps/uv/include/"* /tmp/libnode-pkg/include/
-          cp "$NODE_SRC/src/node.h" /tmp/libnode-pkg/include/
-          cp "$NODE_SRC/src/node_version.h" /tmp/libnode-pkg/include/
-          cp "$NODE_SRC/src/node_api.h" /tmp/libnode-pkg/include/
-          cp "$NODE_SRC/src/node_api_types.h" /tmp/libnode-pkg/include/
-          cp "$NODE_SRC/src/js_native_api.h" /tmp/libnode-pkg/include/
-          cp "$NODE_SRC/src/js_native_api_types.h" /tmp/libnode-pkg/include/
+          for h in node.h node_version.h node_api.h node_api_types.h js_native_api.h js_native_api_types.h; do
+            cp "$NODE_SRC/src/$h" /tmp/libnode-pkg/include/ 2>/dev/null || true
+          done
 
           cd /tmp/libnode-pkg
           tar czf /tmp/libnode-${{ inputs.node_version }}-${{ matrix.platform }}.tar.gz .
-          ls -lh /tmp/libnode-${{ inputs.node_version }}-${{ matrix.platform }}.tar.gz
 
-      - name: Upload to Release
+      - name: Upload (Unix)
+        if: runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="libnode-v${{ inputs.node_version }}"
           FILE="/tmp/libnode-${{ inputs.node_version }}-${{ matrix.platform }}.tar.gz"
-
-          # Release가 없으면 생성
           gh release view "$TAG" --repo ${{ github.repository }} 2>/dev/null || \
             gh release create "$TAG" --repo ${{ github.repository }} \
               --title "libnode v${{ inputs.node_version }}" \
               --notes "Node.js ${{ inputs.node_version }} shared library for Suji"
-
-          # 에셋 업로드 (기존 에셋 있으면 덮어쓰기)
           gh release upload "$TAG" "$FILE" --repo ${{ github.repository }} --clobber
+
+      # ---- Windows ----
+      - name: Build libnode (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nodeVer = "${{ inputs.node_version }}"
+          Invoke-WebRequest -Uri "https://nodejs.org/dist/v$nodeVer/node-v$nodeVer.tar.gz" -OutFile "$env:TEMP\node.tar.gz"
+          tar xzf "$env:TEMP\node.tar.gz" -C "$env:TEMP"
+          cd "$env:TEMP\node-v$nodeVer"
+          # Windows: vcbuild.bat으로 빌드
+          .\vcbuild.bat release dll
+        timeout-minutes: 60
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nodeVer = "${{ inputs.node_version }}"
+          $nodeSrc = "$env:TEMP\node-v$nodeVer"
+          $pkg = "$env:TEMP\libnode-pkg"
+          New-Item -ItemType Directory -Force -Path "$pkg\include"
+
+          # DLL + LIB 복사
+          Copy-Item "$nodeSrc\Release\libnode.dll" "$pkg\" -ErrorAction SilentlyContinue
+          Copy-Item "$nodeSrc\Release\libnode.lib" "$pkg\" -ErrorAction SilentlyContinue
+          Copy-Item "$nodeSrc\Release\node.dll" "$pkg\libnode.dll" -ErrorAction SilentlyContinue
+          Copy-Item "$nodeSrc\Release\node.lib" "$pkg\libnode.lib" -ErrorAction SilentlyContinue
+
+          # 헤더 복사
+          Copy-Item "$nodeSrc\deps\v8\include\*" "$pkg\include\" -Recurse -Force
+          Copy-Item "$nodeSrc\deps\uv\include\*" "$pkg\include\" -Recurse -Force
+          foreach ($h in @("node.h","node_version.h","node_api.h","node_api_types.h","js_native_api.h","js_native_api_types.h")) {
+            Copy-Item "$nodeSrc\src\$h" "$pkg\include\" -ErrorAction SilentlyContinue
+          }
+
+          cd $pkg
+          tar czf "$env:TEMP\libnode-$nodeVer-windows-x86_64.tar.gz" .
+
+      - name: Upload (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "libnode-v${{ inputs.node_version }}"
+          $file = "$env:TEMP\libnode-${{ inputs.node_version }}-windows-x86_64.tar.gz"
+          gh release view $tag --repo ${{ github.repository }} 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo ${{ github.repository }} --title "libnode v${{ inputs.node_version }}" --notes "Node.js ${{ inputs.node_version }} shared library for Suji"
+          }
+          gh release upload $tag $file --repo ${{ github.repository }} --clobber
