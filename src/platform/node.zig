@@ -1,10 +1,20 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const node_config = @import("node_config");
 
-/// Node.js C 브릿지 (bridge.h)
-pub const bridge = @cImport({
+pub const node_enabled = node_config.node_enabled;
+
+/// Node.js C 브릿지 (bridge.h) — libnode가 있을 때만 사용
+pub const bridge = if (node_enabled) @cImport({
     @cInclude("bridge.h");
-});
+}) else struct {
+    pub fn suji_node_init(_: c_int, _: anytype) callconv(.c) c_int { return -1; }
+    pub fn suji_node_run(_: anytype) callconv(.c) c_int { return -1; }
+    pub fn suji_node_stop() callconv(.c) void {}
+    pub fn suji_node_shutdown() callconv(.c) void {}
+    pub fn suji_node_invoke(_: anytype, _: anytype) callconv(.c) ?[*:0]const u8 { return null; }
+    pub fn suji_node_free(_: anytype) callconv(.c) void {}
+};
 
 /// Node.js 백엔드 런타임
 pub const NodeRuntime = struct {

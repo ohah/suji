@@ -98,9 +98,12 @@ pub fn build(b: *std.Build) void {
         std.fs.cwd().access(dylib, .{}) catch break :blk false;
         break :blk true;
     };
+    // Node.js 지원 (libnode가 설치된 경우만)
+    root_module.addIncludePath(.{ .cwd_relative = "src/platform/node" });
+    const node_options = b.addOptions();
+    node_options.addOption(bool, "node_enabled", node_available);
+    root_module.addImport("node_config", node_options.createModule());
     if (node_available) {
-        // Node.js C++ 브릿지 + 헤더
-        root_module.addIncludePath(.{ .cwd_relative = "src/platform/node" });
         const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
         root_module.addIncludePath(.{ .cwd_relative = node_include });
     }

@@ -3,7 +3,9 @@ const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
 const Watcher = @import("platform/watcher.zig").Watcher;
-const NodeRuntime = @import("platform/node.zig").NodeRuntime;
+const node_mod = @import("platform/node.zig");
+const NodeRuntime = node_mod.NodeRuntime;
+const node_enabled = node_mod.node_enabled;
 const bundle_macos = if (@import("builtin").os.tag == .macos) @import("bundle_macos.zig") else struct {
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
@@ -302,6 +304,10 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
 }
 
 fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
+    if (!node_enabled) {
+        std.debug.print("[suji] Node.js backend not available (libnode not installed)\n", .{});
+        return;
+    }
     // entry 경로를 절대 경로로 변환 (createRequire가 절대 경로 필요)
     const abs_entry = try std.fs.cwd().realpathAlloc(allocator, entry);
     defer allocator.free(abs_entry);
@@ -707,8 +713,8 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
         return response_buf[0..len];
     }
 
-    // Node.js 백엔드 폴백
-    if (g_node_runtime != null) {
+    // Node.js 백엔드 폴백 (libnode 활성화된 경우만)
+    if (node_enabled and g_node_runtime != null) {
         if (NodeRuntime.invoke(channel, data)) |resp| {
             const len = @min(resp.len, response_buf.len);
             @memcpy(response_buf[0..len], resp[0..len]);
