@@ -421,7 +421,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
   - [x] `suji run` — 빌드된 앱 실행
-- [ ] 핫 리로드 (개발 모드)
+- [ ] 핫 리로드 (백엔드 — dylib 재빌드/재로드, 프론트엔드는 Vite HMR로 동작)
 
 **`suji init` 스펙**:
 
@@ -670,11 +670,11 @@ Suji 코어 (Zig)
 - [x] 백엔드 간 메시지 패싱 (Rust↔Go 크로스 호출 검증 완료)
 - [x] 이벤트 루프 공존 (tokio + Go runtime + Zig, 충돌 없음)
 - [x] Zig 백엔드도 dlopen (exportApp으로 C ABI 자동 생성)
-- [ ] Zig→Rust, Zig→Go 크로스 호출 (exportApp에 SujiCore 연결 필요)
+- [x] Zig→Rust, Zig→Go 크로스 호출 (chain/fanout IPC 경유로 동작)
 - [ ] 공유 상태 관리
 
 **검증 결과**:
-- 총 70개 테스트 (유닛 + 통합 + 스트레스)
+- 총 141개+ 테스트 (유닛 + 통합 + 스트레스 + CEF IPC)
 - Zig + Rust(tokio) + Go(goroutine) 한 프로세스 동시 로드
 - CHAOS 테스트: 20개 동시 호출 (직접+크로스+협업+팬아웃+체인)
 - RAPID FIRE: 100개 동시 핑 (3개 백엔드)
