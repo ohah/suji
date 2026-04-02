@@ -46,54 +46,77 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("events", events_module);
     root_module.addImport("util", util_module);
 
-    // CEF 헤더 + 라이브러리 경로
-    const home = std.posix.getenv("HOME") orelse "/tmp";
-    const cef_include = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64", .{home}) catch @panic("OOM");
-    root_module.addIncludePath(.{ .cwd_relative = cef_include });
-    const cef_fw_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64/Release", .{home}) catch @panic("OOM");
-    root_module.addFrameworkPath(.{ .cwd_relative = cef_fw_path });
-    root_module.linkFramework("Chromium Embedded Framework", .{});
+    // CEF 헤더 + 라이브러리 경로 (OS/arch별)
+    const home = std.posix.getenv("HOME") orelse
+        (if (@import("builtin").os.tag == .windows) std.posix.getenv("USERPROFILE") orelse "C:\\Users\\Default" else "/tmp");
+    const os_tag = @import("builtin").os.tag;
+    const cef_platform = switch (os_tag) {
+        .macos => "macos-arm64",
+        .linux => "linux-x86_64",
+        .windows => "windows-x86_64",
+        else => @compileError("unsupported OS"),
+    };
+
+    const cef_base = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/{s}", .{ home, cef_platform }) catch @panic("OOM");
+    root_module.addIncludePath(.{ .cwd_relative = cef_base });
     root_module.link_libcpp = true;
-    // macOS: Objective-C 런타임 (NSWindow, NSApp 등)
-    root_module.linkSystemLibrary("objc", .{});
-    root_module.linkFramework("Cocoa", .{});
-    // root_module.addImport("toml", toml_dep.module("toml"));
+
+    if (os_tag == .macos) {
+        // macOS: CEF framework + Objective-C
+        const cef_fw_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
+        root_module.addFrameworkPath(.{ .cwd_relative = cef_fw_path });
+        root_module.linkFramework("Chromium Embedded Framework", .{});
+        root_module.linkSystemLibrary("objc", .{});
+        root_module.linkFramework("Cocoa", .{});
+    } else if (os_tag == .linux) {
+        // Linux: CEF 공유 라이브러리 + GTK
+        const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
+        root_module.addLibraryPath(.{ .cwd_relative = cef_lib_path });
+        root_module.linkSystemLibrary("cef", .{});
+        root_module.linkSystemLibrary("gtk-3", .{});
+        root_module.linkSystemLibrary("gdk-3.0", .{});
+        root_module.linkSystemLibrary("X11", .{});
+    }
 
     const exe = b.addExecutable(.{
         .name = "suji",
         .root_module = root_module,
     });
-    // install_name_tool용 헤더 패딩
-    exe.headerpad_max_install_names = true;
 
-    // macOS: CEF 프레임워크 로드 경로 수정 + ad-hoc 코드서명
-    // 주의: installArtifact가 바이너리를 복사한 후에 실행해야 함
+    if (os_tag == .macos) {
+        exe.headerpad_max_install_names = true;
+    }
+
+    // 플랫폼별 post-install 처리
     const install_artifact = b.addInstallArtifact(exe, .{});
 
-    const fix_rpath = b.addSystemCommand(&.{
-        "install_name_tool", "-change",
-        "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
-    });
-    const cef_fw_abs = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/macos-arm64/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{home}) catch @panic("OOM");
-    fix_rpath.addArg(cef_fw_abs);
-    fix_rpath.addArg("zig-out/bin/suji");
-    fix_rpath.step.dependOn(&install_artifact.step);
+    if (os_tag == .macos) {
+        // macOS: CEF 프레임워크 로드 경로 수정 + ad-hoc 코드서명
+        const fix_rpath = b.addSystemCommand(&.{
+            "install_name_tool", "-change",
+            "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
+        });
+        const cef_fw_abs = std.fmt.allocPrint(b.allocator, "{s}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{cef_base}) catch @panic("OOM");
+        fix_rpath.addArg(cef_fw_abs);
+        fix_rpath.addArg("zig-out/bin/suji");
+        fix_rpath.step.dependOn(&install_artifact.step);
 
-    const codesign = b.addSystemCommand(&.{
-        "codesign", "--force", "--sign", "-",
-        "--entitlements", "macos-entitlements.plist",
-        "--deep",
-        "zig-out/bin/suji",
-    });
-    codesign.step.dependOn(&fix_rpath.step);
+        const codesign = b.addSystemCommand(&.{
+            "codesign", "--force", "--sign", "-",
+            "--entitlements", "macos-entitlements.plist",
+            "--deep",
+            "zig-out/bin/suji",
+        });
+        codesign.step.dependOn(&fix_rpath.step);
+        b.getInstallStep().dependOn(&codesign.step);
 
-    b.getInstallStep().dependOn(&codesign.step);
-
-    const sign_step = b.step("sign", "Ad-hoc codesign for macOS");
-    sign_step.dependOn(&codesign.step);
+        const sign_step = b.step("sign", "Ad-hoc codesign for macOS");
+        sign_step.dependOn(&codesign.step);
+    } else {
+        b.getInstallStep().dependOn(&install_artifact.step);
+    }
 
     const run_cmd = b.addRunArtifact(exe);
-    run_cmd.step.dependOn(&codesign.step);
     if (b.args) |args| {
         run_cmd.addArgs(args);
     }
