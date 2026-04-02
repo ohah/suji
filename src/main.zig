@@ -2,6 +2,7 @@ const std = @import("std");
 const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
+const Watcher = @import("platform/watcher.zig").Watcher;
 const bundle_macos = if (@import("builtin").os.tag == .macos) @import("bundle_macos.zig") else struct {
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
@@ -441,6 +442,11 @@ fn runDev(allocator: std.mem.Allocator) !void {
     try loadPluginsFromConfig(allocator, &config, &registry, false);
     try loadBackendsFromConfig(allocator, &config, &registry, false);
 
+    // 백엔드 핫 리로드 감시 스레드
+    var watcher = Watcher.init(allocator);
+    defer watcher.deinit();
+    startBackendWatcher(allocator, &config, &watcher, &registry);
+
     // 프론트엔드 dev 서버
     std.debug.print("[suji] starting frontend dev server...\n", .{});
     var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
@@ -454,6 +460,114 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.Thread.sleep(2 * std.time.ns_per_s);
 
     try openWindow(allocator, &config, &registry, .dev);
+}
+
+// ============================================
+// 백엔드 핫 리로드
+// ============================================
+
+/// 핫 리로드 콜백 컨텍스트
+const HotReloadCtx = struct {
+    var alloc: std.mem.Allocator = undefined;
+    var conf: *const suji.Config = undefined;
+    var reg: *suji.BackendRegistry = undefined;
+
+    fn onFileChanged(path: []const u8) void {
+        std.debug.print("[suji] file changed: {s}\n", .{path});
+        // 변경된 파일이 어느 백엔드에 속하는지 찾기
+        const backends = conf.backends orelse return;
+        for (backends) |backend| {
+            if (std.mem.indexOf(u8, path, backend.entry) != null) {
+                reloadBackend(alloc, backend, reg);
+                return;
+            }
+        }
+        // 단일 백엔드
+        if (conf.backend) |be| {
+            if (std.mem.indexOf(u8, path, be.entry) != null) {
+                reloadSingleBackend(alloc, be, reg);
+            }
+        }
+    }
+};
+
+fn reloadBackend(allocator: std.mem.Allocator, backend: suji.Config.MultiBackend, registry: *suji.BackendRegistry) void {
+    std.debug.print("[suji] rebuilding {s}...\n", .{backend.name});
+
+    // 재빌드
+    buildBackendByLang(allocator, backend.lang, backend.entry, false) catch |err| {
+        std.debug.print("[suji] rebuild failed: {}\n", .{err});
+        return;
+    };
+
+    // dylib 경로
+    const dylib_path = getDylibPath(allocator, backend.lang, backend.entry, false) catch {
+        std.debug.print("[suji] dylib path not found\n", .{});
+        return;
+    };
+    defer allocator.free(dylib_path);
+
+    var path_buf: [1024]u8 = undefined;
+    const path_z = util.nullTerminate(dylib_path, &path_buf);
+
+    // 리로드 (언로드 + 재로드)
+    registry.reload(backend.name, path_z) catch |err| {
+        std.debug.print("[suji] reload failed: {}\n", .{err});
+        return;
+    };
+
+    std.debug.print("[suji] {s} reloaded\n", .{backend.name});
+}
+
+fn reloadSingleBackend(allocator: std.mem.Allocator, backend: suji.Config.SingleBackend, registry: *suji.BackendRegistry) void {
+    std.debug.print("[suji] rebuilding backend...\n", .{});
+
+    buildBackendByLang(allocator, backend.lang, backend.entry, false) catch |err| {
+        std.debug.print("[suji] rebuild failed: {}\n", .{err});
+        return;
+    };
+
+    const dylib_path = getDylibPath(allocator, backend.lang, backend.entry, false) catch {
+        std.debug.print("[suji] dylib path not found\n", .{});
+        return;
+    };
+    defer allocator.free(dylib_path);
+
+    var path_buf: [1024]u8 = undefined;
+    const path_z = util.nullTerminate(dylib_path, &path_buf);
+
+    registry.reload("default", path_z) catch |err| {
+        std.debug.print("[suji] reload failed: {}\n", .{err});
+        return;
+    };
+
+    std.debug.print("[suji] backend reloaded\n", .{});
+}
+
+fn startBackendWatcher(allocator: std.mem.Allocator, config: *const suji.Config, watcher: *Watcher, registry: *suji.BackendRegistry) void {
+    HotReloadCtx.alloc = allocator;
+    HotReloadCtx.conf = config;
+    HotReloadCtx.reg = registry;
+
+    // 백엔드 소스 디렉토리 감시 등록
+    if (config.backends) |backends| {
+        for (backends) |backend| {
+            watcher.addPath(backend.entry) catch |err| {
+                std.debug.print("[suji] watch failed for {s}: {}\n", .{ backend.entry, err });
+            };
+        }
+    } else if (config.backend) |be| {
+        watcher.addPath(be.entry) catch |err| {
+            std.debug.print("[suji] watch failed: {}\n", .{err});
+        };
+    }
+
+    if (watcher.paths.items.len > 0) {
+        watcher.start(&HotReloadCtx.onFileChanged) catch |err| {
+            std.debug.print("[suji] watcher start failed: {}\n", .{err});
+        };
+        std.debug.print("[suji] watching {d} backend(s) for changes\n", .{watcher.paths.items.len});
+    }
 }
 
 fn runProd(allocator: std.mem.Allocator) !void {
@@ -570,7 +684,7 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
 }
 
 /// fanout: 여러 백엔드에 동시 요청
-fn cefHandleFanout(registry: *const suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
+fn cefHandleFanout(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     // data: {"__fanout":true,"backends":"zig,rust,go","request":"{\"cmd\":\"ping\"}"}
     // backends와 request 추출
     const backends_str = extractJsonString(data, "\"backends\":\"") orelse return null;
@@ -604,7 +718,7 @@ fn cefHandleFanout(registry: *const suji.BackendRegistry, data: []const u8, resp
 }
 
 /// chain: Backend A → Core → Backend B
-fn cefHandleChain(registry: *const suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
+fn cefHandleChain(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     const from = extractJsonString(data, "\"from\":\"") orelse return null;
     const to = extractJsonString(data, "\"to\":\"") orelse return null;
     const request_escaped = extractJsonString(data, "\"request\":\"") orelse return null;
@@ -635,7 +749,7 @@ fn cefHandleChain(registry: *const suji.BackendRegistry, data: []const u8, respo
 }
 
 /// core: Zig 코어 직접 호출
-fn cefHandleCore(registry: *const suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
+fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     // data: {"__core":true,"request":"{\"cmd\":\"core_info\"}"}
     const request_str = extractJsonString(data, "\"request\":\"") orelse return null;
     var req_buf: [4096]u8 = undefined;

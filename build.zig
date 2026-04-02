@@ -237,6 +237,29 @@ pub fn build(b: *std.Build) void {
     const state_test_step = b.step("test-state", "Run state plugin tests (requires built dylib)");
     state_test_step.dependOn(&state_test_run.step);
 
+    // Watcher + hot reload tests
+    const watcher_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/watcher_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const watcher_module = b.createModule(.{
+        .root_source_file = b.path("src/platform/watcher.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const watcher_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    watcher_loader.addImport("events", events_module);
+    watcher_test_mod.addImport("watcher", watcher_module);
+    watcher_test_mod.addImport("loader", watcher_loader);
+    const watcher_test = b.addTest(.{ .root_module = watcher_test_mod });
+    test_step.dependOn(&b.addRunArtifact(watcher_test).step);
+
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/cef_ipc_test.zig"),
