@@ -152,37 +152,7 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
   - [ ] Go 래퍼 — `plugins/state/go/`
   - [ ] Node 래퍼 (Phase 5 이후)
   - [ ] SQLite 플러그인 (별도, 나중에)
-- [ ] 바이너리 데이터 채널 (로컬 HTTP 서버, 별도 기능으로 분리)
-
-**바이너리 데이터 전송**:
-
-webview IPC는 텍스트 전용이라 바이너리(이미지, 파일 등)를 직접 전송 불가.
-Tauri도 같은 문제로 커스텀 프로토콜(`asset://`)을 사용.
-
-Suji 해결 방식: **Zig 코어에서 로컬 HTTP 서버 실행**
-```
-Zig 코어:
-  ├─ WebView IPC (JSON 텍스트) — 함수 호출, 상태, 이벤트
-  └─ 로컬 HTTP 서버 (바이너리) — 이미지, 파일, 스트림
-      http://localhost:{PORT}/asset/photo.png
-```
-```html
-<!-- WebView에서 바이너리 데이터 접근 -->
-<img src="http://localhost:9876/asset/photo.png">
-```
-```js
-// JS에서 바이너리 fetch
-const response = await fetch("http://localhost:9876/api/file/data.bin");
-const buffer = await response.arrayBuffer();
-```
-
-각 프레임워크 비교:
-| 프레임워크 | 텍스트 IPC | 바이너리 |
-|-----------|-----------|---------|
-| Electron | JSON (구조화 복제) | Buffer/ArrayBuffer 직접 지원 |
-| Tauri | JSON-RPC | 커스텀 프로토콜 (asset://) |
-| Wails | JSON | Base64 / 파일 경로 |
-| **Suji** | JSON (webview_bind) | **로컬 HTTP 서버** |
+- [x] ~~바이너리 데이터 채널~~ — CEF `suji://` 커스텀 프로토콜로 대체 (fetch + 로컬 파일 접근 가능, 별도 HTTP 서버 불필요)
 
 **결과물**:
 ```js
@@ -1047,7 +1017,7 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 바이너리 IPC | Buffer 직접 전송 | `asset://` 커스텀 프로토콜 | ❌ (로컬 HTTP 서버 계획) |
+| 바이너리 IPC | Buffer 직접 전송 | `asset://` 커스텀 프로토콜 | ✅ `suji://` 커스텀 프로토콜 |
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ❌ |
 
 ### 우선순위 제안
