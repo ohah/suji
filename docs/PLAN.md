@@ -596,10 +596,13 @@ func backend_handle_ipc(request *C.char) *C.char {
 - NAPI: Node가 Zig를 로드하는 반대 구조. 구현 쉽지만 `node main.js`로 실행해야 하고 유저 PC에 Node 설치 필요. Zig가 프로세스 주인이 아니게 됨.
 - Unix 소켓: POC에서 검증 완료. 가능하지만 별도 프로세스라 임베드가 아님.
 
-- [ ] libnode 빌드 인프라 (CI에서 빌드, 프리빌트 배포)
-- [ ] Zig에서 libnode 링킹 (`@cImport` + node_api.h)
-- [ ] Node 환경 초기화/해제
-- [ ] Zig에서 Node 환경에 Suji API 주입 (BrowserWindow, app 등)
+- [x] libnode 빌드 인프라 (CI에서 빌드, 프리빌트 배포)
+- [x] Zig에서 libnode 링킹 (`@cImport` + node_api.h)
+- [x] Node 환경 초기화/해제
+- [x] Zig에서 Node 환경에 Suji API 주입 (handle/invoke/invokeSync/send/register)
+- [x] Node.js 크로스 호출 (invoke async + invokeSync + thread pool + deadlock 방지)
+- [x] Node.js 이벤트 발신 (suji.send)
+- [x] Node.js 예제 (node-backend 단독 + multi-backend 포함)
 - [ ] `suji run main.js` CLI
 - [ ] require("suji") 패키지
 - [ ] Node 바이너리 번들링 (배포 시)

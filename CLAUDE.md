@@ -11,14 +11,15 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (164개)
+zig build test     # 테스트 (173개)
 zig build run      # CLI 도움말
 
 # 예제 실행
-cd examples/multi-backend && suji dev   # Zig + Rust + Go
+cd examples/multi-backend && suji dev   # Zig + Rust + Go + Node.js
 cd examples/zig-backend && suji dev     # Zig 단독
 cd examples/rust-backend && suji dev    # Rust 단독
 cd examples/go-backend && suji dev      # Go 단독
+cd examples/node-backend && suji dev    # Node.js 단독
 ```
 
 ## CLI
@@ -105,6 +106,15 @@ suji.handle('hello', (data) => {
   const req = JSON.parse(data);
   return JSON.stringify({ message: 'Hello!', echo: req });
 });
+
+// 크로스 호출 (핸들러 내부 — 동기)
+suji.invokeSync('zig', '{"cmd":"ping"}')
+
+// 크로스 호출 (핸들러 밖 — async, Promise 반환, event loop 비블록)
+const result = await suji.invoke('rust', '{"cmd":"greet"}')
+
+// 이벤트 발신
+suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.
@@ -128,7 +138,9 @@ suji/
 │   │   ├── init.zig          # suji init 스캐폴딩
 │   │   └── util.zig          # nullTerminate, 버퍼 상수
 │   ├── platform/
-│   │   └── cef.zig           # CEF 통합 (창, IPC, 렌더러, 커스텀 프로토콜)
+│   │   ├── cef.zig           # CEF 통합 (창, IPC, 렌더러, 커스텀 프로토콜)
+│   │   ├── node.zig          # Node.js 런타임 (libnode 임베딩)
+│   │   └── node/bridge.cc    # Node.js C++ 브릿지 (V8 IPC, thread pool)
 │   ├── backends/
 │   │   └── loader.zig        # BackendRegistry + SujiCore
 │   └── templates/
@@ -166,13 +178,7 @@ suji/
 - **영향**: WebGL, CSS 애니메이션 60fps, 비디오 가속이 필요하면 GPU 활성화 필요
 - **옵션**: `suji.json`에 `"gpu": true/false` 설정 추가 고려
 
-### Node.js async invoke 스레드 관리
-`suji.invoke()` (async/Promise)가 호출마다 `std::thread`를 생성/detach 중.
-- **해결 방법**: 고정 크기 스레드 풀 (4 workers + task queue)로 교체
-- **영향**: 프론트엔드에서 대량 invoke 시 OS 스레드 폭증 가능
-
-### Node.js 양방향 크로스 호출 제한
-`suji.invokeSync()`는 Node event loop를 블록하므로, 대상 백엔드가 Node로 콜백하면 deadlock.
-- 현재 Node→다른백엔드 단방향만 안전
-- `suji.invoke()` (async)는 별도 스레드에서 실행되어 deadlock 없음
+### Node.js 양방향 크로스 호출
+`suji.invokeSync()` 중 대상 백엔드가 Node로 콜백 시 `drain_ipc_queue_inline()`으로 처리.
+다만 깊은 재귀 체인(A→Node→B→Node→C→...)은 테스트되지 않음.
 ```
