@@ -13,6 +13,8 @@
 #include <mutex>
 #include <condition_variable>
 #include <unordered_map>
+#include <queue>
+#include <functional>
 
 // JSON 문자열 값에 사용할 수 없는 문자를 이스케이프
 static std::string escape_json(const std::string& s) {
@@ -108,6 +110,116 @@ static std::vector<AsyncInvokeRequest*> g_async_invoke_done;
 static uv_async_t g_async_invoke_async;
 
 // ============================================
+// Thread Pool (async invoke용, 고정 크기)
+// ============================================
+
+class ThreadPool {
+public:
+    explicit ThreadPool(size_t num_threads) : stop_(false) {
+        for (size_t i = 0; i < num_threads; ++i) {
+            workers_.emplace_back([this]() {
+                while (true) {
+                    std::function<void()> task;
+                    {
+                        std::unique_lock<std::mutex> lock(mtx_);
+                        cv_.wait(lock, [this]() { return stop_ || !tasks_.empty(); });
+                        if (stop_ && tasks_.empty()) return;
+                        task = std::move(tasks_.front());
+                        tasks_.pop();
+                    }
+                    task();
+                }
+            });
+        }
+    }
+
+    void submit(std::function<void()> task) {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            tasks_.push(std::move(task));
+        }
+        cv_.notify_one();
+    }
+
+    ~ThreadPool() {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            stop_ = true;
+        }
+        cv_.notify_all();
+        for (auto& w : workers_) w.join();
+    }
+
+private:
+    std::vector<std::thread> workers_;
+    std::queue<std::function<void()>> tasks_;
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    bool stop_;
+};
+
+static std::unique_ptr<ThreadPool> g_invoke_pool;
+
+// ============================================
+// 단일 IPC 요청 실행 (V8 isolate lock + context scope 안에서 호출)
+// ============================================
+
+static void execute_ipc_request(Isolate* isolate, IpcRequest* req) {
+    HandleScope handle_scope(isolate);
+    std::string result = "{\"error\":\"no handler\"}";
+
+    Local<Function> fn_local;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(g_handler_mutex);
+        auto it = g_handlers.find(req->channel);
+        if (it != g_handlers.end()) {
+            fn_local = it->second.Get(isolate);
+            found = true;
+        }
+    }
+
+    if (found) {
+        Local<String> arg = String::NewFromUtf8(isolate, req->data.c_str()).ToLocalChecked();
+        Local<Value> argv[1] = { arg };
+
+        v8::TryCatch try_catch(isolate);
+        auto maybe_result = fn_local->Call(g_setup->context(), v8::Undefined(isolate), 1, argv);
+
+        if (!maybe_result.IsEmpty()) {
+            Local<Value> ret = maybe_result.ToLocalChecked();
+            if (ret->IsString()) {
+                String::Utf8Value utf8(isolate, ret);
+                result = std::string(*utf8, utf8.length());
+            } else {
+                Local<Value> json_global;
+                if (g_setup->context()->Global()->Get(g_setup->context(), String::NewFromUtf8(isolate, "JSON").ToLocalChecked()).ToLocal(&json_global) && json_global->IsObject()) {
+                    Local<Value> stringify_fn;
+                    if (json_global.As<v8::Object>()->Get(g_setup->context(), String::NewFromUtf8(isolate, "stringify").ToLocalChecked()).ToLocal(&stringify_fn) && stringify_fn->IsFunction()) {
+                        Local<Value> str_argv[1] = { ret };
+                        auto str_result = stringify_fn.As<Function>()->Call(g_setup->context(), json_global, 1, str_argv);
+                        if (!str_result.IsEmpty()) {
+                            String::Utf8Value utf8s(isolate, str_result.ToLocalChecked());
+                            result = std::string(*utf8s, utf8s.length());
+                        }
+                    }
+                }
+            }
+        } else if (try_catch.HasCaught()) {
+            String::Utf8Value err(isolate, try_catch.Exception());
+            result = std::string("{\"error\":\"") + escape_json(*err) + "\"}";
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(req->mtx);
+        req->response = std::move(result);
+        req->done = true;
+    }
+    req->cv.notify_one();
+}
+
+// ============================================
 // Async invoke 결과 처리 (Node event loop에서 Promise resolve)
 // ============================================
 
@@ -160,58 +272,7 @@ static void process_ipc_queue(uv_async_t*) {
     }
 
     for (auto* req : pending) {
-        std::string result = "{\"error\":\"no handler\"}";
-
-        // 핸들러를 mutex 안에서 복사한 뒤 mutex 밖에서 호출 (deadlock 방지)
-        Local<Function> fn_local;
-        bool found = false;
-        {
-            std::lock_guard<std::mutex> lock(g_handler_mutex);
-            auto it = g_handlers.find(req->channel);
-            if (it != g_handlers.end()) {
-                fn_local = it->second.Get(isolate);
-                found = true;
-            }
-        }
-
-        if (found) {
-            Local<String> arg = String::NewFromUtf8(isolate, req->data.c_str()).ToLocalChecked();
-            Local<Value> argv[1] = { arg };
-
-            v8::TryCatch try_catch(isolate);
-            auto maybe_result = fn_local->Call(g_setup->context(), v8::Undefined(isolate), 1, argv);
-
-            if (!maybe_result.IsEmpty()) {
-                Local<Value> ret = maybe_result.ToLocalChecked();
-                if (ret->IsString()) {
-                    String::Utf8Value utf8(isolate, ret);
-                    result = std::string(*utf8, utf8.length());
-                } else {
-                    Local<Value> json_global;
-                    if (g_setup->context()->Global()->Get(g_setup->context(), String::NewFromUtf8(isolate, "JSON").ToLocalChecked()).ToLocal(&json_global) && json_global->IsObject()) {
-                        Local<Value> stringify_fn;
-                        if (json_global.As<v8::Object>()->Get(g_setup->context(), String::NewFromUtf8(isolate, "stringify").ToLocalChecked()).ToLocal(&stringify_fn) && stringify_fn->IsFunction()) {
-                            Local<Value> str_argv[1] = { ret };
-                            auto str_result = stringify_fn.As<Function>()->Call(g_setup->context(), json_global, 1, str_argv);
-                            if (!str_result.IsEmpty()) {
-                                String::Utf8Value utf8s(isolate, str_result.ToLocalChecked());
-                                result = std::string(*utf8s, utf8s.length());
-                            }
-                        }
-                    }
-                }
-            } else if (try_catch.HasCaught()) {
-                String::Utf8Value err(isolate, try_catch.Exception());
-                result = std::string("{\"error\":\"") + escape_json(*err) + "\"}";
-            }
-        }
-
-        {
-            std::lock_guard<std::mutex> lock(req->mtx);
-            req->response = std::move(result);
-            req->done = true;
-        }
-        req->cv.notify_one();
+        execute_ipc_request(isolate, req);
     }
 }
 
@@ -241,8 +302,26 @@ static void js_suji_handle(const v8::FunctionCallbackInfo<Value>& args) {
 // JS에서 호출하는 네이티브 함수: __suji_invoke(backend, request) → string
 // ============================================
 
+// Node event loop 스레드에서 직접 IPC 큐의 pending 요청을 처리
+// invokeSync 내에서 대상 백엔드가 Node로 콜백할 때 deadlock 방지
+static void drain_ipc_queue_inline() {
+    if (!g_setup) return;
+    Isolate* isolate = g_setup->isolate();
+
+    std::vector<IpcRequest*> pending;
+    {
+        std::lock_guard<std::mutex> lock(g_ipc_mutex);
+        pending.swap(g_ipc_queue);
+    }
+    if (pending.empty()) return;
+
+    for (auto* req : pending) {
+        execute_ipc_request(isolate, req);
+    }
+}
+
 // suji.invokeSync(backend, request) → string (동기, 핸들러 내부용)
-// event loop 블록 — 핸들러 내에서 크로스콜할 때만 사용
+// 호출 후 IPC 큐를 드레인하여 양방향 크로스콜 deadlock 방지
 static void js_suji_invoke_sync(const v8::FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     if (!g_core.invoke) {
@@ -258,6 +337,10 @@ static void js_suji_invoke_sync(const v8::FunctionCallbackInfo<Value>& args) {
     String::Utf8Value request(isolate, args[1]);
 
     const char* result = g_core.invoke(*backend, *request);
+
+    // invoke 중 대상 백엔드가 Node로 콜백했을 수 있으므로 pending IPC 처리
+    drain_ipc_queue_inline();
+
     if (result) {
         args.GetReturnValue().Set(String::NewFromUtf8(isolate, result).ToLocalChecked());
         g_core.free(result);
@@ -291,7 +374,12 @@ static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
     async_req->request = std::string(*request, request.length());
     async_req->resolver.Reset(isolate, resolver);
 
-    std::thread([async_req]() {
+    if (!g_invoke_pool) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.invoke: thread pool not initialized").ToLocalChecked());
+        return;
+    }
+
+    g_invoke_pool->submit([async_req]() {
         const char* result = g_core.invoke(async_req->backend.c_str(), async_req->request.c_str());
         if (result) {
             async_req->response = result;
@@ -307,7 +395,7 @@ static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
             g_async_invoke_done.push_back(async_req);
         }
         uv_async_send(&g_async_invoke_async);
-    }).detach();
+    });
 }
 
 // ============================================
@@ -411,6 +499,9 @@ static int run_node_internal(const char* entry_path) {
         uv_async_init(g_setup->event_loop(), &g_ipc_async, process_ipc_queue);
         uv_async_init(g_setup->event_loop(), &g_async_invoke_async, process_async_invoke_done);
 
+        // Async invoke 스레드 풀 (4 workers)
+        g_invoke_pool = std::make_unique<ThreadPool>(4);
+
         // globalThis 네이티브 함수 등록
         auto set_fn = [&](const char* name, v8::FunctionCallback cb) {
             Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(isolate, cb);
@@ -458,6 +549,9 @@ static int run_node_internal(const char* entry_path) {
 
         node::SpinEventLoop(env).FromMaybe(1);
         g_running.store(false);
+
+        // ThreadPool을 V8 isolate scope 안에서 정리 (in-flight 작업 완료 대기)
+        g_invoke_pool.reset();
     }
 
     node::Stop(env);
@@ -490,6 +584,7 @@ void suji_node_stop(void) {
 
 void suji_node_shutdown(void) {
     suji_node_stop();
+    g_invoke_pool.reset(); // run_node_internal에서 이미 정리했으면 no-op
     g_handlers.clear();
     g_setup.reset();
     g_ready.store(false);
