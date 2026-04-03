@@ -185,4 +185,30 @@ suji/
 ### Node.js 양방향 크로스 호출
 `suji.invokeSync()` 중 대상 백엔드가 Node로 콜백 시 `drain_ipc_queue_inline()`으로 처리.
 다만 깊은 재귀 체인(A→Node→B→Node→C→...)은 테스트되지 않음.
+
+## 배포 / 설치
+
+### Suji CLI 배포 (예정)
+
+| 채널 | 명령어 | 상태 |
+|------|--------|------|
+| GitHub Releases | 직접 다운로드 | CI 추가 필요 |
+| Homebrew | `brew install ohah/tap/suji` | tap 레포 생성 필요 |
+| npm/npx | `npx @suji/cli init my-app` | npm 패키지 필요 |
+| curl 스크립트 | `curl -fsSL https://get.suji.dev \| sh` | 스크립트 작성 필요 |
+
+### SDK 배포 (예정)
+
+| SDK | 채널 | 패키지명 | 상태 |
+|-----|------|----------|------|
+| 프론트엔드 JS | npm | `@suji/api` | `packages/suji-js` 존재 |
+| Rust SDK | crates.io | `suji` | `crates/suji-rs` 존재 |
+| Go SDK | go module | `github.com/ohah/suji-go` | `sdks/suji-go` 존재 |
+| Node.js SDK | npm | `suji` (require) | 미구현 |
+
+### 배포 우선순위
+1. GitHub Releases — CI에서 플랫폼별 바이너리 빌드 + 자동 릴리즈
+2. Homebrew tap — macOS 사용자 1순위
+3. npx — 크로스 플랫폼, 프론트엔드 개발자 친화적
+4. curl 스크립트 — 범용 설치
 ```
