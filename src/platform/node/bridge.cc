@@ -14,6 +14,39 @@
 #include <condition_variable>
 #include <unordered_map>
 
+// JSON 문자열 값에 사용할 수 없는 문자를 이스케이프
+static std::string escape_json(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:   out += c;
+        }
+    }
+    return out;
+}
+
+// JS 문자열 리터럴('...')에 사용할 수 없는 문자를 이스케이프
+static std::string escape_js_single(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '\'': out += "\\'";  break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            default:   out += c;
+        }
+    }
+    return out;
+}
+
 using node::CommonEnvironmentSetup;
 using node::Environment;
 using node::MultiIsolatePlatform;
@@ -35,6 +68,9 @@ static std::unique_ptr<MultiIsolatePlatform> g_platform;
 static std::unique_ptr<CommonEnvironmentSetup> g_setup;
 static std::atomic<bool> g_running{false};
 static std::atomic<bool> g_initialized{false};
+static std::atomic<bool> g_ready{false};
+static std::mutex g_ready_mutex;
+static std::condition_variable g_ready_cv;
 static std::thread g_thread;
 
 // IPC 핸들러 맵 (channel → JS function)
@@ -81,41 +117,47 @@ static void process_ipc_queue(uv_async_t*) {
     for (auto* req : pending) {
         std::string result = "{\"error\":\"no handler\"}";
 
+        // 핸들러를 mutex 안에서 복사한 뒤 mutex 밖에서 호출 (deadlock 방지)
+        Local<Function> fn_local;
+        bool found = false;
         {
             std::lock_guard<std::mutex> lock(g_handler_mutex);
             auto it = g_handlers.find(req->channel);
             if (it != g_handlers.end()) {
-                Local<Function> fn = it->second.Get(isolate);
-                Local<String> arg = String::NewFromUtf8(isolate, req->data.c_str()).ToLocalChecked();
-                Local<Value> argv[1] = { arg };
+                fn_local = it->second.Get(isolate);
+                found = true;
+            }
+        }
 
-                v8::TryCatch try_catch(isolate);
-                auto maybe_result = fn->Call(g_setup->context(), v8::Undefined(isolate), 1, argv);
+        if (found) {
+            Local<String> arg = String::NewFromUtf8(isolate, req->data.c_str()).ToLocalChecked();
+            Local<Value> argv[1] = { arg };
 
-                if (!maybe_result.IsEmpty()) {
-                    Local<Value> ret = maybe_result.ToLocalChecked();
-                    if (ret->IsString()) {
-                        String::Utf8Value utf8(isolate, ret);
-                        result = std::string(*utf8, utf8.length());
-                    } else {
-                        // JSON.stringify
-                        Local<Value> json_global;
-                        if (g_setup->context()->Global()->Get(g_setup->context(), String::NewFromUtf8(isolate, "JSON").ToLocalChecked()).ToLocal(&json_global) && json_global->IsObject()) {
-                            Local<Value> stringify_fn;
-                            if (json_global.As<v8::Object>()->Get(g_setup->context(), String::NewFromUtf8(isolate, "stringify").ToLocalChecked()).ToLocal(&stringify_fn) && stringify_fn->IsFunction()) {
-                                Local<Value> str_argv[1] = { ret };
-                                auto str_result = stringify_fn.As<Function>()->Call(g_setup->context(), json_global, 1, str_argv);
-                                if (!str_result.IsEmpty()) {
-                                    String::Utf8Value utf8s(isolate, str_result.ToLocalChecked());
-                                    result = std::string(*utf8s, utf8s.length());
-                                }
+            v8::TryCatch try_catch(isolate);
+            auto maybe_result = fn_local->Call(g_setup->context(), v8::Undefined(isolate), 1, argv);
+
+            if (!maybe_result.IsEmpty()) {
+                Local<Value> ret = maybe_result.ToLocalChecked();
+                if (ret->IsString()) {
+                    String::Utf8Value utf8(isolate, ret);
+                    result = std::string(*utf8, utf8.length());
+                } else {
+                    Local<Value> json_global;
+                    if (g_setup->context()->Global()->Get(g_setup->context(), String::NewFromUtf8(isolate, "JSON").ToLocalChecked()).ToLocal(&json_global) && json_global->IsObject()) {
+                        Local<Value> stringify_fn;
+                        if (json_global.As<v8::Object>()->Get(g_setup->context(), String::NewFromUtf8(isolate, "stringify").ToLocalChecked()).ToLocal(&stringify_fn) && stringify_fn->IsFunction()) {
+                            Local<Value> str_argv[1] = { ret };
+                            auto str_result = stringify_fn.As<Function>()->Call(g_setup->context(), json_global, 1, str_argv);
+                            if (!str_result.IsEmpty()) {
+                                String::Utf8Value utf8s(isolate, str_result.ToLocalChecked());
+                                result = std::string(*utf8s, utf8s.length());
                             }
                         }
                     }
-                } else if (try_catch.HasCaught()) {
-                    String::Utf8Value err(isolate, try_catch.Exception());
-                    result = std::string("{\"error\":\"") + *err + "\"}";
                 }
+            } else if (try_catch.HasCaught()) {
+                String::Utf8Value err(isolate, try_catch.Exception());
+                result = std::string("{\"error\":\"") + escape_json(*err) + "\"}";
             }
         }
 
@@ -154,6 +196,10 @@ static void js_suji_handle(const v8::FunctionCallbackInfo<Value>& args) {
 // JS에서 호출하는 네이티브 함수: __suji_invoke(backend, request) → string
 // ============================================
 
+// NOTE: 이 함수는 Node event loop 스레드에서 동기 호출된다.
+// 대상 백엔드가 suji_node_invoke()를 통해 Node로 콜백하면 deadlock 발생.
+// (event loop가 여기서 블록 중이라 process_ipc_queue가 실행 불가)
+// 현재는 Node→다른백엔드 단방향만 안전. 양방향 크로스콜이 필요하면 async invoke 설계 필요.
 static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     if (!g_core.invoke) {
@@ -292,6 +338,7 @@ static int run_node_internal(const char* entry_path) {
         set_fn("__suji_register", js_suji_register);
 
         // 엔트리 JS 파일 로드 — @suji/node SDK를 주입하고 사용자 코드 실행
+        std::string safe_path = escape_js_single(entry_path);
         std::string code = std::string(
             "globalThis.suji = {"
             "  handle: __suji_handle,"
@@ -300,8 +347,8 @@ static int run_node_internal(const char* entry_path) {
             "  register: __suji_register"
             "};"
             "const { createRequire } = require('module');"
-            "const r = createRequire('") + entry_path + "');"
-            "r('" + entry_path + "');";
+            "const r = createRequire('") + safe_path + "');"
+            "r('" + safe_path + "');";
 
         auto load_result = node::LoadEnvironment(env, code.c_str());
 
@@ -311,6 +358,14 @@ static int run_node_internal(const char* entry_path) {
         }
 
         g_running.store(true);
+
+        // 엔트리 로드 완료 = 핸들러 등록 완료 → ready 시그널
+        {
+            std::lock_guard<std::mutex> lock(g_ready_mutex);
+            g_ready.store(true);
+        }
+        g_ready_cv.notify_all();
+
         node::SpinEventLoop(env).FromMaybe(1);
         g_running.store(false);
     }
@@ -347,6 +402,7 @@ void suji_node_shutdown(void) {
     suji_node_stop();
     g_handlers.clear();
     g_setup.reset();
+    g_ready.store(false);
     if (g_initialized.load()) {
         v8::V8::Dispose();
         v8::V8::DisposePlatform();
@@ -354,6 +410,19 @@ void suji_node_shutdown(void) {
         node::TearDownOncePerProcess();
         g_initialized.store(false);
     }
+}
+
+int suji_node_wait_ready(int timeout_ms) {
+    if (g_ready.load()) return 0;
+    std::unique_lock<std::mutex> lock(g_ready_mutex);
+    if (timeout_ms <= 0) {
+        g_ready_cv.wait(lock, []() { return g_ready.load(); });
+    } else {
+        if (!g_ready_cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), []() { return g_ready.load(); })) {
+            return -1; // timeout
+        }
+    }
+    return 0;
 }
 
 const char* suji_node_invoke(const char* channel, const char* data) {
@@ -378,7 +447,12 @@ const char* suji_node_invoke(const char* channel, const char* data) {
         req->cv.wait_for(lock, std::chrono::seconds(30), [req]() { return req->done; });
     }
 
-    char* result = strdup(req->response.c_str());
+    char* result;
+    if (req->done) {
+        result = strdup(req->response.c_str());
+    } else {
+        result = strdup("{\"error\":\"node invoke timeout (30s)\"}");
+    }
     delete req;
     return result;
 }

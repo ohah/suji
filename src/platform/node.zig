@@ -15,6 +15,7 @@ pub const bridge = if (node_enabled) @cImport({
     pub fn suji_node_invoke(_: anytype, _: anytype) callconv(.c) ?[*:0]const u8 { return null; }
     pub fn suji_node_free(_: anytype) callconv(.c) void {}
     pub fn suji_node_set_core(_: anytype) callconv(.c) void {}
+    pub fn suji_node_wait_ready(_: c_int) callconv(.c) c_int { return -1; }
 };
 
 /// Node.js 백엔드 런타임
@@ -45,8 +46,10 @@ pub const NodeRuntime = struct {
         // 별도 스레드에서 JS 실행
         self.thread = try std.Thread.spawn(.{}, runThread, .{self});
 
-        // Node 핸들러 등록 대기 (최대 2초)
-        std.Thread.sleep(2 * std.time.ns_per_s);
+        // Node 핸들러 등록 완료 대기 (최대 10초)
+        if (bridge.suji_node_wait_ready(10000) != 0) {
+            std.debug.print("[suji-node] WARNING: ready timeout, handlers may not be registered\n", .{});
+        }
         std.debug.print("[suji-node] started: {s}\n", .{self.entry_path});
     }
 
@@ -56,14 +59,34 @@ pub const NodeRuntime = struct {
 
     /// Node IPC 호출 (Zig → JS)
     pub fn invoke(channel: []const u8, data: []const u8) ?[]const u8 {
+        // null-terminated 문자열이 필요하므로 스택 버퍼 시도 후 힙 폴백
         var ch_buf: [256]u8 = undefined;
-        const ch_z = std.fmt.bufPrintZ(&ch_buf, "{s}", .{channel}) catch return null;
         var data_buf: [8192]u8 = undefined;
-        const data_z = std.fmt.bufPrintZ(&data_buf, "{s}", .{data}) catch return null;
+
+        const ch_z = nullTerminateOrAlloc(channel, &ch_buf) orelse return null;
+        defer if (ch_z.allocated) std.heap.page_allocator.free(ch_z.ptr[0 .. channel.len + 1]);
+
+        const data_z = nullTerminateOrAlloc(data, &data_buf) orelse return null;
+        defer if (data_z.allocated) std.heap.page_allocator.free(data_z.ptr[0 .. data.len + 1]);
 
         const result = bridge.suji_node_invoke(ch_z.ptr, data_z.ptr);
         if (result == null) return null;
         return std.mem.span(result);
+    }
+
+    const NullTermResult = struct { ptr: [*:0]const u8, allocated: bool };
+
+    fn nullTerminateOrAlloc(src: []const u8, buf: []u8) ?NullTermResult {
+        if (src.len < buf.len) {
+            @memcpy(buf[0..src.len], src);
+            buf[src.len] = 0;
+            return .{ .ptr = buf[0..src.len :0], .allocated = false };
+        }
+        // 버퍼 초과 시 힙 할당
+        const alloc = std.heap.page_allocator.alloc(u8, src.len + 1) catch return null;
+        @memcpy(alloc[0..src.len], src);
+        alloc[src.len] = 0;
+        return .{ .ptr = alloc[0..src.len :0], .allocated = true };
     }
 
     /// Node IPC 응답 해제

@@ -21,6 +21,9 @@ void suji_node_stop(void);
 // 전체 정리 (V8 + 플랫폼 해제)
 void suji_node_shutdown(void);
 
+// Node.js 런타임 준비 완료 대기 (최대 timeout_ms 밀리초, 0=무한)
+int suji_node_wait_ready(int timeout_ms);
+
 // IPC: JS 함수 호출 (호출자가 suji_node_free로 해제)
 const char* suji_node_invoke(const char* channel, const char* data);
 
