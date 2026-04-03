@@ -300,6 +300,27 @@ pub fn build(b: *std.Build) void {
     const watcher_test = b.addTest(.{ .root_module = watcher_test_mod });
     test_step.dependOn(&b.addRunArtifact(watcher_test).step);
 
+    // Node.js tests (stub + NodeRuntime 구조체)
+    const node_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/node_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const node_module = b.createModule(.{
+        .root_source_file = b.path("src/platform/node.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    node_module.addImport("node_config", node_options.createModule());
+    node_module.addIncludePath(b.path("src/platform/node"));
+    if (node_available) {
+        const node_test_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
+        node_module.addIncludePath(.{ .cwd_relative = node_test_include });
+    }
+    node_test_mod.addImport("node", node_module);
+    const node_test = b.addTest(.{ .root_module = node_test_mod });
+    test_step.dependOn(&b.addRunArtifact(node_test).step);
+
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/cef_ipc_test.zig"),
