@@ -1,0 +1,162 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/ohah/suji/blob/main/suji.schema.json",
+  "title": "suji.json",
+  "description": "Suji 데스크톱 앱 프레임워크 프로젝트 설정",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema 경로"
+    },
+    "app": {
+      "type": "object",
+      "description": "앱 메타데이터",
+      "properties": {
+        "name": {
+          "type": "string",
+          "default": "Suji App",
+          "description": "앱 이름"
+        },
+        "version": {
+          "type": "string",
+          "default": "0.1.0",
+          "description": "앱 버전 (semver)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "window": {
+      "type": "object",
+      "description": "CEF 윈도우 설정",
+      "properties": {
+        "title": {
+          "type": "string",
+          "default": "Suji App",
+          "description": "윈도우 타이틀"
+        },
+        "width": {
+          "type": "integer",
+          "default": 1024,
+          "minimum": 100,
+          "description": "윈도우 너비 (px)"
+        },
+        "height": {
+          "type": "integer",
+          "default": 768,
+          "minimum": 100,
+          "description": "윈도우 높이 (px)"
+        },
+        "debug": {
+          "type": "boolean",
+          "default": false,
+          "description": "DevTools 활성화 (Cmd+Shift+I)"
+        },
+        "protocol": {
+          "type": "string",
+          "enum": ["file", "suji"],
+          "default": "file",
+          "description": "프론트엔드 로딩 프로토콜. 'file': file:// (기본), 'suji': suji:// 커스텀 프로토콜 (CORS/fetch/Cookie/SW 정상 동작)"
+        }
+      },
+      "additionalProperties": false
+    },
+    "backend": {
+      "type": "object",
+      "description": "단일 백엔드 설정 (backends와 동시 사용 불가)",
+      "properties": {
+        "lang": {
+          "type": "string",
+          "enum": ["zig", "rust", "go", "node"],
+          "default": "zig",
+          "description": "백엔드 언어"
+        },
+        "entry": {
+          "type": "string",
+          "description": "백엔드 엔트리 디렉토리 경로"
+        }
+      },
+      "required": ["lang", "entry"],
+      "additionalProperties": false
+    },
+    "backends": {
+      "type": "array",
+      "description": "멀티 백엔드 설정 (backend와 동시 사용 불가)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "백엔드 식별자 (target 지정 시 사용)"
+          },
+          "lang": {
+            "type": "string",
+            "enum": ["zig", "rust", "go", "node"],
+            "description": "백엔드 언어"
+          },
+          "entry": {
+            "type": "string",
+            "description": "백엔드 엔트리 디렉토리 경로"
+          }
+        },
+        "required": ["name", "lang", "entry"],
+        "additionalProperties": false
+      }
+    },
+    "plugins": {
+      "type": "array",
+      "description": "활성화할 플러그인 목록",
+      "items": {
+        "type": "string"
+      },
+      "examples": [["state"]]
+    },
+    "asset_dir": {
+      "type": "string",
+      "default": "assets",
+      "description": "정적 에셋 디렉토리"
+    },
+    "frontend": {
+      "type": "object",
+      "description": "프론트엔드 설정",
+      "properties": {
+        "dir": {
+          "type": "string",
+          "default": "frontend",
+          "description": "프론트엔드 소스 디렉토리"
+        },
+        "dev_url": {
+          "type": "string",
+          "default": "http://localhost:5173",
+          "description": "개발 서버 URL (suji dev 시 사용)"
+        },
+        "dist_dir": {
+          "type": "string",
+          "default": "frontend/dist",
+          "description": "프로덕션 빌드 출력 디렉토리"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "oneOf": [
+    {
+      "properties": { "backend": {}, "backends": false },
+      "description": "단일 백엔드 모드"
+    },
+    {
+      "properties": { "backends": {}, "backend": false },
+      "description": "멀티 백엔드 모드"
+    },
+    {
+      "not": {
+        "anyOf": [
+          { "required": ["backend"] },
+          { "required": ["backends"] }
+        ]
+      },
+      "description": "백엔드 없음 (프론트엔드 전용)"
+    }
+  ],
+  "additionalProperties": false
+}

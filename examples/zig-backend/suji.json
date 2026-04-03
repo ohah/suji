@@ -1,4 +1,5 @@
 {
+  "$schema": "../../suji.schema.json",
   "app": { "name": "Suji Zig Example", "version": "0.1.0" },
   "window": { "title": "Suji + Zig", "width": 1024, "height": 768, "debug": true },
   "backend": { "lang": "zig", "entry": "." },
