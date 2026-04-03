@@ -140,7 +140,8 @@ suji/
 │   ├── platform/
 │   │   ├── cef.zig           # CEF 통합 (창, IPC, 렌더러, 커스텀 프로토콜)
 │   │   ├── node.zig          # Node.js 런타임 (libnode 임베딩)
-│   │   └── node/bridge.cc    # Node.js C++ 브릿지 (V8 IPC, thread pool)
+│   │   ├── node/bridge.cc    # Node.js C++ 브릿지 (V8 IPC, thread pool)
+│   │   └── watcher.zig       # 파일 감시 (백엔드 핫 리로드)
 │   ├── backends/
 │   │   └── loader.zig        # BackendRegistry + SujiCore
 │   └── templates/
