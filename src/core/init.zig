@@ -81,6 +81,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
     const content = switch (backend) {
         .multi => try std.fmt.bufPrint(&buf,
             \\{{
+            \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
             \\  "window": {{ "title": "{s}", "width": 1024, "height": 768, "debug": true }},
             \\  "backends": [
@@ -93,6 +94,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
         , .{ name, name }),
         else => try std.fmt.bufPrint(&buf,
             \\{{
+            \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
             \\  "window": {{ "title": "{s}", "width": 1024, "height": 768, "debug": true }},
             \\  "backend": {{ "lang": "{s}", "entry": "." }},

@@ -74,8 +74,11 @@ suji.emit("event", { msg: "hello" })
 
 ## suji.json 설정
 
+JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
+
 ```json
 {
+  "$schema": "./suji.schema.json",
   "app": { "name": "My App", "version": "1.0.0" },
   "window": {
     "title": "My App",
