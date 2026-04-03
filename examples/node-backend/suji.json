@@ -1,0 +1,6 @@
+{
+  "app": { "name": "Suji Node Example", "version": "0.1.0" },
+  "window": { "title": "Suji + Node.js", "width": 1024, "height": 768, "debug": true },
+  "backend": { "lang": "node", "entry": "backends/node" },
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+}
