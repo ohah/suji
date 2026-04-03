@@ -142,7 +142,8 @@ suji/
 │   ├── zig-backend/
 │   ├── rust-backend/
 │   ├── go-backend/
-│   └── multi-backend/        # Zig+Rust+Go + 이벤트 예제
+│   ├── node-backend/         # Node.js 단독 예제
+│   └── multi-backend/        # Zig+Rust+Go+Node.js + 이벤트 예제
 └── docs/PLAN.md
 
 ## 크로스 플랫폼
@@ -156,4 +157,22 @@ suji/
 
 - macOS 26.4 + Xcode 26.4: Zig 링커 버그 (Xcode 26.2 필요)
 - Go 빌드: Homebrew LLVM 충돌 (CC=/usr/bin/clang 자동 설정)
+
+## 기술 부채 / 개선 예정
+
+### GPU 렌더링 (CEF)
+현재 `--disable-gpu` 플래그로 소프트웨어 렌더링 중. GPU 서브프로세스가 `@executable_path/libGLESv2.dylib`를 찾지 못하기 때문.
+- **해결 방법**: `build.zig` post-install에서 `~/.suji/cef/.../Framework/Libraries/libGLESv2.dylib`를 `zig-out/bin/`에 복사 (macOS `.app` 번들링 시에도 동일)
+- **영향**: WebGL, CSS 애니메이션 60fps, 비디오 가속이 필요하면 GPU 활성화 필요
+- **옵션**: `suji.json`에 `"gpu": true/false` 설정 추가 고려
+
+### Node.js async invoke 스레드 관리
+`suji.invoke()` (async/Promise)가 호출마다 `std::thread`를 생성/detach 중.
+- **해결 방법**: 고정 크기 스레드 풀 (4 workers + task queue)로 교체
+- **영향**: 프론트엔드에서 대량 invoke 시 OS 스레드 폭증 가능
+
+### Node.js 양방향 크로스 호출 제한
+`suji.invokeSync()`는 Node event loop를 블록하므로, 대상 백엔드가 Node로 콜백하면 deadlock.
+- 현재 Node→다른백엔드 단방향만 안전
+- `suji.invoke()` (async)는 별도 스레드에서 실행되어 deadlock 없음
 ```

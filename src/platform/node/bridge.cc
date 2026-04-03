@@ -94,6 +94,52 @@ static std::mutex g_ipc_mutex;
 static std::vector<IpcRequest*> g_ipc_queue;
 static uv_async_t g_ipc_async;
 
+// Async invoke: JS→백엔드 비동기 호출 (Promise 반환)
+struct AsyncInvokeRequest {
+    std::string backend;
+    std::string request;
+    std::string response;
+    v8::Global<v8::Promise::Resolver> resolver;
+};
+
+static std::mutex g_async_invoke_mutex;
+static std::vector<AsyncInvokeRequest*> g_async_invoke_done;
+static uv_async_t g_async_invoke_async;
+
+// ============================================
+// Async invoke 결과 처리 (Node event loop에서 Promise resolve)
+// ============================================
+
+static void process_async_invoke_done(uv_async_t*) {
+    if (!g_setup) return;
+    Isolate* isolate = g_setup->isolate();
+    if (!isolate) return;
+
+    Locker locker(isolate);
+    Isolate::Scope isolate_scope(isolate);
+    HandleScope handle_scope(isolate);
+    Context::Scope context_scope(g_setup->context());
+
+    std::vector<AsyncInvokeRequest*> done;
+    {
+        std::lock_guard<std::mutex> lock(g_async_invoke_mutex);
+        done.swap(g_async_invoke_done);
+    }
+
+    for (auto* req : done) {
+        auto resolver = req->resolver.Get(isolate);
+        // "error" 키가 있으면 reject, 아니면 resolve
+        if (req->response.find("\"error\":") != std::string::npos && req->response[0] == '{') {
+            auto err_str = String::NewFromUtf8(isolate, req->response.c_str()).ToLocalChecked();
+            resolver->Reject(g_setup->context(), err_str).FromMaybe(false);
+        } else {
+            auto result_str = String::NewFromUtf8(isolate, req->response.c_str()).ToLocalChecked();
+            resolver->Resolve(g_setup->context(), result_str).FromMaybe(false);
+        }
+        delete req;
+    }
+}
+
 // ============================================
 // IPC 처리 (메인 Node 스레드에서 실행)
 // ============================================
@@ -196,10 +242,34 @@ static void js_suji_handle(const v8::FunctionCallbackInfo<Value>& args) {
 // JS에서 호출하는 네이티브 함수: __suji_invoke(backend, request) → string
 // ============================================
 
-// NOTE: 이 함수는 Node event loop 스레드에서 동기 호출된다.
-// 대상 백엔드가 suji_node_invoke()를 통해 Node로 콜백하면 deadlock 발생.
-// (event loop가 여기서 블록 중이라 process_ipc_queue가 실행 불가)
-// 현재는 Node→다른백엔드 단방향만 안전. 양방향 크로스콜이 필요하면 async invoke 설계 필요.
+// suji.invokeSync(backend, request) → string (동기, 핸들러 내부용)
+// event loop 블록 — 핸들러 내에서 크로스콜할 때만 사용
+static void js_suji_invoke_sync(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.invoke) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.invokeSync: core not connected").ToLocalChecked());
+        return;
+    }
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.invokeSync(backend, request) requires two strings").ToLocalChecked());
+        return;
+    }
+
+    String::Utf8Value backend(isolate, args[0]);
+    String::Utf8Value request(isolate, args[1]);
+
+    const char* result = g_core.invoke(*backend, *request);
+    if (result) {
+        args.GetReturnValue().Set(String::NewFromUtf8(isolate, result).ToLocalChecked());
+        g_core.free(result);
+    } else {
+        args.GetReturnValue().SetNull();
+    }
+}
+
+// suji.invoke(backend, request) → Promise<string>
+// 별도 스레드에서 g_core.invoke를 호출하고, 완료 시 Node event loop에서 resolve.
+// event loop를 블록하지 않으므로 deadlock 위험 없음.
 static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     if (!g_core.invoke) {
@@ -214,13 +284,29 @@ static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
     String::Utf8Value backend(isolate, args[0]);
     String::Utf8Value request(isolate, args[1]);
 
-    const char* result = g_core.invoke(*backend, *request);
-    if (result) {
-        args.GetReturnValue().Set(String::NewFromUtf8(isolate, result).ToLocalChecked());
-        g_core.free(result);
-    } else {
-        args.GetReturnValue().SetNull();
-    }
+    auto resolver = v8::Promise::Resolver::New(g_setup->context()).ToLocalChecked();
+    args.GetReturnValue().Set(resolver->GetPromise());
+
+    auto* async_req = new AsyncInvokeRequest();
+    async_req->backend = std::string(*backend, backend.length());
+    async_req->request = std::string(*request, request.length());
+    async_req->resolver.Reset(isolate, resolver);
+
+    std::thread([async_req]() {
+        const char* result = g_core.invoke(async_req->backend.c_str(), async_req->request.c_str());
+        if (result) {
+            async_req->response = result;
+            g_core.free(result);
+        } else {
+            async_req->response = "{\"error\":\"invoke returned null\"}";
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_async_invoke_mutex);
+            g_async_invoke_done.push_back(async_req);
+        }
+        uv_async_send(&g_async_invoke_async);
+    }).detach();
 }
 
 // ============================================
@@ -322,6 +408,7 @@ static int run_node_internal(const char* entry_path) {
 
         // IPC async 핸들 등록 (Node 이벤트 루프에서 IPC 처리)
         uv_async_init(g_setup->event_loop(), &g_ipc_async, process_ipc_queue);
+        uv_async_init(g_setup->event_loop(), &g_async_invoke_async, process_async_invoke_done);
 
         // globalThis 네이티브 함수 등록
         auto set_fn = [&](const char* name, v8::FunctionCallback cb) {
@@ -334,6 +421,7 @@ static int run_node_internal(const char* entry_path) {
         };
         set_fn("__suji_handle", js_suji_handle);
         set_fn("__suji_invoke", js_suji_invoke);
+        set_fn("__suji_invoke_sync", js_suji_invoke_sync);
         set_fn("__suji_send", js_suji_send);
         set_fn("__suji_register", js_suji_register);
 
@@ -343,6 +431,7 @@ static int run_node_internal(const char* entry_path) {
             "globalThis.suji = {"
             "  handle: __suji_handle,"
             "  invoke: __suji_invoke,"
+            "  invokeSync: __suji_invoke_sync,"
             "  send: __suji_send,"
             "  register: __suji_register"
             "};"

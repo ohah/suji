@@ -384,6 +384,15 @@ fn onBeforeCommandLineProcessing(
     setCefString(&wildcard, "*");
     cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
 
+    // GPU 서브프로세스가 libGLESv2.dylib를 찾지 못하는 문제 방지
+    // 소프트웨어 렌더링으로 폴백 (데스크톱 앱에서 충분한 성능)
+    var disable_gpu: c.cef_string_t = .{};
+    setCefString(&disable_gpu, "disable-gpu");
+    cmd.append_switch.?(cmd, &disable_gpu);
+
+    var disable_gpu_compositing: c.cef_string_t = .{};
+    setCefString(&disable_gpu_compositing, "disable-gpu-compositing");
+    cmd.append_switch.?(cmd, &disable_gpu_compositing);
 }
 
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {

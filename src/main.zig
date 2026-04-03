@@ -719,8 +719,10 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
     }
 
     // Node.js 백엔드 폴백 (libnode 활성화된 경우만)
+    // target="node"일 때 channel="node"으로 오므로, data에서 cmd 추출
     if (node_enabled and g_node_runtime != null) {
-        if (NodeRuntime.invoke(channel, data)) |resp| {
+        const node_channel = extractJsonString(data, "\"cmd\":\"") orelse channel;
+        if (NodeRuntime.invoke(node_channel, data)) |resp| {
             const len = @min(resp.len, response_buf.len);
             @memcpy(response_buf[0..len], resp[0..len]);
             NodeRuntime.freeResponse(resp);

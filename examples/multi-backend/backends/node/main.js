@@ -1,9 +1,11 @@
 const os = require('os');
 const crypto = require('crypto');
 
+// 핸들러 내부에서는 invokeSync 사용 (동기 컨텍스트)
+// 핸들러 밖에서는 suji.invoke() 사용 (Promise 반환, event loop 비블록)
 function safeInvoke(backend, request) {
   try {
-    return JSON.parse(suji.invoke(backend, request));
+    return JSON.parse(suji.invokeSync(backend, request));
   } catch (e) {
     return { error: `invoke(${backend}) failed: ${e.message}` };
   }
