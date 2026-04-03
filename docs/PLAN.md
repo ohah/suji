@@ -17,7 +17,7 @@
 
 | | Electron | Tauri | Wails | **Suji** |
 |---|---|---|---|---|
-| 브라우저 | Chromium 번들 | OS WebView | OS WebView | OS WebView |
+| 브라우저 | Chromium 번들 | OS WebView | OS WebView | **CEF (Chromium)** |
 | 백엔드 | Node.js 전용 | Rust 전용 | Go 전용 | **아무 언어** |
 | 번들 크기 | ~150MB | ~3MB | ~8MB | 1~50MB (선택) |
 | 코어 언어 | C++ | Rust | Go | **Zig** |
@@ -391,7 +391,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
   - [x] `suji run` — 빌드된 앱 실행
-- [ ] 핫 리로드 (백엔드 — dylib 재빌드/재로드, 프론트엔드는 Vite HMR로 동작)
+- [x] 핫 리로드 (백엔드 — dylib 재빌드/재로드, 프론트엔드는 Vite HMR로 동작)
 
 **`suji init` 스펙**:
 
