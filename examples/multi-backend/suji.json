@@ -1,4 +1,5 @@
 {
+  "$schema": "../../suji.schema.json",
   "app": {
     "name": "Multi Backend Example",
     "version": "0.1.0"
