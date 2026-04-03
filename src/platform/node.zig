@@ -64,29 +64,31 @@ pub const NodeRuntime = struct {
         var data_buf: [8192]u8 = undefined;
 
         const ch_z = nullTerminateOrAlloc(channel, &ch_buf) orelse return null;
-        defer if (ch_z.allocated) std.heap.page_allocator.free(ch_z.ptr[0 .. channel.len + 1]);
+        defer if (ch_z.heap_slice) |s| std.heap.page_allocator.free(s);
 
         const data_z = nullTerminateOrAlloc(data, &data_buf) orelse return null;
-        defer if (data_z.allocated) std.heap.page_allocator.free(data_z.ptr[0 .. data.len + 1]);
+        defer if (data_z.heap_slice) |s| std.heap.page_allocator.free(s);
 
         const result = bridge.suji_node_invoke(ch_z.ptr, data_z.ptr);
         if (result == null) return null;
         return std.mem.span(result);
     }
 
-    pub const NullTermResult = struct { ptr: [*:0]const u8, allocated: bool };
+    pub const NullTermResult = struct {
+        ptr: [*:0]const u8,
+        heap_slice: ?[]u8, // 힙 할당 시 원본 슬라이스 (free용), 스택이면 null
+    };
 
     pub fn nullTerminateOrAlloc(src: []const u8, buf: []u8) ?NullTermResult {
         if (src.len < buf.len) {
             @memcpy(buf[0..src.len], src);
             buf[src.len] = 0;
-            return .{ .ptr = buf[0..src.len :0], .allocated = false };
+            return .{ .ptr = buf[0..src.len :0], .heap_slice = null };
         }
-        // 버퍼 초과 시 힙 할당
         const alloc = std.heap.page_allocator.alloc(u8, src.len + 1) catch return null;
         @memcpy(alloc[0..src.len], src);
         alloc[src.len] = 0;
-        return .{ .ptr = alloc[0..src.len :0], .allocated = true };
+        return .{ .ptr = alloc[0..src.len :0], .heap_slice = alloc };
     }
 
     /// Node IPC 응답 해제

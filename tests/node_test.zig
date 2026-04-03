@@ -64,7 +64,7 @@ test "nullTerminateOrAlloc fits in stack buffer" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("hello", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(!r.allocated);
+    try std.testing.expect(r.heap_slice == null);
     try std.testing.expectEqualStrings("hello", std.mem.span(r.ptr));
 }
 
@@ -73,7 +73,7 @@ test "nullTerminateOrAlloc empty string" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(!r.allocated);
+    try std.testing.expect(r.heap_slice == null);
     try std.testing.expectEqualStrings("", std.mem.span(r.ptr));
 }
 
@@ -82,7 +82,7 @@ test "nullTerminateOrAlloc exact buffer size" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("hello", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(!r.allocated);
+    try std.testing.expect(r.heap_slice == null);
     try std.testing.expectEqualStrings("hello", std.mem.span(r.ptr));
 }
 
@@ -91,7 +91,7 @@ test "nullTerminateOrAlloc overflow uses heap" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("hello", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(r.allocated);
+    try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings("hello", std.mem.span(r.ptr));
     std.heap.page_allocator.free(r.ptr[0 .. 5 + 1]);
 }
@@ -101,7 +101,7 @@ test "nullTerminateOrAlloc single byte buffer overflow" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("ab", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(r.allocated);
+    try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings("ab", std.mem.span(r.ptr));
     std.heap.page_allocator.free(r.ptr[0 .. 2 + 1]);
 }
@@ -121,7 +121,7 @@ test "nullTerminateOrAlloc large data heap allocation" {
     const result = node.NodeRuntime.nullTerminateOrAlloc(data, &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(r.allocated);
+    try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings(data, std.mem.span(r.ptr));
     try std.testing.expect(r.ptr[data.len] == 0);
     std.heap.page_allocator.free(r.ptr[0 .. data.len + 1]);
@@ -133,7 +133,7 @@ test "nullTerminateOrAlloc boundary: src.len == buf.len - 1" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("abcde", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(!r.allocated);
+    try std.testing.expect(r.heap_slice == null);
     try std.testing.expectEqualStrings("abcde", std.mem.span(r.ptr));
 }
 
@@ -143,7 +143,7 @@ test "nullTerminateOrAlloc boundary: src.len == buf.len" {
     const result = node.NodeRuntime.nullTerminateOrAlloc("abcde", &buf);
     try std.testing.expect(result != null);
     const r = result.?;
-    try std.testing.expect(r.allocated);
+    try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings("abcde", std.mem.span(r.ptr));
     std.heap.page_allocator.free(r.ptr[0 .. 5 + 1]);
 }
