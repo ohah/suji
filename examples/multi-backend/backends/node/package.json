@@ -1,5 +1,8 @@
 {
   "name": "suji-multi-node-backend",
   "version": "0.1.0",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@suji/node": "../../../../packages/suji-node"
+  }
 }
