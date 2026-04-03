@@ -63,6 +63,29 @@ export declare function invokeSync<T = unknown>(backend: string, request?: Recor
  */
 export declare function send(channel: string, data?: unknown): void;
 /**
+ * 이벤트 수신 — 프론트엔드/다른 백엔드에서 발신한 이벤트를 수신
+ *
+ * @returns 구독 해제 함수
+ *
+ * @example
+ * const cancel = on('data-updated', (data) => {
+ *   console.log('received:', data);
+ * });
+ * // 나중에 해제
+ * cancel();
+ */
+export declare function on<T = unknown>(channel: string, callback: (data: T) => void): () => void;
+/**
+ * 이벤트 구독 해제
+ */
+export declare function off(subId: number): void;
+/**
+ * 이벤트 한 번만 수신
+ *
+ * @returns 구독 해제 함수
+ */
+export declare function once<T = unknown>(channel: string, callback: (data: T) => void): () => void;
+/**
  * 채널을 수동으로 등록 (자동 라우팅 테이블에 추가)
  *
  * handle()은 자동으로 register하지 않음 (bridge.cc에서 별도 관리).

@@ -109,6 +109,23 @@ static std::mutex g_async_invoke_mutex;
 static std::vector<AsyncInvokeRequest*> g_async_invoke_done;
 static uv_async_t g_async_invoke_async;
 
+// Event listener: C 콜백 → Node 스레드 전달
+struct EventNotification {
+    std::string channel;
+    std::string data;
+};
+
+struct JsEventListener {
+    uint64_t sub_id;
+    v8::Global<v8::Function> callback;
+};
+
+static std::mutex g_event_mutex;
+static std::vector<EventNotification*> g_event_queue;
+static uv_async_t g_event_async;
+static std::mutex g_listener_mutex;
+static std::vector<JsEventListener*> g_listeners;
+
 // ============================================
 // Thread Pool (async invoke용, 고정 크기)
 // ============================================
@@ -159,6 +176,63 @@ private:
 };
 
 static std::unique_ptr<ThreadPool> g_invoke_pool;
+
+// ============================================
+// Event 큐 처리 (Node event loop에서 JS 콜백 호출)
+// ============================================
+
+static void process_event_queue(uv_async_t*) {
+    if (!g_setup) return;
+    Isolate* isolate = g_setup->isolate();
+    if (!isolate) return;
+
+    Locker locker(isolate);
+    Isolate::Scope isolate_scope(isolate);
+    HandleScope handle_scope(isolate);
+    Context::Scope context_scope(g_setup->context());
+
+    std::vector<EventNotification*> events;
+    {
+        std::lock_guard<std::mutex> lock(g_event_mutex);
+        events.swap(g_event_queue);
+    }
+
+    std::vector<JsEventListener*> listeners;
+    {
+        std::lock_guard<std::mutex> lock(g_listener_mutex);
+        listeners = g_listeners; // 복사 (콜백 실행 중 수정 방지)
+    }
+
+    for (auto* evt : events) {
+        for (auto* listener : listeners) {
+            // 채널 매칭: 리스너가 특정 채널 또는 전체(*)를 수신
+            Local<Function> fn = listener->callback.Get(isolate);
+            Local<String> ch_arg = String::NewFromUtf8(isolate, evt->channel.c_str()).ToLocalChecked();
+            Local<String> data_arg = String::NewFromUtf8(isolate, evt->data.c_str()).ToLocalChecked();
+            Local<Value> argv[2] = { ch_arg, data_arg };
+
+            v8::TryCatch try_catch(isolate);
+            fn->Call(g_setup->context(), v8::Undefined(isolate), 2, argv).FromMaybe(Local<Value>());
+            if (try_catch.HasCaught()) {
+                String::Utf8Value err(isolate, try_catch.Exception());
+                fprintf(stderr, "[suji-node] event callback error: %s\n", *err);
+            }
+        }
+        delete evt;
+    }
+}
+
+// C 콜백 — EventBus에서 호출됨 (임의 스레드)
+static void on_event_callback(const char* channel, const char* data, void*) {
+    auto* evt = new EventNotification();
+    evt->channel = channel ? channel : "";
+    evt->data = data ? data : "";
+    {
+        std::lock_guard<std::mutex> lock(g_event_mutex);
+        g_event_queue.push_back(evt);
+    }
+    uv_async_send(&g_event_async);
+}
 
 // ============================================
 // 단일 IPC 요청 실행 (V8 isolate lock + context scope 안에서 호출)
@@ -439,6 +513,78 @@ static void js_suji_register(const v8::FunctionCallbackInfo<Value>& args) {
 }
 
 // ============================================
+// JS에서 호출하는 네이티브 함수: __suji_on(channel, callback) → subId
+// ============================================
+
+static void js_suji_on(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.on) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.on: core not connected").ToLocalChecked());
+        return;
+    }
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsFunction()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.on(channel, callback) requires string and function").ToLocalChecked());
+        return;
+    }
+
+    String::Utf8Value channel(isolate, args[0]);
+
+    // JS 콜백을 Global로 저장
+    auto* listener = new JsEventListener();
+    listener->callback.Reset(isolate, args[1].As<Function>());
+
+    // C 콜백으로 EventBus에 등록 (임의 스레드에서 호출됨 → on_event_callback이 큐에 전달)
+    uint64_t sub_id = g_core.on(*channel, on_event_callback, nullptr);
+    listener->sub_id = sub_id;
+
+    {
+        std::lock_guard<std::mutex> lock(g_listener_mutex);
+        g_listeners.push_back(listener);
+    }
+
+    // subscription ID 반환 (off에서 사용)
+    args.GetReturnValue().Set(v8::Number::New(isolate, static_cast<double>(sub_id)));
+}
+
+// ============================================
+// JS에서 호출하는 네이티브 함수: __suji_off(subId)
+// ============================================
+
+static void js_suji_off(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.off) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.off: core not connected").ToLocalChecked());
+        return;
+    }
+    if (args.Length() < 1 || !args[0]->IsNumber()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.off(subId) requires number").ToLocalChecked());
+        return;
+    }
+
+    uint64_t sub_id = static_cast<uint64_t>(args[0]->NumberValue(g_setup->context()).FromJust());
+
+    // EventBus에서 구독 해제
+    g_core.off(sub_id);
+
+    // JS 리스너 정리
+    {
+        std::lock_guard<std::mutex> lock(g_listener_mutex);
+        g_listeners.erase(
+            std::remove_if(g_listeners.begin(), g_listeners.end(),
+                [sub_id](JsEventListener* l) {
+                    if (l->sub_id == sub_id) {
+                        l->callback.Reset();
+                        delete l;
+                        return true;
+                    }
+                    return false;
+                }),
+            g_listeners.end()
+        );
+    }
+}
+
+// ============================================
 // C API Implementation
 // ============================================
 
@@ -498,6 +644,7 @@ static int run_node_internal(const char* entry_path) {
         // IPC async 핸들 등록 (Node 이벤트 루프에서 IPC 처리)
         uv_async_init(g_setup->event_loop(), &g_ipc_async, process_ipc_queue);
         uv_async_init(g_setup->event_loop(), &g_async_invoke_async, process_async_invoke_done);
+        uv_async_init(g_setup->event_loop(), &g_event_async, process_event_queue);
 
         // Async invoke 스레드 풀 (4 workers)
         g_invoke_pool = std::make_unique<ThreadPool>(4);
@@ -515,6 +662,8 @@ static int run_node_internal(const char* entry_path) {
         set_fn("__suji_invoke", js_suji_invoke);
         set_fn("__suji_invoke_sync", js_suji_invoke_sync);
         set_fn("__suji_send", js_suji_send);
+        set_fn("__suji_on", js_suji_on);
+        set_fn("__suji_off", js_suji_off);
         set_fn("__suji_register", js_suji_register);
 
         // 엔트리 JS 파일 로드 — @suji/node SDK를 주입하고 사용자 코드 실행
@@ -525,6 +674,8 @@ static int run_node_internal(const char* entry_path) {
             "  invoke: __suji_invoke,"
             "  invokeSync: __suji_invoke_sync,"
             "  send: __suji_send,"
+            "  on: __suji_on,"
+            "  off: __suji_off,"
             "  register: __suji_register"
             "};"
             "const { createRequire } = require('module');"

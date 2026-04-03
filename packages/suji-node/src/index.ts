@@ -34,6 +34,8 @@ interface SujiBridge {
   invoke(backend: string, request: string): Promise<string>;
   invokeSync(backend: string, request: string): string;
   send(channel: string, data: string): void;
+  on(channel: string, fn: (channel: string, data: string) => void): number;
+  off(subId: number): void;
   register(channel: string): void;
 }
 
@@ -148,6 +150,66 @@ export function send(channel: string, data: unknown = {}): void {
 // ============================================
 // Channel registration
 // ============================================
+
+/**
+ * 이벤트 수신 — 프론트엔드/다른 백엔드에서 발신한 이벤트를 수신
+ *
+ * @returns 구독 해제 함수
+ *
+ * @example
+ * const cancel = on('data-updated', (data) => {
+ *   console.log('received:', data);
+ * });
+ * // 나중에 해제
+ * cancel();
+ */
+export function on<T = unknown>(
+  channel: string,
+  callback: (data: T) => void,
+): () => void {
+  const subId = getBridge().on(channel, (_ch: string, raw: string) => {
+    let data: T;
+    try {
+      data = JSON.parse(raw) as T;
+    } catch {
+      data = raw as unknown as T;
+    }
+    callback(data);
+  });
+
+  return () => off(subId);
+}
+
+/**
+ * 이벤트 구독 해제
+ */
+export function off(subId: number): void {
+  getBridge().off(subId);
+}
+
+/**
+ * 이벤트 한 번만 수신
+ *
+ * @returns 구독 해제 함수
+ */
+export function once<T = unknown>(
+  channel: string,
+  callback: (data: T) => void,
+): () => void {
+  let subId: number;
+  subId = getBridge().on(channel, (_ch: string, raw: string) => {
+    getBridge().off(subId);
+    let data: T;
+    try {
+      data = JSON.parse(raw) as T;
+    } catch {
+      data = raw as unknown as T;
+    }
+    callback(data);
+  });
+
+  return () => getBridge().off(subId);
+}
 
 /**
  * 채널을 수동으로 등록 (자동 라우팅 테이블에 추가)
