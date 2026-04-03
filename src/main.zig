@@ -320,6 +320,11 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
     rt.* = NodeRuntime.init(allocator, entry_js);
     try rt.start();
     g_node_runtime = rt;
+
+    // SujiCore 연결 (크로스 호출 + 이벤트)
+    if (suji.BackendRegistry.global) |g| {
+        NodeRuntime.setCore(&g.core_api);
+    }
 }
 
 fn buildBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {

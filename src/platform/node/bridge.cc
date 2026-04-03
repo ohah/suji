@@ -41,6 +41,9 @@ static std::thread g_thread;
 static std::unordered_map<std::string, Global<Function>> g_handlers;
 static std::mutex g_handler_mutex;
 
+// SujiCore (크로스 호출 + 이벤트)
+static SujiNodeCore g_core = {nullptr, nullptr, nullptr, nullptr};
+
 // IPC 요청/응답 큐 (스레드 간 통신)
 struct IpcRequest {
     std::string channel;
@@ -148,6 +151,73 @@ static void js_suji_handle(const v8::FunctionCallbackInfo<Value>& args) {
 }
 
 // ============================================
+// JS에서 호출하는 네이티브 함수: __suji_invoke(backend, request) → string
+// ============================================
+
+static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.invoke) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.invoke: core not connected").ToLocalChecked());
+        return;
+    }
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.invoke(backend, request) requires two strings").ToLocalChecked());
+        return;
+    }
+
+    String::Utf8Value backend(isolate, args[0]);
+    String::Utf8Value request(isolate, args[1]);
+
+    const char* result = g_core.invoke(*backend, *request);
+    if (result) {
+        args.GetReturnValue().Set(String::NewFromUtf8(isolate, result).ToLocalChecked());
+        g_core.free(result);
+    } else {
+        args.GetReturnValue().SetNull();
+    }
+}
+
+// ============================================
+// JS에서 호출하는 네이티브 함수: __suji_send(channel, data)
+// ============================================
+
+static void js_suji_send(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.emit) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.send: core not connected").ToLocalChecked());
+        return;
+    }
+    if (args.Length() < 2 || !args[0]->IsString() || !args[1]->IsString()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.send(channel, data) requires two strings").ToLocalChecked());
+        return;
+    }
+
+    String::Utf8Value channel(isolate, args[0]);
+    String::Utf8Value data(isolate, args[1]);
+
+    g_core.emit(*channel, *data);
+}
+
+// ============================================
+// JS에서 호출하는 네이티브 함수: __suji_register(channel)
+// ============================================
+
+static void js_suji_register(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.reg) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.register: core not connected").ToLocalChecked());
+        return;
+    }
+    if (args.Length() < 1 || !args[0]->IsString()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.register(channel) requires string").ToLocalChecked());
+        return;
+    }
+
+    String::Utf8Value channel(isolate, args[0]);
+    g_core.reg(*channel);
+}
+
+// ============================================
 // C API Implementation
 // ============================================
 
@@ -207,17 +277,28 @@ static int run_node_internal(const char* entry_path) {
         // IPC async 핸들 등록 (Node 이벤트 루프에서 IPC 처리)
         uv_async_init(g_setup->event_loop(), &g_ipc_async, process_ipc_queue);
 
-        // globalThis.__suji_handle 등록
-        Local<v8::FunctionTemplate> handle_tmpl = v8::FunctionTemplate::New(isolate, js_suji_handle);
-        g_setup->context()->Global()->Set(
-            g_setup->context(),
-            String::NewFromUtf8(isolate, "__suji_handle").ToLocalChecked(),
-            handle_tmpl->GetFunction(g_setup->context()).ToLocalChecked()
-        ).Check();
+        // globalThis 네이티브 함수 등록
+        auto set_fn = [&](const char* name, v8::FunctionCallback cb) {
+            Local<v8::FunctionTemplate> tmpl = v8::FunctionTemplate::New(isolate, cb);
+            g_setup->context()->Global()->Set(
+                g_setup->context(),
+                String::NewFromUtf8(isolate, name).ToLocalChecked(),
+                tmpl->GetFunction(g_setup->context()).ToLocalChecked()
+            ).Check();
+        };
+        set_fn("__suji_handle", js_suji_handle);
+        set_fn("__suji_invoke", js_suji_invoke);
+        set_fn("__suji_send", js_suji_send);
+        set_fn("__suji_register", js_suji_register);
 
         // 엔트리 JS 파일 로드 — @suji/node SDK를 주입하고 사용자 코드 실행
         std::string code = std::string(
-            "globalThis.suji = { handle: __suji_handle };"
+            "globalThis.suji = {"
+            "  handle: __suji_handle,"
+            "  invoke: __suji_invoke,"
+            "  send: __suji_send,"
+            "  register: __suji_register"
+            "};"
             "const { createRequire } = require('module');"
             "const r = createRequire('") + entry_path + "');"
             "r('" + entry_path + "');";
@@ -308,6 +389,11 @@ void suji_node_free(const char* ptr) {
 
 void suji_node_set_handler(suji_node_handler_fn handler) {
     (void)handler;
+}
+
+void suji_node_set_core(struct SujiNodeCore core) {
+    g_core = core;
+    fprintf(stderr, "[suji-node] core connected (invoke/send/register)\n");
 }
 
 } // extern "C"
