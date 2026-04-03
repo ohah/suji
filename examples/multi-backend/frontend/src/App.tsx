@@ -78,9 +78,12 @@ function App() {
         </section>
 
         <section>
-          <h3>2.5 Node.js Info</h3>
+          <h3>2.5 Node.js</h3>
+          <p>런타임 정보 + 시스템 정보 + crypto</p>
           <div className="buttons">
-            <button className="node" onClick={() => call(() => suji.invoke("node-info"), "node-info")}>invoke("node-info") — runtime info</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-info"), "node-info")}>Runtime Info</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-system"), "node-system")}>System Info</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-hash", { text: "hello suji" }), "node-hash")}>Hash("hello suji")</button>
           </div>
         </section>
 
@@ -92,16 +95,22 @@ function App() {
             <button className="zig" onClick={() => call(() => suji.invoke("call_go", {}, { target: "zig" }), "zig→go")}>Zig→Go</button>
             <button className="rust" onClick={() => call(() => suji.invoke("call_go", {}, { target: "rust" }), "rust→go")}>Rust→Go</button>
             <button className="go" onClick={() => call(() => suji.invoke("call_rust", {}, { target: "go" }), "go→rust")}>Go→Rust</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-call-zig"), "node→zig")}>Node→Zig</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-call-rust"), "node→rust")}>Node→Rust</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-call-go"), "node→go")}>Node→Go</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-call-all"), "node→all")}>Node→All</button>
           </div>
         </section>
 
         <section>
-          <h3>4. Collab (tokio + goroutine)</h3>
+          <h3>4. Collab (tokio + goroutine + Node.js)</h3>
           <div className="buttons">
             <button className="zig" onClick={() => call(() => suji.invoke("collab", { data: "zig leads" }, { target: "zig" }), "zig-collab")}>Zig leads</button>
             <button className="rust" onClick={() => call(() => suji.invoke("collab", { data: "rust leads" }, { target: "rust" }), "rust-collab")}>Rust leads</button>
             <button className="go" onClick={() => call(() => suji.invoke("collab", { data: "go leads" }, { target: "go" }), "go-collab")}>Go leads</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-collab", { data: "node leads" }), "node-collab")}>Node leads</button>
             <button className="zig" onClick={() => call(() => suji.invoke("chain_all", {}, { target: "zig" }), "chain")}>Zig→Rust→Go</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-chain-all"), "node-chain")}>Node→Zig→Rust→Go</button>
           </div>
         </section>
 
@@ -120,12 +129,13 @@ function App() {
               const c1 = suji.on("zig-event", (data: unknown) => log(`  ✅ [zig-event] ${S(data)}`));
               const c2 = suji.on("rust-event", (data: unknown) => log(`  ✅ [rust-event] ${S(data)}`));
               const c3 = suji.on("go-event", (data: unknown) => log(`  ✅ [go-event] ${S(data)}`));
-              (window as any).__cancels = { zig: c1, rust: c2, go: c3 };
-              log("📡 ON: 3 listeners registered");
+              const c4 = suji.on("node-event", (data: unknown) => log(`  ✅ [node-event] ${S(data)}`));
+              (window as any).__cancels = { zig: c1, rust: c2, go: c3, node: c4 };
+              log("📡 ON: 4 listeners registered");
             }}>ON</button>
             <button style={{ background: "#ef5350", fontWeight: 600, border: "none", padding: "5px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11 }} onClick={() => {
               const c = (window as any).__cancels;
-              if (c) { c.zig?.(); c.rust?.(); c.go?.(); (window as any).__cancels = null; log("🔴 OFF"); }
+              if (c) { c.zig?.(); c.rust?.(); c.go?.(); c.node?.(); (window as any).__cancels = null; log("🔴 OFF"); }
               else log("🔴 no listeners");
             }}>OFF</button>
           </div>
@@ -133,6 +143,7 @@ function App() {
             <button className="zig" onClick={() => call(() => suji.invoke("emit_event", {}, { target: "zig" }), "zig→emit")}>Zig sends</button>
             <button className="rust" onClick={() => call(() => suji.invoke("emit_event", { channel: "rust-event", msg: "hi" }, { target: "rust" }), "rust→emit")}>Rust sends</button>
             <button className="go" onClick={() => call(() => suji.invoke("emit_event", { msg: "hi" }, { target: "go" }), "go→emit")}>Go sends</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-emit-event"), "node→emit")}>Node sends</button>
           </div>
         </section>
 
