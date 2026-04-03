@@ -44,7 +44,7 @@ function App() {
     <div className="layout">
       <div className="panel">
         <h1>Suji Multi-Backend</h1>
-        <p className="subtitle">Zig + Rust + Go — Electron-style API</p>
+        <p className="subtitle">Zig + Rust + Go + Node.js — Electron-style API</p>
 
         <section>
           <h3>1. Auto-routing vs Target</h3>
@@ -63,6 +63,7 @@ function App() {
             <button className="zig" onClick={() => call(() => suji.invoke("ping", {}, { target: "zig" }), "zig")}>Zig</button>
             <button className="rust" onClick={() => call(() => suji.invoke("ping", {}, { target: "rust" }), "rust")}>Rust</button>
             <button className="go" onClick={() => call(() => suji.invoke("ping", {}, { target: "go" }), "go")}>Go</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-ping", {}, { target: "node" }), "node")}>Node.js</button>
           </div>
         </section>
 
@@ -72,6 +73,14 @@ function App() {
             <button className="zig" onClick={() => call(() => suji.invoke("greet", { name: "Suji" }, { target: "zig" }), "zig")}>Zig</button>
             <button className="rust" onClick={() => call(() => suji.invoke("greet", { name: "Suji" }, { target: "rust" }), "rust")}>Rust</button>
             <button className="go" onClick={() => call(() => suji.invoke("greet", { name: "Suji" }, { target: "go" }), "go")}>Go</button>
+            <button className="node" onClick={() => call(() => suji.invoke("node-greet", { name: "Suji" }, { target: "node" }), "node")}>Node.js</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>2.5 Node.js Info</h3>
+          <div className="buttons">
+            <button className="node" onClick={() => call(() => suji.invoke("node-info"), "node-info")}>invoke("node-info") — runtime info</button>
           </div>
         </section>
 

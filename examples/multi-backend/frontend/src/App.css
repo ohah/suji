@@ -58,6 +58,8 @@ button.go { background: #81c784; }
 button.go:hover { background: #a5d6a7; }
 button.zig { background: #ce93d8; }
 button.zig:hover { background: #e1bee7; }
+button.node { background: #4caf50; }
+button.node:hover { background: #66bb6a; }
 button.chain { background: #fff176; }
 button.chain:hover { background: #fff59d; }
 
