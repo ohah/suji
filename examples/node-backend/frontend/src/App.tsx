@@ -26,14 +26,14 @@ function App() {
       <p style={{ color: "#888", marginBottom: 24 }}>import {"{ invoke, on, send }"} from "@suji/api"</p>
 
       <section style={{ background: "#1a1a1a", borderRadius: 8, padding: 16, marginBottom: 12 }}>
-        <h3 style={{ color: "#ce93d8" }}>invoke</h3>
+        <h3 style={{ color: "#4caf50" }}>invoke</h3>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button onClick={() => call(() => invoke("ping"), "ping")} style={{ background: "#ce93d8", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+          <button onClick={() => call(() => invoke("ping"), "ping")} style={{ background: "#4caf50", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
             invoke("ping")
           </button>
           <div>
             <input value={name} onChange={(e) => setName(e.target.value)} style={{ background: "#222", color: "#fff", border: "1px solid #444", padding: 8, borderRadius: 4, marginRight: 4 }} />
-            <button onClick={() => call(() => invoke("greet", { name }), "greet")} style={{ background: "#ce93d8", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+            <button onClick={() => call(() => invoke("greet", { name }), "greet")} style={{ background: "#4caf50", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
               invoke("greet", {`{ name }`})
             </button>
           </div>
@@ -41,7 +41,7 @@ function App() {
             <input type="number" value={a} onChange={(e) => setA(+e.target.value)} style={{ width: 50, background: "#222", color: "#fff", border: "1px solid #444", padding: 8, borderRadius: 4, marginRight: 2 }} />
             +
             <input type="number" value={b} onChange={(e) => setB(+e.target.value)} style={{ width: 50, background: "#222", color: "#fff", border: "1px solid #444", padding: 8, borderRadius: 4, margin: "0 4px" }} />
-            <button onClick={() => call(() => invoke("add", { a, b }), "add")} style={{ background: "#ce93d8", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+            <button onClick={() => call(() => invoke("add", { a, b }), "add")} style={{ background: "#4caf50", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
               invoke("add", {`{ a, b }`})
             </button>
           </div>
@@ -49,30 +49,45 @@ function App() {
       </section>
 
       <section style={{ background: "#1a1a1a", borderRadius: 8, padding: 16, marginBottom: 12 }}>
-        <h3 style={{ color: "#ce93d8" }}>on / send / once</h3>
+        <h3 style={{ color: "#4caf50" }}>Node.js APIs</h3>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={() => call(() => invoke("info"), "info")} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            Runtime Info
+          </button>
+          <button onClick={() => call(() => invoke("system"), "system")} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            System Info
+          </button>
+          <button onClick={() => call(() => invoke("hash", { text: "hello suji" }), "hash")} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            Hash("hello suji")
+          </button>
+        </div>
+      </section>
+
+      <section style={{ background: "#1a1a1a", borderRadius: 8, padding: 16, marginBottom: 12 }}>
+        <h3 style={{ color: "#4caf50" }}>on / send / once</h3>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <button onClick={() => {
-            on("test", (data) => log(`  ✅ on: ${S(data)}`));
-            log("📡 on('test') registered");
-          }} style={{ background: "#ce93d8", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            on("test", (data) => log(`  on: ${S(data)}`));
+            log("on('test') registered");
+          }} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
             on("test")
           </button>
           <button onClick={() => {
-            once("test-once", (data) => log(`  ✅ once: ${S(data)}`));
-            log("📡 once('test-once') registered");
-          }} style={{ background: "#ce93d8", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            once("test-once", (data) => log(`  once: ${S(data)}`));
+            log("once('test-once') registered");
+          }} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
             once("test-once")
           </button>
           <button onClick={() => {
             send("test", { msg: "hello", t: Date.now() });
-            log("📤 send('test')");
-          }} style={{ background: "#ce93d8", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            log("send('test')");
+          }} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
             send("test")
           </button>
           <button onClick={() => {
             send("test-once", { msg: "once!" });
-            log("📤 send('test-once')");
-          }} style={{ background: "#ce93d8", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            log("send('test-once')");
+          }} style={{ background: "#4caf50", border: "none", padding: "8px 12px", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
             send("test-once")
           </button>
         </div>
