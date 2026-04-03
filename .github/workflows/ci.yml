@@ -78,7 +78,7 @@ jobs:
           NODE_DIR="$HOME/.suji/node/${{ env.NODE_VERSION }}"
           mkdir -p "$NODE_DIR"
           ASSET="libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
-          URL="https://github.com/${{ github.repository }}/releases/download/libnode-v${{ env.NODE_VERSION }}/$ASSET"
+          URL="https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$ASSET"
           curl -fSL "$URL" -o /tmp/libnode.tar.gz 2>/dev/null && \
             tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
             echo "libnode installed: $NODE_DIR" || \
@@ -91,7 +91,7 @@ jobs:
           $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
           New-Item -ItemType Directory -Force -Path $nodeDir
           $asset = "libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
-          $url = "https://github.com/${{ github.repository }}/releases/download/libnode-v${{ env.NODE_VERSION }}/$asset"
+          $url = "https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$asset"
           try {
             Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\libnode.tar.gz"
             tar xzf "$env:TEMP\libnode.tar.gz" -C $nodeDir
