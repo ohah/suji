@@ -28,6 +28,9 @@ exports.handle = handle;
 exports.invoke = invoke;
 exports.invokeSync = invokeSync;
 exports.send = send;
+exports.on = on;
+exports.off = off;
+exports.once = once;
 exports.register = register;
 // ============================================
 // Bridge access
@@ -122,6 +125,57 @@ function send(channel, data = {}) {
 // ============================================
 // Channel registration
 // ============================================
+/**
+ * 이벤트 수신 — 프론트엔드/다른 백엔드에서 발신한 이벤트를 수신
+ *
+ * @returns 구독 해제 함수
+ *
+ * @example
+ * const cancel = on('data-updated', (data) => {
+ *   console.log('received:', data);
+ * });
+ * // 나중에 해제
+ * cancel();
+ */
+function on(channel, callback) {
+    const subId = getBridge().on(channel, (_ch, raw) => {
+        let data;
+        try {
+            data = JSON.parse(raw);
+        }
+        catch {
+            data = raw;
+        }
+        callback(data);
+    });
+    return () => off(subId);
+}
+/**
+ * 이벤트 구독 해제
+ */
+function off(subId) {
+    getBridge().off(subId);
+}
+/**
+ * 이벤트 한 번만 수신
+ *
+ * @returns 구독 해제 함수
+ */
+function once(channel, callback) {
+    let subId;
+    subId = getBridge().on(channel, (_ch, raw) => {
+        getBridge().off(subId);
+        let data;
+        try {
+            data = JSON.parse(raw);
+        }
+        catch {
+            data = raw;
+        }
+        callback(data);
+    });
+    return () => getBridge().off(subId);
+}
 /**
  * 채널을 수동으로 등록 (자동 라우팅 테이블에 추가)
  *

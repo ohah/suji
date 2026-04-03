@@ -16,6 +16,7 @@ pub const bridge = if (node_enabled) @cImport({
     pub fn suji_node_free(_: anytype) callconv(.c) void {}
     pub fn suji_node_set_core(_: anytype) callconv(.c) void {}
     pub fn suji_node_wait_ready(_: c_int) callconv(.c) c_int { return -1; }
+    // on/off는 SujiNodeCore를 통해 전달되므로 stub 불필요
 };
 
 /// Node.js 백엔드 런타임
@@ -104,6 +105,8 @@ pub const NodeRuntime = struct {
             .invoke = core.invoke,
             .free = core.free,
             .emit = core.emit,
+            .on = core.on,
+            .off = core.off,
             .reg = core.register,
         });
     }
