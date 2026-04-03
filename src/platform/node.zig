@@ -14,6 +14,7 @@ pub const bridge = if (node_enabled) @cImport({
     pub fn suji_node_shutdown() callconv(.c) void {}
     pub fn suji_node_invoke(_: anytype, _: anytype) callconv(.c) ?[*:0]const u8 { return null; }
     pub fn suji_node_free(_: anytype) callconv(.c) void {}
+    pub fn suji_node_set_core(_: anytype) callconv(.c) void {}
 };
 
 /// Node.js 백엔드 런타임
@@ -70,6 +71,16 @@ pub const NodeRuntime = struct {
         if (response) |r| {
             bridge.suji_node_free(@ptrCast(r.ptr));
         }
+    }
+
+    /// SujiCore를 Node bridge에 연결 (크로스 호출 + 이벤트)
+    pub fn setCore(core: anytype) void {
+        bridge.suji_node_set_core(.{
+            .invoke = core.invoke,
+            .free = core.free,
+            .emit = core.emit,
+            .reg = core.register,
+        });
     }
 
     pub fn stop(self: *NodeRuntime) void {

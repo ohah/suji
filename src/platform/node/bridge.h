@@ -31,6 +31,21 @@ void suji_node_free(const char* ptr);
 typedef const char* (*suji_node_handler_fn)(const char* channel, const char* data);
 void suji_node_set_handler(suji_node_handler_fn handler);
 
+// SujiCore 연결 (크로스 호출 + 이벤트)
+typedef const char* (*suji_core_invoke_fn)(const char* backend, const char* request);
+typedef void (*suji_core_free_fn)(const char* ptr);
+typedef void (*suji_core_emit_fn)(const char* channel, const char* data);
+typedef void (*suji_core_register_fn)(const char* channel);
+
+struct SujiNodeCore {
+    suji_core_invoke_fn invoke;
+    suji_core_free_fn free;
+    suji_core_emit_fn emit;
+    suji_core_register_fn reg;
+};
+
+void suji_node_set_core(struct SujiNodeCore core);
+
 #ifdef __cplusplus
 }
 #endif
