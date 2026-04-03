@@ -74,9 +74,9 @@ pub const NodeRuntime = struct {
         return std.mem.span(result);
     }
 
-    const NullTermResult = struct { ptr: [*:0]const u8, allocated: bool };
+    pub const NullTermResult = struct { ptr: [*:0]const u8, allocated: bool };
 
-    fn nullTerminateOrAlloc(src: []const u8, buf: []u8) ?NullTermResult {
+    pub fn nullTerminateOrAlloc(src: []const u8, buf: []u8) ?NullTermResult {
         if (src.len < buf.len) {
             @memcpy(buf[0..src.len], src);
             buf[src.len] = 0;
