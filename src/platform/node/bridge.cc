@@ -99,6 +99,7 @@ struct AsyncInvokeRequest {
     std::string backend;
     std::string request;
     std::string response;
+    bool success = false;
     v8::Global<v8::Promise::Resolver> resolver;
 };
 
@@ -128,13 +129,11 @@ static void process_async_invoke_done(uv_async_t*) {
 
     for (auto* req : done) {
         auto resolver = req->resolver.Get(isolate);
-        // "error" 키가 있으면 reject, 아니면 resolve
-        if (req->response.find("\"error\":") != std::string::npos && req->response[0] == '{') {
-            auto err_str = String::NewFromUtf8(isolate, req->response.c_str()).ToLocalChecked();
-            resolver->Reject(g_setup->context(), err_str).FromMaybe(false);
+        auto str = String::NewFromUtf8(isolate, req->response.c_str()).ToLocalChecked();
+        if (req->success) {
+            resolver->Resolve(g_setup->context(), str).FromMaybe(false);
         } else {
-            auto result_str = String::NewFromUtf8(isolate, req->response.c_str()).ToLocalChecked();
-            resolver->Resolve(g_setup->context(), result_str).FromMaybe(false);
+            resolver->Reject(g_setup->context(), str).FromMaybe(false);
         }
         delete req;
     }
@@ -296,9 +295,11 @@ static void js_suji_invoke(const v8::FunctionCallbackInfo<Value>& args) {
         const char* result = g_core.invoke(async_req->backend.c_str(), async_req->request.c_str());
         if (result) {
             async_req->response = result;
+            async_req->success = true;
             g_core.free(result);
         } else {
-            async_req->response = "{\"error\":\"invoke returned null\"}";
+            async_req->response = "invoke returned null";
+            async_req->success = false;
         }
 
         {
