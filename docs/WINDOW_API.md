@@ -43,20 +43,28 @@ Zig 코어가 모든 윈도우를 소유/관리하고, 각 언어 백엔드는 C
 ## SujiCore 확장
 
 ```zig
-/// 기존 SujiCore에 window 필드 추가
+/// 기존 SujiCore에 window 필드 추가 + on 시그니처 변경 (SujiEvent 추가)
 pub const SujiCore = extern struct {
     // 기존
     invoke: *const fn ([*c]const u8, [*c]const u8) callconv(.c) [*c]const u8,
     free: *const fn ([*c]const u8) callconv(.c) void,
     emit: *const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
-    on: *const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
+    on: *const fn ([*c]const u8, ?*const fn (*SujiEvent, [*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
     off: *const fn (u64) callconv(.c) void,
     register: *const fn ([*c]const u8) callconv(.c) void,
 
     // 신규: 윈도우 API
     window: *const SujiWindowAPI,
 };
+
+/// 이벤트 객체 — 모든 콜백의 첫 번째 파라미터
+pub const SujiEvent = extern struct {
+    default_prevented: i32 = 0,  // 0=false, 1=true
+};
 ```
+
+> **Breaking Change**: `on` 콜백 시그니처가 `fn(channel, data, ctx)` → `fn(event, channel, data, ctx)`로 변경됨.
+> 기존 Rust SDK(`suji::on`), Go SDK(`suji.On`), Node.js bridge, EventBus 내부 모두 수정 필요.
 
 ## SujiWindowAPI (C ABI vtable)
 
@@ -557,8 +565,8 @@ pub const WindowManager = struct {
     /// suji.json의 windows 배열 로딩 — create:true는 즉시 생성, create:false는 프리셋 등록
     pub fn loadFromConfig(self: *WindowManager, config_windows: []const WindowConfig) void { ... }
 
-    /// 메인 윈도우 등록 (openWindow 시 호출)
-    pub fn registerMainWindow(self: *WindowManager, browser: *cef.c.cef_browser_t, native: ?*anyopaque) void { ... }
+    /// 최초 윈도우 등록 (openWindow 시 호출, 특별한 권한 없음)
+    pub fn registerFirstWindow(self: *WindowManager, browser: *cef.c.cef_browser_t, native: ?*anyopaque) u32 { ... }
 
     /// 새 윈도우 생성
     /// 1. name이 있으면 프리셋에서 기본값 로딩
@@ -566,11 +574,14 @@ pub const WindowManager = struct {
     /// 3. name 중복 시 기존 윈도우 반환 (forceNew가 아니면)
     pub fn create(self: *WindowManager, opts_json: []const u8) u32 { ... }
 
-    /// 윈도우 닫기 (close 이벤트 발생, 취소 가능)
+    /// 윈도우 닫기 (mutex 밖에서 window:close 이벤트 발화, preventDefault 가능)
     pub fn close(self: *WindowManager, id: u32) void { ... }
 
     /// 강제 파괴 (이벤트 없음)
     pub fn destroy(self: *WindowManager, id: u32) void { ... }
+
+    /// 마지막 윈도우가 닫혔는지 확인, quitOnAllWindowsClosed 정책 적용
+    pub fn checkQuitPolicy(self: *WindowManager) bool { ... }
 
     pub fn get(self: *WindowManager, id: u32) ?*Window { ... }
 
@@ -590,6 +601,65 @@ pub const WindowManager = struct {
 ```
 이벤트 데이터: { "windowId": <u32> [, 추가 필드] }
 ```
+
+### 이벤트 콜백 시그니처 (Electron 방식)
+
+모든 이벤트 콜백은 첫 번째 파라미터로 `SujiEvent` 포인터를 받는다.
+
+```zig
+/// C ABI 이벤트 객체
+pub const SujiEvent = extern struct {
+    default_prevented: i32 = 0,  // 0=false, 1=true
+};
+
+/// 통일된 콜백 시그니처
+fn callback(
+    event: *SujiEvent,
+    channel: [*c]const u8,
+    data: [*c]const u8,
+    ctx: ?*anyopaque,
+) callconv(.c) void;
+```
+
+- 모든 콜백이 동일한 시그니처 → `on` 등록 함수 하나로 통일
+- 취소 불가능 이벤트에서 `preventDefault()` 호출해도 무시됨 (no-op)
+
+**취소 가능 이벤트:** `window:close`, `window:will-resize`, `window:will-move`
+
+**동작 흐름 (취소 가능 이벤트):**
+
+1. WindowManager가 mutex 해제 후 `SujiEvent{}` 생성
+2. 이벤트 발화 — 모든 리스너에 `*SujiEvent` 전달 (동기 실행)
+3. 리스너가 `event.default_prevented = 1` 설정 가능
+4. 모든 리스너 실행 완료 후 `default_prevented` 확인
+5. `1`이면 원래 동작 중단 (윈도우 안 닫힘, 리사이즈 안 됨)
+
+**SDK 사용 예시:**
+
+```js
+// Frontend JS / Node.js
+suji.on('window:close', (event, data) => {
+    event.preventDefault();  // 윈도우 안 닫힘
+});
+```
+
+```rust
+// Rust
+suji::on("window:close", |event, data| {
+    event.prevent_default();
+});
+```
+
+```go
+// Go
+suji.On("window:close", func(event *suji.Event, data string) {
+    event.PreventDefault()
+})
+```
+
+**제약:**
+- 취소 가능 이벤트는 **동기적으로** 리스너를 실행해야 함 (비동기 취소 불가)
+- 취소 가능 이벤트 목록: `window:close`, `window:will-resize`, `window:will-move`
 
 ### 전체 이벤트 목록
 
@@ -839,31 +909,60 @@ class BrowserWindow {
 const win = await BrowserWindow.create({ title: 'Settings', name: 'settings' });
 ```
 
-## 메인 윈도우와의 관계
+## 윈도우 동등성 (Electron 방식)
 
-- **ID 1**: 메인 윈도우 (openWindow에서 생성되는 기존 윈도우, name = `"main"`)
-- `WindowManager.registerMainWindow()`로 기존 `g_browser`를 ID 1에 등록
-- 메인 윈도우가 닫히면 앱 종료 (기존 동작 유지)
-- 서브 윈도우가 닫혀도 앱은 계속 실행
-- 메인 윈도우는 `destroy` 불가 (`close`만 가능, close 시 앱 종료)
+모든 `BrowserWindow`는 동등하다. "메인 윈도우"라는 특별한 개념이 없다.
+
+- 모든 윈도우는 동일한 API로 create/close/destroy 가능
+- 어떤 윈도우도 특별 보호 대상이 아님
+- 앱 종료 정책은 개발자가 이벤트로 제어
+
+### 앱 종료 정책
+
+기본 동작: `quitOnAllWindowsClosed: true` (suji.json `app` 설정).
+
+| 시나리오 | 동작 |
+|---------|------|
+| 모든 윈도우 close | `quitOnAllWindowsClosed: true`면 앱 종료 |
+| 일부 윈도우 close | 나머지 윈도우 유지, 앱 계속 |
+| 부모 윈도우 close | 부모만 닫힘, 자식은 유지 (시각 관계 해제) |
+
+개발자가 원하면 특정 윈도우 close 시 앱 종료를 직접 구현:
+
+```js
+// "특정 윈도우가 닫히면 앱 종료" 패턴
+const main = await BrowserWindow.create({ name: 'main', ... });
+main.on('closed', () => {
+  suji.app.quit();
+});
+```
+
+```json
+// suji.json
+{
+  "app": {
+    "name": "My App",
+    "quitOnAllWindowsClosed": true
+  }
+}
+```
+
+### 부모-자식 관계
+
+부모-자식은 **시각적 관계**만 의미한다 (Electron 방식).
+
+- 자식이 부모 위에 항상 표시됨 (z-order)
+- `modal: true`면 부모 입력 차단
+- 부모 close해도 **자식은 닫히지 않음** — 자식은 부모 없는 일반 윈도우가 됨
+- 재귀 close 없음 → 순환 참조 검사 불필요
 
 ```zig
 // main.zig openWindow() 에서
 var window_manager = WindowManager.init(allocator);
 window_manager.setGlobal();
-// ... CEF 초기화 후
-window_manager.registerMainWindow(g_browser, g_window);
-// → ID 1, name "main" 자동 할당
+// ... CEF 초기화 후, 최초 윈도우를 WindowManager에 등록
+window_manager.registerFirstWindow(g_browser, g_window);
 ```
-
-### 앱 종료 정책
-
-| 시나리오 | 동작 |
-|---------|------|
-| 메인 윈도우(ID 1) close | 모든 서브 윈도우 close → 앱 종료 |
-| 서브 윈도우 close | 해당 윈도우만 닫힘, 앱 계속 |
-| 모든 서브 윈도우 close | 앱 계속 (메인이 살아있으면) |
-| 부모 윈도우 close | 자식 윈도우도 함께 close |
 
 ## 안정성 고려사항
 
@@ -873,15 +972,15 @@ window_manager.registerMainWindow(g_browser, g_window);
 - invoke 응답은 CEF의 `frame.send_process_message`가 올바른 렌더러로 보내므로 **이미 안전**
 - 이벤트 브로드캐스트 시 모든 윈도우에 전파, 윈도우별 이벤트(`window:*`)는 `windowId` 필드로 구분
 
-### Cmd+W 메인 윈도우 보호
-- 현재 `onPreKeyEvent`에서 `Cmd+W`가 포커스된 브라우저를 무조건 닫음
-- 메인 윈도우(ID 1)에서 `Cmd+W` → 앱 종료 정책 트리거 (모든 서브 윈도우 close → 앱 종료)
-- 구현: keyboard handler에서 `WindowManager.isMainWindow(browser_id)` 체크
+### Cmd+W 윈도우 닫기
+- `onPreKeyEvent`에서 `Cmd+W`가 포커스된 브라우저의 `window:close` 이벤트 발화
+- 리스너가 `preventDefault()` 하지 않으면 해당 윈도우 close
+- 마지막 윈도우가 닫히면 `quitOnAllWindowsClosed` 정책에 따라 앱 종료 여부 결정
 
 ### cef_client_t 메모리 정리
-- 각 서브 윈도우는 독립된 `cef_client_t`를 힙 할당
+- 각 윈도우는 독립된 `cef_client_t`를 힙 할당
 - `onBeforeClose`에서: WindowManager에서 제거 → `cef_client_t` 힙 해제 → 네이티브 윈도우 참조 해제
-- 메인 윈도우의 `cef_client_t`는 스태틱이므로 해제하지 않음
+- 최초 윈도우의 `cef_client_t`는 스태틱이므로 해제하지 않음 (CEF 초기화와 동일 생명주기)
 
 ### 플랫폼별 no-op 처리
 - OS에 없는 기능 호출 시 **조용히 무시** (에러 아님)
@@ -917,10 +1016,11 @@ window_manager.registerMainWindow(g_browser, g_window);
 - 파괴된 윈도우 ID에 대한 모든 호출은 no-op (dangling pointer 방지)
 
 ### 윈도우 라이프사이클
-- `close()`: `window:close` 이벤트 발화 → 리스너가 취소 가능 → 취소되지 않으면 CEF `close_browser` 호출 → `window:closed` 이벤트 → HashMap에서 제거
+- `close()`: `window:close` 이벤트 발화 (mutex 해제 후) → 리스너가 `preventDefault()` 가능 → 취소되지 않으면 CEF `close_browser` 호출 → `window:closed` 이벤트 → HashMap에서 제거
 - `destroy()`: 이벤트 없이 즉시 `close_browser(force=1)` → HashMap에서 제거
-- 부모 윈도우 close 시 자식도 재귀적으로 close
+- 부모 윈도우 close → 자식은 닫히지 않음 (부모 참조만 해제, 일반 윈도우가 됨)
 - CEF 브라우저가 외부에서 닫힌 경우 (유저가 X 버튼 클릭): `onBeforeClose`에서 WindowManager에 통지 → HashMap에서 제거 → `window:closed` 이벤트
+- 마지막 윈도우가 닫히면 `quitOnAllWindowsClosed` 정책에 따라 앱 종료
 
 ### SujiCore 하위 호환성
 - `SujiCore`에 `window` 필드를 추가하면 기존 백엔드 바이너리와 ABI 비호환
@@ -961,19 +1061,22 @@ src/
 - `SujiWindowAPI` vtable (create, close, destroy, set_title, get_title, from_name, get_name, set_name)
 - `SujiCore.window` 필드 추가 (구조체 끝에 배치)
 - CEF 멀티 브라우저 생성 (`cef_browser_host_create_browser_sync` 여러 번 호출)
-- 메인 윈도우 ID 1 등록 (name = "main")
 - name 중복 시 기존 윈도우 반환 / `forceNew` 시 재생성
 - **검증**: PoC로 두 번째 윈도우 생성 확인 완료
 
-### Phase 2: 윈도우 제어
+### Phase 2: 이벤트 시그니처 변경 + 윈도우 제어
+- EventBus 콜백 시그니처에 `*SujiEvent` 첫 번째 파라미터 추가 (breaking change)
+- 기존 `on` 사용처 일괄 수정 (Rust SDK, Go SDK, Node.js bridge, EventBus 내부)
+- `SujiEvent.default_prevented` 기반 취소 가능 이벤트 구현
 - 크기/위치/상태 메서드 전부 구현
+- 크기 제약 위반 시 클램프 (OS 네이티브 제약 활용)
 - 네이티브 윈도우 조작 (macOS NSWindow / Linux / Windows)
 - CEF 브라우저 → 네이티브 윈도우 매핑
 
 ### Phase 3: 외형/속성
 - 프레임리스, 투명, titleBarStyle
 - 크기 제약, always-on-top
-- 부모-자식, 모달
+- 부모-자식 (시각 관계만, 재귀 close 없음), 모달
 
 ### Phase 4: webContents
 - 네비게이션, JS 실행, DevTools (devTools 옵션 반영)
@@ -982,17 +1085,205 @@ src/
 
 ### Phase 5: 이벤트
 - CEF life span / keyboard / display 핸들러에서 이벤트 발화
-- EventBus를 통한 전파
-- 취소 가능 이벤트 (will-resize, will-move, close)
+- mutex 해제 후 이벤트 발화 (deadlock 방지, 방식 A)
+- 취소 가능 이벤트: mutex 밖에서 동기 발화 후 `default_prevented` 확인
+- `quitOnAllWindowsClosed` 정책 구현
 
 ### Phase 6: SDK
 - Rust SDK: `BrowserWindow` struct
 - Go SDK: `BrowserWindow` struct + bridge.c 확장
 - Node.js SDK: bridge.cc N-API 바인딩 + `BrowserWindow` class
-- Frontend JS SDK: IPC 래핑 `BrowserWindow` class
+- Frontend JS SDK: IPC 래핑 `BrowserWindow` class (팩토리 패턴, `await` 필수)
 
 ### Phase 7: 보안/플랫폼 전용
 - contextIsolation: V8 world 분리, Object.freeze 프록시
 - macOS: vibrancy, traffic light, represented filename, 제스처
 - Windows: thumbar, overlay, background material
 - Linux: 해당 사항 구현
+
+## 설계 결정 사항
+
+### 1. Mutex Deadlock 방지 → 방식 A (mutex 밖 발화) ✅
+
+일반 이벤트는 mutex 해제 후 발화. 취소 가능 이벤트(`window:close`, `window:will-resize`, `window:will-move`)는 상태 변경 전에 mutex 밖에서 동기 발화 후 `default_prevented` 확인.
+
+### 2. config.zig → windows[] 전용 (하위 호환 없음) ✅
+
+기존 `window` 단수 필드 지원 제거. `windows` 배열만 파싱. `windows` 미지정 시 기본 윈도우 1개 (title="Suji App", 1024x768) 자동 생성.
+
+### 3. 메인 윈도우 개념 없음 (Electron 방식) ✅
+
+모든 윈도우 동등. 앱 종료는 `quitOnAllWindowsClosed` 설정 또는 개발자가 이벤트로 제어.
+
+### 4. 부모-자식 = 시각 관계만 (Electron 방식) ✅
+
+부모 close해도 자식 안 닫힘 (부모 참조만 해제). 재귀 close 없음. 순환 참조 검사 불필요.
+
+### 5. 크기 제약 → 클램프 (Electron 방식) ✅
+
+`set_minimum_size(100,100)` 후 `set_size(50,50)` → 자동으로 100x100으로 클램프. OS 네이티브 제약 활용.
+
+### 6. 이벤트 콜백 시그니처 → SujiEvent 통일 (Electron 방식) ✅
+
+모든 콜백에 `*SujiEvent` 첫 번째 파라미터. 취소 불가능 이벤트에서 `preventDefault()` 호출해도 무시. 기존 `on` 시그니처 breaking change — 초기 단계이므로 지금 변경.
+
+### 7. Frontend JS SDK → 팩토리 패턴 (await 필수) ✅
+
+`await BrowserWindow.create()` 후에만 인스턴스 반환. 미완료 상태 접근 불가.
+
+## 미해결 이슈
+
+### 1. CEF 레퍼런스 카운팅
+
+현재 `cef_client_t`의 `add_ref`/`release`가 no-op. 멀티 윈도우에서 각 client가 독립 힙 할당될 때 `onBeforeClose`에서의 해제 타이밍과 CEF 내부 참조 간 경합 가능.
+
+**방안:** 각 힙 할당 `cef_client_t`에 `std.atomic.Value(i32)` 기반 ref count 구현. `release`에서 0 도달 시 `page_allocator.destroy()` 호출.
+
+### 2. 윈도우별 URL 라우팅 (suji:// 프로토콜)
+
+`suji://` scheme handler는 CEF에 전역 등록. 윈도우별 다른 페이지 로드 시의 라우팅:
+- `suji://app/` — 기본 (index.html)
+- `suji://app/settings` — SPA 라우트 (프론트엔드 라우터가 처리)
+- `suji://app/settings.html` — 별도 HTML 파일
+- 윈도우 옵션의 `url` 또는 `file` 필드로 지정
+
+### 3. 핫 리로드 시 멀티 윈도우 처리
+
+`watcher.zig`가 백엔드 핫 리로드 시:
+- 프론트엔드 리로드: 모든 윈도우에 `location.reload()` 전파
+- 백엔드 리로드: 윈도우 상태는 유지, 백엔드 핸들러만 재등록
+- 윈도우 목록/설정은 WindowManager가 보존
+
+## 테스트 계획
+
+### 테스트 파일: `tests/window_test.zig`
+
+WindowManager와 Window 구조체의 단위 테스트. CEF 의존성 없이 순수 로직만 검증.
+
+#### 1. WindowManager CRUD
+
+```
+- create 기본 — 유효한 ID (≥ 1) 반환
+- create 연속 — ID가 단조 증가 (1, 2, 3, ...)
+- get — 존재하는 ID → *Window, 없는 ID → null
+- close — close 후 get → null
+- destroy — destroy 후 is_destroyed → true
+- close 후 ID 재사용 안 함 — close(2) 후 create → 3 (2 아님)
+```
+
+#### 2. Name 기반 싱글턴
+
+```
+- create(name="settings") × 2 → 같은 ID 반환
+- create(name="settings", forceNew=true) → 기존 close + 새 ID
+- create(name=null) × 2 → 서로 다른 ID
+- from_name("settings") → 올바른 ID
+- from_name("nonexistent") → 0
+- close 후 from_name → 0 (삭제된 name 조회 불가)
+- set_name으로 이름 변경 후 from_name → 새 이름으로 탐색
+```
+
+#### 3. 부모-자식 관계 (시각 관계만)
+
+```
+- set_parent_window(child, parent) → get_parent_window(child) == parent
+- 부모 close → 자식 유지 (부모 참조만 해제, get_parent_window → 0)
+- 자식 close → 부모 유지
+- get_child_windows 반환값 정확성
+- 부모 close 후 자식의 modal 해제 확인
+- set_parent(A, B) + set_parent(B, A) → 허용 (재귀 close 없으므로 안전)
+```
+
+#### 4. 앱 종료 정책 (quitOnAllWindowsClosed)
+
+```
+- 모든 윈도우 close → quitOnAllWindowsClosed=true면 앱 종료 트리거
+- 일부 윈도우 close → 앱 계속
+- quitOnAllWindowsClosed=false → 모든 윈도우 닫혀도 앱 계속
+- 어떤 윈도우든 close/destroy 가능 (특별 보호 없음)
+```
+
+#### 5. 윈도우 상태 관리
+
+```
+- 기본값 검증 — visible=true, focused=false, resizable=true 등
+- set/get 왕복 — set_title("A") → get_title == "A"
+- 크기 제약 — set_minimum_size(100,100) → set_size(50,50) → 실제 크기 100x100으로 클램프
+- 최대 크기 0 (무제한) — set_maximum_size(0,0) → 어떤 크기든 허용
+- opacity 범위 — set_opacity(1.5) → 1.0으로 클램프, set_opacity(-0.1) → 0.0
+```
+
+#### 6. Destroyed 윈도우 안전성
+
+```
+- destroy 후 set_title → no-op (크래시 없음)
+- destroy 후 get_title → null
+- destroy 후 show/hide/focus/blur → no-op
+- destroy 후 set_size/get_size → no-op
+- destroy 후 close → no-op (이중 close 안전)
+- 존재하지 않는 ID (9999) → 모든 함수 no-op
+```
+
+#### 7. 문자열 메모리
+
+```
+- get_title 반환 → free_string 호출 → 누수 없음
+- get_title 반환값은 원본과 독립 (set_title 후에도 이전 반환값 유효)
+- free_string(null) → 크래시 없음
+- get_url, get_user_agent 등 모든 문자열 반환 함수 동일 검증
+```
+
+#### 8. 스레드 안전성
+
+```
+- 10개 스레드에서 동시 create → 모든 ID 고유, 누락 없음
+- create + close 동시 — 일관된 상태 (use-after-free 없음)
+- get + set_title 동시 — data race 없음
+- getAllWindows 동시 호출 — 정확한 스냅샷
+```
+
+#### 9. 이벤트 통합
+
+```
+- create 시 "window:created" 발화 + windowId, name 포함
+- close 시 "window:close" → "window:closed" 순서 보장
+- "window:close" 리스너에서 preventDefault → 윈도우 안 닫힘
+- "window:will-resize" preventDefault → 크기 변경 안 됨
+- destroy 시 이벤트 없음 (설계대로)
+- 이벤트 리스너 내에서 WindowManager 호출 → deadlock 없음
+```
+
+#### 10. suji.json 설정 파싱
+
+```
+- windows 배열 파싱 — 복수 윈도우 설정 로딩
+- window 단수 → 파싱 에러 (하위 호환 없음)
+- windows 미지정 → 기본 윈도우 1개 (1024x768, "Suji App")
+- create: false → 프리셋 등록만 (WindowManager.presets에 저장)
+- create: true (기본) → 앱 시작 시 자동 생성
+- 프리셋 + 런타임 override — create(name="settings", width=800) → 프리셋의 다른 값 + width만 800
+- 잘못된 값 (width: -1, opacity: 999) → 기본값 폴백 또는 클램프
+```
+
+#### 11. C ABI vtable
+
+```
+- SujiWindowAPI의 모든 필드가 non-null
+- 각 함수 포인터 호출 시 올바른 함수로 디스패치
+- 잘못된 ID 전달 → 모든 함수 no-op (크래시 없음)
+- free_string으로 해제 후 재해제 → 안전 (double-free 방지)
+```
+
+### 테스트 파일: `tests/window_integration_test.zig`
+
+CEF IPC를 통한 프론트엔드 ↔ WindowManager 통합 테스트.
+
+```
+- __core__ 채널 create_window 요청 → 유효한 browser_id 반환
+- create_window JSON 파싱 — title, url, width, height 추출
+- create_window 잘못된 JSON → 에러 응답 (크래시 없음)
+- suji:window.create IPC → WindowManager.create 호출
+- suji:window.setTitle IPC → 윈도우 타이틀 변경
+- suji:window.close IPC → 윈도우 닫힘
+- suji:window.fromName IPC → 올바른 windowId 반환
+```
