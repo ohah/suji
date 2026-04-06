@@ -206,6 +206,43 @@ pub fn createBrowser(config: CefConfig) !void {
     std.debug.print("[suji] CEF browser created\n", .{});
 }
 
+/// 새 윈도우(브라우저) 생성 — PoC: 멀티 윈도우 검증용
+/// 반환: CEF browser ID (실패 시 -1)
+pub fn createNewWindow(title: [:0]const u8, width: i32, height: i32, url: ?[:0]const u8) i32 {
+    // 새 client 할당 (힙)
+    const client_ptr = std.heap.page_allocator.create(c.cef_client_t) catch return -1;
+    initClient(client_ptr);
+
+    var window_info: c.cef_window_info_t = undefined;
+    zeroCefStruct(c.cef_window_info_t, &window_info);
+    window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
+    window_info.bounds = .{ .x = 0, .y = 0, .width = width, .height = height };
+    initWindowInfo(&window_info, .{ .title = title, .width = width, .height = height });
+
+    setCefString(&window_info.window_name, title);
+
+    var cef_url: c.cef_string_t = .{};
+    if (url) |u| {
+        setCefString(&cef_url, u);
+    }
+
+    var browser_settings: c.cef_browser_settings_t = undefined;
+    zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
+
+    std.debug.print("[suji] Creating new window: title={s} size={d}x{d}\n", .{ title, width, height });
+    const browser = c.cef_browser_host_create_browser_sync(
+        &window_info, client_ptr, &cef_url, &browser_settings, null, null,
+    );
+    if (browser == null) {
+        std.debug.print("[suji] New window creation FAILED\n", .{});
+        return -1;
+    }
+    const br: *c.cef_browser_t = @ptrCast(browser);
+    const browser_id = br.get_identifier.?(br);
+    std.debug.print("[suji] New window created: browser_id={d}\n", .{browser_id});
+    return browser_id;
+}
+
 /// 런타임 URL 네비게이션
 pub fn navigate(url: [:0]const u8) void {
     const browser = g_browser orelse return;
@@ -528,8 +565,12 @@ fn initLifeSpanHandler() void {
 }
 
 fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
-    g_browser = browser;
-    std.debug.print("[suji] CEF browser after_created\n", .{});
+    // 메인 윈도우만 g_browser에 저장 (첫 번째 브라우저)
+    if (g_browser == null) {
+        g_browser = browser;
+    }
+    const br = browser orelse return;
+    std.debug.print("[suji] CEF browser after_created: id={d}\n", .{br.get_identifier.?(br)});
 }
 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {

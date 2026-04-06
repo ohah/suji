@@ -805,6 +805,31 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     var req_buf: [4096]u8 = undefined;
     const req_clean = unescapeJson(request_str, &req_buf);
 
+    // PoC: create_window 커맨드
+    if (std.mem.indexOf(u8, req_clean, "create_window") != null) {
+        // title, width, height, url 추출
+        const title_str = extractJsonString(req_clean, "\"title\":\"") orelse "New Window";
+        var title_buf: [256]u8 = undefined;
+        const title_len = @min(title_str.len, title_buf.len - 1);
+        @memcpy(title_buf[0..title_len], title_str[0..title_len]);
+        title_buf[title_len] = 0;
+        const title_z: [:0]const u8 = title_buf[0..title_len :0];
+
+        const url_str = extractJsonString(req_clean, "\"url\":\"");
+        var url_buf: [1024]u8 = undefined;
+        var url_z: ?[:0]const u8 = null;
+        if (url_str) |us| {
+            const url_len = @min(us.len, url_buf.len - 1);
+            @memcpy(url_buf[0..url_len], us[0..url_len]);
+            url_buf[url_len] = 0;
+            url_z = url_buf[0..url_len :0];
+        }
+
+        const browser_id = cef.createNewWindow(title_z, 600, 400, url_z);
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"create_window\",\"browser_id\":{d}}}", .{browser_id}) catch return null;
+        return result;
+    }
+
     if (std.mem.indexOf(u8, req_clean, "core_info") != null) {
         var out_pos: usize = 0;
         const out = response_buf;

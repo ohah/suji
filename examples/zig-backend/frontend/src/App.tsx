@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { invoke, on, send, once } from "@suji/api";
 
+const getBridge = () => (window as any).__suji__;
+
 const S = (v: unknown) => typeof v === "object" ? JSON.stringify(v, null, 2) : String(v);
 
 function App() {
@@ -45,6 +47,15 @@ function App() {
               invoke("add", {`{ a, b }`})
             </button>
           </div>
+        </div>
+      </section>
+
+      <section style={{ background: "#1a1a1a", borderRadius: 8, padding: 16, marginBottom: 12 }}>
+        <h3 style={{ color: "#4fc3f7" }}>Window (PoC)</h3>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={() => call(() => getBridge().core(JSON.stringify({ cmd: "create_window", title: "New Window", url: "https://example.com" })), "create_window")} style={{ background: "#4fc3f7", color: "#000", border: "none", padding: "8px 16px", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+            Create Window
+          </button>
         </div>
       </section>
 
