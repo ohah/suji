@@ -1228,3 +1228,94 @@ test "concurrent close with preventDefault cancels on every thread" {
     try std.testing.expectEqual(@as(usize, 0), native.destroy_calls);
     try std.testing.expect(!wm.get(id).?.destroyed);
 }
+
+// ============================================
+// setTitle OOM — 기존 title 보존 (UAF 방지 invariant)
+// ============================================
+
+test "setTitle OOM preserves existing title (no UAF)" {
+    var native = TestNative{};
+
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = std.math.maxInt(usize) });
+    var wm_probe = WindowManager.init(probe.allocator(), std.testing.io, native.asNative());
+    _ = try wm_probe.create(.{ .title = "Original" });
+    const after_create = probe.alloc_index;
+    wm_probe.deinit();
+    native = .{};
+
+    // create 직후 첫 alloc (= setTitle의 dupe) 실패 유도
+    var fail = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = after_create });
+    var wm = WindowManager.init(fail.allocator(), std.testing.io, native.asNative());
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "Original" });
+    try std.testing.expectError(window.Error.OutOfMemory, wm.setTitle(id, "New"));
+    try std.testing.expectEqualStrings("Original", wm.get(id).?.title);
+    try std.testing.expectEqual(@as(usize, 0), native.set_title_calls);
+}
+
+// ============================================
+// close 에러 경로 — 이벤트 누출 금지
+// ============================================
+
+test "close on unknown/destroyed id emits no events" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    try std.testing.expectError(window.Error.WindowNotFound, wm.close(9999));
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    sink.reset();
+
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.close(id));
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}
+
+// ============================================
+// 동시성 — destroy() race (close race와 별도 경로 검증)
+// ============================================
+
+const DestroyRaceCtx = struct {
+    wm: *WindowManager,
+    id: u32,
+    ok_count: std.atomic.Value(usize) = .init(0),
+    destroyed_count: std.atomic.Value(usize) = .init(0),
+
+    fn run(self: *DestroyRaceCtx) void {
+        if (self.wm.destroy(self.id)) |_| {
+            _ = self.ok_count.fetchAdd(1, .acq_rel);
+        } else |err| {
+            if (err == window.Error.WindowDestroyed) {
+                _ = self.destroyed_count.fetchAdd(1, .acq_rel);
+            }
+        }
+    }
+};
+
+test "concurrent destroy on same id yields exactly one success" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{});
+
+    const THREAD_COUNT = 16;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+    var ctx = DestroyRaceCtx{ .wm = &wm, .id = id };
+
+    for (0..THREAD_COUNT) |i| {
+        threads[i] = try std.Thread.spawn(.{}, DestroyRaceCtx.run, .{&ctx});
+    }
+    for (threads) |t| t.join();
+
+    try std.testing.expectEqual(@as(usize, 1), ctx.ok_count.load(.acquire));
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT - 1), ctx.destroyed_count.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_calls);
+    try std.testing.expect(wm.get(id).?.destroyed);
+}
