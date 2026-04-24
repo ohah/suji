@@ -425,15 +425,10 @@ fn onBeforeCommandLineProcessing(
     setCefString(&wildcard, "*");
     cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
 
-    // GPU 서브프로세스가 libGLESv2.dylib를 찾지 못하는 문제 방지
-    // 소프트웨어 렌더링으로 폴백 (데스크톱 앱에서 충분한 성능)
-    var disable_gpu: c.cef_string_t = .{};
-    setCefString(&disable_gpu, "disable-gpu");
-    cmd.append_switch.?(cmd, &disable_gpu);
-
-    var disable_gpu_compositing: c.cef_string_t = .{};
-    setCefString(&disable_gpu_compositing, "disable-gpu-compositing");
-    cmd.append_switch.?(cmd, &disable_gpu_compositing);
+    // GPU 활성화: CEF가 `@executable_path/libEGL.dylib`, `libGLESv2.dylib` 등을 찾는데,
+    // build.zig의 post-install이 zig-out/bin/ 옆에 절대 경로 심링크를 배치하고,
+    // .app 번들은 bundle_macos.zig의 symlinkGpuLibs가 Contents/MacOS/ 옆에 배치한다.
+    // WebGL/CSS 애니메이션/비디오 가속이 정상 동작.
 }
 
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {

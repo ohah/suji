@@ -75,7 +75,8 @@ pub const Watcher = struct {
         self.paths.deinit(self.allocator);
         if (builtin.os.tag == .linux) {
             if (self.os.inotify_fd >= 0) {
-                std.posix.close(self.os.inotify_fd);
+                // Zig 0.16: std.posix.close 제거 → linux syscall 직접 사용
+                _ = std.os.linux.close(self.os.inotify_fd);
             }
         }
     }

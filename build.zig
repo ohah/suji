@@ -141,8 +141,9 @@ pub fn build(b: *std.Build) void {
     const install_artifact = b.addInstallArtifact(exe, .{});
 
     if (os_tag == .macos) {
-        // macOS: CEF 프레임워크 로드 경로 수정 + ad-hoc 코드서명
+        // macOS: CEF 프레임워크 로드 경로 수정 + GPU 라이브러리 심링크 + ad-hoc 코드서명
         const suji_bin = b.getInstallPath(.bin, "suji");
+        const bin_dir = b.getInstallPath(.bin, "");
         const entitlements = b.pathFromRoot("macos-entitlements.plist");
 
         const fix_rpath = b.addSystemCommand(&.{
@@ -154,6 +155,20 @@ pub fn build(b: *std.Build) void {
         fix_rpath.addArg(suji_bin);
         fix_rpath.step.dependOn(&install_artifact.step);
 
+        // CEF GPU 서브프로세스가 `@executable_path/libGLESv2.dylib` 등을 찾으므로
+        // zig-out/bin/ 옆에 CEF Framework의 Libraries를 절대 경로 심링크로 노출.
+        // bundle_macos.zig의 symlinkGpuLibs와 동일 역할 (번들 vs dev 빌드 두 경로 모두 필요).
+        const cef_libs_dir = std.fmt.allocPrint(b.allocator, "{s}/Release/Chromium Embedded Framework.framework/Libraries", .{cef_base}) catch @panic("OOM");
+        const gpu_assets = [_][]const u8{ "libEGL.dylib", "libGLESv2.dylib", "libvk_swiftshader.dylib", "vk_swiftshader_icd.json" };
+        var prev_step: *std.Build.Step = &fix_rpath.step;
+        for (gpu_assets) |asset| {
+            const src = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ cef_libs_dir, asset }) catch @panic("OOM");
+            const dst = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ bin_dir, asset }) catch @panic("OOM");
+            const symlink_cmd = b.addSystemCommand(&.{ "ln", "-sfh", src, dst });
+            symlink_cmd.step.dependOn(prev_step);
+            prev_step = &symlink_cmd.step;
+        }
+
         const codesign = b.addSystemCommand(&.{
             "codesign", "--force", "--sign", "-",
             "--entitlements",
@@ -161,7 +176,7 @@ pub fn build(b: *std.Build) void {
         codesign.addArg(entitlements);
         codesign.addArg("--deep");
         codesign.addArg(suji_bin);
-        codesign.step.dependOn(&fix_rpath.step);
+        codesign.step.dependOn(prev_step);
         b.getInstallStep().dependOn(&codesign.step);
 
         const sign_step = b.step("sign", "Ad-hoc codesign for macOS");

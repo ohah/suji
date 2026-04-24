@@ -48,6 +48,12 @@ pub const Backend = struct {
     const DestroyFn = *const fn () callconv(.c) void;
 
     pub fn load(name: []const u8, path: [:0]const u8) !Backend {
+        // Zig 0.16은 Windows용 std.DynLib이 미구현 (LoadLibraryA 래퍼 없음).
+        // Windows에서는 dlopen 백엔드 로드가 불가능하므로 즉시 에러 반환.
+        // 임베드 런타임(Node 등)은 embed_runtimes 테이블로 계속 동작.
+        // 추후 kernel32 직접 래핑으로 지원 예정.
+        if (@import("builtin").os.tag == .windows) return error.DynlibUnsupportedOnWindows;
+
         var lib = try std.DynLib.open(path);
         errdefer lib.close();
 
@@ -83,9 +89,13 @@ pub const Backend = struct {
 
     pub fn deinit(self: *Backend) void {
         self.vtable.destroy();
-        if (self.lib) |*lib| {
-            lib.close();
-            self.lib = null;
+        // Windows는 load()가 항상 에러 반환이라 여기 도달할 일이 없음.
+        // 그래도 comptime branch로 DynLib.close 참조를 Windows 경로에서 제거.
+        if (@import("builtin").os.tag != .windows) {
+            if (self.lib) |*lib| {
+                lib.close();
+                self.lib = null;
+            }
         }
     }
 };
