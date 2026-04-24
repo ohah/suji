@@ -314,6 +314,33 @@ test "InvokeEvent.Window.name: ?[]const u8 default null" {
     try std.testing.expect(e.window.name == null);
 }
 
+test "handleIpc: 비-문자열 __window_name (숫자)는 null로 처리" {
+    // extractStringField는 `"key":"..."` 패턴만 매칭. 숫자면 null 반환 → event.window.name = null.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami_named\",\"__window\":1,\"__window_name\":42}",
+    );
+    try std.testing.expect(resp != null);
+    // orelse "" 경로로 빈 문자열 응답 (name null 확인)
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_name\":\"\"") != null);
+}
+
+test "handleIpc: 빈 문자열 __window_name은 빈 string으로 전달" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami_named\",\"__window\":1,\"__window_name\":\"\"}",
+    );
+    try std.testing.expect(resp != null);
+    // name은 "" non-null, orelse가 분기 안 타고 "" 그대로
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_name\":\"\"") != null);
+}
+
 test "Request string extraction" {
     const req = app_mod.Request{
         .raw = "{\"cmd\":\"test\",\"name\":\"suji\"}",

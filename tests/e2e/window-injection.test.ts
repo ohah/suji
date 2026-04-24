@@ -119,7 +119,9 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
 
     await new Promise((r) => setTimeout(r, 300));
     const tail = readLogTail(LOG_PATH, before);
-    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 name=.* raw=\{"cmd":"ping","__window":1.*\}/);
+    expect(tail).toMatch(
+      /\[zig\/ping\] window\.id=1 name=\S* raw=\{"cmd":"ping","__window":1(?:,"__window_name":"[^"]*")?\}/,
+    );
   });
 
   test("2개 창: 각 창에서 ping → 서로 다른 __window id 주입", async () => {
@@ -136,10 +138,12 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
     await new Promise((r) => setTimeout(r, 500));
 
     const tail = readLogTail(LOG_PATH, before);
-    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 name=.* raw=\{"cmd":"ping","__window":1.*\}/);
+    expect(tail).toMatch(
+      /\[zig\/ping\] window\.id=1 name=\S* raw=\{"cmd":"ping","__window":1(?:,"__window_name":"[^"]*")?\}/,
+    );
     expect(tail).toMatch(
       new RegExp(
-        `\\[zig/ping\\] window\\.id=${created.windowId} name=.* raw=\\{"cmd":"ping","__window":${created.windowId}.*\\}`,
+        `\\[zig/ping\\] window\\.id=${created.windowId} name=\\S* raw=\\{"cmd":"ping","__window":${created.windowId}(?:,"__window_name":"[^"]*")?\\}`,
       ),
     );
     expect(created.windowId).not.toBe(1);

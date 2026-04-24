@@ -10,9 +10,12 @@ const window = @import("window");
 /// Phase 2.5 — 요청 JSON에 `__window: <id>` (+ optional `__window_name`) 자동 주입.
 ///   - 이미 `"__window"` 필드가 있으면 원본 반환 (cross-hop 요청 재태깅 방지).
 ///   - `{...}` 로 끝나지 않는 입력(배열/프리미티브/공백 끝)은 원본 반환.
-///   - window_name이 non-null이면 `"__window_name":"..."`도 함께 merge.
-///     (name은 caller가 JSON-safe한지 보장해야 함 — WM 레벨에서 ASCII만 허용하므로 실무적 안전)
-///   - out_buf가 작으면 null. 호출자는 null일 때 원본 사용.
+///   - window_name이 non-null + JSON-safe면 `"__window_name":"..."`도 merge.
+///     unsafe char(`"`, `\`, control < 0x20) 포함 시 **id만 주입하고 name은 생략** —
+///     caller-provided raw interpolation으로 JSON이 깨지는 것 방지. WM 레벨에 아직
+///     이름 검증기가 없어 defensive fallback을 injection 지점에서 수행.
+///   - out_buf 필요 크기: src.len + ~24 (no-name) 또는 src.len + name.len + ~44 (with name).
+///     부족하면 null 반환 → caller는 원본 사용.
 pub fn injectWindowField(
     src: []const u8,
     window_id: u32,
@@ -32,7 +35,13 @@ pub fn injectWindowField(
     const inner_trimmed = std.mem.trim(u8, body[1..], &std.ascii.whitespace);
     const sep: []const u8 = if (inner_trimmed.len == 0) "" else ",";
 
-    if (window_name) |n| {
+    // name이 JSON-safe하면 주입, 아니면 id만. (간이 escape 대신 보수적 skip)
+    const safe_name: ?[]const u8 = if (window_name) |n|
+        (if (isJsonSafe(n)) n else null)
+    else
+        null;
+
+    if (safe_name) |n| {
         return std.fmt.bufPrint(
             out_buf,
             "{s}{s}\"__window\":{d},\"__window_name\":\"{s}\"}}",
@@ -44,6 +53,14 @@ pub fn injectWindowField(
         "{s}{s}\"__window\":{d}}}",
         .{ body, sep, window_id },
     ) catch null;
+}
+
+/// JSON 문자열 리터럴로 bare 삽입이 안전한지: `"`, `\`, control character 없음.
+fn isJsonSafe(s: []const u8) bool {
+    for (s) |c| {
+        if (c == '"' or c == '\\' or c < 0x20) return false;
+    }
+    return true;
 }
 
 pub const CreateWindowReq = struct {
