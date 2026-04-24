@@ -26,10 +26,19 @@ const runtime = @import("runtime");
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
 
-const objc = if (is_macos) @cImport({
-    @cInclude("objc/runtime.h");
-    @cInclude("objc/message.h");
-}) else struct {};
+// Zig 0.16 translate-c가 objc/runtime.h의 block pointer(^) 문법을 파싱하지 못해서
+// 필요한 심볼만 직접 extern 선언. 이 프로젝트에서 실제 사용하는 건 아래 4개뿐.
+const objc = if (is_macos) struct {
+    pub extern "c" fn sel_registerName(name: [*:0]const u8) ?*anyopaque;
+    pub extern "c" fn objc_getClass(name: [*:0]const u8) ?*anyopaque;
+    pub extern "c" fn objc_msgSend() void; // 호출부에서 구체 시그니처로 @ptrCast
+    pub extern "c" fn class_addMethod(
+        cls: ?*anyopaque,
+        sel: ?*anyopaque,
+        imp: *const fn () callconv(.c) void,
+        types: [*:0]const u8,
+    ) u8;
+} else struct {};
 
 // ============================================
 // Public API
