@@ -421,8 +421,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
                 WM에서 `.name("settings")`같이 지정된 창에서 호출 시 event.window.name으로 접근.
           - [ ] `event.window`에 url/frame 추가 (현재는 id+name)
           - Frontend `suji.invoke('ch', data)`는 그대로 (호출 측 변경 없음)
-  - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
-    - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응
+  - [~] Phase 2.5: 멀티 윈도우 데이터 인프라
+    - [x] `suji.send(event, data, {to: winId})` / Zig `suji.sendTo(id, ch, data)` — Electron `webContents.send` 대응 (Rust/Go/Node SDK는 후속)
     - [ ] state 플러그인 scope 확장 (`global` / `window:{id}` / `session`)
     - [ ] `SujiCore.get_window_api` — 플러그인이 BrowserWindow 조작 가능
     - [ ] 생명주기 이벤트 data에 `windowId`/`name` 필수 포함 표준화

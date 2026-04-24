@@ -65,7 +65,8 @@ pub const CefConfig = struct {
 /// channel, data를 받아 response_buf에 JSON 응답을 쓰고 슬라이스 반환.
 /// 에러 시 null 반환.
 pub const InvokeCallback = *const fn (channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8;
-pub const EmitCallback = *const fn (event: []const u8, data: []const u8) void;
+/// target=null: 모든 창으로 브로드캐스트. non-null: 해당 window id에만.
+pub const EmitCallback = *const fn (target: ?u32, event: []const u8, data: []const u8) void;
 
 var g_invoke_callback: ?InvokeCallback = null;
 var g_emit_callback: ?EmitCallback = null;
@@ -404,15 +405,37 @@ pub fn navigate(url: [:0]const u8) void {
     frame.load_url.?(frame, &cef_url);
 }
 
-/// 메인 프로세스에서 렌더러의 JS 실행 (EventBus → JS __dispatch__ 용)
-pub fn evalJs(js: [:0]const u8) void {
-    const browser = g_browser orelse return;
+/// 특정 브라우저 한 개에 JS 실행. 내부 헬퍼.
+fn evalJsOnBrowser(browser: *c.cef_browser_t, js: [:0]const u8) void {
     const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
     var code: c.cef_string_t = .{};
     setCefString(&code, js);
     var url: c.cef_string_t = .{};
     setCefString(&url, "");
     frame.execute_java_script.?(frame, &code, &url, 0);
+}
+
+/// 메인 프로세스에서 렌더러의 JS 실행 (EventBus → JS __dispatch__ 용).
+/// target=null: 모든 live 브라우저로 브로드캐스트.
+/// target=winId: WindowManager id 기준 해당 브라우저 한 개에만 전달.
+///   (살아있는 매핑 없으면 silent no-op — Electron과 동일)
+pub fn evalJs(target: ?u32, js: [:0]const u8) void {
+    const native = g_cef_native orelse {
+        // 초기화 전 또는 단위 테스트 경로 — 과거 동작 유지: 첫 브라우저 fallback.
+        if (g_browser) |br| evalJsOnBrowser(br, js);
+        return;
+    };
+    if (target) |win_id| {
+        const wm = window_mod.WindowManager.global orelse return;
+        const win = wm.get(win_id) orelse return;
+        const entry = native.browsers.get(win.native_handle) orelse return;
+        evalJsOnBrowser(entry.browser, js);
+        return;
+    }
+    var it = native.browsers.valueIterator();
+    while (it.next()) |entry| {
+        evalJsOnBrowser(entry.browser, js);
+    }
 }
 
 /// 메시지 루프 실행 (블로킹)
@@ -718,10 +741,21 @@ fn handleBrowserEmit(msg: *c._cef_process_message_t) i32 {
     var data_buf: [8192]u8 = undefined;
     const data = getArgString(args, 1, &data_buf);
 
-    std.debug.print("[suji] IPC emit: event={s}\n", .{event});
+    // 3번째 인자 — 선택적 target window id. 없으면(0/미설정) 브로드캐스트.
+    const target: ?u32 = blk: {
+        const size = args.get_size.?(args);
+        if (size < 3) break :blk null;
+        const ty = args.get_type.?(args, 2);
+        if (ty != c.VTYPE_INT) break :blk null;
+        const v = args.get_int.?(args, 2);
+        if (v <= 0) break :blk null;
+        break :blk @intCast(v);
+    };
+
+    std.debug.print("[suji] IPC emit: event={s} target={?}\n", .{ event, target });
 
     if (g_emit_callback) |cb| {
-        cb(event, data);
+        cb(target, event, data);
     }
     return 1;
 }
@@ -1077,8 +1111,8 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\      s._pending[seq] = { resolve: resolve, reject: reject };
         \\    });
         \\  };
-        \\  s.emit = function(event, data) {
-        \\    return raw_emit(event, JSON.stringify(data || {}));
+        \\  s.emit = function(event, data, target) {
+        \\    return raw_emit(event, JSON.stringify(data || {}), target);
         \\  };
         \\  s.chain = function(from, to, request) {
         \\    var seq = raw_invoke("__chain__", JSON.stringify({__chain:true,from:from,to:to,request:request}));
@@ -1234,7 +1268,8 @@ fn v8HandleInvoke(
     return 1;
 }
 
-/// emit(event, data) → void
+/// emit(event, data, target?) → void
+/// target은 선택적 window id. JS 레이어가 `suji.send(..., {to: id})`에서 정수로 전달.
 fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
     if (argc < 1) return 0;
 
@@ -1253,6 +1288,17 @@ fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
         }
     }
 
+    // 3번째 인자: 선택적 target window id. number가 아니거나 < 1이면 브로드캐스트로 취급.
+    var target: i32 = 0;
+    if (argc >= 3) {
+        const t_v8 = argv[2];
+        if (t_v8 != null and t_v8.?.is_int.?(t_v8) == 1) {
+            target = t_v8.?.get_int_value.?(t_v8);
+        } else if (t_v8 != null and t_v8.?.is_uint.?(t_v8) == 1) {
+            target = @intCast(t_v8.?.get_uint_value.?(t_v8));
+        }
+    }
+
     // CefProcessMessage로 메인 프로세스에 전송
     var msg_name: c.cef_string_t = .{};
     setCefString(&msg_name, "suji:emit");
@@ -1267,6 +1313,10 @@ fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
     var data_str: c.cef_string_t = .{};
     setCefString(&data_str, data);
     _ = args.set_string.?(args, 1, &data_str);
+
+    if (target > 0) {
+        _ = args.set_int.?(args, 2, target);
+    }
 
     sendToBrowser(msg);
     return 1;

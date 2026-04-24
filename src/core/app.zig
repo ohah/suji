@@ -214,7 +214,7 @@ pub const InvokeEvent = struct {
     };
 };
 
-/// 이벤트 발신 (Electron: webContents.send)
+/// 이벤트 발신 — 모든 창으로 브로드캐스트 (Electron 브로드캐스트 패턴).
 pub fn send(channel: []const u8, data: []const u8) void {
     const core = _global_core orelse return;
     const emit_fn = core.emit orelse return;
@@ -226,6 +226,21 @@ pub fn send(channel: []const u8, data: []const u8) void {
     const d = util.nullTerminate(data, &data_buf);
 
     emit_fn(@ptrCast(ch.ptr), @ptrCast(d.ptr));
+}
+
+/// 특정 창(window id)에만 이벤트 전달 (Electron: `webContents.send`).
+/// 대상 창이 이미 닫혔거나 emit_to_fn이 없으면 silent no-op.
+pub fn sendTo(target: u32, channel: []const u8, data: []const u8) void {
+    const core = _global_core orelse return;
+    const fn_ptr = core.emit_to_fn orelse return;
+
+    var ch_buf: [util.MAX_CHANNEL_NAME]u8 = undefined;
+    const ch = util.nullTerminate(channel, &ch_buf);
+
+    var data_buf: [util.MAX_REQUEST]u8 = undefined;
+    const d = util.nullTerminate(data, &data_buf);
+
+    fn_ptr(target, @ptrCast(ch.ptr), @ptrCast(d.ptr));
 }
 
 /// 앱 빌더 시작
@@ -398,6 +413,8 @@ pub const ExternSujiCore = extern struct {
     quit_fn: ?*const fn () callconv(.c) void = null,
     /// 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
     platform_fn: ?*const fn () callconv(.c) [*:0]const u8 = null,
+    /// 특정 창에만 이벤트 전달 (Electron `webContents.send`). 없으면 sendTo는 no-op.
+    emit_to_fn: ?*const fn (u32, [*c]const u8, [*c]const u8) callconv(.c) void = null,
 };
 
 var _global_core: ?*const ExternSujiCore = null;

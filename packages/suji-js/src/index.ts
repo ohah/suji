@@ -21,12 +21,17 @@ export interface InvokeOptions {
   target?: string;
 }
 
+export interface SendOptions {
+  /** 특정 창(window id)에만 전달. 생략 시 모든 창으로 브로드캐스트 (Electron `webContents.send` 대응) */
+  to?: number;
+}
+
 type Listener = (data: unknown) => void;
 
 interface SujiBridge {
   invoke(channel: string, data?: string, options?: string): Promise<unknown>;
   on(event: string, cb: Listener): () => void;
-  emit(event: string, data: string): Promise<unknown>;
+  emit(event: string, data: string, target?: number): Promise<unknown>;
   chain(from: string, to: string, request: string): Promise<unknown>;
   fanout(backends: string, request: string): Promise<unknown>;
   core(request: string): Promise<unknown>;
@@ -76,10 +81,12 @@ export function once(event: string, callback: Listener): () => void {
 }
 
 /**
- * 이벤트 발신 (Electron: ipcRenderer.send)
+ * 이벤트 발신 (Electron: ipcRenderer.send / webContents.send)
+ *
+ * @param options.to - 특정 창 id 지정 시 해당 창에만. 생략 시 모든 창으로 브로드캐스트.
  */
-export function send(event: string, data: unknown): void {
-  getBridge().emit(event, JSON.stringify(data ?? {}));
+export function send(event: string, data: unknown, options?: SendOptions): void {
+  getBridge().emit(event, JSON.stringify(data ?? {}), options?.to);
 }
 
 /**

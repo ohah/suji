@@ -132,3 +132,68 @@ test "on() copies event_name (caller's ephemeral buffer safe)" {
     try std.testing.expectEqual(@as(usize, 1), call_count);
 }
 
+// ============================================
+// emitTo — 특정 창에만 JS dispatch (Electron webContents.send 대응)
+// ============================================
+
+var last_eval_target: ?u32 = null;
+var last_eval_js_len: usize = 0;
+var last_eval_js: [512]u8 = undefined;
+var eval_call_count: usize = 0;
+
+fn mockEval(target: ?u32, js: [:0]const u8) void {
+    last_eval_target = target;
+    last_eval_js_len = @min(js.len, last_eval_js.len);
+    @memcpy(last_eval_js[0..last_eval_js_len], js[0..last_eval_js_len]);
+    eval_call_count += 1;
+}
+
+fn resetEvalState() void {
+    last_eval_target = null;
+    last_eval_js_len = 0;
+    eval_call_count = 0;
+}
+
+test "emit broadcasts with target=null" {
+    resetEvalState();
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+    bus.webview_eval = mockEval;
+
+    bus.emit("test", "{\"msg\":\"hi\"}");
+    try std.testing.expectEqual(@as(usize, 1), eval_call_count);
+    try std.testing.expectEqual(@as(?u32, null), last_eval_target);
+    // 생성된 JS에 페이로드가 담겨있는지 확인
+    const js = last_eval_js[0..last_eval_js_len];
+    try std.testing.expect(std.mem.indexOf(u8, js, "\"test\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, js, "\"msg\":\"hi\"") != null);
+}
+
+test "emitTo forwards target id to webview_eval" {
+    resetEvalState();
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+    bus.webview_eval = mockEval;
+
+    bus.emitTo(42, "toast", "{}");
+    try std.testing.expectEqual(@as(usize, 1), eval_call_count);
+    try std.testing.expectEqual(@as(?u32, 42), last_eval_target);
+}
+
+test "emitTo still runs Zig listeners (only JS dispatch filters)" {
+    resetState();
+    resetEvalState();
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+    bus.webview_eval = mockEval;
+
+    _ = bus.on("toast", testCallback);
+    bus.emitTo(7, "toast", "payload");
+
+    // Zig listener는 target 무관하게 받는다
+    try std.testing.expectEqual(@as(usize, 1), call_count);
+    try std.testing.expectEqualStrings("payload", last_data[0..last_data_len]);
+    // JS dispatch는 target=7 태깅
+    try std.testing.expectEqual(@as(?u32, 7), last_eval_target);
+}
+

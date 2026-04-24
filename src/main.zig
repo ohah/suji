@@ -1067,11 +1067,15 @@ fn unescapeJson(src: []const u8, buf: []u8) []const u8 {
     return buf[0..o];
 }
 
-/// CEF emit 콜백 — EventBus로 전달
-fn cefEmitHandler(event: []const u8, data: []const u8) void {
+/// CEF emit 콜백 — EventBus로 전달. target이 있으면 해당 창만(webContents.send).
+fn cefEmitHandler(target: ?u32, event: []const u8, data: []const u8) void {
     const registry = suji.BackendRegistry.global orelse return;
     const bus = registry.event_bus orelse return;
-    bus.emit(event, data);
+    if (target) |id| {
+        bus.emitTo(id, event, data);
+    } else {
+        bus.emit(event, data);
+    }
 }
 
 /// dist 디렉토리 절대 경로 탐색 (로컬 → .app 번들)

@@ -44,7 +44,7 @@ macOS는 창이 모두 닫혀도 앱은 dock에 유지 (Electron과 동일). 나
 | `ipcMain.handle(ch, (event, ...args) => {})` | 백엔드 `handle(ch, (req, event) => {})` |
 | `ipcMain.on(ch, fn)` | 백엔드 `on(ch, fn)` |
 | `event.sender` / `BrowserWindow.fromWebContents(e.sender)` | `event.window` rich 객체 (`{id, name}`) |
-| `win.webContents.send(ch, data)` | (roadmap) `suji.emit(ch, data, {to: winId})` |
+| `win.webContents.send(ch, data)` | `suji.send(ch, data, {to: winId})` / Zig `suji.sendTo(id, ch, data)` |
 | `BrowserWindow.getAllWindows()` | (roadmap) `suji.windows.all()` |
 | `app.quit()` | `suji.quit()` |
 | `process.platform` | `suji.platform` — **"macos"** (not "darwin") |

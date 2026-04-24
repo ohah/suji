@@ -118,10 +118,27 @@ handle('save', (data) => {
 });
 ```
 
-## 이벤트 발신 타겟팅 (roadmap)
+## 이벤트 발신 타겟팅
 
-현재 `suji.send('event', data)`는 모든 창에 브로드캐스트. 특정 창에만 보내는
-`sendTo` / `{to: winId}` 옵션은 Phase 2.5 후속 과제.
+기본: `suji.send('event', data)` 는 **모든 창으로 브로드캐스트**.
+
+특정 창 하나에만 보내려면 세 번째 옵션 `{to: winId}` — Electron `webContents.send` 대응:
+
+```js
+// Frontend
+suji.send('toast', { text: 'saved' }, { to: 2 });
+```
+
+```zig
+// Zig 백엔드
+suji.sendTo(2, "toast", "{\"text\":\"saved\"}");
+```
+
+- `to`가 생략되거나 0이면 broadcast.
+- 대상 창이 이미 닫혔으면 **silent no-op** (Electron과 동일).
+- **Zig 리스너는 target 무관하게 항상 수신** — 필터링은 JS dispatch 레이어에서만.
+  이 정책 덕분에 로깅/감사 플러그인이 모든 send 이벤트를 놓치지 않음.
+- Rust/Go/Node SDK의 `sendTo` 확장은 후속.
 
 ## 전체 창 목록 (roadmap)
 

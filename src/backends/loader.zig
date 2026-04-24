@@ -19,6 +19,9 @@ pub const SujiCore = extern struct {
     quit: *const fn () callconv(.c) void,
     /// dylib 백엔드는 자기가 컴파일된 타겟의 플랫폼을 본다 (런타임 OS와 일치해야 정상).
     platform: *const fn () callconv(.c) [*:0]const u8,
+    /// 특정 창(WindowManager id)에만 이벤트 전달 (Electron `webContents.send`).
+    /// 대상이 닫혔거나 존재하지 않으면 no-op.
+    emit_to: *const fn (u32, [*c]const u8, [*c]const u8) callconv(.c) void,
 };
 
 /// dlopen 바깥에서 프로세스 내에 임베드되는 언어 런타임 (Node.js, 향후 Python/Lua).
@@ -154,6 +157,7 @@ pub const BackendRegistry = struct {
                 .get_io = coreGetIo,
                 .quit = coreQuit,
                 .platform = corePlatform,
+                .emit_to = coreEmitTo,
             },
         };
         _ = &reg;
@@ -383,6 +387,15 @@ pub const BackendRegistry = struct {
         const name = std.mem.span(@as([*:0]const u8, @ptrCast(event_name)));
         const d = std.mem.span(@as([*:0]const u8, @ptrCast(data)));
         bus.emit(name, d);
+    }
+
+    // C ABI 콜백: 특정 창에만 이벤트 발행 (Electron `webContents.send`)
+    fn coreEmitTo(target: u32, event_name: [*c]const u8, data: [*c]const u8) callconv(.c) void {
+        const reg = global orelse return;
+        const bus = reg.event_bus orelse return;
+        const name = std.mem.span(@as([*:0]const u8, @ptrCast(event_name)));
+        const d = std.mem.span(@as([*:0]const u8, @ptrCast(data)));
+        bus.emitTo(target, name, d);
     }
 
     // C ABI 콜백: 이벤트 구독

@@ -90,20 +90,25 @@ describe("once", () => {
 });
 
 describe("send", () => {
-  it("calls bridge emit with JSON stringified data", () => {
+  it("calls bridge emit with JSON stringified data (no target → broadcast)", () => {
     send("click", { button: "save" });
     expect(mockBridge.emit).toHaveBeenCalledTimes(1);
-    expect(mockBridge.emit).toHaveBeenCalledWith("click", '{"button":"save"}');
+    expect(mockBridge.emit).toHaveBeenCalledWith("click", '{"button":"save"}', undefined);
   });
 
   it("handles null data", () => {
     send("ping", null);
-    expect(mockBridge.emit).toHaveBeenCalledWith("ping", "{}");
+    expect(mockBridge.emit).toHaveBeenCalledWith("ping", "{}", undefined);
   });
 
   it("handles undefined data", () => {
     send("ping", undefined);
-    expect(mockBridge.emit).toHaveBeenCalledWith("ping", "{}");
+    expect(mockBridge.emit).toHaveBeenCalledWith("ping", "{}", undefined);
+  });
+
+  it("forwards {to: winId} as third argument (webContents.send)", () => {
+    send("toast", { text: "saved" }, { to: 2 });
+    expect(mockBridge.emit).toHaveBeenCalledWith("toast", '{"text":"saved"}', 2);
   });
 });
 

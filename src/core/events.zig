@@ -35,8 +35,9 @@ pub const EventBus = struct {
     mutex: std.Io.Mutex = .init,
     io: std.Io,
 
-    // WebView eval 콜백 (JS에 이벤트 전달용)
-    webview_eval: ?*const fn (js: [:0]const u8) void = null,
+    // WebView eval 콜백 (JS에 이벤트 전달용).
+    // target=null이면 모든 윈도우로 브로드캐스트, u32이면 해당 WindowManager id만.
+    webview_eval: ?*const fn (target: ?u32, js: [:0]const u8) void = null,
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io) EventBus {
         return .{
@@ -88,8 +89,18 @@ pub const EventBus = struct {
         std.debug.panic("EventBus.{s}: OOM ({s}) — 시스템 메모리 고갈", .{ site, @errorName(err) });
     }
 
-    /// 이벤트 발행
+    /// 이벤트 발행 — 모든 윈도우로 브로드캐스트.
     pub fn emit(self: *EventBus, event_name: []const u8, data: []const u8) void {
+        self.emitInternal(event_name, data, null);
+    }
+
+    /// 특정 창에만 이벤트 전달 (Electron `webContents.send` 대응).
+    /// Zig/백엔드 리스너는 target과 무관하게 항상 받는다 — 필터링은 JS dispatch 쪽만.
+    pub fn emitTo(self: *EventBus, target: u32, event_name: []const u8, data: []const u8) void {
+        self.emitInternal(event_name, data, target);
+    }
+
+    fn emitInternal(self: *EventBus, event_name: []const u8, data: []const u8, target: ?u32) void {
         // 리스너 스냅샷 복사 (mutex 범위 최소화)
         var snapshot: [64]Listener = undefined;
         var snapshot_len: usize = 0;
@@ -138,7 +149,7 @@ pub const EventBus = struct {
             }
         }
 
-        self.emitToJs(event_name, data);
+        self.emitToJs(event_name, data, target);
     }
 
     /// 리스너 해제 (ID 기반)
@@ -196,7 +207,7 @@ pub const EventBus = struct {
         try self.listeners.put(owned_key, list);
     }
 
-    fn emitToJs(self: *EventBus, event_name: []const u8, data: []const u8) void {
+    fn emitToJs(self: *EventBus, event_name: []const u8, data: []const u8, target: ?u32) void {
         if (self.webview_eval) |eval_fn| {
             var js_buf: [16384]u8 = undefined;
             const js = std.fmt.bufPrint(&js_buf,
@@ -204,7 +215,7 @@ pub const EventBus = struct {
                 .{ event_name, data },
             ) catch return;
             js_buf[js.len] = 0;
-            eval_fn(js_buf[0..js.len :0]);
+            eval_fn(target, js_buf[0..js.len :0]);
         }
     }
 };
