@@ -24,12 +24,12 @@ fn onWindowAllClosed(_: suji.Event) void {
     }
 }
 
-fn ping(req: suji.Request) suji.Response {
+fn ping(req: suji.Request, event: suji.InvokeEvent) suji.Response {
     const v = std.c.getenv("SUJI_TRACE_IPC");
     if (v != null and v.?[0] != 0 and v.?[0] != '0') {
-        std.debug.print("[zig/ping] raw={s}\n", .{req.raw});
+        std.debug.print("[zig/ping] window.id={d} raw={s}\n", .{ event.window.id, req.raw });
     }
-    return req.ok(.{ .msg = "pong from zig" });
+    return req.ok(.{ .msg = "pong from zig", .window_id = event.window.id });
 }
 
 fn greet(req: suji.Request) suji.Response {

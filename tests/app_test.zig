@@ -16,19 +16,26 @@ fn addHandler(req: app_mod.Request) app_mod.Response {
     return req.ok(.{ .result = a + b });
 }
 
+/// 2-arity 핸들러 — InvokeEvent의 window.id를 응답에 반영.
+fn whoamiHandler(req: app_mod.Request, event: app_mod.InvokeEvent) app_mod.Response {
+    return req.ok(.{ .window_id = event.window.id });
+}
+
 fn clickHandler(_: app_mod.Event) void {}
 
 const test_app = app_mod.app()
     .handle("ping", pingHandler)
     .handle("greet", greetHandler)
     .handle("add", addHandler)
+    .handle("whoami", whoamiHandler)
     .on("clicked", clickHandler);
 
 test "App builder creates commands" {
-    try std.testing.expectEqual(@as(usize, 3), test_app.handler_count);
+    try std.testing.expectEqual(@as(usize, 4), test_app.handler_count);
     try std.testing.expectEqualStrings("ping", test_app.handlers[0].channel);
     try std.testing.expectEqualStrings("greet", test_app.handlers[1].channel);
     try std.testing.expectEqualStrings("add", test_app.handlers[2].channel);
+    try std.testing.expectEqualStrings("whoami", test_app.handlers[3].channel);
 }
 
 test "App builder creates listeners" {
@@ -97,6 +104,46 @@ test "App handleIpc add" {
     const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"add\",\"a\":10,\"b\":20}");
     try std.testing.expect(resp != null);
     try std.testing.expect(std.mem.indexOf(u8, resp.?, "30") != null);
+}
+
+// ============================================
+// Phase 2.5 — InvokeEvent (2-arity handler)
+// ============================================
+
+test "handleIpc passes __window field to 2-arity handler via InvokeEvent" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami\",\"__window\":42}",
+    );
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":42") != null);
+}
+
+test "handleIpc: __window 없으면 InvokeEvent.window.id = 0" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"whoami\"}");
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":0") != null);
+}
+
+test "handleIpc: 기존 1-arity 핸들러는 그대로 동작 (호환성)" {
+    // ping은 1-arity 핸들러. __window 붙은 request가 들어와도 wrapper가 event 무시.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"ping\",\"__window\":7}");
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "pong") != null);
+}
+
+test "InvokeEvent type has window.id: u32" {
+    const e = app_mod.InvokeEvent{ .window = .{ .id = 123 } };
+    try std.testing.expectEqual(@as(u32, 123), e.window.id);
 }
 
 test "Request string extraction" {

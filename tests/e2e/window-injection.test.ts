@@ -113,7 +113,7 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
 
     await new Promise((r) => setTimeout(r, 300));
     const tail = readLogTail(LOG_PATH, before);
-    expect(tail).toMatch(/\[zig\/ping\] raw=\{"cmd":"ping","__window":1\}/);
+    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 raw=\{"cmd":"ping","__window":1\}/);
   });
 
   test("2개 창: 각 창에서 ping → 서로 다른 __window id 주입", async () => {
@@ -130,12 +130,22 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
     await new Promise((r) => setTimeout(r, 500));
 
     const tail = readLogTail(LOG_PATH, before);
-    expect(tail).toMatch(/\[zig\/ping\] raw=\{"cmd":"ping","__window":1\}/);
-    expect(tail).toMatch(new RegExp(`\\[zig/ping\\] raw=\\{"cmd":"ping","__window":${created.windowId}\\}`));
+    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 raw=\{"cmd":"ping","__window":1\}/);
+    expect(tail).toMatch(
+      new RegExp(
+        `\\[zig/ping\\] window\\.id=${created.windowId} raw=\\{"cmd":"ping","__window":${created.windowId}\\}`,
+      ),
+    );
     expect(created.windowId).not.toBe(1);
 
     await cdp2.detach();
   }, 15000);
+
+  test("2-arity 핸들러가 InvokeEvent.window.id를 받음 (response에 포함)", async () => {
+    // zig 백엔드 ping은 2-arity로 바뀌었고 응답에 window_id 포함.
+    const resp = (await pingViaPage(page1)) as { result: { window_id: number } };
+    expect(resp.result.window_id).toBe(1);
+  });
 
   test("3개 창: 각 창에서 ping → distinct __window 세 값", async () => {
     const page1Target = page1.target();

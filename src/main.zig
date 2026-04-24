@@ -294,17 +294,17 @@ fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
     const bin_dir = std.fs.path.dirname(exe_path) orelse return null;
     const zig_out_dir = std.fs.path.dirname(bin_dir) orelse return null;
     const project_root = std.fs.path.dirname(zig_out_dir) orelse return null;
-    const builtin = std.fmt.allocPrint(allocator, "{s}/plugins/{s}", .{ project_root, name }) catch return null;
-    const builtin_json = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{builtin}) catch {
-        allocator.free(builtin);
+    const builtin_dir = std.fmt.allocPrint(allocator, "{s}/plugins/{s}", .{ project_root, name }) catch return null;
+    const builtin_json = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{builtin_dir}) catch {
+        allocator.free(builtin_dir);
         return null;
     };
     defer allocator.free(builtin_json);
     if (std.Io.Dir.cwd().readFileAlloc(runtime.io, builtin_json, allocator, .limited(1024))) |content| {
         allocator.free(content);
-        return builtin;
+        return builtin_dir;
     } else |_| {}
-    allocator.free(builtin);
+    allocator.free(builtin_dir);
 
     return null;
 }

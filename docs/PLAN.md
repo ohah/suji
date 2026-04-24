@@ -410,11 +410,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           비-객체/빈 객체/whitespace 엣지 케이스 모두 처리. `window_ipc.injectWindowField`
           순수 함수로 단위 테스트 7종 + E2E (`tests/e2e/window-injection.test.ts`)로 검증.
     - [ ] `windows[]` 배열 파싱 (렌더러 측 — config의 `windows` 항목으로 초기 창 배치 선언)
-    - [ ] **핸들러 `Event` 파라미터** — Electron의 `(event, ...args)` 대응.
-          `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로
-          받음. `event.window = {id, name, url, frame}` rich 컨텍스트.
-          - Zig: `fn h(req: Request, event: Event) Response`
-          - Rust/Go/Node 동일 시그니처 확장. Node는 Electron `(event, ...args)`와 거의 1:1
+    - [~] **핸들러 `InvokeEvent` 파라미터** — Electron의 `IpcMainInvokeEvent` 대응.
+          `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로 받음.
+          - [x] Zig: `fn h(req: Request, event: InvokeEvent) Response`. 1-arity 핸들러는 comptime
+                wrapper로 adapt되어 호환성 유지. `event.window.id`로 호출한 창 식별.
+                기존 SDK의 window listener용 `Event`와 이름 충돌 회피로 `InvokeEvent` 명명.
+          - [ ] Rust: `#[suji::handle] fn h(req: Request, event: InvokeEvent) -> Response`
+          - [ ] Go / Node: 동일 시그니처 확장. Node는 Electron `(event, ...args)`와 거의 1:1
+          - [ ] `event.window`에 id 외 name/url/frame 추가 (현재는 id만)
           - Frontend `suji.invoke('ch', data)`는 그대로 (호출 측 변경 없음)
   - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
     - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응

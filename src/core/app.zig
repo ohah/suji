@@ -35,7 +35,7 @@ pub const App = struct {
 
     const Handler = struct {
         channel: []const u8,
-        func: *const fn (Request) Response,
+        func: *const fn (Request, InvokeEvent) Response,
     };
 
     const EventListener = struct {
@@ -43,10 +43,27 @@ pub const App = struct {
         func: *const fn (Event) void,
     };
 
-    /// 요청/응답 핸들러 등록 (Electron: ipcMain.handle)
-    pub fn handle(comptime self: App, channel: []const u8, func: *const fn (Request) Response) App {
+    /// 요청/응답 핸들러 등록 (Electron: ipcMain.handle).
+    /// func는 `fn (Request) Response` 또는 `fn (Request, InvokeEvent) Response` 둘 다 허용.
+    /// 1-arity는 comptime wrapper로 2-arity에 맞춰 adapt — 내부 저장은 단일 타입.
+    pub fn handle(comptime self: App, channel: []const u8, comptime func: anytype) App {
+        const FT = @TypeOf(func);
+        const info = @typeInfo(FT);
+        if (info != .@"fn") @compileError("handle: func must be a function");
+        const arity = info.@"fn".params.len;
+
+        const adapted: *const fn (Request, InvokeEvent) Response = switch (arity) {
+            1 => struct {
+                fn wrap(req: Request, _: InvokeEvent) Response {
+                    return func(req);
+                }
+            }.wrap,
+            2 => func,
+            else => @compileError("handle: func must be fn(Request) or fn(Request, InvokeEvent)"),
+        };
+
         var new = self;
-        new.handlers[new.handler_count] = .{ .channel = channel, .func = func };
+        new.handlers[new.handler_count] = .{ .channel = channel, .func = adapted };
         new.handler_count += 1;
         return new;
     }
@@ -67,7 +84,8 @@ pub const App = struct {
     }
 
 
-    /// IPC 요청 처리
+    /// IPC 요청 처리. request_json의 `__window` 필드(cef.zig가 wire에 자동 주입)에서
+    /// 파생한 InvokeEvent를 함께 핸들러에 전달. `__window`가 없으면 window.id=0.
     pub fn handleIpc(self: *const App, allocator: std.mem.Allocator, request_json: []const u8) ?[]const u8 {
         const channel = extractStringField(request_json, "cmd") orelse return null;
 
@@ -77,7 +95,10 @@ pub const App = struct {
                     .raw = request_json,
                     .arena = allocator,
                 };
-                const resp = h.func(req);
+                const win_id_raw = extractIntField(request_json, "__window") orelse 0;
+                const win_id: u32 = if (win_id_raw >= 0) @intCast(win_id_raw) else 0;
+                const event = InvokeEvent{ .window = .{ .id = win_id } };
+                const resp = h.func(req, event);
                 return resp.data;
             }
         }
@@ -171,10 +192,22 @@ pub const Response = struct {
     allocated: bool = false,
 };
 
-/// 이벤트 데이터
+/// 이벤트 데이터 — `on(channel, fn)` 리스너가 받는 window event payload.
 pub const Event = struct {
     channel: []const u8,
     data: []const u8,
+};
+
+/// IPC 핸들러 컨텍스트 — Electron의 `IpcMainInvokeEvent` 대응.
+///   - window.id: wire의 `__window` 필드에서 파생. 어느 창에서 호출됐는지 식별.
+///                필드가 없거나 잘못된 경우 0 (legacy/direct 호출 경로 등).
+/// 핸들러 시그니처: `fn (Request, InvokeEvent) Response` — 2-arity 선택 시 사용.
+pub const InvokeEvent = struct {
+    window: Window,
+
+    pub const Window = struct {
+        id: u32,
+    };
 };
 
 /// 이벤트 발신 (Electron: webContents.send)
