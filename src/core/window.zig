@@ -90,9 +90,40 @@ pub const Error = error{
     OutOfMemory,
 };
 
+/// 취소 가능 이벤트의 기본 동작 방지 상태. listener가 preventDefault() 호출.
+pub const SujiEvent = struct {
+    default_prevented: bool = false,
+
+    pub fn preventDefault(self: *SujiEvent) void {
+        self.default_prevented = true;
+    }
+};
+
+/// WindowManager가 EventBus(또는 테스트 spy)에 이벤트를 흘려보내는 얇은 훅.
+/// 프로덕션에서는 EventBus.emit/emitCancelable로 래핑.
+pub const EventSink = struct {
+    vtable: *const VTable,
+    ctx: ?*anyopaque = null,
+
+    pub const VTable = struct {
+        emit: *const fn (ctx: ?*anyopaque, name: []const u8, data: []const u8) void,
+        /// close 같은 취소 가능 이벤트. listener가 ev.preventDefault()를 호출하면
+        /// WindowManager는 실제 파괴를 건너뛴다.
+        emit_cancelable: *const fn (ctx: ?*anyopaque, name: []const u8, data: []const u8, ev: *SujiEvent) void,
+    };
+
+    pub fn emit(self: EventSink, name: []const u8, data: []const u8) void {
+        self.vtable.emit(self.ctx, name, data);
+    }
+    pub fn emitCancelable(self: EventSink, name: []const u8, data: []const u8, ev: *SujiEvent) void {
+        self.vtable.emit_cancelable(self.ctx, name, data, ev);
+    }
+};
+
 pub const WindowManager = struct {
     allocator: std.mem.Allocator,
     native: Native,
+    sink: ?EventSink = null,
     windows: std.AutoHashMap(u32, *Window),
     /// name → id (소유: name_store). fromName lookup에만 사용
     by_name: std.StringHashMap(u32),
@@ -107,6 +138,11 @@ pub const WindowManager = struct {
             .windows = std.AutoHashMap(u32, *Window).init(allocator),
             .by_name = std.StringHashMap(u32).init(allocator),
         };
+    }
+
+    /// EventBus 또는 테스트 spy를 주입. null 가능 (이벤트 발행 안 함).
+    pub fn setEventSink(self: *WindowManager, sink: EventSink) void {
+        self.sink = sink;
     }
 
     pub fn deinit(self: *WindowManager) void {
@@ -163,10 +199,20 @@ pub const WindowManager = struct {
         if (owned_name) |n| {
             self.by_name.put(n, id) catch {}; // 실패해도 창 자체는 생성됨
         }
+
+        // window:created 이벤트 (단방향 알림, 취소 불가)
+        if (self.sink) |s| {
+            var buf: [512]u8 = undefined;
+            const payload: []const u8 = if (owned_name) |n|
+                std.fmt.bufPrint(&buf, "{{\"windowId\":{d},\"name\":\"{s}\"}}", .{ id, n }) catch ""
+            else
+                std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+            s.emit("window:created", payload);
+        }
         return id;
     }
 
-    /// 창 파괴. 이미 destroyed면 WindowDestroyed 반환.
+    /// 창 파괴 (강제). 이벤트 X, 취소 불가. `window:closed` 이벤트는 `close()` 경로에서만.
     pub fn destroy(self: *WindowManager, id: u32) Error!void {
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
         if (win.destroyed) return Error.WindowDestroyed;
@@ -177,7 +223,34 @@ pub const WindowManager = struct {
         }
     }
 
-    /// 모든 창 파괴. 프로세스 종료 시 호출.
+    /// 정책적 close. `window:close`(취소 가능) 발화 → preventDefault 아니면 파괴 +
+    /// `window:closed`(단방향) 발화. 이미 destroyed면 WindowDestroyed.
+    /// 반환값: true면 실제 파괴됨, false면 listener가 취소.
+    pub fn close(self: *WindowManager, id: u32) Error!bool {
+        const win = self.windows.get(id) orelse return Error.WindowNotFound;
+        if (win.destroyed) return Error.WindowDestroyed;
+
+        // 취소 가능 이벤트 발화 (sink 없으면 바로 진행)
+        if (self.sink) |s| {
+            var buf: [512]u8 = undefined;
+            const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+            var ev: SujiEvent = .{};
+            s.emitCancelable("window:close", payload, &ev);
+            if (ev.default_prevented) return false;
+        }
+
+        // 실제 파괴 + 단방향 알림
+        try self.destroy(id);
+        if (self.sink) |s| {
+            var buf: [512]u8 = undefined;
+            const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+            s.emit("window:closed", payload);
+        }
+        return true;
+    }
+
+    /// 모든 창 파괴. 프로세스 종료 시 호출. 각 창마다 `window:closed` 단방향 이벤트 발화.
+    /// 취소 불가 (강제).
     pub fn destroyAll(self: *WindowManager) void {
         var it = self.windows.iterator();
         while (it.next()) |entry| {
@@ -185,11 +258,13 @@ pub const WindowManager = struct {
             if (!w.destroyed) {
                 self.native.destroyWindow(w.native_handle);
                 w.destroyed = true;
+                if (self.sink) |s| {
+                    var buf: [512]u8 = undefined;
+                    const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{w.id}) catch "";
+                    s.emit("window:closed", payload);
+                }
             }
         }
-        // by_name 비움
-        var name_it = self.by_name.iterator();
-        while (name_it.next()) |_| {} // nothing, 실제 키는 window 소유이므로 bare remove
         self.by_name.clearRetainingCapacity();
     }
 

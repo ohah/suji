@@ -334,3 +334,219 @@ test "create stores parent_id (visual relationship only)" {
     try wm.destroy(parent);
     try std.testing.expect(!wm.get(child).?.destroyed);
 }
+
+// ============================================
+// EventSink — 이벤트 발행 / preventDefault
+// ============================================
+
+const Recorded = struct {
+    name: []const u8,
+    data: []const u8,
+    cancelable: bool,
+};
+
+const TestSink = struct {
+    events: std.ArrayList(Recorded) = .empty,
+    /// 취소 가능 이벤트 수신 시 이 이름과 매칭되면 preventDefault 호출
+    prevent_for: ?[]const u8 = null,
+    buf: [1024 * 16]u8 = undefined,
+    used: usize = 0,
+
+    fn asSink(self: *TestSink) window.EventSink {
+        return .{ .vtable = &vtable, .ctx = self };
+    }
+
+    const vtable: window.EventSink.VTable = .{
+        .emit = onEmit,
+        .emit_cancelable = onEmitCancelable,
+    };
+
+    fn fromCtx(ctx: ?*anyopaque) *TestSink {
+        return @ptrCast(@alignCast(ctx.?));
+    }
+
+    /// buf에 name/data를 복사해서 수명 안정화 (테스트 내 검증용)
+    fn intern(self: *TestSink, s: []const u8) []const u8 {
+        const start = self.used;
+        @memcpy(self.buf[start .. start + s.len], s);
+        self.used += s.len;
+        return self.buf[start .. start + s.len];
+    }
+
+    fn onEmit(ctx: ?*anyopaque, name: []const u8, data: []const u8) void {
+        const self = fromCtx(ctx);
+        self.events.append(std.testing.allocator, .{
+            .name = self.intern(name),
+            .data = self.intern(data),
+            .cancelable = false,
+        }) catch {};
+    }
+
+    fn onEmitCancelable(ctx: ?*anyopaque, name: []const u8, data: []const u8, ev: *window.SujiEvent) void {
+        const self = fromCtx(ctx);
+        self.events.append(std.testing.allocator, .{
+            .name = self.intern(name),
+            .data = self.intern(data),
+            .cancelable = true,
+        }) catch {};
+        if (self.prevent_for) |p| {
+            if (std.mem.eql(u8, p, name)) ev.preventDefault();
+        }
+    }
+
+    fn deinit(self: *TestSink) void {
+        self.events.deinit(std.testing.allocator);
+    }
+};
+
+fn contains(haystack: []const u8, needle: []const u8) bool {
+    return std.mem.indexOf(u8, haystack, needle) != null;
+}
+
+test "create emits window:created with id" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:created", sink.events.items[0].name);
+    try std.testing.expect(!sink.events.items[0].cancelable);
+    // data에 windowId:1 포함
+    var buf: [64]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&buf, "\"windowId\":{d}", .{id});
+    try std.testing.expect(contains(sink.events.items[0].data, expected));
+}
+
+test "create with name emits window:created with name field" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{ .name = "about" });
+    try std.testing.expect(contains(sink.events.items[0].data, "\"name\":\"about\""));
+}
+
+test "close emits cancelable window:close, then window:closed on success" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.events.clearRetainingCapacity();
+
+    const destroyed = try wm.close(id);
+    try std.testing.expect(destroyed);
+    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:close", sink.events.items[0].name);
+    try std.testing.expect(sink.events.items[0].cancelable);
+    try std.testing.expectEqualStrings("window:closed", sink.events.items[1].name);
+    try std.testing.expect(!sink.events.items[1].cancelable);
+    try std.testing.expect(wm.get(id).?.destroyed);
+}
+
+test "close with preventDefault cancels destruction" {
+    var native = TestNative{};
+    var sink = TestSink{ .prevent_for = "window:close" };
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.events.clearRetainingCapacity();
+
+    const destroyed = try wm.close(id);
+    try std.testing.expect(!destroyed);
+    // 취소 가능 이벤트만 발화, closed 이벤트는 발화 X
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:close", sink.events.items[0].name);
+    try std.testing.expect(!wm.get(id).?.destroyed);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_calls);
+}
+
+test "close after preventDefault can be retried" {
+    var native = TestNative{};
+    var sink = TestSink{ .prevent_for = "window:close" };
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    _ = try wm.close(id); // 취소됨
+    try std.testing.expect(!wm.get(id).?.destroyed);
+
+    // 다음 시도 시 preventDefault 해제
+    sink.prevent_for = null;
+    const ok = try wm.close(id);
+    try std.testing.expect(ok);
+    try std.testing.expect(wm.get(id).?.destroyed);
+}
+
+test "close of destroyed returns WindowDestroyed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.close(id));
+}
+
+test "destroyAll emits window:closed for each live window" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{});
+    _ = try wm.create(.{});
+    _ = try wm.create(.{});
+    sink.events.clearRetainingCapacity();
+
+    wm.destroyAll();
+    var closed_count: usize = 0;
+    for (sink.events.items) |e| {
+        if (std.mem.eql(u8, e.name, "window:closed")) closed_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), closed_count);
+}
+
+test "WindowManager without sink operates silently" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    // sink 없음 — 이벤트 발행 경로에서 crash 없어야
+
+    const id = try wm.create(.{});
+    _ = try wm.close(id);
+    try std.testing.expect(wm.get(id).?.destroyed);
+}
+
+test "destroy does not emit window:closed (only close does)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.events.clearRetainingCapacity();
+
+    try wm.destroy(id);
+    // destroy()는 강제 파괴, 이벤트 발화 X
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}
