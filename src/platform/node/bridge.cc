@@ -80,7 +80,7 @@ static std::unordered_map<std::string, Global<Function>> g_handlers;
 static std::mutex g_handler_mutex;
 
 // SujiCore (크로스 호출 + 이벤트)
-static SujiNodeCore g_core = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+static SujiNodeCore g_core = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
 // IPC 요청/응답 큐 (스레드 간 통신)
 struct IpcRequest {
@@ -242,6 +242,70 @@ static void on_event_callback(const char* channel, const char* data, void*) {
 // 단일 IPC 요청 실행 (V8 isolate lock + context scope 안에서 호출)
 // ============================================
 
+// wire의 __window / __window_name 에서 `{window: {id, name}}` 객체 구성.
+// JSON 파싱 없이 간단 파서 — compact wire 포맷 가정 (Suji 코어 주입 결과). 매칭 실패는 id=0/name=null.
+static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data) {
+    Local<v8::Context> ctx = g_setup->context();
+    Local<v8::Object> window = v8::Object::New(isolate);
+    uint32_t id = 0;
+    std::string name;
+    bool has_name = false;
+
+    // "__window":<int> 추출
+    {
+        const std::string key = "\"__window\":";
+        size_t pos = data.find(key);
+        if (pos != std::string::npos) {
+            size_t p = pos + key.size();
+            while (p < data.size() && data[p] == ' ') p++;
+            uint32_t n = 0;
+            bool any = false;
+            while (p < data.size() && data[p] >= '0' && data[p] <= '9') {
+                n = n * 10 + (data[p] - '0');
+                p++;
+                any = true;
+            }
+            if (any) id = n;
+        }
+    }
+    // "__window_name":"<...>" 추출 (이스케이프 고려, compact 형식)
+    {
+        const std::string key = "\"__window_name\":\"";
+        size_t pos = data.find(key);
+        if (pos != std::string::npos) {
+            size_t p = pos + key.size();
+            std::string buf;
+            while (p < data.size()) {
+                char c = data[p];
+                if (c == '\\' && p + 1 < data.size()) {
+                    buf.push_back(data[p + 1]);
+                    p += 2;
+                    continue;
+                }
+                if (c == '"') break;
+                buf.push_back(c);
+                p++;
+            }
+            name = buf;
+            has_name = true;
+        }
+    }
+
+    window->Set(ctx, String::NewFromUtf8(isolate, "id").ToLocalChecked(),
+                v8::Integer::NewFromUnsigned(isolate, id)).Check();
+    if (has_name) {
+        window->Set(ctx, String::NewFromUtf8(isolate, "name").ToLocalChecked(),
+                    String::NewFromUtf8(isolate, name.c_str()).ToLocalChecked()).Check();
+    } else {
+        window->Set(ctx, String::NewFromUtf8(isolate, "name").ToLocalChecked(),
+                    v8::Null(isolate)).Check();
+    }
+
+    Local<v8::Object> event = v8::Object::New(isolate);
+    event->Set(ctx, String::NewFromUtf8(isolate, "window").ToLocalChecked(), window).Check();
+    return event;
+}
+
 static void execute_ipc_request(Isolate* isolate, IpcRequest* req) {
     HandleScope handle_scope(isolate);
     std::string result = "{\"error\":\"no handler\"}";
@@ -258,11 +322,15 @@ static void execute_ipc_request(Isolate* isolate, IpcRequest* req) {
     }
 
     if (found) {
+        // arg[0]: data 문자열 (JS 측 1-arity wrapper가 JSON.parse).
+        // arg[1]: event 객체 — wire의 __window/__window_name에서 파생. 2-arity 핸들러용.
+        //   1-arity handler는 두 번째 인자를 무시하므로 호환 OK.
         Local<String> arg = String::NewFromUtf8(isolate, req->data.c_str()).ToLocalChecked();
-        Local<Value> argv[1] = { arg };
+        Local<Value> event = build_invoke_event(isolate, req->data);
+        Local<Value> argv[2] = { arg, event };
 
         v8::TryCatch try_catch(isolate);
-        auto maybe_result = fn_local->Call(g_setup->context(), v8::Undefined(isolate), 1, argv);
+        auto maybe_result = fn_local->Call(g_setup->context(), v8::Undefined(isolate), 2, argv);
 
         if (!maybe_result.IsEmpty()) {
             Local<Value> ret = maybe_result.ToLocalChecked();
@@ -545,6 +613,29 @@ static void js_suji_send(const v8::FunctionCallbackInfo<Value>& args) {
 }
 
 // ============================================
+// JS에서 호출하는 네이티브 함수: __suji_emit_to(windowId, channel, data)
+// Electron webContents.send 대응. windowId는 uint32 (WindowManager id).
+// ============================================
+
+static void js_suji_emit_to(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    if (!g_core.emit_to) {
+        // core 주입 전 또는 구버전 core — silent no-op (SDK/core 버전 불일치 방어).
+        return;
+    }
+    if (args.Length() < 3 || !args[0]->IsUint32() || !args[1]->IsString() || !args[2]->IsString()) {
+        isolate->ThrowException(String::NewFromUtf8(isolate, "suji.sendTo(windowId, channel, data) requires (uint32, string, string)").ToLocalChecked());
+        return;
+    }
+
+    uint32_t window_id = args[0]->Uint32Value(g_setup->context()).FromMaybe(0);
+    String::Utf8Value channel(isolate, args[1]);
+    String::Utf8Value data(isolate, args[2]);
+
+    g_core.emit_to(window_id, *channel, *data);
+}
+
+// ============================================
 // JS에서 호출하는 네이티브 함수: __suji_register(channel)
 // ============================================
 
@@ -731,6 +822,7 @@ static int run_node_internal(const char* entry_path) {
         set_fn("__suji_invoke", js_suji_invoke);
         set_fn("__suji_invoke_sync", js_suji_invoke_sync);
         set_fn("__suji_send", js_suji_send);
+        set_fn("__suji_emit_to", js_suji_emit_to);
         set_fn("__suji_on", js_suji_on);
         set_fn("__suji_off", js_suji_off);
         set_fn("__suji_register", js_suji_register);
@@ -745,6 +837,7 @@ static int run_node_internal(const char* entry_path) {
             "  invoke: __suji_invoke,"
             "  invokeSync: __suji_invoke_sync,"
             "  send: __suji_send,"
+            "  sendTo: __suji_emit_to,"
             "  on: __suji_on,"
             "  off: __suji_off,"
             "  register: __suji_register,"

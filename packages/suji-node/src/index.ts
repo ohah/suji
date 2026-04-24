@@ -27,13 +27,30 @@
 // Types
 // ============================================
 
-export type HandlerFn<TReq = unknown, TRes = unknown> = (data: TReq) => TRes;
+/** IPC 요청의 sender 창 컨텍스트 (Electron event.sender/BrowserWindow 대응). */
+export interface InvokeEvent {
+  window: {
+    id: number;
+    /** 익명 창이면 null. */
+    name: string | null;
+  };
+}
+
+/**
+ * 1-arity: 기존 `(data) => result` — 호환.
+ * 2-arity: `(data, event) => result` — Zig SDK의 `fn(Request, InvokeEvent)` 대응.
+ */
+export type HandlerFn<TReq = unknown, TRes = unknown> =
+  | ((data: TReq) => TRes)
+  | ((data: TReq, event: InvokeEvent) => TRes);
 
 interface SujiBridge {
-  handle(channel: string, fn: (data: string) => string): void;
+  handle(channel: string, fn: (data: string, event: InvokeEvent) => string): void;
   invoke(backend: string, request: string): Promise<string>;
   invokeSync(backend: string, request: string): string;
   send(channel: string, data: string): void;
+  /** Electron webContents.send 대응. 구버전 core는 이 필드가 없을 수 있음. */
+  sendTo?(windowId: number, channel: string, data: string): void;
   on(channel: string, fn: (channel: string, data: string) => void): number;
   off(subId: number): void;
   register(channel: string): void;
@@ -73,7 +90,7 @@ export function handle<TReq = unknown, TRes = unknown>(
   channel: string,
   handler: HandlerFn<TReq, TRes>,
 ): void {
-  getBridge().handle(channel, (raw: string) => {
+  getBridge().handle(channel, (raw: string, event: InvokeEvent) => {
     let data: TReq;
     try {
       data = JSON.parse(raw);
@@ -81,7 +98,11 @@ export function handle<TReq = unknown, TRes = unknown>(
       data = raw as unknown as TReq;
     }
 
-    const result = handler(data);
+    // 핸들러 arity: 1이면 event 생략 (기존 시그니처 호환), 2면 같이 전달.
+    // bridge.cc가 event 객체를 항상 두 번째 인자로 넘기므로 arity가 유일한 분기 기준.
+    const result = handler.length >= 2
+      ? (handler as (d: TReq, e: InvokeEvent) => TRes)(data, event)
+      : (handler as (d: TReq) => TRes)(data);
 
     if (typeof result === 'string') return result;
     return JSON.stringify(result);
@@ -147,6 +168,19 @@ export function invokeSync<T = unknown>(
  */
 export function send(channel: string, data: unknown = {}): void {
   getBridge().send(channel, JSON.stringify(data));
+}
+
+/**
+ * 특정 창에만 이벤트 전달 (Electron `webContents.send` 대응).
+ * 대상 창이 닫혔거나 bridge가 구버전이면 silent no-op.
+ *
+ * @example
+ * sendTo(2, 'toast', { text: 'saved' });
+ */
+export function sendTo(windowId: number, channel: string, data: unknown = {}): void {
+  const bridge = getBridge();
+  if (!bridge.sendTo) return;
+  bridge.sendTo(windowId, channel, JSON.stringify(data));
 }
 
 // ============================================

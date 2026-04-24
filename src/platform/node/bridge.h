@@ -46,6 +46,8 @@ typedef void (*suji_core_off_fn)(unsigned long long id);
 
 typedef void (*suji_core_quit_fn)(void);
 typedef const char* (*suji_core_platform_fn)(void);
+// 특정 창(WindowManager id)에만 이벤트 전달 (Electron webContents.send).
+typedef void (*suji_core_emit_to_fn)(unsigned int window_id, const char* channel, const char* data);
 
 struct SujiNodeCore {
     suji_core_invoke_fn invoke;
@@ -56,6 +58,7 @@ struct SujiNodeCore {
     suji_core_register_fn reg;
     suji_core_quit_fn quit;
     suji_core_platform_fn platform;
+    suji_core_emit_to_fn emit_to;
 };
 
 void suji_node_set_core(struct SujiNodeCore core);

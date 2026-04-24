@@ -16,6 +16,8 @@ typedef struct {
     void (*quit)(void);
     // 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
     const char* (*platform)(void);
+    // 특정 창에만 이벤트 전달 (Electron webContents.send). 대상이 닫혔으면 no-op.
+    void (*emit_to)(unsigned int window_id, const char* channel, const char* data);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* channel) {
@@ -28,6 +30,10 @@ static const char* core_invoke(SujiCore* core, const char* name, const char* req
 
 static void core_emit(SujiCore* core, const char* channel, const char* data) {
     core->emit(channel, data);
+}
+
+static void core_emit_to(SujiCore* core, unsigned int window_id, const char* channel, const char* data) {
+    core->emit_to(window_id, channel, data);
 }
 
 static void core_quit(SujiCore* core) {
@@ -135,6 +141,19 @@ func Send(channel, data string) {
 	cData := C.CString(data)
 	defer C.free(unsafe.Pointer(cData))
 	C.core_emit(core, cCh, cData)
+}
+
+// SendTo — 특정 창(window id)에만 이벤트 전달 (Electron webContents.send 대응).
+// 대상 창이 닫혔거나 core 주입 전이면 silent no-op.
+func SendTo(windowID uint32, channel, data string) {
+	if core == nil {
+		return
+	}
+	cCh := C.CString(channel)
+	defer C.free(unsafe.Pointer(cCh))
+	cData := C.CString(data)
+	defer C.free(unsafe.Pointer(cData))
+	C.core_emit_to(core, C.uint(windowID), cCh, cData)
 }
 
 // Quit — 앱 종료 요청 (Electron app.quit() 호환).

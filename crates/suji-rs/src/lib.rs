@@ -16,6 +16,47 @@ pub use suji_macros::command as handle;
 pub use serde_json;
 pub use serde;
 
+/// IPC 요청의 sender 창 컨텍스트 — Electron의 `event.sender`/`BrowserWindow.fromWebContents` 대응.
+///
+/// 2-arity 핸들러 `fn(..., event: InvokeEvent)`의 두 번째 파라미터로 받는다.
+/// 파싱 실패/누락 시 id=0, name=None.
+///
+/// ```ignore
+/// #[suji::handle]
+/// fn save(filename: String, event: suji::InvokeEvent) -> serde_json::Value {
+///     if event.window.name.as_deref() == Some("settings") { /* ... */ }
+///     serde_json::json!({ "ok": true, "from": event.window.id })
+/// }
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct InvokeEvent {
+    pub window: Window,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Window {
+    pub id: u32,
+    pub name: Option<String>,
+}
+
+impl InvokeEvent {
+    /// wire의 `__window` / `__window_name` 필드에서 파생.
+    /// #[doc(hidden)] 루트 request JSON Value를 받아 구성 — proc macro가 자동 호출.
+    #[doc(hidden)]
+    pub fn from_request(parsed: &serde_json::Value) -> Self {
+        let id = parsed
+            .get("__window")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32)
+            .unwrap_or(0);
+        let name = parsed
+            .get("__window_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Self { window: Window { id, name } }
+    }
+}
+
 #[repr(C)]
 pub struct SujiCore {
     pub invoke: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char) -> *const std::os::raw::c_char,
@@ -30,6 +71,8 @@ pub struct SujiCore {
     pub quit: extern "C" fn(),
     /// 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
     pub platform: extern "C" fn() -> *const std::os::raw::c_char,
+    /// 특정 창(WindowManager id)에만 이벤트 전달 (Electron `webContents.send`).
+    pub emit_to: extern "C" fn(u32, *const std::os::raw::c_char, *const std::os::raw::c_char),
 }
 
 unsafe impl Send for SujiCore {}
@@ -52,6 +95,16 @@ pub fn send(channel: &str, data: &str) {
         let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
         let c_data = std::ffi::CString::new(data).unwrap_or_default();
         (core.emit)(c_ch.as_ptr(), c_data.as_ptr());
+    }
+}
+
+/// 특정 창(window id)에만 이벤트 전달 (Electron `webContents.send`).
+/// 대상 창이 닫혔거나 core가 주입 전이면 silent no-op.
+pub fn send_to(window_id: u32, channel: &str, data: &str) {
+    if let Some(core) = __SUJI_CORE.get() {
+        let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
+        let c_data = std::ffi::CString::new(data).unwrap_or_default();
+        (core.emit_to)(window_id, c_ch.as_ptr(), c_data.as_ptr());
     }
 }
 
@@ -137,16 +190,58 @@ mod tests {
         off(0);
         off(99999);
     }
+
+    #[test]
+    fn send_and_send_to_are_noop_when_core_missing() {
+        // __SUJI_CORE 없을 때 crash 없음
+        send("test", "{}");
+        send_to(5, "test", "{}");
+    }
+
+    #[test]
+    fn invoke_event_from_request_parses_window_fields() {
+        let v = serde_json::json!({
+            "cmd": "save",
+            "__window": 7u32,
+            "__window_name": "settings",
+        });
+        let ev = InvokeEvent::from_request(&v);
+        assert_eq!(ev.window.id, 7);
+        assert_eq!(ev.window.name.as_deref(), Some("settings"));
+    }
+
+    #[test]
+    fn invoke_event_defaults_when_fields_missing() {
+        let v = serde_json::json!({ "cmd": "ping" });
+        let ev = InvokeEvent::from_request(&v);
+        assert_eq!(ev.window.id, 0);
+        assert!(ev.window.name.is_none());
+    }
+
+    #[test]
+    fn invoke_event_defaults_when_types_wrong() {
+        // 음수/문자열 __window, 숫자 __window_name — 전부 default로 안전 폴백.
+        let v = serde_json::json!({
+            "__window": "not-a-number",
+            "__window_name": 42,
+        });
+        let ev = InvokeEvent::from_request(&v);
+        assert_eq!(ev.window.id, 0);
+        assert!(ev.window.name.is_none());
+    }
 }
 
 pub mod prelude {
     pub use crate::handle;
     pub use crate::invoke;
     pub use crate::send;
+    pub use crate::send_to;
     pub use crate::on;
     pub use crate::off;
     pub use crate::quit;
     pub use crate::platform;
+    pub use crate::InvokeEvent;
+    pub use crate::Window;
     pub use crate::PLATFORM_MACOS;
     pub use crate::PLATFORM_LINUX;
     pub use crate::PLATFORM_WINDOWS;
