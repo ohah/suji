@@ -388,7 +388,15 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 - [ ] 플러그인: menu — 메뉴바 (CEF `cef_menu_model_capi.h` 사용, 기본 NSMenu Edit 메뉴는 이미 제공)
 - [~] window — 멀티 윈도우 + BrowserWindow API (`docs/WINDOW_API.md`)
   - [x] Phase 1: 설계 확정 + PoC (`__core__:create_window`, `cef.zig:createNewWindow`, Electron 방식 동등성, name 중복 싱글턴)
-  - [ ] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태) + IPC `__window` 자동 태깅 + `windows[]` 배열 파싱
+  - [~] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태) + IPC `__window` 자동 태깅 + `windows[]` 배열 파싱
+    - [x] WindowManager 스켈레톤 + Native vtable 추상화 (`src/core/window.zig`)
+    - [x] SujiEvent + EventSink (`window:created`/`close`/`closed`, preventDefault)
+    - [x] 동시성 안전성 (`std.Io.Mutex` + 이벤트 발화는 lock 밖)
+    - [x] TDD 단위 테스트 49개 (동시성·OOM·재진입·에러 경로·이벤트 누출 금지 커버)
+    - [ ] CefNative 구현 — `window.Native` vtable을 CEF 호출로 연결 (`src/platform/cef.zig`)
+    - [ ] EventBus 어댑터 — WindowManager.EventSink → EventBus.emit/emitCancelable
+    - [ ] IPC 라우팅 — `__core__:create_window` 등 커맨드를 WindowManager 경유로 교체
+    - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)
   - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
     - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응
     - [ ] state 플러그인 scope 확장 (`global` / `window:{id}` / `session`)

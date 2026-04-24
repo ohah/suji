@@ -1439,10 +1439,28 @@ window_manager.registerFirstWindow(g_browser, g_window);
 | darkTheme | O | O | O (GTK) |
 | type (splash, toolbar 등) | O | O | 부분 지원 |
 
-### 스레드 안전
-- `WindowManager`의 모든 public 메서드는 `mutex`로 보호
-- CEF 브라우저 조작은 반드시 UI 스레드에서 실행해야 함 → `cef_post_task(TID_UI, ...)` 사용
-- C ABI 콜백은 임의 스레드에서 호출될 수 있으므로, vtable 함수 내부에서 UI 스레드로 디스패치
+### 스레드 모델 — **main(UI) 스레드 전용 계약**
+
+WindowManager 및 모든 Window API 메서드는 **CEF UI 스레드(= main 스레드)에서만 호출**해야 한다. Electron/Tauri 등 대부분의 GUI 프레임워크와 동일한 제약.
+
+**계약**:
+- `WindowManager.{create, destroy, close, setTitle, setBounds, setVisible, focus, destroyAll}` — main 스레드만
+- `WindowManager.{get, fromName}` — read-only, 어느 스레드에서든 호출 가능 (mutex 보호)
+- 백엔드(Rust/Go/Node) 핸들러가 창을 조작하려면 IPC로 main에 요청 → main의 IPC 핸들러가 WM 호출
+
+**왜 (a) "CefNative가 내부에서 UI 스레드로 marshal" 옵션을 버렸나**:
+
+1. **Deadlock 설계 지뢰밭** — 시나리오: 스레드 B가 `wm.destroy(id)` 실행 중 WM lock 보유 → Phase 3에서 `destroy_window` → UI 스레드로 marshal + 세마포 대기. 동시에 UI 스레드는 `wm.create(...)` 호출 → WM lock 대기 (B가 보유). UI 스레드가 블록되어 marshal된 task를 drain 못 함 → **서로 무한 대기**.
+   해결하려면 모든 vtable 호출 전 WM lock을 해제해야 하는데, `close`의 Phase 1/2/3 쪼개기를 모든 메서드에 적용하는 꼴 → WM 코드가 폭발.
+2. **CEF 자체가 UI 스레드 단일 접근을 강제** — 우리가 안 막아도 CEF의 내부 `CEF_REQUIRE_UI_THREAD()` CHECK가 발화해 abort. 잘못된 호출은 어차피 크래시.
+3. **Electron 에코시스템 호환** — "main process only"는 Electron 사용자에게 이미 자명한 규칙. 학습 비용 0.
+4. **런타임 비용** — (a)는 매 호출 `cef_post_task` + 컨텍스트 스위치 + 세마포 대기. (b)는 직접 호출.
+5. **테스트** — (a)는 CefNative의 marshal 로직을 E2E 외엔 검증 어려움. (b)는 WM 유닛 테스트(이미 있음) + CEF 통합은 E2E로 커버.
+
+**구현 결과**:
+- CefNative vtable 함수들은 진입점에서 `std.debug.assert(cef.currentlyOn(TID_UI))` — 잘못된 스레드 호출을 debug 빌드에서 즉시 감지
+- `std.Io.Mutex`는 유지 — 이론상 단일 스레드면 불필요하지만, (1) read-only API가 다른 스레드에서 와도 안전, (2) 잘못된 스레드 write 호출 시 데이터 레이스 대신 직렬화 정도는 보장 (defense-in-depth)
+- 백엔드 SDK의 Window API wrapper는 "이 호출은 main으로 IPC 경유"임을 명시 (Electron의 `BrowserWindow` 패턴)
 
 ### 메모리 안전
 - `get_title`, `get_url` 등 문자열 반환 함수는 코어가 `allocator.dupe()`로 복사본 할당
