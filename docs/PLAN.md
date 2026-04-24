@@ -138,18 +138,19 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
   - [x] Go On/Send → bridge.c → EventBus (CGo 브릿지)
   - [x] JS on/emit/off → WebView ↔ EventBus
   - [x] EventBus ↔ WebView 연결 (webview_eval)
-- [ ] 플러그인 시스템
-  - [ ] suji.json `plugins` 필드 파싱 (문자열 또는 객체)
-  - [ ] main.zig에서 플러그인 빌드 + dlopen + BackendRegistry 등록
-  - [ ] 채널 접두사 컨벤션 (`state:get`, `fs:read` 등)
-  - [ ] `suji-plugin.json` 스펙 (플러그인 메타데이터)
+- [x] 플러그인 시스템
+  - [x] suji.json `plugins` 필드 파싱 (문자열 배열)
+  - [x] main.zig에서 플러그인 빌드 + dlopen + BackendRegistry 등록
+  - [x] 채널 접두사 컨벤션 (`state:get`, `fs:read` 등)
+  - [x] `suji-plugin.json` 스펙 (플러그인 메타데이터)
   - [ ] 권한 시스템 (나중에)
-- [ ] State 플러그인
-  - [ ] Zig 구현 — `plugins/state/zig/` (HashMap + Mutex + EventBus + JSON 파일)
-  - [ ] 경합 테스트 (멀티 백엔드 동시 접근)
-  - [ ] JS 래퍼 — `plugins/state/js/`
-  - [ ] Rust 래퍼 — `plugins/state/rust/`
-  - [ ] Go 래퍼 — `plugins/state/go/`
+- [x] State 플러그인 (첫 번째 공식 플러그인)
+  - [x] Zig 구현 — `plugins/state/zig/` (HashMap + Mutex + JSON 파일 영속성)
+  - [x] 경합 테스트 (`tests/state_plugin_test.zig` — 10 threads + rapid fire 100)
+  - [x] JS 래퍼 — `plugins/state/js/`
+  - [x] Rust 래퍼 — `plugins/state/rust/`
+  - [x] Go 래퍼 — `plugins/state/go/`
+  - [x] EventBus 연동 (`state:set` 시 `state:{key}` 이벤트 발행)
   - [ ] Node 래퍼 (Phase 5 이후)
   - [ ] SQLite 플러그인 (별도, 나중에)
 - [x] ~~바이너리 데이터 채널~~ — CEF `suji://` 커스텀 프로토콜로 대체 (fetch + 로컬 파일 접근 가능, 별도 HTTP 서버 불필요)
@@ -384,8 +385,15 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 - [ ] 플러그인: fs — 파일 시스템 (`plugins/fs/`)
 - [ ] 플러그인: dialog — 시스템 다이얼로그 (`plugins/dialog/`)
 - [ ] 플러그인: tray — 트레이 아이콘 (`plugins/tray/`)
-- [ ] 플러그인: menu — 메뉴바 (`plugins/menu/`)
-- [ ] 플러그인: window — 창 이벤트, 멀티 윈도우 (`plugins/window/`)
+- [ ] 플러그인: menu — 메뉴바 (CEF `cef_menu_model_capi.h` 사용, 기본 NSMenu Edit 메뉴는 이미 제공)
+- [~] window — 멀티 윈도우 + BrowserWindow API (`docs/WINDOW_API.md`)
+  - [x] Phase 1: 설계 확정 + PoC (`__core__:create_window`, `cef.zig:createNewWindow`, Electron 방식 동등성, name 중복 싱글턴)
+  - [ ] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태)
+  - [ ] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식)
+  - [ ] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
+  - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
+  - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
+  - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
 - [ ] CLI 도구
   - [x] `suji init` — 프로젝트 스캐폴딩 (rust/go/multi)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
@@ -602,9 +610,10 @@ func backend_handle_ipc(request *C.char) *C.char {
 - [x] Zig에서 Node 환경에 Suji API 주입 (handle/invoke/invokeSync/send/register)
 - [x] Node.js 크로스 호출 (invoke async + invokeSync + thread pool + deadlock 방지)
 - [x] Node.js 이벤트 발신 (suji.send)
+- [x] Node.js 이벤트 수신 (suji.on/once/off)
 - [x] Node.js 예제 (node-backend 단독 + multi-backend 포함)
+- [x] Node.js SDK 패키지 — `@suji/node` (`packages/suji-node`, TypeScript, require 기반)
 - [ ] `suji run main.js` CLI
-- [ ] require("suji") 패키지
 - [ ] Node 바이너리 번들링 (배포 시)
 - [ ] Electron 마이그레이션 가이드
 
@@ -970,10 +979,10 @@ suji build → 결과물:
 | 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ❌ |
 | 시스템 다이얼로그 (열기/저장/알림) | `dialog` | `dialog` 플러그인 | ❌ |
 | 트레이 아이콘 | `Tray` | `tray-icon` | ❌ |
-| 메뉴바 | `Menu` | `menu` | ❌ |
-| 창 이벤트 (resize/close/focus) | `BrowserWindow` 이벤트 | `Window` 이벤트 | ❌ |
-| 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ❌ |
-| 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ❌ |
+| 메뉴바 | `Menu` | `menu` | 🟡 (macOS Edit 메뉴만 기본 제공) |
+| 창 이벤트 (resize/close/focus) | `BrowserWindow` 이벤트 | `Window` 이벤트 | 🟡 (설계 완료, 구현 대기) |
+| 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | 🟡 (PoC 완료, API 미구현) |
+| 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ✅ (dylib 재로드 + Vite HMR) |
 
 ### 보안
 
@@ -987,16 +996,17 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| macOS .app 번들 | electron-builder | `tauri build` | ❌ (계획만) |
+| macOS .app 번들 | electron-builder | `tauri build` | ✅ (`bundle_macos.zig`, Helper 4개, Info.plist) |
 | Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
 | Linux .deb/.AppImage | electron-builder | `tauri build` | ❌ |
-| 코드 서명 & 공증 | electron-notarize | 빌트인 | ❌ |
+| 코드 서명 & 공증 | electron-notarize | 빌트인 | 🟡 (서명 준비 — 공증 미구현) |
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 
 ### 플러그인 / 확장 API
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
+| 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
 | 클립보드 | `clipboard` | `clipboard-manager` | ❌ |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ |
 | 알림 (Notification) | `Notification` | `notification` | ❌ |
@@ -1010,26 +1020,28 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| DevTools | Chromium 내장 | WebView inspect | ❌ (debug 플래그만) |
+| DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
+| E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`) |
 | TypeScript 타입 자동 생성 | - | specta 연동 | ❌ |
-| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ❌ (init은 있지만 제한적) |
-| 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | ❌ |
-| CI/CD 템플릿 | - | GitHub Actions 공식 제공 | ❌ |
+| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | 🟡 (`suji init` 존재, 제한적) |
+| 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
+| CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |
 
 ### 바이너리 데이터 / 고급 기능
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 바이너리 IPC | Buffer 직접 전송 | `asset://` 커스텀 프로토콜 | ✅ `suji://` 커스텀 프로토콜 |
-| 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ❌ |
+| 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`) |
 
 ### 우선순위 제안
 
-1. **파일 시스템 + 다이얼로그** — 가장 기본적인 네이티브 API
-2. **앱 패키징** (.app/.exe) — 배포 불가능하면 프레임워크로서 의미 없음
-3. **트레이 + 메뉴바** — 데스크톱 앱의 기본 요소
-4. **보안 모델** — 프로덕션 사용 전 필수
-5. **자동 업데이트** — 배포 후 유지보수에 필수
+1. **멀티 윈도우 완성** (`BrowserWindow` API Phase 2~7) — 설계 확정됨, 실제 데스크톱 앱 필수
+2. **파일 시스템 + 다이얼로그** — 가장 기본적인 네이티브 API
+3. **앱 패키징** (Windows .msi, Linux .AppImage) — macOS는 완료, 타 OS 보완
+4. **트레이 + 메뉴바** — 데스크톱 앱의 기본 요소
+5. **보안 모델** — 프로덕션 사용 전 필수
+6. **자동 업데이트** — 배포 후 유지보수에 필수
 
 ---
 
