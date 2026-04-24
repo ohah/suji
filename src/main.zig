@@ -619,6 +619,10 @@ const HotReloadCtx = struct {
     var reg: *suji.BackendRegistry = undefined;
 
     fn onFileChanged(path: []const u8) void {
+        // rebuild가 스스로 수정하는 파일은 무시 — 안 그러면 feedback loop.
+        // 예: Node는 `npm install`이 package-lock.json을 갱신 → watcher 재발화 → 무한 rebuild.
+        if (shouldIgnore(path)) return;
+
         std.debug.print("[suji] file changed: {s}\n", .{path});
         // 변경된 파일이 어느 백엔드에 속하는지 찾기
         const backends = conf.backends orelse return;
@@ -634,6 +638,21 @@ const HotReloadCtx = struct {
                 reloadSingleBackend(alloc, be, reg);
             }
         }
+    }
+
+    fn shouldIgnore(path: []const u8) bool {
+        const basename = std.fs.path.basename(path);
+        const ignored = [_][]const u8{
+            "package-lock.json",
+            "yarn.lock",
+            "pnpm-lock.yaml",
+            ".DS_Store",
+            "Thumbs.db",
+        };
+        for (ignored) |name| {
+            if (std.mem.eql(u8, basename, name)) return true;
+        }
+        return false;
     }
 };
 

@@ -30,8 +30,10 @@ static void core_emit(SujiCore* core, const char* channel, const char* data) {
 static void core_quit(SujiCore* core) { core->quit(); }
 static const char* core_platform(SujiCore* core) { return core->platform(); }
 
-// window:all-closed 콜백 (goEventBridge 패턴 대신 단순 C 콜백)
-extern void go_on_window_all_closed(const char* ch, const char* data, void* arg);
+// window:all-closed 콜백 (goEventBridge 패턴 대신 단순 C 콜백).
+// cgo가 `//export`에서 자동 생성하는 prototype은 const qualifier가 없으므로
+// 수동 extern도 non-const로 맞춰야 "conflicting types"로 빌드 실패하지 않는다.
+extern void go_on_window_all_closed(char* ch, char* data, void* arg);
 
 static unsigned long long register_window_all_closed(SujiCore* core) {
     return core->on("window:all-closed", (void*)go_on_window_all_closed, (void*)0);

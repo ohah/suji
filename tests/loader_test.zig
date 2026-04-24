@@ -187,3 +187,71 @@ test "SujiCore.get_io tracks most recent setGlobal" {
     try std.testing.expectEqual(@as(*const anyopaque, @ptrCast(&reg2.io)), raw_from_reg1);
     try std.testing.expectEqual(@as(*const anyopaque, @ptrCast(&reg2.io)), raw_from_reg2);
 }
+
+// ============================================
+// 회귀 테스트 — coreRegister duplicate 채널 시 owned_channel 누수 방지
+// ============================================
+//
+// 이전 구조: dupe → 중복 체크 → 중복이면 early return (owned_channel 해제 안 됨).
+// 매 duplicate 채널마다 채널 이름 크기만큼 누수 발생 → multi-backend 예제에서만
+// 수십 바이트씩 GPA leak 리포트가 쌓였다.
+// 수정: 중복 체크 → 통과 시에만 dupe + put. put 실패 시도 free.
+
+test "coreRegister: allocator.dupe must come AFTER duplicate check" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/backends/loader.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const marker = "fn coreRegister(";
+    const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.CoreRegisterNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + marker.len, "\n    fn ") orelse
+        std.mem.indexOfPos(u8, source, fn_start + marker.len, "\nfn ") orelse
+        source.len;
+    const body = source[fn_start..body_end];
+
+    const dup_check_pos = std.mem.indexOf(u8, body, "reg.routes.getPtr(") orelse return error.DuplicateCheckMissing;
+    const dupe_pos = std.mem.indexOf(u8, body, "reg.allocator.dupe(u8, channel)") orelse return error.DupeCallMissing;
+
+    // dupe가 duplicate 체크 뒤에 와야 early return 경로에서 누수 없음.
+    try std.testing.expect(dup_check_pos < dupe_pos);
+}
+
+// ============================================
+// 회귀 테스트 — watcher onFileChanged: 자동 생성/OS 메타 파일 무시
+// ============================================
+//
+// npm install이 package-lock.json을 갱신 → watcher 재발화 → 무한 rebuild loop.
+// shouldIgnore 리스트에 최소 package-lock.json이 포함되어 있어야 한다.
+
+test "onFileChanged: shouldIgnore covers npm/os-metadata feedback files" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const must_contain = [_][]const u8{
+        "\"package-lock.json\"",
+        "\"yarn.lock\"",
+        "\"pnpm-lock.yaml\"",
+        "\".DS_Store\"",
+    };
+    for (must_contain) |needle| {
+        if (std.mem.indexOf(u8, source, needle) == null) return error.IgnoreEntryMissing;
+    }
+
+    // onFileChanged에서 shouldIgnore가 실제 호출되는지
+    const marker = "fn onFileChanged(";
+    const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.OnFileChangedNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + marker.len, "\n    fn ") orelse
+        std.mem.indexOfPos(u8, source, fn_start + marker.len, "\nfn ") orelse
+        source.len;
+    const body = source[fn_start..body_end];
+    if (std.mem.indexOf(u8, body, "shouldIgnore(path)") == null) return error.ShouldIgnoreNotCalled;
+}

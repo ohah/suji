@@ -380,16 +380,17 @@ pub const BackendRegistry = struct {
         const channel = std.mem.span(@as([*:0]const u8, @ptrCast(channel_name)));
         const backend = reg.registering_backend orelse return;
 
-        const owned_channel = reg.allocator.dupe(u8, channel) catch return;
-
         if (reg.routes.getPtr(channel)) |existing_ptr| {
-            // 중복: 값을 빈 문자열로 덮어쓰기 (자동 라우팅 차단)
+            // 중복: 값을 빈 문자열로 덮어쓰기 (자동 라우팅 차단). target 옵션 강제.
             std.debug.print("[suji] ERROR: channel '{s}' duplicate ('{s}' and '{s}') — use target option\n", .{ channel, existing_ptr.*, backend });
             existing_ptr.* = "";
             return;
         }
 
-        reg.routes.put(owned_channel, backend) catch {};
+        const owned_channel = reg.allocator.dupe(u8, channel) catch return;
+        reg.routes.put(owned_channel, backend) catch {
+            reg.allocator.free(owned_channel);
+        };
     }
 
     // C ABI 콜백: 응답 메모리 해제 (coreInvoke가 복사한 Suji 소유 메모리)
