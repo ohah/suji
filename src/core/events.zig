@@ -47,54 +47,40 @@ pub const EventBus = struct {
     }
 
     /// 이벤트 구독 — 리스너 ID 반환 (해제용)
+    /// 이벤트 구독 — 성공 시 리스너 id (>0), OOM 등록 실패 시 0 반환.
+    /// next_id는 성공 시에만 증가 (실패한 id는 재사용).
     pub fn on(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
+        const listener = Listener{ .id = id, .callback = .{ .zig = callback } };
+        self.addListener(event_name, listener) catch return 0;
         self.next_id += 1;
-
-        const listener = Listener{
-            .id = id,
-            .callback = .{ .zig = callback },
-        };
-
-        self.addListener(event_name, listener);
         return id;
     }
 
-    /// C ABI 이벤트 구독 (백엔드에서 사용)
+    /// C ABI 이벤트 구독 (백엔드에서 사용). 성공 시 id, 실패 시 0.
     pub fn onC(self: *EventBus, event_name: []const u8, callback: CEventCallback, arg: ?*anyopaque) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
+        const listener = Listener{ .id = id, .callback = .{ .c_abi = .{ .func = callback, .arg = arg } } };
+        self.addListener(event_name, listener) catch return 0;
         self.next_id += 1;
-
-        const listener = Listener{
-            .id = id,
-            .callback = .{ .c_abi = .{ .func = callback, .arg = arg } },
-        };
-
-        self.addListener(event_name, listener);
         return id;
     }
 
-    /// 한 번만 수신
+    /// 한 번만 수신. 성공 시 id, 실패 시 0.
     pub fn once(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
+        const listener = Listener{ .id = id, .callback = .{ .zig = callback }, .once = true };
+        self.addListener(event_name, listener) catch return 0;
         self.next_id += 1;
-
-        const listener = Listener{
-            .id = id,
-            .callback = .{ .zig = callback },
-            .once = true,
-        };
-
-        self.addListener(event_name, listener);
         return id;
     }
 
@@ -189,28 +175,21 @@ pub const EventBus = struct {
         self.listeners.deinit();
     }
 
-    // 내부 헬퍼. OOM은 silent (addListener는 void 반환 유지) — 부분 실패 시 partial
-    // allocation 모두 해제해 leak 방지.
-    fn addListener(self: *EventBus, event_name: []const u8, listener: Listener) void {
+    // 내부 헬퍼. 실패 시 error 반환 → 호출자(`on`/`onC`/`once`)가 id=0 반환 결정.
+    // 부분 실패 경로에서 errdefer로 list/key 해제 보장.
+    fn addListener(self: *EventBus, event_name: []const u8, listener: Listener) !void {
         if (self.listeners.getPtr(event_name)) |list| {
-            list.append(self.allocator, listener) catch {};
+            try list.append(self.allocator, listener);
             return;
         }
         // event_name은 caller의 스택 버퍼일 수 있음 (backend SDK의 nullTerminate 경유).
         // 키는 HashMap이 소유하도록 복사.
         var list = std.ArrayList(Listener).empty;
-        list.append(self.allocator, listener) catch {
-            list.deinit(self.allocator);
-            return;
-        };
-        const owned_key = self.allocator.dupe(u8, event_name) catch {
-            list.deinit(self.allocator);
-            return;
-        };
-        self.listeners.put(owned_key, list) catch {
-            self.allocator.free(owned_key);
-            list.deinit(self.allocator);
-        };
+        errdefer list.deinit(self.allocator);
+        try list.append(self.allocator, listener);
+        const owned_key = try self.allocator.dupe(u8, event_name);
+        errdefer self.allocator.free(owned_key);
+        try self.listeners.put(owned_key, list);
     }
 
     fn emitToJs(self: *EventBus, event_name: []const u8, data: []const u8) void {
