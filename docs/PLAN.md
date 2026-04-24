@@ -413,11 +413,13 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [~] **핸들러 `InvokeEvent` 파라미터** — Electron의 `IpcMainInvokeEvent` 대응.
           `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로 받음.
           - [x] Zig: `fn h(req: Request, event: InvokeEvent) Response`. 1-arity 핸들러는 comptime
-                wrapper로 adapt되어 호환성 유지. `event.window.id`로 호출한 창 식별.
-                기존 SDK의 window listener용 `Event`와 이름 충돌 회피로 `InvokeEvent` 명명.
+                wrapper로 adapt되어 호환성 유지. `event.window.id`/`event.window.name`으로 호출한
+                창 식별. 기존 SDK의 window listener용 `Event`와 이름 충돌 회피로 `InvokeEvent` 명명.
           - [ ] Rust: `#[suji::handle] fn h(req: Request, event: InvokeEvent) -> Response`
           - [ ] Go / Node: 동일 시그니처 확장. Node는 Electron `(event, ...args)`와 거의 1:1
-          - [ ] `event.window`에 id 외 name/url/frame 추가 (현재는 id만)
+          - [x] `event.window`에 name 추가 — wire의 `__window_name`에서 파생 (익명 창은 null).
+                WM에서 `.name("settings")`같이 지정된 창에서 호출 시 event.window.name으로 접근.
+          - [ ] `event.window`에 url/frame 추가 (현재는 id+name)
           - Frontend `suji.invoke('ch', data)`는 그대로 (호출 측 변경 없음)
   - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
     - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응

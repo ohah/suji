@@ -50,13 +50,19 @@ const pingViaCDP = async (session: CDPSession) =>
     })
   ).result.value;
 
-const createWindow = (p: Page, title: string) =>
+const createWindow = (p: Page, title: string, name?: string) =>
   p.evaluate(
-    (t) =>
+    (t, n) =>
       (window as any).__suji__.core(
-        JSON.stringify({ cmd: "create_window", title: t, url: "http://localhost:5173" }),
+        JSON.stringify({
+          cmd: "create_window",
+          title: t,
+          url: "http://localhost:5173",
+          ...(n ? { name: n } : {}),
+        }),
       ),
     title,
+    name ?? "",
   ) as Promise<{ windowId: number }>;
 
 async function waitForNewPageTarget(excluded: Set<Target>, timeoutMs = 5000): Promise<Target> {
@@ -113,7 +119,7 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
 
     await new Promise((r) => setTimeout(r, 300));
     const tail = readLogTail(LOG_PATH, before);
-    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 raw=\{"cmd":"ping","__window":1\}/);
+    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 name=.* raw=\{"cmd":"ping","__window":1.*\}/);
   });
 
   test("2개 창: 각 창에서 ping → 서로 다른 __window id 주입", async () => {
@@ -130,10 +136,10 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
     await new Promise((r) => setTimeout(r, 500));
 
     const tail = readLogTail(LOG_PATH, before);
-    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 raw=\{"cmd":"ping","__window":1\}/);
+    expect(tail).toMatch(/\[zig\/ping\] window\.id=1 name=.* raw=\{"cmd":"ping","__window":1.*\}/);
     expect(tail).toMatch(
       new RegExp(
-        `\\[zig/ping\\] window\\.id=${created.windowId} raw=\\{"cmd":"ping","__window":${created.windowId}\\}`,
+        `\\[zig/ping\\] window\\.id=${created.windowId} name=.* raw=\\{"cmd":"ping","__window":${created.windowId}.*\\}`,
       ),
     );
     expect(created.windowId).not.toBe(1);
@@ -141,11 +147,37 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
     await cdp2.detach();
   }, 15000);
 
-  test("2-arity 핸들러가 InvokeEvent.window.id를 받음 (response에 포함)", async () => {
-    // zig 백엔드 ping은 2-arity로 바뀌었고 응답에 window_id 포함.
-    const resp = (await pingViaPage(page1)) as { result: { window_id: number } };
+  test("2-arity 핸들러가 InvokeEvent.window.id / .name을 받음", async () => {
+    // zig 백엔드 ping은 2-arity. 응답에 window_id + window_name 포함.
+    const resp = (await pingViaPage(page1)) as { result: { window_id: number; window_name: string } };
     expect(resp.result.window_id).toBe(1);
+    // main 창은 main.zig에서 .name = "main"으로 생성됨.
+    expect(resp.result.window_name).toBe("main");
   });
+
+  test("명명된 창: event.window.name이 wire + InvokeEvent를 거쳐 핸들러까지 전달", async () => {
+    const excluded = new Set<Target>(browser.targets().filter((t) => t.type() === "page"));
+    const created = await createWindow(page1, "Settings", "settings");
+    expect(created.windowId).toBeGreaterThanOrEqual(2);
+
+    const target = await waitForNewPageTarget(excluded);
+    const cdp = await target.createCDPSession();
+
+    const before = logLength(LOG_PATH);
+    const resp = (
+      await pingViaCDP(cdp)
+    ) as { result: { window_id: number; window_name: string } };
+    expect(resp.result.window_id).toBe(created.windowId);
+    expect(resp.result.window_name).toBe("settings");
+
+    // stderr 로그에도 name 포함
+    await new Promise((r) => setTimeout(r, 300));
+    const tail = readLogTail(LOG_PATH, before);
+    expect(tail).toMatch(/name=settings/);
+    expect(tail).toMatch(/"__window_name":"settings"/);
+
+    await cdp.detach();
+  }, 15000);
 
   test("3개 창: 각 창에서 ping → distinct __window 세 값", async () => {
     const page1Target = page1.target();

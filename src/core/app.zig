@@ -97,7 +97,8 @@ pub const App = struct {
                 };
                 const win_id_raw = extractIntField(request_json, "__window") orelse 0;
                 const win_id: u32 = if (win_id_raw >= 0) @intCast(win_id_raw) else 0;
-                const event = InvokeEvent{ .window = .{ .id = win_id } };
+                const win_name = extractStringField(request_json, "__window_name");
+                const event = InvokeEvent{ .window = .{ .id = win_id, .name = win_name } };
                 const resp = h.func(req, event);
                 return resp.data;
             }
@@ -201,12 +202,15 @@ pub const Event = struct {
 /// IPC 핸들러 컨텍스트 — Electron의 `IpcMainInvokeEvent` 대응.
 ///   - window.id: wire의 `__window` 필드에서 파생. 어느 창에서 호출됐는지 식별.
 ///                필드가 없거나 잘못된 경우 0 (legacy/direct 호출 경로 등).
+///   - window.name: wire의 `__window_name` 필드에서 파생. WM에서 창을 `.name("settings")`
+///                  같은 식으로 등록한 경우에만 non-null. 없으면 null (익명 창).
 /// 핸들러 시그니처: `fn (Request, InvokeEvent) Response` — 2-arity 선택 시 사용.
 pub const InvokeEvent = struct {
     window: Window,
 
     pub const Window = struct {
         id: u32,
+        name: ?[]const u8 = null,
     };
 };
 

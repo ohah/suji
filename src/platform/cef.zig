@@ -658,8 +658,8 @@ fn handleBrowserInvoke(
     var data_buf: [8192]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
 
-    // Phase 2.5 — wire 레벨 `__window` 자동 주입. 핸들러가 어느 창에서 호출됐는지
-    // 식별 가능하도록 sender browser → WM.id로 변환해 JSON에 merge.
+    // Phase 2.5 — wire 레벨 `__window` (+ optional `__window_name`) 자동 주입.
+    // 핸들러가 어느 창에서 호출됐는지 식별 가능하도록 sender browser → WM.id로 변환해 JSON에 merge.
     // 이미 __window가 박혀있는 요청(cross-hop)은 보존.
     var injected_buf: [8192]u8 = undefined;
     const data_to_backend: []const u8 = blk: {
@@ -667,7 +667,8 @@ fn handleBrowserInvoke(
         const native_handle: u64 = @intCast(br.get_identifier.?(br));
         const wm = window_mod.WindowManager.global orelse break :blk data;
         const win_id = wm.findByNativeHandle(native_handle) orelse break :blk data;
-        break :blk window_ipc.injectWindowField(data, win_id, &injected_buf) orelse data;
+        const win_name: ?[]const u8 = if (wm.get(win_id)) |w| w.name else null;
+        break :blk window_ipc.injectWindowField(data, win_id, win_name, &injected_buf) orelse data;
     };
 
     // 백엔드 호출

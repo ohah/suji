@@ -21,6 +21,14 @@ fn whoamiHandler(req: app_mod.Request, event: app_mod.InvokeEvent) app_mod.Respo
     return req.ok(.{ .window_id = event.window.id });
 }
 
+/// 2-arity 핸들러 — window.name (optional)도 반영.
+fn whoamiNamedHandler(req: app_mod.Request, event: app_mod.InvokeEvent) app_mod.Response {
+    return req.ok(.{
+        .window_id = event.window.id,
+        .window_name = event.window.name orelse "",
+    });
+}
+
 fn clickHandler(_: app_mod.Event) void {}
 
 const test_app = app_mod.app()
@@ -28,14 +36,16 @@ const test_app = app_mod.app()
     .handle("greet", greetHandler)
     .handle("add", addHandler)
     .handle("whoami", whoamiHandler)
+    .handle("whoami_named", whoamiNamedHandler)
     .on("clicked", clickHandler);
 
 test "App builder creates commands" {
-    try std.testing.expectEqual(@as(usize, 4), test_app.handler_count);
+    try std.testing.expectEqual(@as(usize, 5), test_app.handler_count);
     try std.testing.expectEqualStrings("ping", test_app.handlers[0].channel);
     try std.testing.expectEqualStrings("greet", test_app.handlers[1].channel);
     try std.testing.expectEqualStrings("add", test_app.handlers[2].channel);
     try std.testing.expectEqualStrings("whoami", test_app.handlers[3].channel);
+    try std.testing.expectEqualStrings("whoami_named", test_app.handlers[4].channel);
 }
 
 test "App builder creates listeners" {
@@ -267,6 +277,41 @@ test "InvokeEvent.Window 중첩 타입이 public하게 접근 가능" {
     const W = app_mod.InvokeEvent.Window;
     const w: W = .{ .id = 55 };
     try std.testing.expectEqual(@as(u32, 55), w.id);
+}
+
+// ============================================
+// Phase 2.5 — __window_name 주입 + 파싱
+// ============================================
+
+test "handleIpc: __window_name이 event.window.name으로 전달" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami_named\",\"__window\":3,\"__window_name\":\"settings\"}",
+    );
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_name\":\"settings\"") != null);
+}
+
+test "handleIpc: __window_name 없으면 event.window.name = null (익명 창)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami_named\",\"__window\":1}",
+    );
+    try std.testing.expect(resp != null);
+    // name이 null이면 orelse "" 경로 → 빈 문자열 응답
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_name\":\"\"") != null);
+}
+
+test "InvokeEvent.Window.name: ?[]const u8 default null" {
+    const e = app_mod.InvokeEvent{ .window = .{ .id = 1 } };
+    try std.testing.expect(e.window.name == null);
 }
 
 test "Request string extraction" {

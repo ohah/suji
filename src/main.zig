@@ -987,6 +987,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return window_ipc.handleCreateWindow(.{
             .title = extractJsonString(req_clean, "\"title\":\"") orelse "New Window",
             .url = extractJsonString(req_clean, "\"url\":\""),
+            .name = extractJsonString(req_clean, "\"name\":\""),
             .width = 600,
             .height = 400,
         }, response_buf, wm);

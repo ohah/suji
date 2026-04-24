@@ -7,12 +7,18 @@
 const std = @import("std");
 const window = @import("window");
 
-/// Phase 2.5 — 요청 JSON에 `__window: <id>` 자동 주입.
+/// Phase 2.5 — 요청 JSON에 `__window: <id>` (+ optional `__window_name`) 자동 주입.
 ///   - 이미 `"__window"` 필드가 있으면 원본 반환 (cross-hop 요청 재태깅 방지).
 ///   - `{...}` 로 끝나지 않는 입력(배열/프리미티브/공백 끝)은 원본 반환.
+///   - window_name이 non-null이면 `"__window_name":"..."`도 함께 merge.
+///     (name은 caller가 JSON-safe한지 보장해야 함 — WM 레벨에서 ASCII만 허용하므로 실무적 안전)
 ///   - out_buf가 작으면 null. 호출자는 null일 때 원본 사용.
-/// 반환값은 out_buf의 prefix 슬라이스.
-pub fn injectWindowField(src: []const u8, window_id: u32, out_buf: []u8) ?[]const u8 {
+pub fn injectWindowField(
+    src: []const u8,
+    window_id: u32,
+    window_name: ?[]const u8,
+    out_buf: []u8,
+) ?[]const u8 {
     // 이미 박혀있으면 no-op
     if (std.mem.indexOf(u8, src, "\"__window\"") != null) return src;
 
@@ -26,7 +32,18 @@ pub fn injectWindowField(src: []const u8, window_id: u32, out_buf: []u8) ?[]cons
     const inner_trimmed = std.mem.trim(u8, body[1..], &std.ascii.whitespace);
     const sep: []const u8 = if (inner_trimmed.len == 0) "" else ",";
 
-    return std.fmt.bufPrint(out_buf, "{s}{s}\"__window\":{d}}}", .{ body, sep, window_id }) catch null;
+    if (window_name) |n| {
+        return std.fmt.bufPrint(
+            out_buf,
+            "{s}{s}\"__window\":{d},\"__window_name\":\"{s}\"}}",
+            .{ body, sep, window_id, n },
+        ) catch null;
+    }
+    return std.fmt.bufPrint(
+        out_buf,
+        "{s}{s}\"__window\":{d}}}",
+        .{ body, sep, window_id },
+    ) catch null;
 }
 
 pub const CreateWindowReq = struct {
