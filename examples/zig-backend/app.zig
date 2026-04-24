@@ -27,7 +27,8 @@ fn add(req: suji.Request) suji.Response {
 fn onWindowAllClosed(_: suji.Event) void {
     const platform = suji.platform();
     std.debug.print("[Zig] window-all-closed received (platform={s})\n", .{platform});
-    if (!std.mem.eql(u8, platform, "macos")) {
+    // macOS는 Electron 관례상 앱 유지(dock). 나머지는 종료.
+    if (!std.mem.eql(u8, platform, suji.PLATFORM_MACOS)) {
         std.debug.print("[Zig] non-macOS → suji.quit()\n", .{});
         suji.quit();
     }

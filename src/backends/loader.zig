@@ -15,13 +15,9 @@ pub const SujiCore = extern struct {
     /// 반환값은 `*const std.Io`로 캐스팅해서 사용.
     /// Rust/Go plugin은 무시 (자체 OS I/O 사용).
     get_io: *const fn () callconv(.c) ?*const anyopaque,
-    /// 앱 종료 요청 (Electron `app.quit()` 호환).
-    /// 메인 프로세스가 `setQuitHandler`로 실제 종료 함수를 주입해야 동작.
     /// 주입 안 된 경우 no-op (SDK/core 버전 불일치로부터 안전).
     quit: *const fn () callconv(.c) void,
-    /// 플랫폼 이름: "macos" | "linux" | "windows" | "other".
-    /// 컴파일 타임 결정 — dylib 백엔드는 자기가 컴파일된 타겟의 플랫폼을 본다
-    /// (프로세스가 실행되는 OS와 일치해야 정상).
+    /// dylib 백엔드는 자기가 컴파일된 타겟의 플랫폼을 본다 (런타임 OS와 일치해야 정상).
     platform: *const fn () callconv(.c) [*:0]const u8,
 };
 
@@ -424,16 +420,22 @@ pub const BackendRegistry = struct {
     }
 };
 
-/// main이 주입하는 앱 종료 함수. 주입 전까진 coreQuit는 no-op.
 var quit_handler: ?*const fn () void = null;
 
-/// 컴파일 타임 결정된 플랫폼 문자열 리터럴 (z-terminated).
+/// 플랫폼 문자열 상수 — loader / SDK / tests가 동일 문자열 공유.
+pub const platform_names = struct {
+    pub const macos: [:0]const u8 = "macos";
+    pub const linux: [:0]const u8 = "linux";
+    pub const windows: [:0]const u8 = "windows";
+    pub const other: [:0]const u8 = "other";
+};
+
 pub fn platformName() [*:0]const u8 {
     const builtin = @import("builtin");
     return switch (builtin.os.tag) {
-        .macos => "macos",
-        .linux => "linux",
-        .windows => "windows",
-        else => "other",
+        .macos => platform_names.macos,
+        .linux => platform_names.linux,
+        .windows => platform_names.windows,
+        else => platform_names.other,
     };
 }

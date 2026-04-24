@@ -400,9 +400,13 @@ pub fn quit() void {
     fn_ptr();
 }
 
-/// 현재 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
-/// Electron `process.platform` 대응. 대소문자 그대로 반환 (Electron은 "darwin"이지만
-/// Suji는 명시적 "macos").
+/// 플랫폼 문자열 상수. `suji.platform()` 반환값과 비교할 때 사용.
+pub const PLATFORM_MACOS = "macos";
+pub const PLATFORM_LINUX = "linux";
+pub const PLATFORM_WINDOWS = "windows";
+pub const PLATFORM_OTHER = "other";
+
+/// 현재 플랫폼 이름. Electron `process.platform` 대응 (단 Suji는 "darwin" 대신 "macos").
 pub fn platform() []const u8 {
     const core = _global_core orelse return "unknown";
     const fn_ptr = core.platform_fn orelse return "unknown";
