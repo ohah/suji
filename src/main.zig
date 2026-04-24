@@ -809,6 +809,15 @@ fn openWindow(
     std.debug.print("[suji] CEF window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
     cef.run();
 
+    // Node runtime 종료 (별도 스레드 join). 이게 빠지면 Cmd+Q로 CEF가 quit한 뒤
+    // libnode event loop가 계속 돌아 프로세스가 exit 못하고 hang한다. node::Stop이
+    // isolate에 terminate 신호 보내고 run 스레드가 빠져나오면 thread.join이 완료.
+    if (g_node_runtime) |rt| {
+        rt.shutdown();
+        allocator.destroy(rt);
+        g_node_runtime = null;
+    }
+
     // cef.shutdown() 전에 정리: user close → OnBeforeClose → wm.markClosedExternal로
     // 이미 destroyed=true 세팅된 상태. WM.deinit은 살아있는 창에만 native.destroyWindow를
     // 호출하므로 CEF가 이미 파괴한 브라우저에 재접근하는 UAF 없음.

@@ -776,6 +776,15 @@ static int run_node_internal(const char* entry_path) {
 
         // ThreadPool을 V8 isolate scope 안에서 정리 (in-flight 작업 완료 대기)
         g_invoke_pool.reset();
+
+        // async 핸들을 닫아야 g_setup 파괴 시 uv_loop_close가 "open handles"로
+        // abort하지 않는다. uv_close는 async라 loop를 한 번 더 돌려 close 콜백
+        // 처리까지 해줘야 uv_loop가 alive=0이 됨.
+        uv_close(reinterpret_cast<uv_handle_t*>(&g_ipc_async), nullptr);
+        uv_close(reinterpret_cast<uv_handle_t*>(&g_async_invoke_async), nullptr);
+        uv_close(reinterpret_cast<uv_handle_t*>(&g_event_async), nullptr);
+        uv_loop_t* loop = g_setup->event_loop();
+        while (uv_run(loop, UV_RUN_NOWAIT) != 0) {}
     }
 
     node::Stop(env);
