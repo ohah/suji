@@ -7,6 +7,28 @@
 const std = @import("std");
 const window = @import("window");
 
+/// Phase 2.5 — 요청 JSON에 `__window: <id>` 자동 주입.
+///   - 이미 `"__window"` 필드가 있으면 원본 반환 (cross-hop 요청 재태깅 방지).
+///   - `{...}` 로 끝나지 않는 입력(배열/프리미티브/공백 끝)은 원본 반환.
+///   - out_buf가 작으면 null. 호출자는 null일 때 원본 사용.
+/// 반환값은 out_buf의 prefix 슬라이스.
+pub fn injectWindowField(src: []const u8, window_id: u32, out_buf: []u8) ?[]const u8 {
+    // 이미 박혀있으면 no-op
+    if (std.mem.indexOf(u8, src, "\"__window\"") != null) return src;
+
+    // 끝에서 공백 스킵해 닫는 `}` 위치 찾기
+    var end = src.len;
+    while (end > 0 and std.ascii.isWhitespace(src[end - 1])) : (end -= 1) {}
+    if (end == 0 or src[end - 1] != '}') return src;
+
+    const body = src[0 .. end - 1];
+    // 빈 객체 `{}`인지 — body가 `{` 이후 공백만 있는지 — separator 선택용
+    const inner_trimmed = std.mem.trim(u8, body[1..], &std.ascii.whitespace);
+    const sep: []const u8 = if (inner_trimmed.len == 0) "" else ",";
+
+    return std.fmt.bufPrint(out_buf, "{s}{s}\"__window\":{d}}}", .{ body, sep, window_id }) catch null;
+}
+
 pub const CreateWindowReq = struct {
     title: []const u8 = "New Window",
     url: ?[]const u8 = null,

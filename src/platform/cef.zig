@@ -24,6 +24,7 @@ pub const c = @cImport({
 const builtin = @import("builtin");
 const runtime = @import("runtime");
 const window_mod = @import("window");
+const window_ipc = @import("window_ipc");
 const logger = @import("logger");
 
 const log = logger.module("cef");
@@ -642,7 +643,7 @@ fn onBrowserProcessMessageReceived(
 
 /// 메인 프로세스: invoke 요청 처리 → 백엔드 호출 → 응답 반환
 fn handleBrowserInvoke(
-    _: ?*c._cef_browser_t,
+    browser: ?*c._cef_browser_t,
     frame: ?*c._cef_frame_t,
     msg: *c._cef_process_message_t,
 ) i32 {
@@ -657,7 +658,17 @@ fn handleBrowserInvoke(
     var data_buf: [8192]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
 
-    // std.debug.print("[suji] IPC invoke: seq={d} channel={s}\n", .{ seq_id, channel });
+    // Phase 2.5 — wire 레벨 `__window` 자동 주입. 핸들러가 어느 창에서 호출됐는지
+    // 식별 가능하도록 sender browser → WM.id로 변환해 JSON에 merge.
+    // 이미 __window가 박혀있는 요청(cross-hop)은 보존.
+    var injected_buf: [8192]u8 = undefined;
+    const data_to_backend: []const u8 = blk: {
+        const br = browser orelse break :blk data;
+        const native_handle: u64 = @intCast(br.get_identifier.?(br));
+        const wm = window_mod.WindowManager.global orelse break :blk data;
+        const win_id = wm.findByNativeHandle(native_handle) orelse break :blk data;
+        break :blk window_ipc.injectWindowField(data, win_id, &injected_buf) orelse data;
+    };
 
     // 백엔드 호출
     var response_buf: [16384]u8 = undefined;
@@ -665,7 +676,7 @@ fn handleBrowserInvoke(
     var result: []const u8 = "\"no handler\"";
 
     if (g_invoke_callback) |cb| {
-        if (cb(channel, data, &response_buf)) |resp| {
+        if (cb(channel, data_to_backend, &response_buf)) |resp| {
             result = resp;
             success = true;
         } else {
@@ -1672,11 +1683,19 @@ fn initNSApp() void {
         @ptrCast(&isHandlingSendEventImpl),
         "B@:",
     );
-    // _setHandlingSendEvent: 도 추가
+    // _setHandlingSendEvent: (underscore prefix, 전통적 private setter)
     const setSel = objc.sel_registerName("_setHandlingSendEvent:");
     _ = objc.class_addMethod(
         @ptrCast(cls),
         setSel,
+        @ptrCast(&setHandlingSendEventImpl),
+        "v@:B",
+    );
+    // setHandlingSendEvent: (CEF 신버전이 underscore 없이 호출하는 경로 대응)
+    const setSel2 = objc.sel_registerName("setHandlingSendEvent:");
+    _ = objc.class_addMethod(
+        @ptrCast(cls),
+        setSel2,
         @ptrCast(&setHandlingSendEventImpl),
         "v@:B",
     );

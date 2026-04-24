@@ -245,3 +245,51 @@ test "handleSetTitle response is valid JSON (parsable)" {
     try std.testing.expectEqualStrings("zig-core", parsed.value.from);
     try std.testing.expect(parsed.value.ok);
 }
+
+// ============================================
+// Phase 2.5 — injectWindowField (wire 레벨 __window 자동 주입)
+// ============================================
+
+test "injectWindowField: inserts into simple object" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 3, &buf).?;
+    try std.testing.expectEqualStrings("{\"cmd\":\"ping\",\"__window\":3}", out);
+}
+
+test "injectWindowField: handles empty object (no leading comma)" {
+    var buf: [64]u8 = undefined;
+    const out = ipc.injectWindowField("{}", 1, &buf).?;
+    try std.testing.expectEqualStrings("{\"__window\":1}", out);
+}
+
+test "injectWindowField: handles whitespace-only object body" {
+    var buf: [64]u8 = undefined;
+    const out = ipc.injectWindowField("{  }", 5, &buf).?;
+    try std.testing.expectEqualStrings("{  \"__window\":5}", out);
+}
+
+test "injectWindowField: already-tagged request is returned as-is (no double-inject)" {
+    var buf: [256]u8 = undefined;
+    const src = "{\"cmd\":\"ping\",\"__window\":99}";
+    const out = ipc.injectWindowField(src, 1, &buf).?;
+    try std.testing.expectEqualStrings(src, out);
+}
+
+test "injectWindowField: non-object input returned as-is" {
+    var buf: [64]u8 = undefined;
+    try std.testing.expectEqualStrings("[1,2,3]", ipc.injectWindowField("[1,2,3]", 1, &buf).?);
+    try std.testing.expectEqualStrings("42", ipc.injectWindowField("42", 1, &buf).?);
+    try std.testing.expectEqualStrings("", ipc.injectWindowField("", 1, &buf).?);
+}
+
+test "injectWindowField: trailing whitespace before } still parses" {
+    var buf: [64]u8 = undefined;
+    const out = ipc.injectWindowField("{\"a\":1}\n  ", 7, &buf).?;
+    try std.testing.expectEqualStrings("{\"a\":1,\"__window\":7}", out);
+}
+
+test "injectWindowField: returns null when output buffer too small" {
+    var tiny: [4]u8 = undefined;
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, &tiny);
+    try std.testing.expect(out == null);
+}

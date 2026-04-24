@@ -114,8 +114,6 @@ fn stressDeep(req: suji.Request) suji.Response {
     });
 }
 
-const std = @import("std");
-
 comptime {
     _ = suji.exportApp(my_app);
 }
