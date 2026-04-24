@@ -696,13 +696,11 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
 
     // WindowManager 배선 (CefNative + EventBusSink)
     var cef_native = cef.CefNative.init(allocator);
-    defer cef_native.deinit();
+    cef_native.registerGlobal(); // life_span_handler 콜백이 참조
 
     var stack: window_stack_mod.WindowStack = undefined;
     stack.init(allocator, runtime.io, cef_native.asNative(), &event_bus);
-    defer stack.deinit();
     stack.setGlobal();
-    defer window_stack_mod.WindowStack.clearGlobal();
 
     // 첫 윈도우 생성 (이전 cef.createBrowser 자리)
     _ = stack.manager.create(.{
@@ -720,6 +718,15 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
 
     std.debug.print("[suji] CEF window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
     cef.run();
+
+    // cef.shutdown() 전에 정리: user close → OnBeforeClose → wm.markClosedExternal로
+    // 이미 destroyed=true 세팅된 상태. WM.deinit은 살아있는 창에만 native.destroyWindow를
+    // 호출하므로 CEF가 이미 파괴한 브라우저에 재접근하는 UAF 없음.
+    window_stack_mod.WindowStack.clearGlobal();
+    stack.deinit();
+    cef.CefNative.unregisterGlobal();
+    cef_native.deinit();
+
     cef.shutdown();
 }
 

@@ -18,6 +18,10 @@ pub const TestNative = struct {
     last_bounds: ?window.Bounds = null,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
+    /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
+    /// observed_destroyed_during_destroy에 기록 (CefNative의 DoClose 재진입 시나리오 시뮬레이션).
+    observe_wm: ?*const window.WindowManager = null,
+    observed_destroyed_during_destroy: ?bool = null,
 
     pub fn asNative(self: *TestNative) window.Native {
         return .{ .vtable = &vtable, .ctx = self };
@@ -48,8 +52,14 @@ pub const TestNative = struct {
         return handle;
     }
 
-    fn destroyWindow(ctx: ?*anyopaque, _: u64) void {
-        fromCtx(ctx).destroy_calls += 1;
+    fn destroyWindow(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        self.destroy_calls += 1;
+        if (self.observe_wm) |wm| {
+            if (wm.findByNativeHandle(handle)) |id| {
+                if (wm.get(id)) |w| self.observed_destroyed_during_destroy = w.destroyed;
+            }
+        }
     }
 
     fn setTitle(ctx: ?*anyopaque, _: u64, title: []const u8) void {

@@ -270,12 +270,17 @@ pub const WindowManager = struct {
     }
 
     /// lock 이미 잡은 상태에서 실제 파괴. 내부 헬퍼.
+    ///
+    /// 순서가 중요: destroyed 마킹 + by_name 정리를 **native.destroyWindow 호출 전**에.
+    /// 이유: native 구현(CefNative)이 close_browser를 호출하면 CEF가 동기로 DoClose
+    /// 콜백을 발화할 수 있다. DoClose 훅이 "이 창은 이미 WM이 닫는 중"인지 판단하려면
+    /// destroyed 플래그가 미리 세팅되어 있어야 한다.
     fn destroyLocked(self: *WindowManager, win: *Window) void {
-        self.native.destroyWindow(win.native_handle);
         win.destroyed = true;
         if (win.name) |n| {
             _ = self.by_name.remove(n);
         }
+        self.native.destroyWindow(win.native_handle);
     }
 
     /// 창 파괴 (강제). 이벤트 X, 취소 불가. `window:closed` 이벤트는 `close()` 경로에서만.
@@ -338,8 +343,9 @@ pub const WindowManager = struct {
             while (it.next()) |entry| {
                 const w = entry.value_ptr.*;
                 if (!w.destroyed) {
-                    self.native.destroyWindow(w.native_handle);
+                    // destroyLocked과 같은 이유로 destroyed 마킹을 native 호출 전에.
                     w.destroyed = true;
+                    self.native.destroyWindow(w.native_handle);
                     closed_ids.appendAssumeCapacity(w.id);
                 }
             }
@@ -362,6 +368,57 @@ pub const WindowManager = struct {
 
     pub fn fromName(self: *const WindowManager, name: []const u8) ?u32 {
         return self.by_name.get(name);
+    }
+
+    /// native_handle로 WM id 역조회. destroyed 창도 포함 (CEF 콜백이 "이미 WM 처리됨"을
+    /// 구별하려면 destroyed 상태로도 찾을 수 있어야).
+    pub fn findByNativeHandle(self: *const WindowManager, handle: u64) ?u32 {
+        var it = self.windows.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.*.native_handle == handle) {
+                return entry.value_ptr.*.id;
+            }
+        }
+        return null;
+    }
+
+    /// 외부 트리거(예: CEF DoClose)용 "물어보기" 버전. `window:close` 취소 가능 이벤트를
+    /// 발화하고 preventDefault 여부를 반환. **실제 파괴/`window:closed` 이벤트는 발화 X**
+    /// — 외부 layer가 파괴를 수행하고 나중에 markClosedExternal로 WM에 통지.
+    pub fn tryClose(self: *WindowManager, id: u32) Error!bool {
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            _ = try self.getLiveLocked(id);
+        }
+        if (self.sink) |s| {
+            var buf: [512]u8 = undefined;
+            const payload = buildIdPayload(&buf, id);
+            var ev: SujiEvent = .{};
+            s.emitCancelable(events.close, payload, &ev);
+            if (ev.default_prevented) return false;
+        }
+        return true;
+    }
+
+    /// 외부(예: CEF OnBeforeClose)가 이미 파괴한 윈도우를 WM에 알림.
+    /// destroyed 마킹 + by_name 정리 + `window:closed` 이벤트 발화.
+    /// **native.destroyWindow는 호출하지 않음** — 외부가 이미 처리.
+    pub fn markClosedExternal(self: *WindowManager, id: u32) Error!void {
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            const win = try self.getLiveLocked(id);
+            win.destroyed = true;
+            if (win.name) |n| {
+                _ = self.by_name.remove(n);
+            }
+        }
+        if (self.sink) |s| {
+            var buf: [512]u8 = undefined;
+            const payload = buildIdPayload(&buf, id);
+            s.emit(events.closed, payload);
+        }
     }
 
     pub fn setTitle(self: *WindowManager, id: u32, title: []const u8) Error!void {

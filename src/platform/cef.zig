@@ -243,9 +243,9 @@ pub const CefNative = struct {
     allocator: std.mem.Allocator,
     /// 모든 윈도우가 공유하는 client (콜백이 전부 module-global이라 공유 안전)
     client: c.cef_client_t = undefined,
-    /// WindowManager가 저장하는 native_handle (u64) → CEF browser 포인터
+    /// WindowManager의 native_handle (= CEF browser identifier를 u64로 캐스팅) → CEF browser 포인터.
+    /// browser identifier를 그대로 handle로 쓰므로 CEF 콜백이 별도 매핑 없이 역조회 가능.
     browsers: std.AutoHashMap(u64, *c.cef_browser_t),
-    next_handle: u64 = 1,
     /// opts.url이 null일 때 사용. "" 이면 CEF는 about:blank 수준의 빈 페이지를 로드.
     default_url: [:0]const u8 = "",
 
@@ -260,9 +260,21 @@ pub const CefNative = struct {
     }
 
     pub fn deinit(self: *CefNative) void {
-        // 브라우저 실제 파괴는 WindowManager.destroyAll 또는 개별 close/destroy 경유.
-        // 여기선 테이블만 정리 (CEF는 OnBeforeClose로 수명 관리).
+        // 브라우저 수명은 CEF가 OnBeforeClose로 관리 → 우리는 테이블만 정리.
         self.browsers.deinit();
+    }
+
+    /// life_span_handler 콜백이 참조할 수 있도록 stable 포인터 등록.
+    pub fn registerGlobal(self: *CefNative) void {
+        g_cef_native = self;
+    }
+    pub fn unregisterGlobal() void {
+        g_cef_native = null;
+    }
+
+    /// CEF가 OnBeforeClose에서 확정 파괴를 알렸을 때 테이블에서 제거.
+    pub fn purge(self: *CefNative, handle: u64) void {
+        _ = self.browsers.remove(handle);
     }
 
     pub fn asNative(self: *CefNative) window_mod.Native {
@@ -343,9 +355,15 @@ pub const CefNative = struct {
         if (browser == null) return error.BrowserCreationFailed;
         const br: *c.cef_browser_t = @ptrCast(browser);
 
-        const handle = self.next_handle;
-        self.browsers.put(handle, br) catch return error.OutOfMemory;
-        self.next_handle += 1;
+        // handle = CEF browser identifier (프로세스 내 unique). life_span 콜백이
+        // 같은 정수로 역조회 가능.
+        const handle: u64 = @intCast(br.get_identifier.?(br));
+        self.browsers.put(handle, br) catch {
+            // CEF browser는 이미 살아있음 → close_browser로 정리해 handle 누수 방지
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            if (host) |h| h.close_browser.?(h, 1);
+            return error.OutOfMemory;
+        };
         return handle;
     }
 
@@ -706,11 +724,16 @@ fn handleBrowserEmit(msg: *c._cef_process_message_t) i32 {
 // ============================================
 
 var g_life_span_handler: c.cef_life_span_handler_t = undefined;
+/// life_span_handler 콜백이 참조하는 CefNative 싱글턴 포인터.
+/// 프로세스당 하나의 CefNative만 등록된다고 가정 (CefNative.registerGlobal이 세팅).
+/// 여러 인스턴스 등록 시 마지막만 유효 — 현재 설계는 이 제약을 강제하지 않음.
+var g_cef_native: ?*CefNative = null;
 
 fn initLifeSpanHandler() void {
     zeroCefStruct(c.cef_life_span_handler_t, &g_life_span_handler);
     initBaseRefCounted(&g_life_span_handler.base);
     g_life_span_handler.on_after_created = &onAfterCreated;
+    g_life_span_handler.do_close = &doClose;
     g_life_span_handler.on_before_close = &onBeforeClose;
 }
 
@@ -723,13 +746,44 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
     std.debug.print("[suji] CEF browser after_created: id={d}\n", .{br.get_identifier.?(br)});
 }
 
+/// CEF가 browser close 요청을 처리할지 물어보는 훅.
+/// - WM이 이미 close 중(destroyed=true)이면 통과 (WM 경로가 이미 이벤트 발화함)
+/// - 아니면 사용자/OS 기인 close → wm.tryClose로 라우팅해 `window:close` 취소 가능 이벤트 발화
+/// 반환: 0 = 진행, 1 = 취소 (브라우저 유지)
+fn doClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) i32 {
+    const br = browser orelse return 0;
+    const wm = window_mod.WindowManager.global orelse return 0;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+    const id = wm.findByNativeHandle(handle) orelse return 0;
+    const w = wm.get(id) orelse return 0;
+
+    // WM이 이미 close 중 → WM이 close_browser를 직접 호출해서 온 DoClose. 통과.
+    if (w.destroyed) return 0;
+
+    // 사용자/OS 기인 close — 취소 가능 이벤트 발화 + 결과 반환
+    const proceed = wm.tryClose(id) catch return 0;
+    return if (proceed) 0 else 1;
+}
+
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
-    if (browser) |br| {
-        if (g_browser) |main| {
-            if (br.get_identifier.?(br) != main.get_identifier.?(main)) {
-                return; // 서브 브라우저 (DevTools 등)
-            }
-        }
+    const br = browser orelse return;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+
+    // CefNative 테이블 purge
+    if (g_cef_native) |cn| cn.purge(handle);
+
+    // WM 통지 (이미 destroyed면 wm.close가 처리한 것이므로 skip)
+    notifyWm: {
+        const wm = window_mod.WindowManager.global orelse break :notifyWm;
+        const id = wm.findByNativeHandle(handle) orelse break :notifyWm;
+        const w = wm.get(id) orelse break :notifyWm;
+        if (w.destroyed) break :notifyWm;
+        wm.markClosedExternal(id) catch {};
+    }
+
+    // 메인 브라우저 close면 메시지 루프 종료
+    if (g_browser) |main| {
+        if (br.get_identifier.?(br) != main.get_identifier.?(main)) return;
     }
     c.cef_quit_message_loop();
 }

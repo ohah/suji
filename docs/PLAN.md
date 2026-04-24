@@ -396,8 +396,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] Step A: CefNative 스켈레톤 — `window.Native` vtable을 CEF로 구현 (`src/platform/cef.zig`)
     - [x] Step B.1: EventBusSink 어댑터 — WM.EventSink → EventBus + cancelable 리스너 레지스트리
     - [x] Step B.2: `main.zig` 배선 — WindowStack으로 WM + CefNative + Sink 통합, 첫 윈도우 `wm.create` 경유
-    - [ ] Step B.3: `CefLifeSpanHandler::DoClose` 가로채 → `wm.close(id)` (사용자 X/Cmd+W close 취소 가능)
-    - [ ] Step B.4: `OnBeforeClose` → CefNative 테이블 정리 + WM 통지
+    - [x] Step B.3+B.4: CEF life_span 통합 — `DoClose` 취소 가능 이벤트 라우팅 + `OnBeforeClose` 테이블 정리 + WM 통지. `tryClose`/`markClosedExternal`/`findByNativeHandle` 추가. `destroyLocked` reorder (destroyed 마킹을 native 호출 전에 — DoClose 재진입 시 중복 이벤트 방지)
     - [ ] Step B.5: 기존 `createNewWindow` PoC 제거, Cmd+W → `wm.close` 경유
     - [ ] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow, Linux GTK, Windows Win32)
     - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)
