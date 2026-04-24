@@ -32,6 +32,10 @@ pub const events = struct {
     pub const created = "window:created";
     pub const close = "window:close";
     pub const closed = "window:closed";
+    /// 마지막 live 윈도우가 파괴되어 남은 창이 0개가 되는 순간 발화. Electron의
+    /// `app.on('window-all-closed', ...)`와 동등. macOS는 보통 이 시점에도 종료하지
+    /// 않고 dock에 남지만, Windows/Linux는 여기서 quit하는 것이 관습.
+    pub const all_closed = "window:all-closed";
 };
 
 pub const CreateOptions = struct {
@@ -285,10 +289,15 @@ pub const WindowManager = struct {
 
     /// 창 파괴 (강제). 이벤트 X, 취소 불가. `window:closed` 이벤트는 `close()` 경로에서만.
     pub fn destroy(self: *WindowManager, id: u32) Error!void {
-        self.lock.lockUncancelable(self.io);
-        defer self.lock.unlock(self.io);
-        const win = try self.getLiveLocked(id);
-        self.destroyLocked(win);
+        var live_after: usize = undefined;
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            const win = try self.getLiveLocked(id);
+            self.destroyLocked(win);
+            live_after = self.liveCountLocked();
+        }
+        self.maybeEmitAllClosed(true, live_after);
     }
 
     /// 정책적 close. `window:close`(취소 가능) 발화 → preventDefault 아니면 파괴 +
@@ -312,11 +321,13 @@ pub const WindowManager = struct {
         }
 
         // Phase 3: 실제 파괴 (lock, listener 도중 destroy됐는지 재확인)
+        var live_after: usize = undefined;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
             const win = try self.getLiveLocked(id);
             self.destroyLocked(win);
+            live_after = self.liveCountLocked();
         }
 
         // Phase 4: 단방향 이벤트 (lock 밖)
@@ -325,6 +336,7 @@ pub const WindowManager = struct {
             const payload = buildIdPayload(&buf, id);
             s.emit(events.closed, payload);
         }
+        self.maybeEmitAllClosed(true, live_after);
         return true;
     }
 
@@ -360,6 +372,8 @@ pub const WindowManager = struct {
                 s.emit(events.closed, payload);
             }
         }
+        // destroyAll 이후 live=0 (모두 destroyed 마킹됨). lock 재획득 없이 직접 0 전달.
+        self.maybeEmitAllClosed(closed_ids.items.len > 0, 0);
     }
 
     pub fn get(self: *const WindowManager, id: u32) ?*const Window {
@@ -405,6 +419,7 @@ pub const WindowManager = struct {
     /// destroyed 마킹 + by_name 정리 + `window:closed` 이벤트 발화.
     /// **native.destroyWindow는 호출하지 않음** — 외부가 이미 처리.
     pub fn markClosedExternal(self: *WindowManager, id: u32) Error!void {
+        var live_after: usize = undefined;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
@@ -413,12 +428,40 @@ pub const WindowManager = struct {
             if (win.name) |n| {
                 _ = self.by_name.remove(n);
             }
+            live_after = self.liveCountLocked();
         }
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
             const payload = buildIdPayload(&buf, id);
             s.emit(events.closed, payload);
         }
+        self.maybeEmitAllClosed(true, live_after);
+    }
+
+    /// 살아있는(destroyed=false) 창의 개수. O(N). Lock 획득.
+    pub fn liveCount(self: *WindowManager) usize {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        return self.liveCountLocked();
+    }
+
+    /// liveCount lock 보유 버전. 내부 헬퍼.
+    fn liveCountLocked(self: *const WindowManager) usize {
+        var count: usize = 0;
+        var it = self.windows.iterator();
+        while (it.next()) |entry| {
+            if (!entry.value_ptr.*.destroyed) count += 1;
+        }
+        return count;
+    }
+
+    /// `destroyed_any=true` & `live_count_after==0`이면 `window:all-closed` 발화.
+    /// live_count는 caller가 lock 안에서 계산해 전달 (lock 재획득 회피).
+    fn maybeEmitAllClosed(self: *WindowManager, destroyed_any: bool, live_count_after: usize) void {
+        if (!destroyed_any) return;
+        if (live_count_after > 0) return;
+        const s = self.sink orelse return;
+        s.emit(events.all_closed, "{}");
     }
 
     pub fn setTitle(self: *WindowManager, id: u32, title: []const u8) Error!void {

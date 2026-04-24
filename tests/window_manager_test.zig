@@ -422,7 +422,7 @@ test "close emits cancelable window:close, then window:closed on success" {
 
     const destroyed = try wm.close(id);
     try std.testing.expect(destroyed);
-    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+    // window:close, window:closed 순서 + (마지막 창이므로) window:all-closed
     try std.testing.expectEqualStrings("window:close", sink.events.items[0].name);
     try std.testing.expect(sink.events.items[0].cancelable);
     try std.testing.expectEqualStrings("window:closed", sink.events.items[1].name);
@@ -511,7 +511,7 @@ test "WindowManager without sink operates silently" {
     try std.testing.expect(wm.get(id).?.destroyed);
 }
 
-test "destroy does not emit window:closed (only close does)" {
+test "destroy does not emit window:close or window:closed (silent destruction)" {
     var native = TestNative{};
     var sink = TestSink{};
     defer sink.deinit();
@@ -523,8 +523,9 @@ test "destroy does not emit window:closed (only close does)" {
     sink.events.clearRetainingCapacity();
 
     try wm.destroy(id);
-    // destroy()는 강제 파괴, 이벤트 발화 X
-    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+    // destroy()는 close/closed를 발화하지 않음 (all-closed는 라이프사이클 이벤트라 별도)
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.close));
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.closed));
 }
 
 // ============================================
@@ -780,10 +781,10 @@ test "close event payloads carry windowId" {
     sink.reset();
 
     _ = try wm.close(id);
-    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
 
     var buf: [64]u8 = undefined;
     const expected = try std.fmt.bufPrint(&buf, "\"windowId\":{d}", .{id});
+    // window:close / window:closed 모두 id 포함
     try std.testing.expect(contains(sink.events.items[0].data, expected));
     try std.testing.expectEqualStrings("window:close", sink.events.items[0].name);
     try std.testing.expect(contains(sink.events.items[1].data, expected));
@@ -804,8 +805,8 @@ test "destroyAll event payloads carry each windowId" {
 
     try wm.destroyAll();
 
-    // 각 창마다 window:closed 하나씩, payload에 해당 id 포함
-    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+    // 각 창마다 window:closed 하나씩 + all-closed 1회
+    var closed_count: usize = 0;
     var seen1 = false;
     var seen2 = false;
     var buf: [64]u8 = undefined;
@@ -813,10 +814,13 @@ test "destroyAll event payloads carry each windowId" {
     var buf2: [64]u8 = undefined;
     const e2 = try std.fmt.bufPrint(&buf2, "\"windowId\":{d}", .{id2});
     for (sink.events.items) |ev| {
-        try std.testing.expectEqualStrings("window:closed", ev.name);
-        if (contains(ev.data, e1)) seen1 = true;
-        if (contains(ev.data, e2)) seen2 = true;
+        if (std.mem.eql(u8, ev.name, window.events.closed)) {
+            closed_count += 1;
+            if (contains(ev.data, e1)) seen1 = true;
+            if (contains(ev.data, e2)) seen2 = true;
+        }
     }
+    try std.testing.expectEqual(@as(usize, 2), closed_count);
     try std.testing.expect(seen1);
     try std.testing.expect(seen2);
 }
@@ -1416,9 +1420,9 @@ test "markClosedExternal emits window:closed (not window:close)" {
     sink.reset();
 
     try wm.markClosedExternal(id);
-    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
-    try std.testing.expectEqualStrings(window.events.closed, sink.events.items[0].name);
-    try std.testing.expect(!sink.events.items[0].cancelable);
+    // close는 발화 X, closed는 1회 (all-closed는 별개)
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.close));
+    try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.closed));
 }
 
 // ============================================
@@ -1457,6 +1461,156 @@ test "findByNativeHandle returns null for unknown handle" {
 // 통합 — tryClose + markClosedExternal 조합이 CEF 외부 close 흐름 모사
 // ============================================
 
+// ============================================
+// window:all-closed — 마지막 창 파괴 시 발화
+// ============================================
+
+fn countEvents(sink: *const TestSink, name: []const u8) usize {
+    var n: usize = 0;
+    for (sink.events.items) |ev| if (std.mem.eql(u8, ev.name, name)) { n += 1; };
+    return n;
+}
+
+test "all-closed fires after closing last window via close()" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+
+    _ = try wm.close(id);
+    try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed does NOT fire when closing one of multiple windows" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id1 = try wm.create(.{});
+    _ = try wm.create(.{});
+    sink.reset();
+
+    _ = try wm.close(id1);
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed does NOT fire when close is preventDefault-ed" {
+    var native = TestNative{};
+    var sink = TestSink{ .prevent_for = window.events.close };
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+
+    _ = try wm.close(id);
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed fires after destroy() of last window" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+
+    try wm.destroy(id);
+    try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed fires after markClosedExternal of last window" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+
+    try wm.markClosedExternal(id);
+    try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed fires once after destroyAll" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{});
+    _ = try wm.create(.{});
+    _ = try wm.create(.{});
+    sink.reset();
+
+    try wm.destroyAll();
+    try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed does NOT fire from destroyAll on empty WM" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    // 창이 없는 상태에서 destroyAll
+    try wm.destroyAll();
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.all_closed));
+}
+
+test "all-closed payload is {}" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+    _ = try wm.close(id);
+
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, window.events.all_closed)) {
+            try std.testing.expectEqualStrings("{}", ev.data);
+            return;
+        }
+    }
+    try std.testing.expect(false); // 찾지 못함
+}
+
+test "liveCount reflects non-destroyed windows" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    try std.testing.expectEqual(@as(usize, 0), wm.liveCount());
+    const a = try wm.create(.{});
+    _ = try wm.create(.{});
+    try std.testing.expectEqual(@as(usize, 2), wm.liveCount());
+    try wm.destroy(a);
+    try std.testing.expectEqual(@as(usize, 1), wm.liveCount());
+}
+
 test "tryClose then markClosedExternal simulates CEF user-close flow" {
     var native = TestNative{};
     var sink = TestSink{};
@@ -1477,8 +1631,7 @@ test "tryClose then markClosedExternal simulates CEF user-close flow" {
     try std.testing.expect(wm.get(id).?.destroyed);
     try std.testing.expectEqual(@as(usize, 0), native.destroy_calls);
 
-    // 이벤트 순서: close, closed
-    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+    // 순서: close → closed (all-closed는 마지막이 마지막이라 추가로 따라붙음)
     try std.testing.expectEqualStrings(window.events.close, sink.events.items[0].name);
     try std.testing.expect(sink.events.items[0].cancelable);
     try std.testing.expectEqualStrings(window.events.closed, sink.events.items[1].name);
