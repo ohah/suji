@@ -372,17 +372,25 @@ pub const CefNative = struct {
         host.set_focus.?(host, 1);
     }
 
-    // TODO Step C: setTitle / setBounds는 OS 네이티브 윈도우 핸들을 받아 플랫폼별로
-    // 처리해야 한다. CEF Alloy runtime에는 별도 API가 없어서 host.get_window_handle()로
-    // NSWindow*/HWND/GtkWindow*를 받아 직접 조작.
-    fn setTitle(_: ?*anyopaque, _: u64, _: []const u8) void {
+    // Step C: setTitle / setBounds 플랫폼별 연결. macOS는 BrowserEntry.ns_window를 경유.
+    // Linux/Windows는 CEF가 자체 윈도우를 관리 → 추후 host.get_window_handle()로 HWND /
+    // GtkWindow* 접근. 지금은 macOS만 구현, 나머지는 no-op (빌드되지만 동작 X).
+    fn setTitle(ctx: ?*anyopaque, handle: u64, title: []const u8) void {
         assertUiThread();
-        // Step C에서 플랫폼별 구현 (NSWindow setTitle:, SetWindowTextW, gtk_window_set_title)
+        if (!is_macos) return;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const ns_window = entry.ns_window orelse return;
+        setMacWindowTitle(ns_window, title);
     }
 
-    fn setBounds(_: ?*anyopaque, _: u64, _: window_mod.Bounds) void {
+    fn setBounds(ctx: ?*anyopaque, handle: u64, bounds: window_mod.Bounds) void {
         assertUiThread();
-        // Step C에서 플랫폼별 구현 (NSWindow setFrame:, SetWindowPos, gtk_window_*)
+        if (!is_macos) return;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const ns_window = entry.ns_window orelse return;
+        setMacWindowBounds(ns_window, bounds);
     }
 };
 
@@ -1925,4 +1933,56 @@ fn closeMacWindow(ns_window: ?*anyopaque) void {
     const closeSel = objc.sel_registerName("close");
     const closeFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     closeFn(w, @ptrCast(closeSel));
+}
+
+/// macOS: NSWindow.setTitle:(NSString*). title은 임의 slice (non-null-terminated 가능)
+/// → 스택 버퍼로 null-terminate 후 NSString 변환.
+fn setMacWindowTitle(ns_window: *anyopaque, title: []const u8) void {
+    var buf: [512]u8 = undefined;
+    if (title.len >= buf.len) return; // 512바이트 넘는 타이틀은 거부 (현실적 한계)
+    @memcpy(buf[0..title.len], title);
+    buf[title.len] = 0;
+
+    const NSString = getClass("NSString") orelse return;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), @ptrCast(&buf)) orelse return;
+
+    msgSendVoid1(ns_window, "setTitle:", ns_title);
+}
+
+/// macOS: NSWindow.setFrame:display:. NSRect는 Cocoa 좌표(bottom-left origin)를 쓰지만
+/// Suji Bounds는 top-left 기준이라 화면 높이로 변환. 변환 실패(main screen 없음 등)시
+/// 그대로 전달.
+///
+/// ARM64 ABI: NSRect (4x f64)는 float 레지스터(d0-d3)로 전달. extern fn 시그니처에
+/// NSRect를 그대로 두면 Zig 컴파일러가 올바른 calling convention을 선택.
+fn setMacWindowBounds(ns_window: *anyopaque, bounds: window_mod.Bounds) void {
+    const NSRect = extern struct {
+        origin_x: f64,
+        origin_y: f64,
+        width: f64,
+        height: f64,
+    };
+
+    const w_f: f64 = @floatFromInt(bounds.width);
+    const h_f: f64 = @floatFromInt(bounds.height);
+    const x_f: f64 = @floatFromInt(bounds.x);
+    const top_y_f: f64 = @floatFromInt(bounds.y);
+
+    // screen.frame.size.height 읽어 Cocoa Y로 변환. 실패 시 그대로 사용.
+    const cocoa_y: f64 = blk: {
+        const NSScreen = getClass("NSScreen") orelse break :blk top_y_f;
+        const mainScreen = msgSend(NSScreen, "mainScreen") orelse break :blk top_y_f;
+        // [screen frame] — 반환이 NSRect (struct). objc_msgSend_stret이 필요할 수 있지만
+        // ARM64는 단일 msgSend로 struct return 처리. 함수 포인터 타입으로 직접 호출.
+        const frameFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+        const screen_frame = frameFn(mainScreen, @ptrCast(objc.sel_registerName("frame")));
+        break :blk screen_frame.height - top_y_f - h_f;
+    };
+
+    const rect: NSRect = .{ .origin_x = x_f, .origin_y = cocoa_y, .width = w_f, .height = h_f };
+
+    const setFrameSel = objc.sel_registerName("setFrame:display:");
+    const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setFrameFn(ns_window, @ptrCast(setFrameSel), rect, 1); // display:YES
 }

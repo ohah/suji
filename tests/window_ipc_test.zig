@@ -101,3 +101,147 @@ test "handleCreateWindow rejects small buffer WITHOUT creating window" {
     try std.testing.expect(resp == null);
     try std.testing.expectEqual(@as(usize, 0), native.create_calls);
 }
+
+// ============================================
+// Step C — handleSetTitle / handleSetBounds
+// ============================================
+
+test "handleSetTitle forwards title to native.setTitle" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .title = "old" });
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetTitle(.{ .window_id = 1, .title = "new title" }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(usize, 1), native.set_title_calls);
+    try std.testing.expectEqualStrings("new title", native.last_title.?);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"cmd\":\"set_title\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":true") != null);
+}
+
+test "handleSetTitle on unknown id returns ok:false, does not call native" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetTitle(.{ .window_id = 999, .title = "x" }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(usize, 0), native.set_title_calls);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":false") != null);
+}
+
+test "handleSetBounds forwards bounds to native.setBounds" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .bounds = .{ .width = 100, .height = 100 } });
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetBounds(.{
+        .window_id = 1,
+        .x = 10,
+        .y = 20,
+        .width = 800,
+        .height = 600,
+    }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(usize, 1), native.set_bounds_calls);
+    const lb = native.last_bounds.?;
+    try std.testing.expectEqual(@as(i32, 10), lb.x);
+    try std.testing.expectEqual(@as(i32, 20), lb.y);
+    try std.testing.expectEqual(@as(u32, 800), lb.width);
+    try std.testing.expectEqual(@as(u32, 600), lb.height);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":true") != null);
+}
+
+test "handleSetBounds rejects small buffer" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    var tiny: [3]u8 = undefined;
+    const resp = ipc.handleSetBounds(.{ .window_id = 1 }, &tiny, &wm);
+    try std.testing.expect(resp == null);
+}
+
+test "handleSetBounds on unknown id returns ok:false, does not call native" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetBounds(.{
+        .window_id = 999,
+        .width = 800,
+        .height = 600,
+    }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(usize, 0), native.set_bounds_calls);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"windowId\":999") != null);
+}
+
+test "handleSetTitle rejects small buffer" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    var tiny: [3]u8 = undefined;
+    const resp = ipc.handleSetTitle(.{ .window_id = 1, .title = "x" }, &tiny, &wm);
+    try std.testing.expect(resp == null);
+}
+
+test "handleSetTitle on destroyed window returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "living" });
+    try wm.destroy(id);
+
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetTitle(.{ .window_id = id, .title = "ghost" }, &buf, &wm).?;
+
+    // destroy 후엔 setTitle이 실패해야 한다.
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":false") != null);
+}
+
+test "handleSetBounds on destroyed window returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "living" });
+    try wm.destroy(id);
+
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetBounds(.{ .window_id = id, .width = 100, .height = 100 }, &buf, &wm).?;
+
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":false") != null);
+}
+
+test "handleSetTitle response is valid JSON (parsable)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .title = "x" });
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleSetTitle(.{ .window_id = 1, .title = "new" }, &buf, &wm).?;
+
+    const Parsed = struct { windowId: u32, cmd: []const u8, from: []const u8, ok: bool };
+    const parsed = try std.json.parseFromSlice(
+        Parsed,
+        std.testing.allocator,
+        resp,
+        .{ .ignore_unknown_fields = true },
+    );
+    defer parsed.deinit();
+    try std.testing.expectEqual(@as(u32, 1), parsed.value.windowId);
+    try std.testing.expectEqualStrings("set_title", parsed.value.cmd);
+    try std.testing.expectEqualStrings("zig-core", parsed.value.from);
+    try std.testing.expect(parsed.value.ok);
+}

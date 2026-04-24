@@ -642,15 +642,24 @@ const HotReloadCtx = struct {
 
     fn shouldIgnore(path: []const u8) bool {
         const basename = std.fs.path.basename(path);
-        const ignored = [_][]const u8{
+        const ignored_names = [_][]const u8{
+            // Node/npm lock files — npm install이 스스로 갱신해서 feedback loop
             "package-lock.json",
             "yarn.lock",
             "pnpm-lock.yaml",
+            // OS metadata
             ".DS_Store",
             "Thumbs.db",
         };
-        for (ignored) |name| {
+        for (ignored_names) |name| {
             if (std.mem.eql(u8, basename, name)) return true;
+        }
+        // 빌드 산출물 — rebuild가 생성하므로 watcher가 fire하면 feedback loop.
+        // Go: cgo -buildmode=c-shared → libbackend.h (자동 생성) + libbackend.dylib
+        // Rust/Zig도 dylib 경로 동일.
+        const ignored_prefixes = [_][]const u8{ "libbackend.", "_cgo_" };
+        for (ignored_prefixes) |p| {
+            if (std.mem.startsWith(u8, basename, p)) return true;
         }
         return false;
     }
@@ -978,6 +987,29 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         }, response_buf, wm);
     }
 
+    // set_title 커맨드
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"set_title\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = @intCast(extractJsonInt(req_clean, "\"windowId\":") orelse return null);
+        return window_ipc.handleSetTitle(.{
+            .window_id = win_id,
+            .title = extractJsonString(req_clean, "\"title\":\"") orelse "",
+        }, response_buf, wm);
+    }
+
+    // set_bounds 커맨드
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"set_bounds\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = @intCast(extractJsonInt(req_clean, "\"windowId\":") orelse return null);
+        return window_ipc.handleSetBounds(.{
+            .window_id = win_id,
+            .x = @intCast(extractJsonInt(req_clean, "\"x\":") orelse 0),
+            .y = @intCast(extractJsonInt(req_clean, "\"y\":") orelse 0),
+            .width = @intCast(extractJsonInt(req_clean, "\"width\":") orelse 0),
+            .height = @intCast(extractJsonInt(req_clean, "\"height\":") orelse 0),
+        }, response_buf, wm);
+    }
+
     // quit 커맨드 — 프론트 `__suji__.quit()`가 라우팅됨
     if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"quit\"") != null) {
         cef.quit();
@@ -1016,6 +1048,19 @@ fn extractJsonString(json: []const u8, pattern: []const u8) ?[]const u8 {
         if (json[i] == '"') return json[start..i];
     }
     return null;
+}
+
+/// `"key":123` 패턴에서 숫자 추출. pattern은 `"key":` 까지 포함해서 넘기면 됨.
+/// 공백/음수 허용. parseInt 실패 또는 패턴 없으면 null.
+fn extractJsonInt(json: []const u8, pattern: []const u8) ?i64 {
+    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
+    var start = idx + pattern.len;
+    while (start < json.len and json[start] == ' ') : (start += 1) {}
+    var end = start;
+    if (end < json.len and json[end] == '-') end += 1;
+    while (end < json.len and json[end] >= '0' and json[end] <= '9') : (end += 1) {}
+    if (end == start) return null;
+    return std.fmt.parseInt(i64, json[start..end], 10) catch null;
 }
 
 /// JSON 이스케이프 복원: \" → ", \\ → \

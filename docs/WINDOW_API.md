@@ -730,16 +730,90 @@ Electron 앱 포팅 시 찾기-바꾸기 수준으로 줄어들도록 용어를 
 
 | Electron | Suji |
 |---|---|
-| `ipcRenderer.invoke(ch, data)` | `suji.invoke(ch, data)` |
+| `ipcRenderer.invoke(ch, ...args)` | `suji.invoke(ch, data)` — data는 단일 객체 (아래 "주요 설계 차이" 참조) |
 | `ipcRenderer.send(ch, data)` | `suji.emit(ch, data)` |
 | `ipcRenderer.on(ch, fn)` | `suji.on(ch, fn)` |
-| `ipcMain.handle(ch, fn)` | 백엔드 `handle(ch, fn)` |
+| `ipcMain.handle(ch, (event, ...args) => {})` | 백엔드 `handle(ch, (req, event) => {})` — 시그니처 순서 다름 (아래 참조) |
 | `ipcMain.on(ch, fn)` | 백엔드 `on(ch, fn)` |
+| `event.sender` / `BrowserWindow.fromWebContents(e.sender)` | `event.window` rich 객체 (`{id, name, url, frame}`) |
 | `win.webContents.send(ch, data)` | `suji.emit(ch, data, {to: winId})` or `suji.sendTo(winId, ch, data)` |
+| `BrowserWindow.getAllWindows()` | `windows[]` config + SDK `suji.windows.all()` |
+| `app.quit()` | `suji.quit()` |
+| `process.platform` | `suji.platform` — **"macos"** (Electron은 "darwin") |
 | `MessageChannelMain` | **미지원 (V1)** — 아래 참조 |
 | `remote` 모듈 | **미지원** (Electron도 deprecated) |
-| `preload.js` | **미지원** — 아래 참조 |
-| `contextBridge` | 코어가 `window.__suji__`만 자동 주입 |
+| `preload.js` | **미지원** — 아래 참조 (Suji 렌더러는 Node 노출 자체가 없음) |
+| `contextBridge` | **미제공** — 대신 `contextIsolation: true`면 `Object.freeze` 프록시 자동 주입 |
+
+### 주요 설계 차이 (Electron과 의도적으로 다른 부분)
+
+#### 1. `invoke` 인자 스타일: variadic → 단일 객체
+
+Electron은 `ipcRenderer.invoke('ch', a, b, c)` variadic. Suji는 `suji.invoke('ch', data)`
+단일 객체.
+
+**이유**: 크로스-언어 JSON 직렬화. Zig/Rust/Go/Node 백엔드가 같은 wire 포맷을 쓰려면
+positional varargs보다 named 필드 객체가 자연스럽다. Electron은 JS only라 variadic이
+V8 네이티브 지원되지만, Suji는 JSON 한 겹을 거치므로 객체가 표준.
+
+#### 2. 핸들러 시그니처: `(event, ...args)` → `(req, event)`
+
+Electron:
+```js
+ipcMain.handle('ch', (event, a, b) => { event.sender.getURL() })
+```
+
+Suji (모든 백엔드 언어):
+```zig
+fn h(req: Request, event: Event) Response {
+    req.string("name");     // 사용자 데이터
+    event.window.url;       // rich 컨텍스트
+}
+```
+
+**차이**:
+- 순서: Suji는 `req` 먼저 (주 데이터 우선). Electron은 `event` 먼저 (sender 강조).
+- 인자 풀기: Suji는 req 하나에 모든 필드 병합. Electron은 args 위치 기반.
+
+**이유**: Suji는 크로스-언어 공통 시그니처가 필요. Zig/Go는 variadic이 번거롭고,
+Rust는 `#[handle]` 매크로가 시그니처를 검사해야 해서 고정 arity가 단순.
+
+#### 3. Wire 레벨 `__window` 자동 태깅 (Suji 신규)
+
+Electron은 프레임 ID를 V8 IPC에 암묵 전달하고 handler 호출 시 `event.sender`로 풀음.
+Suji는 **JSON payload에 `__window: <id>` 필드 자동 주입**. `event.window`는 이 필드에서
+파생된 편의 객체.
+
+**효과**:
+- 저수준 접근 필요한 플러그인은 wire 필드 직접 읽을 수 있음 (JSON에 그냥 박혀있음)
+- 크로스-언어에서 context 전파가 자연스러움 (V8 hidden context 같은 것 불필요)
+- 로그/감사에서 "어느 창이 호출했는지" wire 레벨에서 확인 가능
+
+#### 4. 보안 경계: contextBridge → Object.freeze 프록시
+
+Electron의 `contextBridge.exposeInMainWorld`는 **preload에서 isolated world로 값을 복사**
+하는 API. Suji는 preload 자체를 제공하지 않는 대신 `contextIsolation: true` 옵션이 켜지면
+`window.__suji__`를 별도 V8 world에 생성 후 **Object.freeze 프록시만 메인 월드에 노출**.
+
+**이유**: Suji 렌더러는 Node API 노출이 없어 preload가 해결하려던 "Node API leak" 문제가
+애초에 없음. contextBridge는 사용자가 필요한 API를 직접 골라 노출하는 책임이 있는데,
+Suji는 `window.__suji__` 하나만 통과시키면 되어 프록시 자동화가 가능.
+
+#### 5. 플랫폼 문자열: `darwin` → `macos`
+
+Electron: `process.platform` = `"darwin"` / `"linux"` / `"win32"`
+Suji: `suji.platform` = `"macos"` / `"linux"` / `"windows"`
+
+**이유**: Suji는 BSD 커널 기반 이름(`darwin`)이 아닌 **사용자 친화적 OS 이름**으로 통일.
+`win32` 같은 레거시 문자열도 `"windows"`로 단순화. Electron 코드 포팅 시 **상수 재매핑만**
+필요 (`PLATFORM_MACOS` 같은 상수 상수 쌍으로 안전성 확보).
+
+#### 6. 지원 플랫폼 범위
+
+Electron: macOS / Linux / Windows / FreeBSD (experimental)
+Suji: **macOS / Linux / Windows 만** — 그 외는 `@compileError`로 빌드 자체 차단.
+
+**이유**: CEF 공식 지원 3대 플랫폼에만 집중 → 엣지 케이스 코드 최소화.
 
 ### 설계 비제공 항목과 이유
 

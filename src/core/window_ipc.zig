@@ -42,3 +42,51 @@ pub fn handleCreateWindow(
         .{id},
     ) catch null;
 }
+
+pub const SetTitleReq = struct {
+    window_id: u32,
+    title: []const u8,
+};
+
+/// set_title 요청 처리. 응답: `{"from":"zig-core","cmd":"set_title","windowId":N,"ok":true|false}`.
+pub fn handleSetTitle(
+    req: SetTitleReq,
+    response_buf: []u8,
+    wm: *window.WindowManager,
+) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setTitle(req.window_id, req.title)) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"set_title\",\"windowId\":{d},\"ok\":{}}}",
+        .{ req.window_id, ok },
+    ) catch null;
+}
+
+pub const SetBoundsReq = struct {
+    window_id: u32,
+    x: i32 = 0,
+    y: i32 = 0,
+    width: u32 = 0,
+    height: u32 = 0,
+};
+
+/// set_bounds 요청 처리. width/height=0이면 현재 유지 (caller 책임).
+pub fn handleSetBounds(
+    req: SetBoundsReq,
+    response_buf: []u8,
+    wm: *window.WindowManager,
+) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setBounds(req.window_id, .{
+        .x = req.x,
+        .y = req.y,
+        .width = req.width,
+        .height = req.height,
+    })) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"set_bounds\",\"windowId\":{d},\"ok\":{}}}",
+        .{ req.window_id, ok },
+    ) catch null;
+}

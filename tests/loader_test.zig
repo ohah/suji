@@ -294,6 +294,9 @@ test "onFileChanged: shouldIgnore covers npm/os-metadata feedback files" {
         "\"yarn.lock\"",
         "\"pnpm-lock.yaml\"",
         "\".DS_Store\"",
+        // 빌드 산출물 prefix (Go cgo가 생성 → watcher 재발화 → 재빌드 loop 방지)
+        "\"libbackend.\"",
+        "\"_cgo_\"",
     };
     for (must_contain) |needle| {
         if (std.mem.indexOf(u8, source, needle) == null) return error.IgnoreEntryMissing;
@@ -307,6 +310,16 @@ test "onFileChanged: shouldIgnore covers npm/os-metadata feedback files" {
         source.len;
     const body = source[fn_start..body_end];
     if (std.mem.indexOf(u8, body, "shouldIgnore(path)") == null) return error.ShouldIgnoreNotCalled;
+
+    // prefix 기반 매칭(startsWith) 경로가 실제 구현되어 있는지 — 단순 eql만 있으면
+    // "libbackend.dylib" 같은 파일이 걸러지지 않음.
+    const marker2 = "fn shouldIgnore(";
+    const fn2_start = std.mem.indexOf(u8, source, marker2) orelse return error.ShouldIgnoreFnNotFound;
+    const body2_end = std.mem.indexOfPos(u8, source, fn2_start + marker2.len, "\n    fn ") orelse
+        std.mem.indexOfPos(u8, source, fn2_start + marker2.len, "\nfn ") orelse
+        source.len;
+    const body2 = source[fn2_start..body2_end];
+    if (std.mem.indexOf(u8, body2, "startsWith") == null) return error.PrefixMatchMissing;
 }
 
 // ============================================
