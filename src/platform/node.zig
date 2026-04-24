@@ -125,5 +125,8 @@ pub const NodeRuntime = struct {
         self.stop();
         bridge.suji_node_shutdown();
         self.initialized = false;
+        // caller가 dupeZ로 넘겨주는 경로 — NodeRuntime이 소유자 계약(startNodeBackend
+        // 참조)이라 여기서 free. 이 경로가 빠지면 Node 백엔드 실행당 path 크기만큼 누수.
+        self.allocator.free(self.entry_path);
     }
 };

@@ -208,3 +208,24 @@ test "Config deinit without arena" {
     var cfg = config.Config{};
     cfg.deinit(); // arena 없어도 크래시 안 남
 }
+
+// ============================================
+// 회귀 테스트 — Config._arena는 반드시 포인터
+// ============================================
+//
+// 값 필드로 바꾸면 `Config { ._arena = arena }` 시점에 ArenaAllocator의 state가 복사되고,
+// 이후 동일 arena를 통한 할당은 stack 원본에만 기록됨. loadJson return 시 스택이 사라지면
+// 그 뒤에 붙은 buffer들이 deinit 경로에 잡히지 않아 leak (JSON 파서 내부 allocation 등).
+test "Config._arena must be a pointer to ArenaAllocator (not a value)" {
+    const T = comptime blk: {
+        const fields = @typeInfo(config.Config).@"struct".fields;
+        for (fields) |f| {
+            if (std.mem.eql(u8, f.name, "_arena")) break :blk f.type;
+        }
+        @compileError("Config._arena field missing");
+    };
+    // ?*ArenaAllocator 형태여야 함 — optional을 풀어 pointer인지 확인.
+    const optional_info = @typeInfo(T).optional;
+    const payload_info = @typeInfo(optional_info.child);
+    try std.testing.expect(payload_info == .pointer);
+}

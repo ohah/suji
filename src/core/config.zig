@@ -12,7 +12,11 @@ pub const Config = struct {
     asset_dir: [:0]const u8 = "assets",
     frontend: Frontend = .{},
 
-    _arena: ?std.heap.ArenaAllocator = null,
+    // _arena는 포인터로 보관. 값으로 담으면 `Config { ._arena = arena }` 시점에 arena의
+    // 내부 state(buffer 리스트 head)가 COPY되고, 이후 동일 arena를 거치는 할당(예:
+    // parseFromSlice 내부)은 stack-local 원본만 갱신 → return으로 스택이 사라지면 그 뒤에
+    // 할당된 buffer가 deinit 경로에 잡히지 않아 leak.
+    _arena: ?*std.heap.ArenaAllocator = null,
 
     pub const App = struct {
         name: [:0]const u8 = "Suji App",
@@ -51,8 +55,10 @@ pub const Config = struct {
     }
 
     pub fn deinit(self: *Config) void {
-        if (self._arena) |*arena| {
+        if (self._arena) |arena| {
+            const child = arena.child_allocator;
             arena.deinit();
+            child.destroy(arena);
             self._arena = null;
         }
     }
@@ -64,7 +70,10 @@ pub const Config = struct {
     fn loadJson(allocator: std.mem.Allocator) !Config {
         const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
 
-        var arena = std.heap.ArenaAllocator.init(allocator);
+        const arena = try allocator.create(std.heap.ArenaAllocator);
+        errdefer allocator.destroy(arena);
+        arena.* = std.heap.ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
         const a = arena.allocator();
 
         const owned = a.dupe(u8, content) catch return error.OutOfMemory;
