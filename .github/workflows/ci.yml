@@ -8,6 +8,8 @@ on:
 
 env:
   NODE_VERSION: '24.14.1'
+  RUST_TOOLCHAIN: '1.83.0'
+  GO_VERSION: '1.26.0'
 
 jobs:
   ci:
@@ -36,6 +38,16 @@ jobs:
         uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.15.2
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -112,3 +124,9 @@ jobs:
 
       - name: Test state plugin
         run: zig build test-state
+
+      - name: Test state plugin Rust wrapper
+        run: zig build test-state-rust
+
+      - name: Test state plugin Go wrapper
+        run: zig build test-state-go

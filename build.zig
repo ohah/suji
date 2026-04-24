@@ -281,6 +281,58 @@ pub fn build(b: *std.Build) void {
     const state_test_step = b.step("test-state", "Run state plugin tests (requires built dylib)");
     state_test_step.dependOn(&state_test_run.step);
 
+    // State plugin Rust 래퍼 통합 테스트
+    // Rust bridge dylib를 cargo로 빌드한 뒤 Zig 테스트에서 로드.
+    const rust_wrapper_mod = b.createModule(.{
+        .root_source_file = b.path("tests/state_rust_wrapper_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    rust_wrapper_mod.addImport("loader", state_loader);
+    const rust_wrapper_test = b.addTest(.{ .root_module = rust_wrapper_mod });
+    const rust_wrapper_run = b.addRunArtifact(rust_wrapper_test);
+    rust_wrapper_run.setCwd(b.path("."));
+
+    const cargo_build_rust_bridge = b.addSystemCommand(&.{ "cargo", "build" });
+    cargo_build_rust_bridge.setCwd(b.path("tests/fixtures/state_rust_bridge"));
+    rust_wrapper_run.step.dependOn(&cargo_build_rust_bridge.step);
+
+    const rust_wrapper_step = b.step("test-state-rust", "Run Rust wrapper integration tests (builds Rust bridge + requires state dylib)");
+    rust_wrapper_step.dependOn(&rust_wrapper_run.step);
+
+    // State plugin Go 래퍼 통합 테스트
+    const go_wrapper_mod = b.createModule(.{
+        .root_source_file = b.path("tests/state_go_wrapper_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    go_wrapper_mod.addImport("loader", state_loader);
+    const go_wrapper_test = b.addTest(.{ .root_module = go_wrapper_mod });
+    const go_wrapper_run = b.addRunArtifact(go_wrapper_test);
+    go_wrapper_run.setCwd(b.path("."));
+
+    const go_bridge_lib = switch (target.result.os.tag) {
+        .macos => "libbackend.dylib",
+        .linux => "libbackend.so",
+        .windows => "backend.dll",
+        else => "libbackend.dylib",
+    };
+    const go_build = b.addSystemCommand(&.{
+        "go", "build", "-buildmode=c-shared", "-o", go_bridge_lib, "main.go",
+    });
+    go_build.setCwd(b.path("tests/fixtures/state_go_bridge"));
+    // macOS: Homebrew LLVM과 충돌 회피 (examples/multi-backend/backends/go와 동일)
+    if (target.result.os.tag == .macos) {
+        go_build.setEnvironmentVariable("CC", "/usr/bin/clang");
+    }
+    go_build.setEnvironmentVariable("CGO_ENABLED", "1");
+    go_wrapper_run.step.dependOn(&go_build.step);
+
+    const go_wrapper_step = b.step("test-state-go", "Run Go wrapper integration tests (builds Go bridge + requires state dylib)");
+    go_wrapper_step.dependOn(&go_wrapper_run.step);
+
     // Watcher + hot reload tests
     const watcher_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/watcher_test.zig"),

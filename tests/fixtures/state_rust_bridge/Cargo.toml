@@ -1,0 +1,13 @@
+[package]
+name = "state-rust-bridge"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+suji = { path = "../../../crates/suji-rs" }
+suji-plugin-state = { path = "../../../plugins/state/rust" }
+serde_json = "1"

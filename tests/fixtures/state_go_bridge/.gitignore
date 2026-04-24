@@ -1,0 +1,6 @@
+*.dylib
+*.so
+*.dll
+libbackend.h
+backend.h
+go.sum
