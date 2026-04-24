@@ -38,7 +38,7 @@ fn freeResp(reg: *const loader.BackendRegistry, resp: ?[]const u8) void {
 // ============================================
 
 test "state plugin: load" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
 
@@ -47,7 +47,7 @@ test "state plugin: load" {
 }
 
 test "state plugin: get nonexistent key returns null value" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -59,7 +59,7 @@ test "state plugin: get nonexistent key returns null value" {
 }
 
 test "state plugin: set and get" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -78,7 +78,7 @@ test "state plugin: set and get" {
 }
 
 test "state plugin: set overwrites existing value" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -93,7 +93,7 @@ test "state plugin: set overwrites existing value" {
 }
 
 test "state plugin: delete" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -108,7 +108,7 @@ test "state plugin: delete" {
 }
 
 test "state plugin: keys" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -123,7 +123,7 @@ test "state plugin: keys" {
 }
 
 test "state plugin: channel routing via register" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -136,7 +136,7 @@ test "state plugin: channel routing via register" {
 }
 
 test "state plugin: invokeByChannel routing" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -155,7 +155,7 @@ test "state plugin: invokeByChannel routing" {
 // ============================================
 
 test "state plugin: concurrent set/get (10 threads)" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);
@@ -196,7 +196,7 @@ fn concurrentWorker(reg: *loader.BackendRegistry, thread_id: usize) void {
 }
 
 test "state plugin: rapid fire 100 concurrent sets" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try loadStatePlugin(&reg);

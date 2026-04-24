@@ -12,14 +12,25 @@ pub const app = suji.app()
 // State Store (HashMap + Mutex + JSON 파일 영속성)
 // ============================================
 
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var gpa: std.heap.DebugAllocator(.{}) = .init;
 const alloc = gpa.allocator();
+
+// Plugin 내부 뮤텍스용 io (plugin이 dlopen 되므로 자체 Threaded 생성)
+var plugin_threaded: std.Io.Threaded = undefined;
+var plugin_io_initialized: bool = false;
+fn pluginIo() std.Io {
+    if (!plugin_io_initialized) {
+        plugin_threaded = .init(alloc, .{});
+        plugin_io_initialized = true;
+    }
+    return plugin_threaded.io();
+}
 
 var store: Store = .{};
 
 const Store = struct {
     map: std.StringHashMap([]const u8) = std.StringHashMap([]const u8).init(alloc),
-    mutex: std.Thread.Mutex = .{},
+    mutex: std.Io.Mutex = .init,
     data_path: ?[]const u8 = null,
     initialized: bool = false,
     dir_created: bool = false,
@@ -32,8 +43,8 @@ const Store = struct {
     }
 
     fn get(self: *Store, key: []const u8) ?[]const u8 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(pluginIo());
+        defer self.mutex.unlock(pluginIo());
         self.ensureInit();
         return self.map.get(key);
     }
@@ -41,8 +52,8 @@ const Store = struct {
     fn set(self: *Store, key: []const u8, value: []const u8) void {
         // Phase 1: 뮤텍스 하에서 맵 업데이트 + 디스크 저장
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            self.mutex.lockUncancelable(pluginIo());
+            defer self.mutex.unlock(pluginIo());
             self.ensureInit();
 
             // 기존 값 해제
@@ -72,8 +83,8 @@ const Store = struct {
     }
 
     fn delete(self: *Store, key: []const u8) bool {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(pluginIo());
+        defer self.mutex.unlock(pluginIo());
         self.ensureInit();
 
         if (self.map.fetchRemove(key)) |kv| {
@@ -86,17 +97,17 @@ const Store = struct {
     }
 
     fn keys(self: *Store, arena: std.mem.Allocator) ?[]const u8 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(pluginIo());
+        defer self.mutex.unlock(pluginIo());
         self.ensureInit();
 
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf: std.ArrayList(u8) = .empty;
         buf.appendSlice(arena, "{\"keys\":[") catch return null;
         var iter = self.map.iterator();
         var first = true;
         while (iter.next()) |entry| {
             if (!first) buf.appendSlice(arena, ",") catch break;
-            std.fmt.format(buf.writer(arena), "\"{s}\"", .{entry.key_ptr.*}) catch break;
+            buf.print(arena, "\"{s}\"", .{entry.key_ptr.*}) catch break;
             first = false;
         }
         buf.appendSlice(arena, "]}") catch return null;
@@ -105,8 +116,8 @@ const Store = struct {
 
     /// state:clear — 전체 초기화 (테스트용)
     fn clear(self: *Store) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(pluginIo());
+        defer self.mutex.unlock(pluginIo());
         var iter = self.map.iterator();
         while (iter.next()) |entry| {
             alloc.free(entry.key_ptr.*);
@@ -117,7 +128,7 @@ const Store = struct {
 
     fn loadFromDisk(self: *Store) void {
         const path = self.data_path orelse return;
-        const content = std.fs.cwd().readFileAlloc(alloc, path, 1024 * 1024) catch return;
+        const content = std.Io.Dir.cwd().readFileAlloc(pluginIo(), path, alloc, .limited(1024 * 1024)) catch return;
         defer alloc.free(content);
 
         const parsed = std.json.parseFromSlice(std.json.Value, alloc, content, .{}) catch return;
@@ -161,13 +172,13 @@ const Store = struct {
         // 디렉토리 생성 (최초 1회만)
         if (!self.dir_created) {
             if (std.mem.lastIndexOfScalar(u8, path, '/')) |sep| {
-                std.fs.cwd().makePath(path[0..sep]) catch {};
+                std.Io.Dir.cwd().createDirPath(pluginIo(), path[0..sep]) catch {};
             }
             self.dir_created = true;
         }
 
         const a = alloc;
-        var buf = std.ArrayListUnmanaged(u8){};
+        var buf: std.ArrayList(u8) = .empty;
         defer buf.deinit(a);
 
         buf.appendSlice(a, "{") catch return;
@@ -175,32 +186,40 @@ const Store = struct {
         var first = true;
         while (map_iter.next()) |entry| {
             if (!first) buf.appendSlice(a, ",") catch continue;
-            std.fmt.format(buf.writer(a), "\"{s}\":{s}", .{ entry.key_ptr.*, entry.value_ptr.* }) catch continue;
+            buf.print(a, "\"{s}\":{s}", .{ entry.key_ptr.*, entry.value_ptr.* }) catch continue;
             first = false;
         }
         buf.appendSlice(a, "}") catch return;
 
-        const file = std.fs.cwd().createFile(path, .{}) catch return;
-        defer file.close();
-        file.writeAll(buf.items) catch {};
+        const io = pluginIo();
+        var file = std.Io.Dir.cwd().createFile(io, path, .{}) catch return;
+        defer file.close(io);
+        var fw_buf: [4096]u8 = undefined;
+        var fw = file.writer(io, &fw_buf);
+        fw.interface.writeAll(buf.items) catch {};
+        fw.interface.flush() catch {};
     }
 };
+
+fn cGetenv(name: [*:0]const u8) ?[]const u8 {
+    const raw = std.c.getenv(name) orelse return null;
+    return std.mem.span(raw);
+}
 
 fn getDataPath() ?[]const u8 {
     const builtin = @import("builtin");
     if (builtin.os.tag == .macos) {
-        const home = std.posix.getenv("HOME") orelse return null;
+        const home = cGetenv("HOME") orelse return null;
         // TODO: app name을 config에서 받아야 함. 지금은 하드코딩.
         return std.fmt.allocPrint(alloc, "{s}/Library/Application Support/suji-app/state.json", .{home}) catch null;
     } else if (builtin.os.tag == .linux) {
-        const xdg = std.posix.getenv("XDG_DATA_HOME");
-        if (xdg) |dir| {
+        if (cGetenv("XDG_DATA_HOME")) |dir| {
             return std.fmt.allocPrint(alloc, "{s}/suji-app/state.json", .{dir}) catch null;
         }
-        const home = std.posix.getenv("HOME") orelse return null;
+        const home = cGetenv("HOME") orelse return null;
         return std.fmt.allocPrint(alloc, "{s}/.local/share/suji-app/state.json", .{home}) catch null;
     } else if (builtin.os.tag == .windows) {
-        const appdata = std.posix.getenv("APPDATA") orelse return null;
+        const appdata = cGetenv("APPDATA") orelse return null;
         return std.fmt.allocPrint(alloc, "{s}\\suji-app\\state.json", .{appdata}) catch null;
     }
     return null;

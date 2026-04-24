@@ -1,5 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const runtime = @import("runtime");
+
+const Dir = std.Io.Dir;
 
 /// 파일/디렉토리 변경 감시 (OS 네이티브)
 ///
@@ -16,7 +19,8 @@ const builtin = @import("builtin");
 /// ```
 pub const Watcher = struct {
     allocator: std.mem.Allocator,
-    paths: std.ArrayListUnmanaged([]const u8),
+    io: std.Io,
+    paths: std.ArrayList([]const u8),
     callback: ?*const fn ([]const u8) void,
     thread: ?std.Thread,
     should_stop: std.atomic.Value(bool),
@@ -45,10 +49,11 @@ pub const Watcher = struct {
         dummy: u8 = 0,
     };
 
-    pub fn init(allocator: std.mem.Allocator) Watcher {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) Watcher {
         var w = Watcher{
             .allocator = allocator,
-            .paths = .{},
+            .io = io,
+            .paths = .empty,
             .callback = null,
             .thread = null,
             .should_stop = std.atomic.Value(bool).init(false),
@@ -88,7 +93,7 @@ pub const Watcher = struct {
                 self.os.inotify_fd = @intCast(fd);
             }
             // 디렉토리 감시 등록
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [Dir.max_path_bytes]u8 = undefined;
             const path_z = std.fmt.bufPrintZ(&path_buf, "{s}", .{path}) catch return error.PathTooLong;
             const IN_MODIFY = @as(u32, 0x00000002);
             const IN_CREATE = @as(u32, 0x00000100);
@@ -139,13 +144,13 @@ pub const Watcher = struct {
         while (!self.should_stop.load(.acquire)) {
             const len = std.posix.read(fd, &buf) catch |err| {
                 if (err == error.WouldBlock) {
-                    std.Thread.sleep(100 * std.time.ns_per_ms);
+                    self.io.sleep(.fromMilliseconds(100), .awake) catch {};
                     continue;
                 }
                 break;
             };
             if (len == 0) {
-                std.Thread.sleep(100 * std.time.ns_per_ms);
+                self.io.sleep(.fromMilliseconds(100), .awake) catch {};
                 continue;
             }
 
@@ -170,8 +175,8 @@ pub const Watcher = struct {
     // ============================================
 
     fn watchLoopPoll(self: *Watcher) void {
-        // 초기 mtime 수집
-        var mtimes = std.StringHashMap(i128).init(self.allocator);
+        // 초기 mtime 수집 (Zig 0.16: File.stat이 Io.Timestamp 반환 → i96 nanoseconds)
+        var mtimes = std.StringHashMap(i96).init(self.allocator);
         defer {
             // HashMap 키 메모리 해제
             var iter = mtimes.iterator();
@@ -182,69 +187,66 @@ pub const Watcher = struct {
         }
 
         for (self.paths.items) |path| {
-            collectMtimes(self.allocator, path, &mtimes) catch {};
+            self.collectMtimes(path, &mtimes) catch {};
         }
 
         while (!self.should_stop.load(.acquire)) {
-            std.Thread.sleep(500 * std.time.ns_per_ms);
+            self.io.sleep(.fromMilliseconds(500), .awake) catch {};
 
             for (self.paths.items) |path| {
-                checkChanges(self.allocator, path, &mtimes, self.callback) catch {};
+                self.checkChanges(path, &mtimes) catch {};
             }
         }
     }
 
-    fn collectMtimes(allocator: std.mem.Allocator, dir_path: []const u8, mtimes: *std.StringHashMap(i128)) !void {
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
-        defer dir.close();
+    fn collectMtimes(self: *Watcher, dir_path: []const u8, mtimes: *std.StringHashMap(i96)) !void {
+        const io = self.io;
+        var dir = Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return;
+        defer dir.close(io);
 
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [Dir.max_path_bytes]u8 = undefined;
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             if (entry.kind != .file) continue;
             const full_stack = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
-            const stat = std.fs.cwd().statFile(full_stack) catch continue;
+            const stat = Dir.cwd().statFile(io, full_stack, .{}) catch continue;
             if (!mtimes.contains(full_stack)) {
-                const owned = allocator.dupe(u8, full_stack) catch continue;
-                mtimes.put(owned, stat.mtime) catch {
-                    allocator.free(owned);
+                const owned = self.allocator.dupe(u8, full_stack) catch continue;
+                mtimes.put(owned, stat.mtime.nanoseconds) catch {
+                    self.allocator.free(owned);
                 };
             }
         }
     }
 
-    fn checkChanges(
-        allocator: std.mem.Allocator,
-        dir_path: []const u8,
-        mtimes: *std.StringHashMap(i128),
-        callback: ?*const fn ([]const u8) void,
-    ) !void {
-        var dir = std.fs.cwd().openDir(dir_path, .{ .iterate = true }) catch return;
-        defer dir.close();
+    fn checkChanges(self: *Watcher, dir_path: []const u8, mtimes: *std.StringHashMap(i96)) !void {
+        const io = self.io;
+        var dir = Dir.cwd().openDir(io, dir_path, .{ .iterate = true }) catch return;
+        defer dir.close(io);
 
         // 스택 버퍼로 경로 조립 (매 주기 heap 할당 방지)
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [Dir.max_path_bytes]u8 = undefined;
 
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             if (entry.kind != .file) continue;
             const full_stack = std.fmt.bufPrint(&path_buf, "{s}/{s}", .{ dir_path, entry.name }) catch continue;
 
-            const stat = std.fs.cwd().statFile(full_stack) catch continue;
+            const stat = Dir.cwd().statFile(io, full_stack, .{}) catch continue;
 
             if (mtimes.getPtr(full_stack)) |mtime_ptr| {
-                if (stat.mtime != mtime_ptr.*) {
-                    mtime_ptr.* = stat.mtime;
-                    if (callback) |cb| cb(full_stack);
+                if (stat.mtime.nanoseconds != mtime_ptr.*) {
+                    mtime_ptr.* = stat.mtime.nanoseconds;
+                    if (self.callback) |cb| cb(full_stack);
                 }
             } else {
                 // 새 파일 — heap 할당은 HashMap 키로만
-                const owned = allocator.dupe(u8, full_stack) catch continue;
-                mtimes.put(owned, stat.mtime) catch {
-                    allocator.free(owned);
+                const owned = self.allocator.dupe(u8, full_stack) catch continue;
+                mtimes.put(owned, stat.mtime.nanoseconds) catch {
+                    self.allocator.free(owned);
                     continue;
                 };
-                if (callback) |cb| cb(full_stack);
+                if (self.callback) |cb| cb(full_stack);
             }
         }
     }

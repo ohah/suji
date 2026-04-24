@@ -84,16 +84,19 @@ pub const BackendRegistry = struct {
     routes: std.StringHashMap([]const u8),
     /// register 중인 백엔드 이름 (backend_init 호출 중에만 유효)
     registering_backend: ?[]const u8 = null,
-    /// 핫 리로드: invoke 중 언로드 방지
-    rw_lock: std.Thread.RwLock = .{},
+    /// 핫 리로드: invoke 중 언로드 방지 (Zig 0.16: std.Io.RwLock)
+    rw_lock: std.Io.RwLock = .init,
+    /// lock 호출에 필요한 io (init에서 주입, 기본은 runtime.io)
+    io: std.Io,
 
     pub var global: ?*BackendRegistry = null;
 
-    pub fn init(allocator: std.mem.Allocator) BackendRegistry {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) BackendRegistry {
         var reg = BackendRegistry{
             .backends = std.StringHashMap(Backend).init(allocator),
             .allocator = allocator,
             .routes = std.StringHashMap([]const u8).init(allocator),
+            .io = io,
             .core_api = SujiCore{
                 .invoke = coreInvoke,
                 .free = coreFree,
@@ -147,8 +150,8 @@ pub const BackendRegistry = struct {
     }
 
     pub fn invoke(self: *BackendRegistry, backend_name: []const u8, request: [*:0]const u8) ?[]const u8 {
-        self.rw_lock.lockShared();
-        defer self.rw_lock.unlockShared();
+        self.rw_lock.lockSharedUncancelable(self.io);
+        defer self.rw_lock.unlockShared(self.io);
         const backend = self.get(backend_name) orelse return null;
         return backend.invoke(request);
     }
@@ -165,8 +168,8 @@ pub const BackendRegistry = struct {
         errdefer backend.deinit();
 
         // 2. lock 획득 → 스왑
-        self.rw_lock.lock();
-        defer self.rw_lock.unlock();
+        self.rw_lock.lockUncancelable(self.io);
+        defer self.rw_lock.unlock(self.io);
 
         // 기존 백엔드 언로드
         if (self.backends.getPtr(name)) |old| {

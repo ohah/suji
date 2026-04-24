@@ -28,25 +28,28 @@ const Listener = struct {
 ///   Rust emit → EventBus → JS on() 수신
 ///   Zig emit → EventBus → 모든 on() 수신
 pub const EventBus = struct {
-    listeners: std.StringHashMap(std.ArrayListUnmanaged(Listener)),
+    listeners: std.StringHashMap(std.ArrayList(Listener)),
     allocator: std.mem.Allocator,
     next_id: u64 = 1,
-    mutex: std.Thread.Mutex = .{},
+    /// Zig 0.16: std.Thread.Mutex 제거 → std.Io.Mutex
+    mutex: std.Io.Mutex = .init,
+    io: std.Io,
 
     // WebView eval 콜백 (JS에 이벤트 전달용)
     webview_eval: ?*const fn (js: [:0]const u8) void = null,
 
-    pub fn init(allocator: std.mem.Allocator) EventBus {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io) EventBus {
         return .{
-            .listeners = std.StringHashMap(std.ArrayListUnmanaged(Listener)).init(allocator),
+            .listeners = std.StringHashMap(std.ArrayList(Listener)).init(allocator),
             .allocator = allocator,
+            .io = io,
         };
     }
 
     /// 이벤트 구독 — 리스너 ID 반환 (해제용)
     pub fn on(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         self.next_id += 1;
@@ -62,8 +65,8 @@ pub const EventBus = struct {
 
     /// C ABI 이벤트 구독 (백엔드에서 사용)
     pub fn onC(self: *EventBus, event_name: []const u8, callback: CEventCallback, arg: ?*anyopaque) u64 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         self.next_id += 1;
@@ -79,8 +82,8 @@ pub const EventBus = struct {
 
     /// 한 번만 수신
     pub fn once(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         self.next_id += 1;
@@ -104,8 +107,8 @@ pub const EventBus = struct {
         var once_count: usize = 0;
 
         {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
 
             if (self.listeners.getPtr(event_name)) |list| {
                 snapshot_len = @min(list.items.len, 64);
@@ -150,8 +153,8 @@ pub const EventBus = struct {
 
     /// 리스너 해제 (ID 기반)
     pub fn off(self: *EventBus, listener_id: u64) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         var iter = self.listeners.iterator();
         while (iter.next()) |entry| {
@@ -169,8 +172,8 @@ pub const EventBus = struct {
 
     /// 특정 이벤트의 모든 리스너 해제
     pub fn offAll(self: *EventBus, event_name: []const u8) void {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
 
         if (self.listeners.getPtr(event_name)) |list| {
             list.clearRetainingCapacity();
@@ -190,7 +193,7 @@ pub const EventBus = struct {
         if (self.listeners.getPtr(event_name)) |list| {
             list.append(self.allocator, listener) catch {};
         } else {
-            var list = std.ArrayListUnmanaged(Listener){};
+            var list = std.ArrayList(Listener).empty;
             list.append(self.allocator, listener) catch {};
             self.listeners.put(event_name, list) catch {};
         }

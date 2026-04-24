@@ -15,41 +15,41 @@ test "SujiCore struct size" {
 // ============================================
 
 test "BackendRegistry init and deinit" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     try std.testing.expect(reg.get("nonexistent") == null);
 }
 
 test "BackendRegistry invoke nonexistent returns null" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     const result = reg.invoke("nonexistent", "test");
     try std.testing.expect(result == null);
 }
 
 test "BackendRegistry freeResponse nonexistent does not crash" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     reg.freeResponse("nonexistent", null);
     reg.freeResponse("nonexistent", "some data");
 }
 
 test "BackendRegistry register invalid path returns error" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     const result = reg.register("test", "/nonexistent/path/libtest.dylib");
     try std.testing.expectError(error.FileNotFound, result);
 }
 
 test "BackendRegistry get after failed register returns null" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     _ = reg.register("test", "/nonexistent.dylib") catch {};
     try std.testing.expect(reg.get("test") == null);
 }
 
 test "BackendRegistry setGlobal and deinit clears global" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     reg.setGlobal();
     try std.testing.expect(loader.BackendRegistry.global == &reg);
     reg.deinit();
@@ -57,8 +57,8 @@ test "BackendRegistry setGlobal and deinit clears global" {
 }
 
 test "BackendRegistry multiple setGlobal" {
-    var reg1 = loader.BackendRegistry.init(std.testing.allocator);
-    var reg2 = loader.BackendRegistry.init(std.testing.allocator);
+    var reg1 = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    var reg2 = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg2.deinit();
 
     reg1.setGlobal();

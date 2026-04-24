@@ -14,12 +14,20 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // 런타임 컨텍스트 (io/gpa/environ_map 전역 저장소)
+    const runtime_module = b.createModule(.{
+        .root_source_file = b.path("src/runtime.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const events_module = b.createModule(.{
         .root_source_file = b.path("src/core/events.zig"),
         .target = target,
         .optimize = optimize,
     });
     events_module.addImport("util", util_module);
+    events_module.addImport("runtime", runtime_module);
 
     const loader_module = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
@@ -27,6 +35,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     loader_module.addImport("events", events_module);
+    loader_module.addImport("runtime", runtime_module);
 
     // 외부 패키지용 모듈 export (사용자가 @import("suji")로 가져감)
     _ = b.addModule("suji", .{
@@ -45,15 +54,16 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("loader", loader_module);
     root_module.addImport("events", events_module);
     root_module.addImport("util", util_module);
+    root_module.addImport("runtime", runtime_module);
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
     const os_tag = @import("builtin").os.tag;
     const home: []const u8 = blk: {
+        const env = &b.graph.environ_map;
         if (os_tag == .windows) {
-            const env = std.process.getEnvMap(b.allocator) catch break :blk "C:\\Users\\Default";
             break :blk env.get("USERPROFILE") orelse "C:\\Users\\Default";
         }
-        break :blk std.posix.getenv("HOME") orelse "/tmp";
+        break :blk env.get("HOME") orelse "/tmp";
     };
     const cef_platform = switch (os_tag) {
         .macos => "macos-arm64",
@@ -95,7 +105,7 @@ pub fn build(b: *std.Build) void {
     const node_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/node/24.14.1", .{home}) catch @panic("OOM");
     const node_available = blk: {
         const dylib = std.fmt.allocPrint(b.allocator, "{s}/libnode.dylib", .{node_path}) catch break :blk false;
-        std.fs.cwd().access(dylib, .{}) catch break :blk false;
+        std.Io.Dir.accessAbsolute(b.graph.io, dylib, .{}) catch break :blk false;
         break :blk true;
     };
     // Node.js 지원 (libnode가 설치된 경우만)
@@ -115,12 +125,12 @@ pub fn build(b: *std.Build) void {
 
     if (node_available) {
         // bridge.cc를 C++ 오브젝트로 컴파일 + 링크
-        exe.addCSourceFile(.{
+        root_module.addCSourceFile(.{
             .file = b.path("src/platform/node/bridge.cc"),
             .flags = &.{"-std=c++20"},
         });
-        exe.addLibraryPath(.{ .cwd_relative = node_path });
-        exe.linkSystemLibrary("node");
+        root_module.addLibraryPath(.{ .cwd_relative = node_path });
+        root_module.linkSystemLibrary("node", .{});
     }
 
     if (os_tag == .macos) {
@@ -184,6 +194,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     test_loader.addImport("events", events_module);
+    test_loader.addImport("runtime", runtime_module);
     loader_test_mod.addImport("loader", test_loader);
     const loader_test = b.addTest(.{ .root_module = loader_test_mod });
     test_step.dependOn(&b.addRunArtifact(loader_test).step);
@@ -244,6 +255,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     routing_loader.addImport("events", events_module);
+    routing_loader.addImport("runtime", runtime_module);
     routing_test_mod.addImport("loader", routing_loader);
     const routing_test = b.addTest(.{ .root_module = routing_test_mod });
     test_step.dependOn(&b.addRunArtifact(routing_test).step);
@@ -272,6 +284,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     state_loader.addImport("events", events_module);
+    state_loader.addImport("runtime", runtime_module);
     state_test_mod.addImport("loader", state_loader);
     state_test_mod.addImport("events", events_module);
     const state_test = b.addTest(.{ .root_module = state_test_mod });
@@ -345,12 +358,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    watcher_module.addImport("runtime", runtime_module);
     const watcher_loader = b.createModule(.{
         .root_source_file = b.path("src/backends/loader.zig"),
         .target = target,
         .optimize = optimize,
     });
     watcher_loader.addImport("events", events_module);
+    watcher_loader.addImport("runtime", runtime_module);
     watcher_test_mod.addImport("watcher", watcher_module);
     watcher_test_mod.addImport("loader", watcher_loader);
     const watcher_test = b.addTest(.{ .root_module = watcher_test_mod });

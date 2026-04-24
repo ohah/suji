@@ -1,4 +1,5 @@
 const std = @import("std");
+const runtime = @import("runtime");
 const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
@@ -12,21 +13,26 @@ const bundle_macos = if (@import("builtin").os.tag == .macos) @import("bundle_ma
     }
 };
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
+    runtime.init(.{
+        .io = init.io,
+        .gpa = init.gpa,
+        .environ_map = init.environ_map,
+        .args_vector = init.minimal.args.vector,
+    });
+
     // CEF 서브프로세스 처리 (렌더러/GPU 등 — 메인이면 통과)
     cef.executeSubprocess();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    const allocator = init.gpa;
 
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
 
     // 번들에서 실행 시 자동으로 run (macOS .app / Linux AppImage)
     if (args.len < 2) {
         var exe_buf: [1024]u8 = undefined;
-        if (std.fs.selfExePath(&exe_buf)) |ep| {
+        if (std.process.executablePath(init.io, &exe_buf)) |n| {
+            const ep = exe_buf[0..n];
             const is_bundle = switch (comptime @import("builtin").os.tag) {
                 .macos => std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null,
                 else => false, // Linux/Windows: 향후 AppImage 등 감지 추가
@@ -130,10 +136,11 @@ fn runBuild(allocator: std.mem.Allocator) !void {
 
     // suji 바이너리 경로
     var exe_buf: [1024]u8 = undefined;
-    const exe_path = std.fs.selfExePath(&exe_buf) catch {
+    const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch {
         std.debug.print("[suji] cannot find self executable\n", .{});
         return;
     };
+    const exe_path = exe_buf[0..exe_len];
 
     // 번들 ID: config 또는 기본값
     const identifier = config.app.name;
@@ -201,7 +208,7 @@ fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
         return null;
     };
     defer allocator.free(local_json);
-    if (std.fs.cwd().readFileAlloc(allocator, local_json, 1024)) |content| {
+    if (std.Io.Dir.cwd().readFileAlloc(runtime.io, local_json, allocator, .limited(1024))) |content| {
         allocator.free(content);
         return local;
     } else |_| {}
@@ -209,7 +216,8 @@ fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
 
     // 2. suji 바이너리 기준 (zig-out/bin/suji → ../../plugins/{name})
     var exe_buf: [1024]u8 = undefined;
-    const exe_path = std.fs.selfExePath(&exe_buf) catch return null;
+    const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch return null;
+    const exe_path = exe_buf[0..exe_len];
     const bin_dir = std.fs.path.dirname(exe_path) orelse return null;
     const zig_out_dir = std.fs.path.dirname(bin_dir) orelse return null;
     const project_root = std.fs.path.dirname(zig_out_dir) orelse return null;
@@ -219,7 +227,7 @@ fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
         return null;
     };
     defer allocator.free(builtin_json);
-    if (std.fs.cwd().readFileAlloc(allocator, builtin_json, 1024)) |content| {
+    if (std.Io.Dir.cwd().readFileAlloc(runtime.io, builtin_json, allocator, .limited(1024))) |content| {
         allocator.free(content);
         return builtin;
     } else |_| {}
@@ -233,7 +241,7 @@ fn readPluginLang(allocator: std.mem.Allocator, plugin_dir: []const u8) ?[]const
     const json_path = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{plugin_dir}) catch return null;
     defer allocator.free(json_path);
 
-    const content = std.fs.cwd().readFileAlloc(allocator, json_path, 1024 * 16) catch return null;
+    const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, json_path, allocator, .limited(1024 * 16)) catch return null;
     defer allocator.free(content);
 
     const parsed = std.json.parseFromSlice(std.json.Value, allocator, content, .{}) catch return null;
@@ -309,7 +317,7 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
         return;
     }
     // entry 경로를 절대 경로로 변환 (createRequire가 절대 경로 필요)
-    const abs_entry = try std.fs.cwd().realpathAlloc(allocator, entry);
+    const abs_entry = try std.Io.Dir.cwd().realPathFileAlloc(runtime.io, entry, allocator);
     defer allocator.free(abs_entry);
     const entry_js_str = try std.fmt.allocPrint(allocator, "{s}/main.js", .{abs_entry});
     defer allocator.free(entry_js_str);
@@ -367,7 +375,7 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         // Node 백엔드: npm install (빌드 불필요, 런타임에 JS 실행)
         const pkg_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{entry});
         defer allocator.free(pkg_path);
-        std.fs.cwd().access(pkg_path, .{}) catch return; // package.json 없으면 skip
+        std.Io.Dir.cwd().access(runtime.io, pkg_path, .{}) catch return; // package.json 없으면 skip
         std.debug.print("[suji] installing npm packages...\n", .{});
         const npm_cmd = if (release) &[_][]const u8{ "npm", "install", "--prefix", entry, "--production" } else &[_][]const u8{ "npm", "install", "--prefix", entry };
         try runCmd(allocator, npm_cmd);
@@ -377,16 +385,15 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         const prefix = try std.fmt.allocPrint(allocator, "--prefix={s}/zig-out", .{entry});
         defer allocator.free(prefix);
         // entry 디렉토리에서 zig build 실행
-        var child = std.process.Child.init(&.{ "zig", "build" }, allocator);
-        const abs_entry = std.fs.cwd().realpathAlloc(allocator, entry) catch null;
+        const abs_entry = std.Io.Dir.cwd().realPathFileAlloc(runtime.io, entry, allocator) catch null;
         defer if (abs_entry) |p| allocator.free(p);
-        child.cwd = abs_entry;
-        child.stderr_behavior = .Inherit;
-        child.stdout_behavior = .Inherit;
-        try child.spawn();
-        const result = try child.wait();
+        var child = try std.process.spawn(runtime.io, .{
+            .argv = &.{ "zig", "build" },
+            .cwd = if (abs_entry) |p| .{ .path = p } else .inherit,
+        });
+        const result = try child.wait(runtime.io);
         switch (result) {
-            .Exited => |code| if (code != 0) return error.CommandFailed,
+            .exited => |code| if (code != 0) return error.CommandFailed,
             else => return error.CommandFailed,
         }
     }
@@ -405,34 +412,33 @@ fn getDylibPath(allocator: std.mem.Allocator, lang: []const u8, entry: []const u
 }
 
 fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
-    var child = std.process.Child.init(argv, allocator);
-    child.stderr_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    try child.spawn();
-    const result = try child.wait();
+    _ = allocator;
+    var child = try std.process.spawn(runtime.io, .{ .argv = argv });
+    const result = try child.wait(runtime.io);
     switch (result) {
-        .Exited => |code| if (code != 0) return error.CommandFailed,
+        .exited => |code| if (code != 0) return error.CommandFailed,
         else => return error.CommandFailed,
     }
 }
 
 fn runCmdEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pairs: []const [2][]const u8) !void {
-    var child = std.process.Child.init(argv, allocator);
-    child.stderr_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-
-    // 환경 변수 설정
-    var env_map = try std.process.getEnvMap(allocator);
+    // 환경 변수 설정 (부모 환경 복제 후 override)
+    var env_map = if (runtime.environ_map) |m|
+        try m.clone(allocator)
+    else
+        std.process.Environ.Map.init(allocator);
     defer env_map.deinit();
     for (env_pairs) |pair| {
         try env_map.put(pair[0], pair[1]);
     }
-    child.env_map = &env_map;
 
-    try child.spawn();
-    const result = try child.wait();
+    var child = try std.process.spawn(runtime.io, .{
+        .argv = argv,
+        .environ_map = &env_map,
+    });
+    const result = try child.wait(runtime.io);
     switch (result) {
-        .Exited => |code| if (code != 0) return error.CommandFailed,
+        .exited => |code| if (code != 0) return error.CommandFailed,
         else => return error.CommandFailed,
     }
 }
@@ -445,28 +451,23 @@ fn startFrontendDev(allocator: std.mem.Allocator, frontend_dir: []const u8) !std
     const has_bun = blk: {
         var buf: [512]u8 = undefined;
         const p = std.fmt.bufPrint(&buf, "{s}/bun.lock", .{frontend_dir}) catch break :blk false;
-        std.fs.cwd().access(p, .{}) catch break :blk false;
+        std.Io.Dir.cwd().access(runtime.io, p, .{}) catch break :blk false;
         break :blk true;
     };
 
-    var child = std.process.Child.init(
-        if (has_bun)
-            &.{ "bun", "--cwd", frontend_dir, "dev" }
-        else
-            &.{ "npm", "--prefix", frontend_dir, "run", "dev" },
-        allocator,
-    );
-    child.stderr_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    try child.spawn();
-    return child;
+    _ = allocator;
+    const argv: []const []const u8 = if (has_bun)
+        &.{ "bun", "--cwd", frontend_dir, "dev" }
+    else
+        &.{ "npm", "--prefix", frontend_dir, "run", "dev" };
+    return try std.process.spawn(runtime.io, .{ .argv = argv });
 }
 
 fn buildFrontend(allocator: std.mem.Allocator, frontend_dir: []const u8) !void {
     var buf: [512]u8 = undefined;
     const p = std.fmt.bufPrint(&buf, "{s}/bun.lock", .{frontend_dir}) catch return;
     const has_bun = blk: {
-        std.fs.cwd().access(p, .{}) catch break :blk false;
+        std.Io.Dir.cwd().access(runtime.io, p, .{}) catch break :blk false;
         break :blk true;
     };
 
@@ -490,14 +491,14 @@ fn runDev(allocator: std.mem.Allocator) !void {
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
-    var registry = suji.BackendRegistry.init(allocator);
+    var registry = suji.BackendRegistry.init(allocator, runtime.io);
     defer registry.deinit();
     registry.setGlobal();
     try loadPluginsFromConfig(allocator, &config, &registry, false);
     try loadBackendsFromConfig(allocator, &config, &registry, false);
 
     // 백엔드 핫 리로드 감시 스레드
-    var watcher = Watcher.init(allocator);
+    var watcher = Watcher.init(allocator, runtime.io);
     defer watcher.deinit();
     startBackendWatcher(allocator, &config, &watcher, &registry);
 
@@ -508,10 +509,10 @@ fn runDev(allocator: std.mem.Allocator) !void {
         try openWindow(allocator, &config, &registry, .dev);
         return;
     };
-    defer _ = frontend_proc.kill() catch {};
+    defer frontend_proc.kill(runtime.io);
 
     std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
-    std.Thread.sleep(2 * std.time.ns_per_s);
+    runtime.io.sleep(.fromSeconds(2), .awake) catch {};
 
     try openWindow(allocator, &config, &registry, .dev);
 }
@@ -613,7 +614,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
 
     std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
 
-    var registry = suji.BackendRegistry.init(allocator);
+    var registry = suji.BackendRegistry.init(allocator, runtime.io);
     defer registry.deinit();
     registry.setGlobal();
     try loadPluginsFromConfig(allocator, &config, &registry, true);
@@ -626,7 +627,7 @@ const WindowMode = enum { dev, dist };
 
 fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
     // EventBus 생성
-    var event_bus = suji.EventBus.init(allocator);
+    var event_bus = suji.EventBus.init(allocator, runtime.io);
     defer event_bus.deinit();
     registry.setEventBus(&event_bus);
 
@@ -895,22 +896,23 @@ fn cefEmitHandler(event: []const u8, data: []const u8) void {
 /// dist 디렉토리 절대 경로 탐색 (로컬 → .app 번들)
 fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 {
     // 1. CWD 기준 (로컬 개발)
-    if (std.fs.cwd().realpathAlloc(allocator, dist_dir)) |p| return p else |_| {}
+    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, dist_dir, allocator)) |p| return p else |_| {}
 
     // 2. .app 번들: exe/../Resources/frontend/dist
     var exe_buf: [1024]u8 = undefined;
-    const exe_path = std.fs.selfExePath(&exe_buf) catch return null;
+    const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch return null;
+    const exe_path = exe_buf[0..exe_len];
     const macos_dir = std.fs.path.dirname(exe_path) orelse return null;
     const contents_dir = std.fs.path.dirname(macos_dir) orelse return null;
 
     const bundle_dist = std.fmt.allocPrint(allocator, "{s}/Resources/frontend/dist", .{contents_dir}) catch return null;
     defer allocator.free(bundle_dist);
-    if (std.fs.cwd().realpathAlloc(allocator, bundle_dist)) |p| return p else |_| {}
+    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_dist, allocator)) |p| return p else |_| {}
 
     // 3. .app 번들: Resources/frontend (dist 없이)
     const bundle_frontend = std.fmt.allocPrint(allocator, "{s}/Resources/frontend", .{contents_dir}) catch return null;
     defer allocator.free(bundle_frontend);
-    if (std.fs.cwd().realpathAlloc(allocator, bundle_frontend)) |p| return p else |_| {}
+    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_frontend, allocator)) |p| return p else |_| {}
 
     return null;
 }

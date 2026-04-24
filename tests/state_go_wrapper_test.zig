@@ -55,7 +55,7 @@ fn contains(haystack: []const u8, needle: []const u8) bool {
 }
 
 test "go wrapper: load both plugins" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
 
@@ -65,7 +65,7 @@ test "go wrapper: load both plugins" {
 }
 
 test "go wrapper: set then get roundtrip" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -80,7 +80,7 @@ test "go wrapper: set then get roundtrip" {
 }
 
 test "go wrapper: get missing key returns null" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -91,7 +91,7 @@ test "go wrapper: get missing key returns null" {
 }
 
 test "go wrapper: delete removes key" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -105,7 +105,7 @@ test "go wrapper: delete removes key" {
 }
 
 test "go wrapper: keys lists everything" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -120,7 +120,7 @@ test "go wrapper: keys lists everything" {
 }
 
 test "go wrapper: object value roundtrip" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);

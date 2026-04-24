@@ -2,7 +2,7 @@ const std = @import("std");
 const loader = @import("loader");
 
 test "BackendRegistry routes init empty" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
     try std.testing.expect(reg.getBackendForChannel("ping") == null);
@@ -10,7 +10,7 @@ test "BackendRegistry routes init empty" {
 }
 
 test "BackendRegistry invokeByChannel returns null when no route" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
     const result = reg.invokeByChannel("nonexistent", "{}");
@@ -18,7 +18,7 @@ test "BackendRegistry invokeByChannel returns null when no route" {
 }
 
 test "BackendRegistry routes put and get" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
     try reg.routes.put("ping", "zig");
@@ -32,7 +32,7 @@ test "BackendRegistry routes put and get" {
 }
 
 test "BackendRegistry duplicate route rejected" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     defer { loader.BackendRegistry.global = null; }
@@ -55,20 +55,20 @@ test "BackendRegistry duplicate route rejected" {
 }
 
 test "BackendRegistry routes deinit clears" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
 
     try reg.routes.put("ping", "zig");
     try reg.routes.put("greet", "rust");
 
     reg.deinit();
     // deinit 후 접근 불가 (use-after-free 방지를 위해 재생성)
-    reg = loader.BackendRegistry.init(std.testing.allocator);
+    reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     try std.testing.expect(reg.getBackendForChannel("ping") == null);
 }
 
 test "BackendRegistry multiple channels same backend" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
     try reg.routes.put("ping", "zig");
@@ -81,7 +81,7 @@ test "BackendRegistry multiple channels same backend" {
 }
 
 test "BackendRegistry registering_backend lifecycle" {
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
     try std.testing.expect(reg.registering_backend == null);

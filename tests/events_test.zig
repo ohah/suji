@@ -19,13 +19,13 @@ fn resetState() void {
 }
 
 test "EventBus init and deinit" {
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 }
 
 test "EventBus on and emit" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("test", testCallback);
@@ -37,7 +37,7 @@ test "EventBus on and emit" {
 
 test "EventBus multiple listeners" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("test", testCallback);
@@ -49,7 +49,7 @@ test "EventBus multiple listeners" {
 
 test "EventBus off removes listener" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     const id = bus.on("test", testCallback);
@@ -61,7 +61,7 @@ test "EventBus off removes listener" {
 
 test "EventBus once fires only once" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.once("test", testCallback);
@@ -74,7 +74,7 @@ test "EventBus once fires only once" {
 
 test "EventBus offAll" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("test", testCallback);
@@ -87,7 +87,7 @@ test "EventBus offAll" {
 
 test "EventBus different events" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("a", testCallback);
@@ -101,7 +101,7 @@ test "EventBus different events" {
 }
 
 test "EventBus emit nonexistent event" {
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     // 리스너 없는 이벤트 발행 — 크래시 안 남

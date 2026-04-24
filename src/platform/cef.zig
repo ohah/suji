@@ -21,6 +21,8 @@ pub const c = @cImport({
 });
 
 const builtin = @import("builtin");
+const runtime = @import("runtime");
+
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
 
@@ -65,6 +67,19 @@ pub fn setEmitHandler(cb: EmitCallback) void {
 var g_app: c.cef_app_t = undefined;
 var g_app_initialized: bool = false;
 
+/// Zig 0.16: std.os.argv 제거 → main이 runtime.args_vector에 저장한 값을
+/// CEF 네이티브 포맷으로 변환한다.
+fn makeMainArgs() c.cef_main_args_t {
+    if (comptime builtin.os.tag == .windows) {
+        return .{ .instance = null }; // HINSTANCE = GetModuleHandle
+    }
+    const vec = runtime.args_vector; // []const [*:0]const u8
+    return .{
+        .argc = @intCast(vec.len),
+        .argv = @constCast(@ptrCast(vec.ptr)),
+    };
+}
+
 /// CEF 서브프로세스 실행 (main 함수 초입에 호출)
 /// 서브프로세스면 exit, 메인 프로세스면 반환
 pub fn executeSubprocess() void {
@@ -74,12 +89,7 @@ pub fn executeSubprocess() void {
         g_app_initialized = true;
     }
 
-    var main_args: c.cef_main_args_t = if (comptime builtin.os.tag == .windows) .{
-        .instance = null, // Windows: HINSTANCE (null = GetModuleHandle)
-    } else .{
-        .argc = @intCast(std.os.argv.len),
-        .argv = @ptrCast(std.os.argv.ptr),
-    };
+    var main_args = makeMainArgs();
 
     const code = c.cef_execute_process(&main_args, &g_app, null);
     if (code >= 0) {
@@ -95,12 +105,7 @@ pub fn initialize(config: CefConfig) !void {
         g_app_initialized = true;
     }
 
-    var main_args: c.cef_main_args_t = if (comptime builtin.os.tag == .windows) .{
-        .instance = null,
-    } else .{
-        .argc = @intCast(std.os.argv.len),
-        .argv = @ptrCast(std.os.argv.ptr),
-    };
+    var main_args = makeMainArgs();
 
     var settings: c.cef_settings_t = undefined;
     zeroCefStruct(c.cef_settings_t, &settings);
@@ -115,16 +120,15 @@ pub fn initialize(config: CefConfig) !void {
 
     // Subprocess path (자기 자신)
     var exe_buf: [1024]u8 = undefined;
-    if (std.fs.selfExePath(&exe_buf)) |ep| {
-        setCefString(&settings.browser_subprocess_path, ep);
+    if (std.process.executablePath(runtime.io, &exe_buf)) |exe_len| {
+        setCefString(&settings.browser_subprocess_path, exe_buf[0..exe_len]);
     } else |_| {}
 
     // CEF 경로 설정 (OS/arch별)
-    // TODO: Windows에서 USERPROFILE 환경변수 읽기 (std.process.getenvW)
     const home: []const u8 = if (comptime builtin.os.tag == .windows)
-        "C:\\Users\\Default"
+        runtime.env("USERPROFILE") orelse "C:\\Users\\Default"
     else
-        std.posix.getenv("HOME") orelse "/tmp";
+        runtime.env("HOME") orelse "/tmp";
     const cef_platform = comptime switch (builtin.os.tag) {
         .macos => "macos-arm64",
         .linux => "linux-x86_64",
@@ -1208,20 +1212,23 @@ fn schemeFactoryCreate(
     const file_path = std.fmt.bufPrint(&file_path_buf, "{s}{s}", .{ dist, path }) catch return null;
 
     // 파일 읽기 (동기 — IO 스레드에서 실행됨)
-    const file = std.fs.openFileAbsolute(file_path, .{}) catch {
+    const io = runtime.io;
+    var file = std.Io.Dir.openFileAbsolute(io, file_path, .{}) catch {
         std.debug.print("[suji] scheme 404: {s}\n", .{file_path});
         return createErrorHandler(404);
     };
-    defer file.close();
+    defer file.close(io);
 
-    const stat = file.stat() catch return null;
+    const stat = file.stat(io) catch return null;
     const file_size = stat.size;
 
     // 파일 내용 읽기 (최대 64MB)
     const max_size: usize = 64 * 1024 * 1024;
-    const read_size = @min(file_size, max_size);
+    const read_size: usize = @intCast(@min(file_size, @as(u64, max_size)));
     const data = std.heap.page_allocator.alloc(u8, read_size) catch return null;
-    const bytes_read = file.readAll(data) catch {
+    var rd_buf: [0]u8 = undefined;
+    var fr = file.reader(io, &rd_buf);
+    const bytes_read = fr.interface.readSliceShort(data) catch {
         std.heap.page_allocator.free(data);
         return null;
     };

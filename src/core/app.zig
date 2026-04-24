@@ -127,7 +127,7 @@ pub const Request = struct {
 
     /// 여러 Raw JSON 결과를 합쳐서 응답
     pub fn okMulti(self: *const Request, fields: []const [2][]const u8) Response {
-        var parts = std.ArrayListUnmanaged(u8){};
+        var parts = std.ArrayList(u8).empty;
         parts.appendSlice(self.arena, "{\"from\":\"zig\"") catch return .{ .data = "{}", .allocated = false };
         for (fields) |field| {
             parts.appendSlice(self.arena, ",\"") catch break;
@@ -196,7 +196,7 @@ fn toJson(allocator: std.mem.Allocator, value: anytype) ![]const u8 {
     const info = @typeInfo(T);
 
     if (info == .@"struct") {
-        var parts = std.ArrayListUnmanaged(u8){};
+        var parts = std.ArrayList(u8).empty;
         try parts.appendSlice(allocator, "{\"from\":\"zig\",\"result\":{");
         const fields = std.meta.fields(T);
         inline for (fields, 0..) |field, i| {
@@ -211,14 +211,14 @@ fn toJson(allocator: std.mem.Allocator, value: anytype) ![]const u8 {
         return parts.toOwnedSlice(allocator);
     }
 
-    var parts = std.ArrayListUnmanaged(u8){};
+    var parts = std.ArrayList(u8).empty;
     try parts.appendSlice(allocator, "{\"from\":\"zig\",\"result\":");
     try appendJsonValue(allocator, &parts, value);
     try parts.appendSlice(allocator, "}");
     return parts.toOwnedSlice(allocator);
 }
 
-fn appendJsonValue(allocator: std.mem.Allocator, parts: *std.ArrayListUnmanaged(u8), value: anytype) !void {
+fn appendJsonValue(allocator: std.mem.Allocator, parts: *std.ArrayList(u8), value: anytype) !void {
     const T = @TypeOf(value);
     const info = @typeInfo(T);
 

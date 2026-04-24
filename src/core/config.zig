@@ -1,4 +1,5 @@
 const std = @import("std");
+const runtime = @import("runtime");
 
 /// Suji 프로젝트 설정
 /// suji.json에서 로드
@@ -61,7 +62,7 @@ pub const Config = struct {
     }
 
     fn loadJson(allocator: std.mem.Allocator) !Config {
-        const content = std.fs.cwd().readFileAlloc(allocator, "suji.json", 1024 * 64) catch return error.ConfigNotFound;
+        const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
 
         var arena = std.heap.ArenaAllocator.init(allocator);
         const a = arena.allocator();
@@ -114,7 +115,7 @@ pub const Config = struct {
 
         if (root.get("backends")) |bs_val| {
             if (bs_val == .array) {
-                var list = std.ArrayListUnmanaged(MultiBackend){};
+                var list = std.ArrayList(MultiBackend).empty;
                 for (bs_val.array.items) |item| {
                     if (item == .object) {
                         const obj = item.object;
@@ -134,7 +135,7 @@ pub const Config = struct {
 
         if (root.get("plugins")) |pl_val| {
             if (pl_val == .array) {
-                var list = std.ArrayListUnmanaged([:0]const u8){};
+                var list = std.ArrayList([:0]const u8).empty;
                 for (pl_val.array.items) |item| {
                     if (item == .string) {
                         list.append(a, dupeStr(a, item.string)) catch continue;

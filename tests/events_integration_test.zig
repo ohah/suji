@@ -43,7 +43,7 @@ fn cCallback(event_name: [*c]const u8, data: [*c]const u8, arg: ?*anyopaque) cal
 
 test "EventBus full lifecycle: on → emit → off → emit" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     const id = bus.on("test", countCallback);
@@ -60,7 +60,7 @@ test "EventBus full lifecycle: on → emit → off → emit" {
 
 test "EventBus once fires exactly once" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.once("one-shot", countCallback);
@@ -72,7 +72,7 @@ test "EventBus once fires exactly once" {
 
 test "EventBus data is passed correctly" {
     resetState();
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("data-test", dataCallback);
@@ -83,7 +83,7 @@ test "EventBus data is passed correctly" {
 test "EventBus C ABI callback" {
     c_received_count = 0;
     c_received_channel_len = 0;
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.onC("backend-event", cCallback, null);
@@ -95,7 +95,7 @@ test "EventBus C ABI callback" {
 test "EventBus mixed Zig + C callbacks" {
     resetState();
     c_received_count = 0;
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("mixed", countCallback);
@@ -110,7 +110,7 @@ test "EventBus mixed Zig + C callbacks" {
 test "EventBus offAll clears all listeners" {
     resetState();
     c_received_count = 0;
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("clear-me", countCallback);
@@ -127,7 +127,7 @@ test "EventBus offAll clears all listeners" {
 test "EventBus multiple channels independent" {
     resetState();
     c_received_count = 0;
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     _ = bus.on("ch-a", countCallback);
@@ -143,7 +143,7 @@ test "EventBus multiple channels independent" {
 }
 
 test "EventBus stress: many listeners" {
-    var bus = events.EventBus.init(std.testing.allocator);
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
 
     var ids: [32]u64 = undefined;

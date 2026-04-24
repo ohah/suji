@@ -93,7 +93,7 @@ test "nullTerminateOrAlloc overflow uses heap" {
     const r = result.?;
     try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings("hello", std.mem.span(r.ptr));
-    std.heap.page_allocator.free(r.ptr[0 .. 5 + 1]);
+    std.heap.page_allocator.free(r.heap_slice.?);
 }
 
 test "nullTerminateOrAlloc single byte buffer overflow" {
@@ -103,7 +103,7 @@ test "nullTerminateOrAlloc single byte buffer overflow" {
     const r = result.?;
     try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings("ab", std.mem.span(r.ptr));
-    std.heap.page_allocator.free(r.ptr[0 .. 2 + 1]);
+    std.heap.page_allocator.free(r.heap_slice.?);
 }
 
 test "nullTerminateOrAlloc preserves null terminator" {
@@ -124,7 +124,7 @@ test "nullTerminateOrAlloc large data heap allocation" {
     try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings(data, std.mem.span(r.ptr));
     try std.testing.expect(r.ptr[data.len] == 0);
-    std.heap.page_allocator.free(r.ptr[0 .. data.len + 1]);
+    std.heap.page_allocator.free(r.heap_slice.?);
 }
 
 test "nullTerminateOrAlloc boundary: src.len == buf.len - 1" {
@@ -145,5 +145,5 @@ test "nullTerminateOrAlloc boundary: src.len == buf.len" {
     const r = result.?;
     try std.testing.expect(r.heap_slice != null);
     try std.testing.expectEqualStrings("abcde", std.mem.span(r.ptr));
-    std.heap.page_allocator.free(r.ptr[0 .. 5 + 1]);
+    std.heap.page_allocator.free(r.heap_slice.?);
 }

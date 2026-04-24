@@ -1,4 +1,7 @@
 const std = @import("std");
+const runtime = @import("runtime");
+
+const Dir = std.Io.Dir;
 
 pub const BackendLang = enum {
     zig,
@@ -22,10 +25,11 @@ pub const InitOptions = struct {
 
 pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     const name = opts.name;
+    const io = runtime.io;
 
     std.debug.print("[suji] creating project '{s}' (backend: {s})\n", .{ name, @tagName(opts.backend) });
 
-    std.fs.cwd().makeDir(name) catch |err| {
+    Dir.cwd().createDir(io, name, .default_dir) catch |err| {
         if (err == error.PathAlreadyExists) {
             std.debug.print("[suji] error: directory '{s}' already exists\n", .{name});
             return;
@@ -33,8 +37,8 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
         return err;
     };
 
-    var project_dir = try std.fs.cwd().openDir(name, .{});
-    defer project_dir.close();
+    var project_dir = try Dir.cwd().openDir(io, name, .{});
+    defer project_dir.close(io);
 
     // suji.json
     try writeConfig(allocator, project_dir, name, opts.backend);
@@ -45,23 +49,23 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
         .rust => try scaffoldRust(project_dir),
         .go => try scaffoldGo(allocator, project_dir, name),
         .multi => {
-            try project_dir.makeDir("backends");
-            var backends_dir = try project_dir.openDir("backends", .{});
-            defer backends_dir.close();
+            try project_dir.createDir(io, "backends", .default_dir);
+            var backends_dir = try project_dir.openDir(io, "backends", .{});
+            defer backends_dir.close(io);
 
-            try backends_dir.makeDir("zig");
-            var zig_dir = try backends_dir.openDir("zig", .{});
-            defer zig_dir.close();
+            try backends_dir.createDir(io, "zig", .default_dir);
+            var zig_dir = try backends_dir.openDir(io, "zig", .{});
+            defer zig_dir.close(io);
             try scaffoldZig(zig_dir);
 
-            try backends_dir.makeDir("rust");
-            var rust_dir = try backends_dir.openDir("rust", .{});
-            defer rust_dir.close();
+            try backends_dir.createDir(io, "rust", .default_dir);
+            var rust_dir = try backends_dir.openDir(io, "rust", .{});
+            defer rust_dir.close(io);
             try scaffoldRust(rust_dir);
 
-            try backends_dir.makeDir("go");
-            var go_dir = try backends_dir.openDir("go", .{});
-            defer go_dir.close();
+            try backends_dir.createDir(io, "go", .default_dir);
+            var go_dir = try backends_dir.openDir(io, "go", .{});
+            defer go_dir.close(io);
             try scaffoldGo(allocator, go_dir, name);
         },
     }
@@ -76,7 +80,7 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     std.debug.print("\n[suji] project '{s}' created!\n\n  cd {s}\n  suji dev\n\n", .{ name, name });
 }
 
-fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, backend: BackendLang) !void {
+fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend: BackendLang) !void {
     var buf: [2048]u8 = undefined;
     const content = switch (backend) {
         .multi => try std.fmt.bufPrint(&buf,
@@ -106,19 +110,20 @@ fn writeConfig(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8, 
     try writeFileContent(dir, "suji.json", content);
 }
 
-fn scaffoldZig(dir: std.fs.Dir) !void {
+fn scaffoldZig(dir: Dir) !void {
     try writeFileContent(dir, "app.zig", @embedFile("../templates/zig_app.zig"));
 }
 
-fn scaffoldRust(dir: std.fs.Dir) !void {
+fn scaffoldRust(dir: Dir) !void {
+    const io = runtime.io;
     try writeFileContent(dir, "Cargo.toml", @embedFile("../templates/rust_cargo.toml"));
-    try dir.makeDir("src");
-    var src_dir = try dir.openDir("src", .{});
-    defer src_dir.close();
+    try dir.createDir(io, "src", .default_dir);
+    var src_dir = try dir.openDir(io, "src", .{});
+    defer src_dir.close(io);
     try writeFileContent(src_dir, "lib.rs", @embedFile("../templates/rust_lib.rs"));
 }
 
-fn scaffoldGo(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !void {
+fn scaffoldGo(allocator: std.mem.Allocator, dir: Dir, name: []const u8) !void {
     var buf: [512]u8 = undefined;
     const go_mod = try std.fmt.bufPrint(&buf, "module {s}\n\ngo 1.26\n", .{name});
     _ = allocator;
@@ -127,20 +132,17 @@ fn scaffoldGo(allocator: std.mem.Allocator, dir: std.fs.Dir, name: []const u8) !
 }
 
 fn createFrontend(allocator: std.mem.Allocator, project_name: []const u8) !void {
-    const project_path = std.fs.cwd().realpathAlloc(allocator, project_name) catch null;
+    const io = runtime.io;
+    const project_path = Dir.cwd().realPathFileAlloc(io, project_name, allocator) catch null;
     defer if (project_path) |p| allocator.free(p);
 
-    var child = std.process.Child.init(
-        &.{ "bunx", "create-vite", "frontend", "--template", "react-ts" },
-        allocator,
-    );
-    child.cwd = project_path;
-    child.stderr_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    try child.spawn();
-    const result = try child.wait();
+    var child = try std.process.spawn(io, .{
+        .argv = &.{ "bunx", "create-vite", "frontend", "--template", "react-ts" },
+        .cwd = if (project_path) |p| .{ .path = p } else .inherit,
+    });
+    const result = try child.wait(io);
     switch (result) {
-        .Exited => |code| if (code != 0) {
+        .exited => |code| if (code != 0) {
             std.debug.print("[suji] warning: frontend creation failed\n", .{});
         },
         else => {},
@@ -149,19 +151,22 @@ fn createFrontend(allocator: std.mem.Allocator, project_name: []const u8) !void 
     // bun install
     const frontend_path = try std.fmt.allocPrint(allocator, "{s}/frontend", .{project_name});
     defer allocator.free(frontend_path);
-    const frontend_real = std.fs.cwd().realpathAlloc(allocator, frontend_path) catch null;
+    const frontend_real = Dir.cwd().realPathFileAlloc(io, frontend_path, allocator) catch null;
     defer if (frontend_real) |p| allocator.free(p);
 
-    var install = std.process.Child.init(&.{ "bun", "install" }, allocator);
-    install.cwd = frontend_real;
-    install.stderr_behavior = .Inherit;
-    install.stdout_behavior = .Inherit;
-    try install.spawn();
-    _ = try install.wait();
+    var install = try std.process.spawn(io, .{
+        .argv = &.{ "bun", "install" },
+        .cwd = if (frontend_real) |p| .{ .path = p } else .inherit,
+    });
+    _ = try install.wait(io);
 }
 
-fn writeFileContent(dir: std.fs.Dir, name: []const u8, content: []const u8) !void {
-    const file = try dir.createFile(name, .{});
-    defer file.close();
-    try file.writeAll(content);
+fn writeFileContent(dir: Dir, name: []const u8, content: []const u8) !void {
+    const io = runtime.io;
+    var file = try dir.createFile(io, name, .{});
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var fw = file.writer(io, &buf);
+    try fw.interface.writeAll(content);
+    try fw.interface.flush();
 }

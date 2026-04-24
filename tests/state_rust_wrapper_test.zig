@@ -53,7 +53,7 @@ fn contains(haystack: []const u8, needle: []const u8) bool {
 }
 
 test "rust wrapper: load both plugins" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
 
@@ -63,7 +63,7 @@ test "rust wrapper: load both plugins" {
 }
 
 test "rust wrapper: set then get roundtrip" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -80,7 +80,7 @@ test "rust wrapper: set then get roundtrip" {
 }
 
 test "rust wrapper: get missing key returns null" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -91,7 +91,7 @@ test "rust wrapper: get missing key returns null" {
 }
 
 test "rust wrapper: delete removes key" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -105,7 +105,7 @@ test "rust wrapper: delete removes key" {
 }
 
 test "rust wrapper: keys lists everything" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);
@@ -120,7 +120,7 @@ test "rust wrapper: keys lists everything" {
 }
 
 test "rust wrapper: object value roundtrip" {
-    var reg = loader.BackendRegistry.init(std.heap.page_allocator);
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
     try setupRegistry(&reg);

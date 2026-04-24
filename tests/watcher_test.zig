@@ -1,12 +1,19 @@
 const std = @import("std");
 const Watcher = @import("watcher").Watcher;
 
+const io = std.testing.io;
+const Dir = std.Io.Dir;
+
+fn testSleep(ms: i64) void {
+    io.sleep(.fromMilliseconds(ms), .awake) catch {};
+}
+
 // ============================================
 // Watcher 초기화/해제
 // ============================================
 
 test "Watcher init and deinit" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     defer w.deinit();
 
     try std.testing.expect(w.paths.items.len == 0);
@@ -16,7 +23,7 @@ test "Watcher init and deinit" {
 }
 
 test "Watcher addPath" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     defer w.deinit();
 
     try w.addPath("/tmp");
@@ -25,25 +32,25 @@ test "Watcher addPath" {
 }
 
 test "Watcher addPath multiple" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     defer w.deinit();
 
     // 실제 존재하는 디렉토리 사용 (Linux inotify는 존재하지 않는 경로 거부)
     const dirs = [_][]const u8{ "/tmp/suji-watch-a", "/tmp/suji-watch-b", "/tmp/suji-watch-c" };
-    for (dirs) |d| std.fs.cwd().makePath(d) catch {};
-    defer for (dirs) |d| std.fs.cwd().deleteTree(d) catch {};
+    for (dirs) |d| Dir.cwd().createDirPath(io, d) catch {};
+    defer for (dirs) |d| Dir.cwd().deleteTree(io, d) catch {};
 
     for (dirs) |d| try w.addPath(d);
     try std.testing.expectEqual(@as(usize, 3), w.paths.items.len);
 }
 
 test "Watcher addPath owns memory" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     defer w.deinit();
 
     const tmp_dir = "/tmp/suji-watch-own";
-    std.fs.cwd().makePath(tmp_dir) catch {};
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+    Dir.cwd().createDirPath(io, tmp_dir) catch {};
+    defer Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
     // 스택 문자열 전달 — Watcher가 복제해야 함
     var buf: [32]u8 = undefined;
@@ -52,6 +59,15 @@ test "Watcher addPath owns memory" {
     // buf를 수정해도 watcher의 경로는 영향 없어야 함
     buf[0] = 'X';
     try std.testing.expectEqualStrings(tmp_dir, w.paths.items[0]);
+}
+
+fn writeFile(path: []const u8, content: []const u8) !void {
+    var file = try Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var fw_buf: [256]u8 = undefined;
+    var fw = file.writer(io, &fw_buf);
+    try fw.interface.writeAll(content);
+    try fw.interface.flush();
 }
 
 // ============================================
@@ -63,11 +79,11 @@ test "Watcher detects file creation" {
 
     // 임시 디렉토리 생성
     const tmp_dir = "/tmp/suji-watcher-test-create";
-    std.fs.cwd().deleteTree(tmp_dir) catch {};
-    try std.fs.cwd().makePath(tmp_dir);
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+    Dir.cwd().deleteTree(io, tmp_dir) catch {};
+    try Dir.cwd().createDirPath(io, tmp_dir);
+    defer Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
-    var w = Watcher.init(allocator);
+    var w = Watcher.init(allocator, io);
     defer w.deinit();
     try w.addPath(tmp_dir);
 
@@ -82,18 +98,13 @@ test "Watcher detects file creation" {
     try w.start(&Ctx.cb);
 
     // 파일 생성
-    std.Thread.sleep(600 * std.time.ns_per_ms); // watcher가 초기 mtime 수집할 시간
-    const file_path = tmp_dir ++ "/test.txt";
-    {
-        var f = try std.fs.cwd().createFile(file_path, .{});
-        _ = try f.write("hello");
-        f.close();
-    }
+    testSleep(600); // watcher가 초기 mtime 수집할 시간
+    try writeFile(tmp_dir ++ "/test.txt", "hello");
 
     // 감지 대기 (최대 3초)
     var waited: usize = 0;
     while (!detected.load(.acquire) and waited < 30) : (waited += 1) {
-        std.Thread.sleep(100 * std.time.ns_per_ms);
+        testSleep(100);
     }
 
     w.stop();
@@ -104,19 +115,15 @@ test "Watcher detects file modification" {
     const allocator = std.testing.allocator;
 
     const tmp_dir = "/tmp/suji-watcher-test-modify";
-    std.fs.cwd().deleteTree(tmp_dir) catch {};
-    try std.fs.cwd().makePath(tmp_dir);
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+    Dir.cwd().deleteTree(io, tmp_dir) catch {};
+    try Dir.cwd().createDirPath(io, tmp_dir);
+    defer Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
     // 미리 파일 생성
     const file_path = tmp_dir ++ "/existing.txt";
-    {
-        var f = try std.fs.cwd().createFile(file_path, .{});
-        _ = try f.write("v1");
-        f.close();
-    }
+    try writeFile(file_path, "v1");
 
-    var w = Watcher.init(allocator);
+    var w = Watcher.init(allocator, io);
     defer w.deinit();
     try w.addPath(tmp_dir);
 
@@ -131,19 +138,15 @@ test "Watcher detects file modification" {
     try w.start(&Ctx.cb);
 
     // 초기 스캔 대기
-    std.Thread.sleep(800 * std.time.ns_per_ms);
+    testSleep(800);
 
     // 파일 수정
-    {
-        var f = try std.fs.cwd().createFile(file_path, .{});
-        _ = try f.write("v2-modified");
-        f.close();
-    }
+    try writeFile(file_path, "v2-modified");
 
     // 감지 대기
     var waited: usize = 0;
     while (change_count.load(.acquire) == 0 and waited < 30) : (waited += 1) {
-        std.Thread.sleep(100 * std.time.ns_per_ms);
+        testSleep(100);
     }
 
     w.stop();
@@ -151,13 +154,13 @@ test "Watcher detects file modification" {
 }
 
 test "Watcher stop is safe when not started" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     w.stop(); // 크래시 안 남
     w.deinit();
 }
 
 test "Watcher start and stop quickly" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     defer w.deinit();
 
     try w.addPath("/tmp");
@@ -167,12 +170,12 @@ test "Watcher start and stop quickly" {
     }.cb;
 
     try w.start(&noop);
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    testSleep(50);
     w.stop();
 
     // 다시 시작 가능
     try w.start(&noop);
-    std.Thread.sleep(50 * std.time.ns_per_ms);
+    testSleep(50);
     w.stop();
 }
 
@@ -182,7 +185,7 @@ test "Watcher start and stop quickly" {
 
 test "BackendRegistry clearRoutesFor" {
     const loader = @import("loader");
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, io);
     defer {
         // routes 키 메모리 해제 (BackendRegistry.deinit은 키를 해제하지 않음)
         var iter = reg.routes.iterator();
@@ -210,7 +213,7 @@ test "BackendRegistry clearRoutesFor" {
 
 test "BackendRegistry clearRoutesFor nonexistent backend" {
     const loader = @import("loader");
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, io);
     defer {
         var iter = reg.routes.iterator();
         while (iter.next()) |entry| std.testing.allocator.free(entry.key_ptr.*);
@@ -228,21 +231,17 @@ test "BackendRegistry clearRoutesFor nonexistent backend" {
 }
 
 // ============================================
-// RwLock 동시성 테스트
-// ============================================
-
-// ============================================
 // Watcher 추가 테스트
 // ============================================
 
 test "Watcher detects multiple file changes" {
     const allocator = std.testing.allocator;
     const tmp_dir = "/tmp/suji-watcher-test-multi";
-    std.fs.cwd().deleteTree(tmp_dir) catch {};
-    try std.fs.cwd().makePath(tmp_dir);
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+    Dir.cwd().deleteTree(io, tmp_dir) catch {};
+    try Dir.cwd().createDirPath(io, tmp_dir);
+    defer Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
-    var w = Watcher.init(allocator);
+    var w = Watcher.init(allocator, io);
     defer w.deinit();
     try w.addPath(tmp_dir);
 
@@ -256,21 +255,19 @@ test "Watcher detects multiple file changes" {
     Ctx.counter = &change_count;
     try w.start(&Ctx.cb);
 
-    std.Thread.sleep(800 * std.time.ns_per_ms);
+    testSleep(800);
 
     // 여러 파일 생성
     const files = [_][]const u8{ "/a.txt", "/b.txt", "/c.txt" };
     for (files) |suffix| {
         var path_buf: [128]u8 = undefined;
         const file_path = std.fmt.bufPrint(&path_buf, "{s}{s}", .{ tmp_dir, suffix }) catch continue;
-        var f = std.fs.cwd().createFile(file_path, .{}) catch continue;
-        _ = f.write("data") catch {};
-        f.close();
+        writeFile(file_path, "data") catch continue;
     }
 
     var waited: usize = 0;
     while (change_count.load(.acquire) < 3 and waited < 40) : (waited += 1) {
-        std.Thread.sleep(100 * std.time.ns_per_ms);
+        testSleep(100);
     }
     w.stop();
     try std.testing.expect(change_count.load(.acquire) >= 2); // 최소 2개 감지
@@ -279,11 +276,11 @@ test "Watcher detects multiple file changes" {
 test "Watcher empty directory no crash" {
     const allocator = std.testing.allocator;
     const tmp_dir = "/tmp/suji-watcher-test-empty";
-    std.fs.cwd().deleteTree(tmp_dir) catch {};
-    try std.fs.cwd().makePath(tmp_dir);
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+    Dir.cwd().deleteTree(io, tmp_dir) catch {};
+    try Dir.cwd().createDirPath(io, tmp_dir);
+    defer Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
-    var w = Watcher.init(allocator);
+    var w = Watcher.init(allocator, io);
     defer w.deinit();
     try w.addPath(tmp_dir);
 
@@ -291,12 +288,12 @@ test "Watcher empty directory no crash" {
         fn cb(_: []const u8) void {}
     }.cb;
     try w.start(&noop);
-    std.Thread.sleep(700 * std.time.ns_per_ms); // 폴링 한 바퀴 돌 때까지
+    testSleep(700); // 폴링 한 바퀴 돌 때까지
     w.stop();
 }
 
 test "Watcher double stop no crash" {
-    var w = Watcher.init(std.testing.allocator);
+    var w = Watcher.init(std.testing.allocator, io);
     defer w.deinit();
     try w.addPath("/tmp");
     const noop = struct {
@@ -313,7 +310,7 @@ test "Watcher double stop no crash" {
 
 test "BackendRegistry reload nonexistent backend loads fresh" {
     const loader = @import("loader");
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, io);
     defer reg.deinit();
 
     // 존재하지 않는 백엔드 reload → load 시도 → dylib 없으면 에러
@@ -323,7 +320,7 @@ test "BackendRegistry reload nonexistent backend loads fresh" {
 
 test "BackendRegistry clearRoutesFor multiple calls safe" {
     const loader = @import("loader");
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, io);
     defer {
         var iter = reg.routes.iterator();
         while (iter.next()) |entry| std.testing.allocator.free(entry.key_ptr.*);
@@ -348,7 +345,7 @@ test "BackendRegistry clearRoutesFor multiple calls safe" {
 test "BackendRegistry concurrent invoke safety" {
     // RwLock이 shared 접근을 허용하는지 확인
     const loader = @import("loader");
-    var reg = loader.BackendRegistry.init(std.testing.allocator);
+    var reg = loader.BackendRegistry.init(std.testing.allocator, io);
     defer reg.deinit();
 
     // 여러 스레드에서 동시 invoke (백엔드 없으므로 null 반환)
