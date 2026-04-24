@@ -10,6 +10,7 @@ typedef struct {
     unsigned long long (*on)(const char* channel, void* cb, void* arg);
     void (*off)(unsigned long long id);
     void (*reg)(const char* channel);
+    const void* (*get_io)(void);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* ch) {

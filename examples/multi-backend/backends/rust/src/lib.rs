@@ -12,6 +12,7 @@ struct SujiCore {
     on: extern "C" fn(*const c_char, Option<extern "C" fn(*const c_char, *const c_char, *mut std::os::raw::c_void)>, *mut std::os::raw::c_void) -> u64,
     off: extern "C" fn(u64),
     register: extern "C" fn(*const c_char),
+    get_io: extern "C" fn() -> *const std::os::raw::c_void,
 }
 unsafe impl Send for SujiCore {}
 unsafe impl Sync for SujiCore {}

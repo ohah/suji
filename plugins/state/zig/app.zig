@@ -15,15 +15,10 @@ pub const app = suji.app()
 var gpa: std.heap.DebugAllocator(.{}) = .init;
 const alloc = gpa.allocator();
 
-// Plugin 내부 뮤텍스용 io (plugin이 dlopen 되므로 자체 Threaded 생성)
-var plugin_threaded: std.Io.Threaded = undefined;
-var plugin_io_initialized: bool = false;
+// 메인 프로세스의 std.Io를 SujiCore 경유로 획득 (자체 Threaded 생성하지 않음).
+// backend_init 이후부터 사용 가능.
 fn pluginIo() std.Io {
-    if (!plugin_io_initialized) {
-        plugin_threaded = .init(alloc, .{});
-        plugin_io_initialized = true;
-    }
-    return plugin_threaded.io();
+    return suji.io();
 }
 
 var store: Store = .{};

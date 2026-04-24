@@ -24,6 +24,8 @@ pub struct SujiCore {
     pub on: extern "C" fn(*const std::os::raw::c_char, Option<extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char, *mut std::os::raw::c_void)>, *mut std::os::raw::c_void) -> u64,
     pub off: extern "C" fn(u64),
     pub register: extern "C" fn(*const std::os::raw::c_char),
+    /// Zig plugin 전용. Rust plugin은 `std::sync`/`std::fs` 사용 권장.
+    pub get_io: extern "C" fn() -> *const std::os::raw::c_void,
 }
 
 unsafe impl Send for SujiCore {}

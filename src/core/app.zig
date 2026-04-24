@@ -376,9 +376,22 @@ const ExternSujiCore = extern struct {
     on_fn: ?*const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
     off_fn: ?*const fn (u64) callconv(.c) void,
     register_fn: ?*const fn ([*c]const u8) callconv(.c) void,
+    /// 메인 프로세스의 std.Io 포인터 getter (Zig plugin 전용).
+    get_io: ?*const fn () callconv(.c) ?*const anyopaque,
 };
 
 var _global_core: ?*const ExternSujiCore = null;
+
+/// Plugin 개발자 API — 메인 프로세스의 std.Io를 반환.
+/// 이걸로 std.Io.Mutex/RwLock, std.Io.Dir, sleep 등을 호출.
+/// 호출 전에 backend_init이 실행돼 있어야 함 (plugin init 이후 hot path 어디서든 OK).
+pub fn io() std.Io {
+    const core = _global_core orelse @panic("suji.io(): backend_init 미호출 상태");
+    const get = core.get_io orelse @panic("suji.io(): core.get_io null (SDK/core 버전 불일치)");
+    const raw = get() orelse @panic("suji.io(): BackendRegistry.global 미설정");
+    const ptr: *const std.Io = @ptrCast(@alignCast(raw));
+    return ptr.*;
+}
 
 /// 다른 백엔드 호출 (invoke)
 pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {

@@ -10,6 +10,8 @@ typedef struct {
     unsigned long long (*on)(const char* channel, void* cb, void* arg);
     void (*off)(unsigned long long id);
     void (*reg)(const char* channel);
+    // Zig plugin 전용. Go plugin은 sync/os 표준 패키지 사용 권장.
+    const void* (*get_io)(void);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* channel) {

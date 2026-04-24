@@ -11,6 +11,10 @@ pub const SujiCore = extern struct {
     on: *const fn ([*c]const u8, ?*const fn ([*c]const u8, [*c]const u8, ?*anyopaque) callconv(.c) void, ?*anyopaque) callconv(.c) u64,
     off: *const fn (u64) callconv(.c) void,
     register: *const fn ([*c]const u8) callconv(.c) void,
+    /// 메인 프로세스의 std.Io 포인터 getter (Zig plugin 전용).
+    /// 반환값은 `*const std.Io`로 캐스팅해서 사용.
+    /// Rust/Go plugin은 무시 (자체 OS I/O 사용).
+    get_io: *const fn () callconv(.c) ?*const anyopaque,
 };
 
 /// C ABI 백엔드 인터페이스
@@ -104,6 +108,7 @@ pub const BackendRegistry = struct {
                 .on = coreOn,
                 .off = coreOff,
                 .register = coreRegister,
+                .get_io = coreGetIo,
             },
         };
         _ = &reg;
@@ -274,5 +279,13 @@ pub const BackendRegistry = struct {
         // 원래 백엔드의 free를 호출해야 하지만, 어떤 백엔드인지 모름
         // TODO: 응답에 백엔드 정보를 태깅하는 방식으로 개선
         _ = ptr;
+    }
+
+    /// C ABI 콜백: 메인 프로세스의 std.Io 포인터 반환.
+    /// Zig plugin이 `*const std.Io`로 캐스팅해서 사용.
+    /// Rust/Go plugin은 자체 언어 표준 I/O를 쓰면 되므로 호출하지 않음.
+    fn coreGetIo() callconv(.c) ?*const anyopaque {
+        const g = global orelse return null;
+        return @ptrCast(&g.io);
     }
 };
