@@ -193,6 +193,8 @@ pub const WindowManager = struct {
             }
 
             const handle = self.native.createWindow(&opts) catch return Error.NativeCreateFailed;
+            // 후속 allocation이 실패해도 native handle이 떠돌지 않도록 회수
+            errdefer self.native.destroyWindow(handle);
 
             const win = self.allocator.create(Window) catch return Error.OutOfMemory;
             errdefer self.allocator.destroy(win);

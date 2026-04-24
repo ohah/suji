@@ -255,6 +255,29 @@ test "setBounds on destroyed window returns WindowDestroyed" {
     try std.testing.expectError(window.Error.WindowDestroyed, wm.setBounds(id, .{}));
 }
 
+test "setVisible/focus on destroyed window returns WindowDestroyed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setVisible(id, false));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.focus(id));
+}
+
+test "close/setVisible/focus on unknown id returns WindowNotFound" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    try std.testing.expectError(window.Error.WindowNotFound, wm.close(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setVisible(999, true));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.focus(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setTitle(999, "x"));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setBounds(999, .{}));
+}
+
 // ============================================
 // setTitle / setBounds / setVisible / focus
 // ============================================
@@ -292,6 +315,21 @@ test "focus delegates to native" {
     const id = try wm.create(.{});
     try wm.focus(id);
     try std.testing.expectEqual(@as(usize, 1), native.focus_calls);
+}
+
+test "setVisible updates state and calls native" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{});
+    try std.testing.expect(wm.get(id).?.state.visible); // 기본값 true
+    try wm.setVisible(id, false);
+    try std.testing.expect(!wm.get(id).?.state.visible);
+    try std.testing.expectEqual(@as(usize, 1), native.set_visible_calls);
+    try wm.setVisible(id, true);
+    try std.testing.expect(wm.get(id).?.state.visible);
+    try std.testing.expectEqual(@as(usize, 2), native.set_visible_calls);
 }
 
 // ============================================
@@ -793,4 +831,164 @@ test "concurrent close on same id yields exactly one success" {
     try std.testing.expectEqual(@as(usize, THREAD_COUNT - 1), ctx.destroyed_count.load(.acquire));
     try std.testing.expectEqual(@as(usize, 1), native.destroy_calls);
     try std.testing.expect(wm.get(id).?.destroyed);
+}
+
+// ============================================
+// Event payload 내용 검증
+// ============================================
+
+test "close event payloads carry windowId" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+
+    _ = try wm.close(id);
+    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+
+    var buf: [64]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&buf, "\"windowId\":{d}", .{id});
+    try std.testing.expect(contains(sink.events.items[0].data, expected));
+    try std.testing.expectEqualStrings("window:close", sink.events.items[0].name);
+    try std.testing.expect(contains(sink.events.items[1].data, expected));
+    try std.testing.expectEqualStrings("window:closed", sink.events.items[1].name);
+}
+
+test "destroyAll event payloads carry each windowId" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id1 = try wm.create(.{});
+    const id2 = try wm.create(.{});
+    sink.reset();
+
+    wm.destroyAll();
+
+    // 각 창마다 window:closed 하나씩, payload에 해당 id 포함
+    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+    var seen1 = false;
+    var seen2 = false;
+    var buf: [64]u8 = undefined;
+    const e1 = try std.fmt.bufPrint(&buf, "\"windowId\":{d}", .{id1});
+    var buf2: [64]u8 = undefined;
+    const e2 = try std.fmt.bufPrint(&buf2, "\"windowId\":{d}", .{id2});
+    for (sink.events.items) |ev| {
+        try std.testing.expectEqualStrings("window:closed", ev.name);
+        if (contains(ev.data, e1)) seen1 = true;
+        if (contains(ev.data, e2)) seen2 = true;
+    }
+    try std.testing.expect(seen1);
+    try std.testing.expect(seen2);
+}
+
+// ============================================
+// 재진입 — listener 안에서 WindowManager 메서드 호출
+// ============================================
+
+const ReentrantSink = struct {
+    wm: *WindowManager,
+    target_id: u32 = 0,
+    destroy_on_close: bool = false,
+    close_events: usize = 0,
+    closed_events: usize = 0,
+
+    fn asSink(self: *ReentrantSink) window.EventSink {
+        return .{ .vtable = &vtable, .ctx = self };
+    }
+
+    const vtable: window.EventSink.VTable = .{
+        .emit = onEmit,
+        .emit_cancelable = onEmitCancelable,
+    };
+
+    fn fromCtx(ctx: ?*anyopaque) *ReentrantSink {
+        return @ptrCast(@alignCast(ctx.?));
+    }
+
+    fn onEmit(ctx: ?*anyopaque, name: []const u8, _: []const u8) void {
+        const self = fromCtx(ctx);
+        if (std.mem.eql(u8, name, "window:closed")) self.closed_events += 1;
+    }
+
+    fn onEmitCancelable(ctx: ?*anyopaque, name: []const u8, _: []const u8, _: *window.SujiEvent) void {
+        const self = fromCtx(ctx);
+        if (std.mem.eql(u8, name, "window:close")) {
+            self.close_events += 1;
+            if (self.destroy_on_close) {
+                // listener 안에서 강제 파괴 — close()의 Phase 3 재확인이 WindowDestroyed 반환해야
+                _ = self.wm.destroy(self.target_id) catch {};
+            }
+        }
+    }
+};
+
+test "close detects reentrant destroy during listener (Phase 3 recheck)" {
+    // window:close listener가 wm.destroy(id)를 호출하면 Phase 3에서 이미 destroyed 감지.
+    // close()는 Error.WindowDestroyed를 반환하고, window:closed는 발화되지 않아야 한다.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{});
+    var sink = ReentrantSink{ .wm = &wm, .target_id = id, .destroy_on_close = true };
+    wm.setEventSink(sink.asSink());
+
+    const res = wm.close(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, res);
+
+    // listener가 한 번 호출됐고 closed 이벤트는 발화 X
+    try std.testing.expectEqual(@as(usize, 1), sink.close_events);
+    try std.testing.expectEqual(@as(usize, 0), sink.closed_events);
+    // native.destroyWindow는 listener 내부의 destroy() 호출에서 1회만
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_calls);
+    try std.testing.expect(wm.get(id).?.destroyed);
+}
+
+// ============================================
+// OOM — FailingAllocator로 create 부분 실패 경로 검증
+// ============================================
+
+test "create propagates OOM, leaks no memory, and reclaims native handle" {
+    // fail_index를 0부터 증가시켜 각 allocation 지점마다 create 실패를 유발.
+    // std.testing.allocator가 메모리 누수를 자동 검증하고, native handle은 errdefer로
+    // destroyWindow에 회수되어야 한다.
+    var native = TestNative{};
+
+    // 먼저 성공 경로에서 필요한 allocation 수를 측정
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = std.math.maxInt(usize) });
+    var wm_probe = WindowManager.init(probe.allocator(), std.testing.io, native.asNative());
+    _ = try wm_probe.create(.{ .name = "x", .title = "Hi" });
+    wm_probe.deinit();
+    const total_allocs = probe.alloc_index;
+    try std.testing.expect(total_allocs > 0);
+
+    native = .{}; // 카운터 리셋
+
+    var i: usize = 0;
+    while (i < total_allocs) : (i += 1) {
+        var fail = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = i });
+        var wm = WindowManager.init(fail.allocator(), std.testing.io, native.asNative());
+        defer wm.deinit();
+
+        const before_create = native.create_calls;
+        const before_destroy = native.destroy_calls;
+        if (wm.create(.{ .name = "x", .title = "Hi" })) |_| {
+            // 이 fail_index에서는 실패 지점이 없어서 성공 — 다음 인덱스로
+        } else |err| {
+            try std.testing.expectEqual(window.Error.OutOfMemory, err);
+            // native.createWindow 호출됐다면 handle이 errdefer로 회수되어야 함
+            const creates = native.create_calls - before_create;
+            const destroys = native.destroy_calls - before_destroy;
+            try std.testing.expectEqual(creates, destroys);
+        }
+    }
 }
