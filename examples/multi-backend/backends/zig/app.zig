@@ -1,3 +1,4 @@
+const std = @import("std");
 const suji = @import("suji");
 
 pub const my_app = suji.app()
@@ -24,6 +25,10 @@ fn onWindowAllClosed(_: suji.Event) void {
 }
 
 fn ping(req: suji.Request) suji.Response {
+    const v = std.c.getenv("SUJI_TRACE_IPC");
+    if (v != null and v.?[0] != 0 and v.?[0] != '0') {
+        std.debug.print("[zig/ping] raw={s}\n", .{req.raw});
+    }
     return req.ok(.{ .msg = "pong from zig" });
 }
 

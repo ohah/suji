@@ -13,7 +13,8 @@ const Watcher = @import("platform/watcher.zig").Watcher;
 const node_mod = @import("platform/node.zig");
 const NodeRuntime = node_mod.NodeRuntime;
 const node_enabled = node_mod.node_enabled;
-const bundle_macos = if (@import("builtin").os.tag == .macos) @import("bundle_macos.zig") else struct {
+const builtin = @import("builtin");
+const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") else struct {
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
     }
@@ -120,7 +121,11 @@ fn setupLogFile(out_file: *std.Io.File) !void {
     var fname_buf: [128]u8 = undefined;
     var path_buf: [2048]u8 = undefined;
     var dir_buf2: [1024]u8 = undefined;
-    const pid: i32 = @intCast(std.c.getpid());
+    // std.c.getpid() — POSIX에선 pid_t 반환, Windows에선 opaque stub. 플랫폼별 분기.
+    const pid: i32 = if (builtin.os.tag == .windows)
+        @intCast(std.os.windows.kernel32.GetCurrentProcessId())
+    else
+        @intCast(std.c.getpid());
     const full_path = try logger.buildLogFilePath(
         .{ .out = &path_buf, .dir = &dir_buf2, .fname = &fname_buf },
         home,

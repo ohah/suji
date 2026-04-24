@@ -243,18 +243,35 @@ pub fn cleanupOldLogs(
     now_ns: i128,
 ) !void {
     if (retention_days == 0) return;
-    var it = dir.iterate();
     const retention_ns: i128 = @as(i128, retention_days) * std.time.ns_per_day;
+
+    // Linux에서 iterate 도중 같은 dir에 openFile/deleteFile을 호출하면 iterator의 fd 상태가
+    // 꼬여 BADF panic 발생 (Io.Dir.posixSeekTo). 2-pass로 분리:
+    //   1) iterate하며 이름만 수집 (fixed buffer — 과거 로그 수십 개 규모 충분)
+    //   2) iterate 끝난 뒤 stat + delete
+    var name_buf: [64][std.Io.Dir.max_path_bytes]u8 = undefined;
+    var name_lens: [64]usize = undefined;
+    var count: usize = 0;
+
+    var it = dir.iterate();
     while (try it.next(io)) |entry| {
         if (entry.kind != .file) continue;
         if (!std.mem.startsWith(u8, entry.name, "suji-")) continue;
         if (!std.mem.endsWith(u8, entry.name, ".log")) continue;
-        var file = dir.openFile(io, entry.name, .{}) catch continue;
+        if (count >= name_buf.len) break; // 용량 초과 시 안전 중단
+        @memcpy(name_buf[count][0..entry.name.len], entry.name);
+        name_lens[count] = entry.name.len;
+        count += 1;
+    }
+
+    for (0..count) |i| {
+        const name = name_buf[i][0..name_lens[i]];
+        var file = dir.openFile(io, name, .{}) catch continue;
         defer file.close(io);
         const stat = file.stat(io) catch continue;
         const mtime_ns: i128 = stat.mtime.toNanoseconds();
         if (now_ns - mtime_ns > retention_ns) {
-            dir.deleteFile(io, entry.name) catch {};
+            dir.deleteFile(io, name) catch {};
         }
     }
 }
