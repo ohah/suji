@@ -393,14 +393,18 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
     // entry_js는 NodeRuntime이 소유 (해제하지 않음)
 
     const rt = try allocator.create(NodeRuntime);
+    errdefer allocator.destroy(rt);
     rt.* = NodeRuntime.init(allocator, entry_js);
-    try rt.start();
-    g_node_runtime = rt;
 
-    // SujiCore 연결 (크로스 호출 + 이벤트)
+    // SujiCore 연결은 rt.start() 이전. start()가 main.js를 즉시 실행하는데,
+    // main.js의 top-level `suji.on(...)`/`suji.quit()` 호출 시점에 core가 없으면
+    // bridge가 exception 던짐 ("core not connected").
     if (suji.BackendRegistry.global) |g| {
         NodeRuntime.setCore(&g.core_api);
     }
+
+    try rt.start();
+    g_node_runtime = rt;
 
     // 임베드 런타임 테이블에 Node.js 등록. 다른 백엔드가 core.invoke("node", ...)로
     // 들어오면 BackendRegistry.coreInvoke가 이 테이블로 폴백한다.

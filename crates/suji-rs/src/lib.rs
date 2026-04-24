@@ -147,6 +147,9 @@ pub mod prelude {
     pub use crate::off;
     pub use crate::quit;
     pub use crate::platform;
+    pub use crate::PLATFORM_MACOS;
+    pub use crate::PLATFORM_LINUX;
+    pub use crate::PLATFORM_WINDOWS;
     pub use serde_json::json;
 }
 
