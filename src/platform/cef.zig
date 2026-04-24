@@ -18,10 +18,12 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_keyboard_handler_capi.h");
     @cInclude("include/capi/cef_scheme_capi.h");
     @cInclude("include/capi/cef_resource_handler_capi.h");
+    @cInclude("include/capi/cef_task_capi.h");
 });
 
 const builtin = @import("builtin");
 const runtime = @import("runtime");
+const window_mod = @import("../core/window.zig");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
@@ -255,6 +257,161 @@ pub fn createNewWindow(title: [:0]const u8, width: i32, height: i32, url: ?[:0]c
     std.debug.print("[suji] New window created: browser_id={d}\n", .{browser_id});
     return browser_id;
 }
+
+// ============================================
+// CefNative — WindowManager의 Native vtable 구현
+// ============================================
+//
+// 스레드 계약 (docs/WINDOW_API.md#스레드-모델):
+// - 모든 vtable 함수는 CEF UI 스레드에서만 호출
+// - 각 진입점에서 std.debug.assert로 방어
+// - 잘못된 스레드 호출은 debug에서 crash, release에서 CEF CHECK abort
+
+pub const CefNative = struct {
+    allocator: std.mem.Allocator,
+    /// 모든 윈도우가 공유하는 client (콜백이 전부 module-global이라 공유 안전)
+    client: c.cef_client_t = undefined,
+    /// WindowManager가 저장하는 native_handle (u64) → CEF browser 포인터
+    browsers: std.AutoHashMap(u64, *c.cef_browser_t),
+    next_handle: u64 = 1,
+    /// 기본 URL (opts.url이 null일 때 사용). "" 이면 빈 URL로 CEF 호출
+    default_url: [:0]const u8 = "",
+
+    pub fn init(allocator: std.mem.Allocator) CefNative {
+        var self: CefNative = .{
+            .allocator = allocator,
+            .browsers = std.AutoHashMap(u64, *c.cef_browser_t).init(allocator),
+        };
+        initClient(&self.client);
+        return self;
+    }
+
+    pub fn deinit(self: *CefNative) void {
+        // 브라우저 실제 파괴는 WindowManager.destroyAll 또는 개별 close/destroy 경유.
+        // 여기선 테이블만 정리 (CEF는 OnBeforeClose로 수명 관리).
+        self.browsers.deinit();
+    }
+
+    pub fn asNative(self: *CefNative) window_mod.Native {
+        return .{ .vtable = &vtable, .ctx = self };
+    }
+
+    const vtable: window_mod.Native.VTable = .{
+        .create_window = createWindow,
+        .destroy_window = destroyWindow,
+        .set_title = setTitle,
+        .set_bounds = setBounds,
+        .set_visible = setVisible,
+        .focus = focus,
+    };
+
+    fn fromCtx(ctx: ?*anyopaque) *CefNative {
+        return @ptrCast(@alignCast(ctx.?));
+    }
+
+    fn assertUiThread() void {
+        std.debug.assert(c.cef_currently_on(c.TID_UI) == 1);
+    }
+
+    fn getHost(self: *CefNative, handle: u64) ?*c.cef_browser_host_t {
+        const br = self.browsers.get(handle) orelse return null;
+        return asPtr(c.cef_browser_host_t, br.get_host.?(br));
+    }
+
+    fn createWindow(ctx: ?*anyopaque, opts: *const window_mod.CreateOptions) anyerror!u64 {
+        const self = fromCtx(ctx);
+        assertUiThread();
+
+        // title/url을 null-terminated로 복사 (CEF API 요구)
+        var title_buf: [512]u8 = undefined;
+        if (opts.title.len >= title_buf.len) return error.TitleTooLong;
+        @memcpy(title_buf[0..opts.title.len], opts.title);
+        title_buf[opts.title.len] = 0;
+        const title_z: [:0]const u8 = title_buf[0..opts.title.len :0];
+
+        var url_buf: [2048]u8 = undefined;
+        const url_z: [:0]const u8 = if (opts.url) |u| blk: {
+            if (u.len >= url_buf.len) return error.UrlTooLong;
+            @memcpy(url_buf[0..u.len], u);
+            url_buf[u.len] = 0;
+            break :blk url_buf[0..u.len :0];
+        } else self.default_url;
+
+        var window_info: c.cef_window_info_t = undefined;
+        zeroCefStruct(c.cef_window_info_t, &window_info);
+        window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
+        window_info.bounds = .{
+            .x = opts.bounds.x,
+            .y = opts.bounds.y,
+            .width = @intCast(opts.bounds.width),
+            .height = @intCast(opts.bounds.height),
+        };
+        initWindowInfo(&window_info, .{
+            .title = title_z,
+            .width = @intCast(opts.bounds.width),
+            .height = @intCast(opts.bounds.height),
+        });
+        setCefString(&window_info.window_name, title_z);
+
+        var cef_url: c.cef_string_t = .{};
+        if (url_z.len > 0) setCefString(&cef_url, url_z);
+
+        var browser_settings: c.cef_browser_settings_t = undefined;
+        zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
+
+        const browser = c.cef_browser_host_create_browser_sync(
+            &window_info,
+            &self.client,
+            &cef_url,
+            &browser_settings,
+            null,
+            null,
+        );
+        if (browser == null) return error.BrowserCreationFailed;
+        const br: *c.cef_browser_t = @ptrCast(browser);
+
+        const handle = self.next_handle;
+        self.browsers.put(handle, br) catch return error.OutOfMemory;
+        self.next_handle += 1;
+        return handle;
+    }
+
+    fn destroyWindow(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        const host = self.getHost(handle) orelse return;
+        // force=1: 사용자 확인 없이 즉시 close 시작 (WindowManager.destroy 계약).
+        // 실제 파괴는 async (OnBeforeClose) — 테이블 정리는 그 콜백에서 Step B.
+        host.close_browser.?(host, 1);
+    }
+
+    fn setVisible(ctx: ?*anyopaque, handle: u64, visible: bool) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        const host = self.getHost(handle) orelse return;
+        host.was_hidden.?(host, if (visible) 0 else 1);
+    }
+
+    fn focus(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        const host = self.getHost(handle) orelse return;
+        host.set_focus.?(host, 1);
+    }
+
+    // TODO Step C: setTitle / setBounds는 OS 네이티브 윈도우 핸들을 받아 플랫폼별로
+    // 처리해야 한다. CEF Alloy runtime에는 별도 API가 없어서 host.get_window_handle()로
+    // NSWindow*/HWND/GtkWindow*를 받아 직접 조작.
+    fn setTitle(_: ?*anyopaque, _: u64, _: []const u8) void {
+        assertUiThread();
+        // Step C에서 플랫폼별 구현 (NSWindow setTitle:, SetWindowTextW, gtk_window_set_title)
+    }
+
+    fn setBounds(_: ?*anyopaque, _: u64, _: window_mod.Bounds) void {
+        assertUiThread();
+        // Step C에서 플랫폼별 구현 (NSWindow setFrame:, SetWindowPos, gtk_window_*)
+    }
+};
 
 /// 런타임 URL 네비게이션
 pub fn navigate(url: [:0]const u8) void {

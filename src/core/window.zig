@@ -6,6 +6,12 @@
 //! - destroyed 창에 메서드 호출 시 error.WindowDestroyed
 //! - 플랫폼 조작은 Native vtable로 위임 → WindowManager는 CEF 없이 TDD 가능
 //!
+//! 스레드 모델 (docs/WINDOW_API.md#스레드-모델 참조):
+//! - write API (create/destroy/close/setters)는 **main(CEF UI) 스레드 전용**
+//! - read API (get/fromName)는 어느 스레드에서든 호출 가능 (mutex 보호)
+//! - std.Io.Mutex는 defense-in-depth (read/write 레이스 방지 + 잘못된 스레드 호출 시
+//!   데이터 경합 대신 직렬화 보장). 단일 스레드 계약이 깨져도 crash 대신 느려지기만 함.
+//!
 //! Phase 2 단위 테스트는 `tests/window_manager_test.zig` 참조.
 //! 실제 CEF 통합은 `src/platform/cef.zig`의 CefNative가 VTable 구현.
 
@@ -31,6 +37,8 @@ pub const events = struct {
 pub const CreateOptions = struct {
     name: ?[]const u8 = null,
     title: []const u8 = "Suji",
+    /// 초기 로드 URL. null이면 Native 구현이 default URL 사용.
+    url: ?[]const u8 = null,
     bounds: Bounds = .{},
     parent_id: ?u32 = null,
     /// name 중복 시: false면 기존 id 반환(싱글턴), true면 새 창 생성
