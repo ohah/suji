@@ -173,16 +173,16 @@ suji/
 
 - macOS 26.4 + Xcode 26.4: Zig 링커 버그 (Xcode 26.2 필요)
 - Go 빌드: Homebrew LLVM 충돌 (CC=/usr/bin/clang 자동 설정)
+- **Windows dlopen 백엔드 로드 불가** (Zig 0.16 `std.DynLib` 미지원 regression): [#11](https://github.com/ohah/suji/issues/11)
+  - Node.js 임베드 경로는 영향 없음. Rust/Go/Zig dylib 백엔드만 Windows에서 제약.
+  - 업스트림 복원 대기 중. `Backend.load` 구조는 그대로 남아있어 복원 시 5줄 제거로 복구.
+- **Linux/Windows GPU 가속 미지원** (명시적 `--disable-gpu`): [#12](https://github.com/ohah/suji/issues/12)
+  - macOS만 ANGLE Metal 경로로 GPU 활성. Linux/Windows는 SwiftShader CPU 폴백.
+  - asset 배치 로직만 추가하면 됨. 우선순위 낮음.
 
-## 기술 부채 / 개선 예정
+## 구현 노트
 
-### GPU 렌더링 (CEF)
-현재 `--disable-gpu` 플래그로 소프트웨어 렌더링 중. GPU 서브프로세스가 `@executable_path/libGLESv2.dylib`를 찾지 못하기 때문.
-- **해결 방법**: `build.zig` post-install에서 `~/.suji/cef/.../Framework/Libraries/libGLESv2.dylib`를 `zig-out/bin/`에 복사 (macOS `.app` 번들링 시에도 동일)
-- **영향**: WebGL, CSS 애니메이션 60fps, 비디오 가속이 필요하면 GPU 활성화 필요
-- **옵션**: `suji.json`에 `"gpu": true/false` 설정 추가 고려
-
-### Node.js 양방향 크로스 호출
+### Node.js 양방향 크로스 호출 (deadlock 방지)
 `suji.invokeSync()`에 두 가지 deadlock 방지 경로:
 
 1. **동일 스레드 재귀** (Zig→Rust→Go→Node 동기 체인): `g_in_sync_invoke` thread_local
