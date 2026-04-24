@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (316개)
+zig build test     # 테스트 (306개)
 zig build run      # CLI 도움말
 
 # 예제 실행
@@ -87,11 +87,7 @@ JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완�
 ```json
 {
   "$schema": "./suji.schema.json",
-  "app": {
-    "name": "My App",
-    "version": "1.0.0",
-    "quitOnAllWindowsClosed": null    // true/false/null(=플랫폼 기본: macOS=false, Win/Linux=true)
-  },
+  "app": { "name": "My App", "version": "1.0.0" },
   "window": {
     "title": "My App",
     "width": 1024,

@@ -7,7 +7,6 @@ const window_mod = @import("window");
 const window_stack_mod = @import("window_stack");
 const window_ipc = @import("window_ipc");
 const logger = @import("logger");
-const quit_policy = @import("quit_policy");
 
 const log = logger.module("main");
 const Watcher = @import("platform/watcher.zig").Watcher;
@@ -95,22 +94,6 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-/// config.app.quit_on_all_closed 을 리스너에 전달하기 위한 모듈 레벨 저장소.
-/// EventBus 콜백은 ctx 인자가 없어 (zig callback signature) 이 방식으로 공유.
-/// 프로세스 내에 openWindow는 1회만 실행되므로 단일 값으로 충분.
-var quit_override_storage: ?bool = null;
-
-/// EventBus 리스너 — window:all-closed 발화 시 플랫폼별 + config override 기반 quit 결정.
-/// Electron 기본: macOS 유지, Windows/Linux 종료. config로 override 가능.
-fn onWindowAllClosed(_: [*:0]const u8) void {
-    const platform = quit_policy.Platform.current();
-    const should_quit = quit_policy.shouldQuitOnAllClosed(platform, quit_override_storage);
-    log.info(
-        "window-all-closed platform={s} override={?} should_quit={}",
-        .{ @tagName(platform), quit_override_storage, should_quit },
-    );
-    if (should_quit) cef.quit();
-}
 
 /// `~/.suji/logs/` 에 실행별 로그 파일 생성 + 7일 지난 오래된 로그 cleanup.
 /// 실패하면 파일 출력 없이 stderr만 사용 (호출자가 error를 삼킴).
@@ -732,10 +715,10 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
 
-    // window:all-closed 리스너 — Electron의 `app.on('window-all-closed', ...)` 코어 기본.
-    // config.app.quit_on_all_closed 로 플랫폼 기본 override 가능.
-    quit_override_storage = config.app.quit_on_all_closed;
-    _ = event_bus.on(window_mod.events.all_closed, onWindowAllClosed);
+    // window:all-closed 이벤트는 WindowManager가 발화. 사용자가 자기 backend에서
+    // `suji.on("window:all-closed", ...)`로 구독하고 플랫폼에 맞게 `suji.quit()`
+    // 호출하는 Electron 패턴. 코어는 자동 quit하지 않음 → 사용자 코드가 주인.
+    // 예시: examples/zig-backend/app.zig
 
     // CEF IPC 콜백 연결
     cef.setInvokeHandler(&cefInvokeHandler);
