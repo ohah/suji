@@ -355,4 +355,21 @@ describe("stress: deep recursive cross-backend chain", () => {
     });
     expect(results.filter((r: string) => r === "ok")).toHaveLength(10);
   });
+
+  test("응답 메모리 누수 회귀 방지: 200회 체인 호출", async () => {
+    // coreFree가 no-op였던 시절엔 매 크로스 호출마다 응답 strdup이 leak됨.
+    // depth=2 × 200회 = coreInvoke→coreFree 왕복 최소 400회.
+    // 지금은 length-prefix header로 정상 해제되는지 확인 (실패 시 RSS 폭주/crash).
+    // 5초 내 완료를 목표로 규모 조정.
+    const success = await page.evaluate(async () => {
+      const s = (window as any).__suji__;
+      let ok = 0;
+      for (let i = 0; i < 200; i++) {
+        const r: any = await s.invoke("node-stress", { depth: 2 });
+        if (r?.child?.child?.base === "rust") ok += 1;
+      }
+      return ok;
+    });
+    expect(success).toBe(200);
+  }, 15000);
 });

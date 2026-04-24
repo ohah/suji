@@ -632,6 +632,81 @@ app.on("ready", () => {
 
 ---
 
+### Phase 5.5 (백로그): 추가 임베드 런타임 (Python / Lua)
+
+**목표**: Node 임베드와 같은 패턴으로 Python/Lua 인터프리터를 프로세스 내에 임베드. 사용자 앱이 추가 바이너리 설치 없이 해당 언어로 백엔드/플러그인 작성 가능.
+
+**동기**:
+- Python: 데이터사이언스/AI 라이브러리(numpy, pandas, torch) 활용 수요
+- Lua: 초경량 임베드 언어 — 설정 스크립트, 플러그인 DSL, 게임/에디터 확장용
+
+**선행 작업 (아키텍처 일반화)**:
+
+현재 `src/backends/loader.zig`의 `BackendRegistry.node_invoke_fallback`은 Node 전용 하드코딩. 새 임베드 런타임마다 분기를 추가하면 지저분해지므로 먼저 일반화가 필요하다.
+
+- [ ] `EmbedRuntime` struct 도입
+  ```zig
+  pub const EmbedRuntime = extern struct {
+      invoke: *const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
+      free_response: ?*const fn ([*:0]const u8) callconv(.c) void = null,
+  };
+  ```
+- [ ] `BackendRegistry.embed_runtimes: std.StringHashMap(EmbedRuntime)` 필드 — "node"/"python"/"lua" 등 이름으로 등록
+- [ ] `coreInvoke`에서 `registry.invoke(name, ...)`가 null이면 `embed_runtimes.get(name)` 폴백 (현재 Node 전용 if문 제거)
+- [ ] 기존 `node_invoke_fallback`을 `EmbedRuntime` 등록으로 이관 (하위 호환 제거)
+
+**Python 임베드**:
+
+- [ ] libpython 빌드/다운로드 인프라 (macOS: python.org 프리빌트, Linux: apt `libpython3-dev`, Windows: Python installer)
+- [ ] `src/platform/python.zig` + `src/platform/python/bridge.cc` — `Py_Initialize`, `PyObject_CallObject`, `PyGILState_Ensure/Release` (GIL 관리)
+- [ ] JSON ↔ PyDict 변환 (Python stdlib `json` 활용)
+- [ ] 재진입 패턴 (Node의 `g_in_sync_invoke` 대응) — GIL 하나라 같은 스레드 재귀와 본질적으로 동일
+- [ ] `@suji/python` (pip 패키지)
+  ```python
+  import suji
+  suji.handle('ping', lambda: {'msg': 'pong'})
+  suji.handle('analyze', lambda data: {'mean': np.mean(data['values'])})
+  ```
+- [ ] 예제 (`examples/python-backend`, `examples/multi-backend`에 Python 추가)
+- [ ] suji.json 설정: `{ "lang": "python", "entry": "backend/main.py" }`
+
+**Lua 임베드**:
+
+- [ ] Lua 런타임 빌드 (정적 링크 `liblua.a` 수백 KB, 또는 LuaJIT)
+- [ ] `src/platform/lua.zig` — `luaL_newstate`, `lua_pcall`, `lua_tostring`, `cjson` 라이브러리 번들
+- [ ] state 격리 (스레드마다 별도 `lua_State`)
+- [ ] Lua 모듈 (`suji.lua`):
+  ```lua
+  local suji = require("suji")
+  suji.handle("ping", function() return {msg = "pong"} end)
+  suji.handle("greet", function(data) return {hello = data.name} end)
+  ```
+- [ ] 예제 (`examples/lua-backend`)
+- [ ] suji.json 설정: `{ "lang": "lua", "entry": "backend/main.lua" }`
+
+**언어별 특성 요약**:
+
+| | Python | Lua | Node (참고) |
+|---|---|---|---|
+| 임베드 크기 | ~15MB | 수백 KB | ~60MB |
+| 동시성 | GIL (단일 스레드) | 단일 스레드 + 코루틴 | libuv event loop |
+| 패키지 매니저 | pip | LuaRocks | npm |
+| JSON 지원 | stdlib | cjson 라이브러리 | 내장 |
+| 재진입 패턴 | Node와 동일 (GIL 재귀) | 더 단순 (단일 스레드) | `g_in_sync_invoke` |
+| 사용자 수요 | 높음 (AI/DS) | 중간 (DSL/확장) | 매우 높음 |
+
+**구현 순서 권장**:
+1. 선행 — `EmbedRuntime` 일반화 (반나절)
+2. Lua 먼저 (더 가볍고 임베드 단순, 일반화 설계 검증용)
+3. Python 이어서 (수요 높지만 GIL/배포 복잡도 큼)
+
+**남은 설계 질문**:
+- Python 패키지 매니저(pip) 자동 설치 방식 (현재 Node는 npm install을 `suji dev`가 호출)
+- Lua 라이브러리 번들링 정책 (빌드 타임 vs 런타임 LuaRocks)
+- SDK 배포: PyPI `suji` 패키지명 + `github.com/ohah/suji-lua` 모듈
+
+---
+
 ### Phase 6 (선택): 멀티 백엔드
 
 **목표**: 하나의 앱에서 여러 언어 백엔드 동시 사용

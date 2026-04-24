@@ -334,10 +334,15 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
         NodeRuntime.setCore(&g.core_api);
     }
 
-    // 다른 백엔드가 core.invoke("node", ...)로 들어올 때 BackendRegistry가
-    // libnode 임베드 런타임으로 폴백할 수 있도록 함수 포인터 주입.
+    // 임베드 런타임 테이블에 Node.js 등록. 다른 백엔드가 core.invoke("node", ...)로
+    // 들어오면 BackendRegistry.coreInvoke가 이 테이블로 폴백한다.
     if (node_enabled) {
-        suji.BackendRegistry.node_invoke_fallback = node_mod.bridge.suji_node_invoke;
+        suji.BackendRegistry.registerEmbedRuntime("node", .{
+            .invoke = node_mod.bridge.suji_node_invoke,
+            .free_response = node_mod.bridge.suji_node_free,
+        }) catch |err| {
+            std.debug.print("[suji] node embed registration failed: {}\n", .{err});
+        };
     }
 }
 

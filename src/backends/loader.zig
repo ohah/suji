@@ -17,6 +17,18 @@ pub const SujiCore = extern struct {
     get_io: *const fn () callconv(.c) ?*const anyopaque,
 };
 
+/// dlopen 바깥에서 프로세스 내에 임베드되는 언어 런타임 (Node.js, 향후 Python/Lua).
+/// `BackendRegistry.embed_runtimes`에 이름으로 등록하면 `coreInvoke`가 dlopen 백엔드를
+/// 찾지 못했을 때 이 테이블로 폴백한다. 각 런타임이 자기 언어의 동시성/메모리 모델을
+/// 유지하므로 Suji 코어는 채널명 라우팅과 응답 복사만 담당.
+pub const EmbedRuntime = struct {
+    /// 요청 실행. channel은 JSON 요청의 `cmd` 필드에서 추출된 값.
+    /// 반환 문자열은 런타임이 소유 (직후 `free_response`로 해제됨).
+    invoke: *const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
+    /// `invoke`가 반환한 응답 문자열의 소유 메모리 해제. null이면 leak (런타임이 정책상 관리 안 하는 경우).
+    free_response: ?*const fn (ptr: [*:0]const u8) callconv(.c) void = null,
+};
+
 /// C ABI 백엔드 인터페이스
 pub const Backend = struct {
     name: []const u8,
@@ -95,10 +107,21 @@ pub const BackendRegistry = struct {
 
     pub var global: ?*BackendRegistry = null;
 
-    /// Node.js 백엔드 폴백 (libnode 임베드 시 main이 설정).
-    /// coreInvoke에서 backend name이 "node"인데 dlopen registry에 없을 때 사용.
-    /// 시그니처는 bridge.suji_node_invoke와 동일.
-    pub var node_invoke_fallback: ?*const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8 = null;
+    /// 임베드 런타임 테이블. main이 Node/Python/Lua 등을 여기 등록.
+    /// coreInvoke에서 dlopen registry에 없는 이름일 때 폴백으로 조회.
+    pub var embed_runtimes: std.StringHashMap(EmbedRuntime) = undefined;
+    var embed_runtimes_initialized: bool = false;
+
+    /// 임베드 런타임 등록. 호출 순서 상관없이 사용 전 lazy-init.
+    pub fn registerEmbedRuntime(name: []const u8, rt: EmbedRuntime) !void {
+        const g = global orelse return error.NoRegistry;
+        if (!embed_runtimes_initialized) {
+            embed_runtimes = std.StringHashMap(EmbedRuntime).init(g.allocator);
+            embed_runtimes_initialized = true;
+        }
+        const owned = try g.allocator.dupe(u8, name);
+        try embed_runtimes.put(owned, rt);
+    }
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io) BackendRegistry {
         var reg = BackendRegistry{
@@ -218,31 +241,75 @@ pub const BackendRegistry = struct {
         global = null;
     }
 
+    // ============================================
+    // 응답 소유권 (length-prefix header)
+    // ============================================
+    // coreInvoke는 백엔드/Node 응답을 Suji allocator로 즉시 복사하고, 원본은
+    // 소유자(백엔드 SDK / node bridge)에게 돌려보낸다. 호출자(다른 SDK)는
+    // 받은 포인터를 coreFree로 해제하고, Suji는 포인터 직전 8바이트의 길이 필드로
+    // 전체 할당 크기를 계산해 자기 allocator로 free한다.
+    //
+    // 레이아웃: [len: u64 LE][body...][0]
+    //           ^             ^
+    //           header_ptr    body_ptr (호출자가 받음)
+    const OWNED_HEADER_SIZE: usize = 8;
+
+    /// 백엔드/Node 응답을 Suji 소유 메모리로 복사. 실패 시 null.
+    fn dupeOwnedResponse(allocator: std.mem.Allocator, src: []const u8) ?[*:0]u8 {
+        const total = OWNED_HEADER_SIZE + src.len + 1;
+        const buf = allocator.alloc(u8, total) catch return null;
+        std.mem.writeInt(u64, buf[0..OWNED_HEADER_SIZE], src.len, .little);
+        @memcpy(buf[OWNED_HEADER_SIZE .. OWNED_HEADER_SIZE + src.len], src);
+        buf[OWNED_HEADER_SIZE + src.len] = 0;
+        return @ptrCast(buf[OWNED_HEADER_SIZE .. OWNED_HEADER_SIZE + src.len :0].ptr);
+    }
+
+    /// coreInvoke가 반환했던 포인터를 해제. null 또는 static 문자열("{}"/"")는 무시.
+    fn freeOwnedResponse(allocator: std.mem.Allocator, body_ptr: [*:0]const u8) void {
+        const body_bytes: [*]const u8 = @ptrCast(body_ptr);
+        const header_bytes = body_bytes - OWNED_HEADER_SIZE;
+        const len = std.mem.readInt(u64, header_bytes[0..OWNED_HEADER_SIZE], .little);
+        // 방어: 말도 안 되는 크기면 no-op (static literal 등이 잘못 넘어온 경우)
+        if (len > 64 * 1024 * 1024) return;
+        const total = OWNED_HEADER_SIZE + len + 1;
+        const full_slice: []const u8 = header_bytes[0..total];
+        allocator.free(full_slice);
+    }
+
     // C ABI 콜백: 백엔드에서 다른 백엔드 호출
     fn coreInvoke(backend_name: [*c]const u8, request: [*c]const u8) callconv(.c) [*c]const u8 {
         const reg = global orelse return @ptrCast(@constCast(""));
         const name = std.mem.span(@as([*:0]const u8, @ptrCast(backend_name)));
-        const resp = reg.invoke(name, @ptrCast(request));
-        if (resp) |r| {
-            // 응답을 복사해서 반환 (원본은 백엔드 소유)
-            const backend = reg.get(name) orelse return @ptrCast(@constCast(""));
-            _ = backend;
-            // 백엔드 응답 포인터를 그대로 반환 (호출자가 core.free로 해제)
-            return @ptrCast(@constCast(r.ptr));
+
+        // dlopen 백엔드 경로
+        if (reg.get(name)) |backend| {
+            const raw = backend.invoke(@ptrCast(request));
+            if (raw) |r| {
+                const owned = dupeOwnedResponse(reg.allocator, r) orelse {
+                    backend.freeResponse(r);
+                    return @ptrCast(@constCast(""));
+                };
+                backend.freeResponse(r);
+                return @ptrCast(owned);
+            }
         }
 
-        // dlopen registry에 없으면 Node 백엔드 폴백 시도 (libnode 임베드 시만).
-        // Node는 채널 단위로 handler를 관리하므로 request의 "cmd" 필드를 channel로 사용.
-        if (std.mem.eql(u8, name, "node")) {
-            if (node_invoke_fallback) |nf| {
+        // 임베드 런타임 폴백 (Node.js, 향후 Python/Lua 등)
+        if (embed_runtimes_initialized) {
+            if (embed_runtimes.get(name)) |rt| {
                 const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
                 var ch_buf: [256]u8 = undefined;
                 const channel = extractCmdField(req_span) orelse name;
                 const len = @min(channel.len, ch_buf.len - 1);
                 @memcpy(ch_buf[0..len], channel[0..len]);
                 ch_buf[len] = 0;
-                const resp_ptr = nf(@ptrCast(&ch_buf), @ptrCast(request));
-                if (resp_ptr) |p| return @ptrCast(@constCast(p));
+                if (rt.invoke(@ptrCast(&ch_buf), @ptrCast(request))) |p| {
+                    const raw_body = std.mem.span(p);
+                    const owned = dupeOwnedResponse(reg.allocator, raw_body);
+                    // 런타임이 free_response를 제공하면 원본 메모리 반납
+                    if (rt.free_response) |ff| ff(p);
+                    if (owned) |o| return @ptrCast(o);
+                }
             }
         }
 
@@ -303,12 +370,15 @@ pub const BackendRegistry = struct {
         reg.routes.put(owned_channel, backend) catch {};
     }
 
-    // C ABI 콜백: 응답 메모리 해제
+    // C ABI 콜백: 응답 메모리 해제 (coreInvoke가 복사한 Suji 소유 메모리)
     fn coreFree(ptr: [*c]const u8) callconv(.c) void {
-        // 현재는 백엔드가 할당한 메모리를 그대로 반환하므로
-        // 원래 백엔드의 free를 호출해야 하지만, 어떤 백엔드인지 모름
-        // TODO: 응답에 백엔드 정보를 태깅하는 방식으로 개선
-        _ = ptr;
+        if (ptr == null) return;
+        const reg = global orelse return;
+        const c_ptr: [*:0]const u8 = @ptrCast(ptr);
+        // 정적 문자열("{}"/"")은 header가 없어 free 불가 — 간단 가드.
+        const body = std.mem.span(c_ptr);
+        if (body.len == 0 or std.mem.eql(u8, body, "{}")) return;
+        freeOwnedResponse(reg.allocator, c_ptr);
     }
 
     /// C ABI 콜백: 메인 프로세스의 std.Io 포인터 반환.
