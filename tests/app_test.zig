@@ -36,6 +36,33 @@ test "App builder creates listeners" {
     try std.testing.expectEqualStrings("clicked", test_app.listeners[0].channel);
 }
 
+// ============================================
+// App.named() — ready/bye 로그 prefix 구분
+// ============================================
+
+// App 빌더는 comptime self 계약이라 comptime 컨텍스트(모듈 스코프 또는 comptime block)에서만
+// 체인 가능. 테스트용 샘플은 모듈 스코프로 고정.
+const default_app = app_mod.app();
+const named_app = app_mod.app().named("state");
+const chained_app = app_mod.app()
+    .named("my-plugin")
+    .handle("ping", pingHandler)
+    .on("clicked", clickHandler);
+
+test "App.name defaults to \"Zig\"" {
+    try std.testing.expectEqualStrings("Zig", default_app.name);
+}
+
+test "App.named sets custom name" {
+    try std.testing.expectEqualStrings("state", named_app.name);
+}
+
+test "App.named preserves builder chain (handlers/listeners)" {
+    try std.testing.expectEqualStrings("my-plugin", chained_app.name);
+    try std.testing.expectEqual(@as(usize, 1), chained_app.handler_count);
+    try std.testing.expectEqual(@as(usize, 1), chained_app.listener_count);
+}
+
 test "App handleIpc ping" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();

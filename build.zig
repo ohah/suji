@@ -497,7 +497,11 @@ pub fn build(b: *std.Build) void {
     const watcher_test = b.addTest(.{ .root_module = watcher_test_mod });
     test_step.dependOn(&b.addRunArtifact(watcher_test).step);
 
-    // Node.js tests (stub + NodeRuntime 구조체)
+    // Node.js tests (stub + NodeRuntime 구조체).
+    // 테스트는 libnode 링크 없이 돌려야 하므로 node_config를 항상 false로 고정.
+    // (node_enabled=true면 bridge가 @cImport로 C 심볼을 요구 → bridge.cc 없이는 link fail)
+    const node_test_opts = b.addOptions();
+    node_test_opts.addOption(bool, "node_enabled", false);
     const node_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/node_test.zig"),
         .target = target,
@@ -508,12 +512,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    node_module.addImport("node_config", node_options.createModule());
+    node_module.addImport("node_config", node_test_opts.createModule());
     node_module.addIncludePath(b.path("src/platform/node"));
-    if (node_available) {
-        const node_test_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
-        node_module.addIncludePath(.{ .cwd_relative = node_test_include });
-    }
     node_test_mod.addImport("node", node_module);
     const node_test = b.addTest(.{ .root_module = node_test_mod });
     test_step.dependOn(&b.addRunArtifact(node_test).step);

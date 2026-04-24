@@ -149,6 +149,41 @@ test "nullTerminateOrAlloc boundary: src.len == buf.len" {
 }
 
 // ============================================
+// 회귀 테스트 — NodeRuntime.shutdown ownership / double-free 가드
+// ============================================
+//
+// shutdown 계약:
+//   1) entry_path는 NodeRuntime이 소유. shutdown에서 allocator.free.
+//   2) 중복 호출 시 early return (entry_path.len == 0 가드). 없으면 double-free로
+//      DebugAllocator 손상.
+// 실제 libnode 초기화는 하지 않으므로 node_enabled == false 환경에서도 동작
+// (bridge 함수는 stub no-op).
+
+test "NodeRuntime.shutdown frees owned entry_path (no leak)" {
+    // std.testing.allocator는 leak이 있으면 실패 — 이 테스트 자체가 leak 검출.
+    const owned = try std.testing.allocator.dupeZ(u8, "/tmp/owned/main.js");
+    var rt = node.NodeRuntime.init(std.testing.allocator, owned);
+    rt.shutdown();
+    // shutdown 후 entry_path는 ""로 리셋되어야 함.
+    try std.testing.expectEqualStrings("", rt.entry_path);
+}
+
+test "NodeRuntime.shutdown is idempotent (double-call doesn't double-free)" {
+    const owned = try std.testing.allocator.dupeZ(u8, "/tmp/idem/main.js");
+    var rt = node.NodeRuntime.init(std.testing.allocator, owned);
+    rt.shutdown(); // 1st: free + clear
+    rt.shutdown(); // 2nd: early return 보장 (crash/corruption 없음)
+    try std.testing.expectEqualStrings("", rt.entry_path);
+}
+
+test "NodeRuntime.shutdown on non-owned (literal) skips free safely" {
+    // entry_path.len == 0인 경로는 처음부터 early return.
+    var rt = node.NodeRuntime.init(std.testing.allocator, "");
+    rt.shutdown(); // no-op
+    try std.testing.expectEqualStrings("", rt.entry_path);
+}
+
+// ============================================
 // 회귀 테스트 — startNodeBackend: setCore → start 순서
 // ============================================
 //
