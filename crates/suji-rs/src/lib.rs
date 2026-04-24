@@ -12,6 +12,10 @@
 //! suji::export_handlers!(ping, greet);
 //! ```
 
+// `#[suji::handle]` 매크로가 `::suji::InvokeEvent::from_request(...)` 경로를 확장한다.
+// crate 내부 (테스트 포함)에서도 그 경로를 유효하게 하려면 self를 `suji`라는 이름으로 노출.
+extern crate self as suji;
+
 pub use suji_macros::command as handle;
 pub use serde_json;
 pub use serde;
@@ -228,6 +232,71 @@ mod tests {
         let ev = InvokeEvent::from_request(&v);
         assert_eq!(ev.window.id, 0);
         assert!(ev.window.name.is_none());
+    }
+
+    // proc macro 통합 테스트 — 매크로가 확장한 함수가 기대한 대로 동작하는지 검증.
+    // 일반 필드 추출 경로 / InvokeEvent 자동 파생 경로 / 두 파라미터 혼합 경로.
+
+    #[suji::handle]
+    #[allow(dead_code)]
+    fn greet_test(name: String) -> String {
+        format!("hi {name}")
+    }
+
+    #[suji::handle]
+    #[allow(dead_code)]
+    fn whoami_test(event: suji::InvokeEvent) -> serde_json::Value {
+        serde_json::json!({
+            "id": event.window.id,
+            "name": event.window.name,
+        })
+    }
+
+    #[suji::handle]
+    #[allow(dead_code)]
+    fn save_test(text: String, event: suji::InvokeEvent) -> serde_json::Value {
+        serde_json::json!({
+            "text": text,
+            "from_window": event.window.id,
+        })
+    }
+
+    #[test]
+    fn handle_macro_extracts_named_fields() {
+        let req = serde_json::json!({ "name": "kim" });
+        let resp = greet_test(req);
+        assert_eq!(resp, serde_json::json!("hi kim"));
+    }
+
+    #[test]
+    fn handle_macro_auto_injects_invoke_event() {
+        let req = serde_json::json!({
+            "__window": 3,
+            "__window_name": "settings",
+        });
+        let resp = whoami_test(req);
+        assert_eq!(resp, serde_json::json!({ "id": 3, "name": "settings" }));
+    }
+
+    #[test]
+    fn handle_macro_mixes_fields_and_invoke_event() {
+        let req = serde_json::json!({
+            "text": "hi",
+            "__window": 9,
+        });
+        let resp = save_test(req);
+        assert_eq!(resp, serde_json::json!({ "text": "hi", "from_window": 9 }));
+    }
+
+    #[test]
+    fn handle_macro_fills_defaults_for_missing_fields() {
+        // name 필드 없음 → String::default()인 ""
+        // __window 없음 → 0, name=None → json에서 null
+        let resp_greet = greet_test(serde_json::json!({}));
+        assert_eq!(resp_greet, serde_json::json!("hi "));
+
+        let resp_who = whoami_test(serde_json::json!({}));
+        assert_eq!(resp_who, serde_json::json!({ "id": 0, "name": null }));
     }
 }
 

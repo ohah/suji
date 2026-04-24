@@ -503,3 +503,76 @@ test "suji.platform() returns injected core's platform string" {
 
     try std.testing.expectEqualStrings("test-platform", app_mod.platform());
 }
+
+// ============================================
+// suji.sendTo — Phase 2.5 webContents.send 대응
+// ============================================
+
+test "suji.sendTo() is no-op when core not injected" {
+    // core 주입 전 sendTo 호출 — crash 없이 silent return.
+    app_mod.sendTo(2, "channel", "{}");
+}
+
+test "suji.sendTo() is no-op when emit_to_fn is null (구버전 core 호환)" {
+    // core는 있지만 emit_to_fn이 null (예: 구버전 core가 주입됐을 때).
+    // SDK가 기능을 찾지 못하면 silent — 크래시하지 않아야.
+    const ExternSujiCore = app_mod.ExternSujiCore;
+    var core = ExternSujiCore{
+        .invoke_fn = null,
+        .free_fn = null,
+        .emit = null,
+        .on_fn = null,
+        .off_fn = null,
+        .register_fn = null,
+        .get_io = null,
+        // emit_to_fn 명시 생략 → default null
+    };
+    app_mod.setGlobalCore(&core);
+    defer app_mod.setGlobalCore(null);
+
+    app_mod.sendTo(2, "channel", "{}");
+}
+
+const SendToSpy = struct {
+    var last_target: u32 = 0;
+    var last_channel: [64]u8 = undefined;
+    var last_channel_len: usize = 0;
+    var last_data: [256]u8 = undefined;
+    var last_data_len: usize = 0;
+    var call_count: usize = 0;
+
+    fn onEmitTo(target: u32, channel: [*c]const u8, data: [*c]const u8) callconv(.c) void {
+        last_target = target;
+        const ch_span = std.mem.span(@as([*:0]const u8, @ptrCast(channel)));
+        last_channel_len = @min(ch_span.len, last_channel.len);
+        @memcpy(last_channel[0..last_channel_len], ch_span[0..last_channel_len]);
+        const d_span = std.mem.span(@as([*:0]const u8, @ptrCast(data)));
+        last_data_len = @min(d_span.len, last_data.len);
+        @memcpy(last_data[0..last_data_len], d_span[0..last_data_len]);
+        call_count += 1;
+    }
+};
+
+test "suji.sendTo() forwards target id + channel + data to emit_to_fn" {
+    SendToSpy.call_count = 0;
+    const ExternSujiCore = app_mod.ExternSujiCore;
+    var core = ExternSujiCore{
+        .invoke_fn = null,
+        .free_fn = null,
+        .emit = null,
+        .on_fn = null,
+        .off_fn = null,
+        .register_fn = null,
+        .get_io = null,
+        .emit_to_fn = &SendToSpy.onEmitTo,
+    };
+    app_mod.setGlobalCore(&core);
+    defer app_mod.setGlobalCore(null);
+
+    app_mod.sendTo(7, "toast", "{\"msg\":\"hi\"}");
+
+    try std.testing.expectEqual(@as(usize, 1), SendToSpy.call_count);
+    try std.testing.expectEqual(@as(u32, 7), SendToSpy.last_target);
+    try std.testing.expectEqualStrings("toast", SendToSpy.last_channel[0..SendToSpy.last_channel_len]);
+    try std.testing.expectEqualStrings("{\"msg\":\"hi\"}", SendToSpy.last_data[0..SendToSpy.last_data_len]);
+}

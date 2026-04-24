@@ -125,3 +125,58 @@ func TestCallMethodInjectsInvokeEvent(t *testing.T) {
 		t.Fatalf("event.window.name = %q, want %q", app.lastName, "main")
 	}
 }
+
+// 값 타입(InvokeEvent, 포인터 아님) 주입도 허용되는지 — 문서에 양쪽 쓸 수 있다고 표기했으니 둘 다 보장.
+type testAppForValueEvent struct {
+	lastID   uint32
+	lastName string
+}
+
+func (a *testAppForValueEvent) Ping(event InvokeEvent) string {
+	a.lastID = event.Window.ID
+	a.lastName = event.Window.Name
+	return "pong"
+}
+
+func TestCallMethodInjectsInvokeEventByValue(t *testing.T) {
+	app := &testAppForValueEvent{}
+	Bind(app)
+	resp := HandleIPC(`{"cmd":"ping","__window":4,"__window_name":"settings"}`)
+	if app.lastID != 4 {
+		t.Fatalf("event.window.id = %d, want 4 (resp=%s)", app.lastID, resp)
+	}
+	if app.lastName != "settings" {
+		t.Fatalf("event.window.name = %q, want %q", app.lastName, "settings")
+	}
+}
+
+// 2-arity 메서드에서 데이터 파라미터 이름 매칭은 InvokeEvent를 건너뛰고 계속 이어져야.
+// getParamName의 index가 0("name"), 1("text"), ... 인데 InvokeEvent가 끼어들면
+// dataIndex 카운터가 제대로 분리됐는지 검증.
+type testAppForMultiArg struct {
+	lastName string
+	lastText string
+	lastID   uint32
+}
+
+func (a *testAppForMultiArg) Greet(name string, event *InvokeEvent, text string) string {
+	a.lastName = name
+	a.lastText = text
+	a.lastID = event.Window.ID
+	return "ok"
+}
+
+func TestCallMethodDataIndexSkipsInvokeEvent(t *testing.T) {
+	app := &testAppForMultiArg{}
+	Bind(app)
+	_ = HandleIPC(`{"cmd":"greet","name":"kim","text":"hello","__window":5}`)
+	if app.lastName != "kim" {
+		t.Fatalf("name = %q, want %q", app.lastName, "kim")
+	}
+	if app.lastText != "hello" {
+		t.Fatalf("text = %q, want %q", app.lastText, "hello")
+	}
+	if app.lastID != 5 {
+		t.Fatalf("window.id = %d, want 5", app.lastID)
+	}
+}

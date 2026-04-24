@@ -197,3 +197,30 @@ test "emitTo still runs Zig listeners (only JS dispatch filters)" {
     try std.testing.expectEqual(@as(?u32, 7), last_eval_target);
 }
 
+test "emit / emitTo with null webview_eval: no crash" {
+    // CEF 아직 초기화 전 또는 헤드리스 환경 — webview_eval 주입 전에도 emit/emitTo는 안전.
+    resetState();
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+    // 일부러 webview_eval 주입하지 않는다
+
+    _ = bus.on("only-zig", testCallback);
+    bus.emit("only-zig", "a");
+    bus.emitTo(3, "only-zig", "b");
+
+    // Zig 리스너는 그대로 받는다 — 2번 호출
+    try std.testing.expectEqual(@as(usize, 2), call_count);
+}
+
+test "emitTo with target=0 still sets webview_eval target to 0 (renderer-side가 broadcast로 해석)" {
+    // EventBus 레이어는 받은 값 그대로 전달 — 해석 책임은 renderer/cef 쪽 (target<=0 이면 broadcast).
+    // 이 약속이 깨지면 백엔드 sendTo(0, ...)이 의도치 않게 특정 창으로 라우팅될 수 있음.
+    resetEvalState();
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+    bus.webview_eval = mockEval;
+
+    bus.emitTo(0, "ch", "{}");
+    try std.testing.expectEqual(@as(?u32, 0), last_eval_target);
+}
+
