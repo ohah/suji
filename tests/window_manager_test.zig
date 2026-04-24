@@ -373,6 +373,13 @@ const TestSink = struct {
         return self.buf[start .. start + s.len];
     }
 
+    /// events.clearRetainingCapacity만으로는 buf는 계속 쌓인다. 긴 테스트에서
+    /// buf 오버플로 막기 위해 명시적으로 함께 리셋.
+    fn reset(self: *TestSink) void {
+        self.events.clearRetainingCapacity();
+        self.used = 0;
+    }
+
     fn onEmit(ctx: ?*anyopaque, name: []const u8, data: []const u8) void {
         const self = fromCtx(ctx);
         self.events.append(std.testing.allocator, .{
@@ -637,6 +644,25 @@ test "concurrent create with distinct names yields N windows" {
     try std.testing.expectEqual(@as(usize, THREAD_COUNT), wm.windows.count());
 }
 
+const MixedCtx = struct {
+    wm: *WindowManager,
+    existing: u32,
+    create_ok: std.atomic.Value(usize) = .init(0),
+    set_title_ok: std.atomic.Value(usize) = .init(0),
+
+    fn createRun(self: *MixedCtx) void {
+        if (self.wm.create(.{})) |_| {
+            _ = self.create_ok.fetchAdd(1, .acq_rel);
+        } else |_| {}
+    }
+
+    fn setTitleRun(self: *MixedCtx) void {
+        if (self.wm.setTitle(self.existing, "bang")) |_| {
+            _ = self.set_title_ok.fetchAdd(1, .acq_rel);
+        } else |_| {}
+    }
+};
+
 test "concurrent mixed create + setTitle doesn't crash" {
     // 한 스레드는 새 창을 만들고 다른 스레드는 기존 창 제목을 수정
     // 내부 mutex가 없으면 HashMap corruption/crash 가능
@@ -649,28 +675,122 @@ test "concurrent mixed create + setTitle doesn't crash" {
 
     const THREAD_COUNT = 20;
     var threads: [THREAD_COUNT]std.Thread = undefined;
-
-    const CtxCreate = struct {
-        fn run(wm_ptr: *WindowManager) void {
-            _ = wm_ptr.create(.{}) catch {};
-        }
-    };
-    const CtxSetTitle = struct {
-        fn run(wm_ptr: *WindowManager, id: u32) void {
-            _ = wm_ptr.setTitle(id, "bang") catch {};
-        }
-    };
+    var ctx = MixedCtx{ .wm = &wm, .existing = existing };
 
     var i: usize = 0;
     while (i < THREAD_COUNT) : (i += 1) {
         if (i % 2 == 0) {
-            threads[i] = try std.Thread.spawn(.{}, CtxCreate.run, .{&wm});
+            threads[i] = try std.Thread.spawn(.{}, MixedCtx.createRun, .{&ctx});
         } else {
-            threads[i] = try std.Thread.spawn(.{}, CtxSetTitle.run, .{ &wm, existing });
+            threads[i] = try std.Thread.spawn(.{}, MixedCtx.setTitleRun, .{&ctx});
         }
     }
     for (threads) |t| t.join();
 
-    // 크래시 없이 완료되고 창 수가 기존(1) + 새로 생성된 스레드 수(10)
+    // 모든 작업이 성공해야 (mutex가 경합을 직렬화하므로 단일 실패도 용납 안 함)
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT / 2), ctx.create_ok.load(.acquire));
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT / 2), ctx.set_title_ok.load(.acquire));
+    // 기존(1) + 새로 만든 10 = 11
     try std.testing.expectEqual(@as(usize, 11), wm.windows.count());
+}
+
+// ============================================
+// name 정규화 / forceNew 탈취 방지
+// ============================================
+
+test "forceNew=true does not hijack existing name ownership" {
+    // 첫 창이 name="main" 소유 → forceNew=true로 두 번째 창 생성 시 name 탈취 X
+    // 두 번째 창은 익명(Window.name=null), fromName은 첫 창을 유지.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id1 = try wm.create(.{ .name = "main" });
+    const id2 = try wm.create(.{ .name = "main", .force_new = true });
+
+    try std.testing.expect(id1 != id2);
+    // fromName은 여전히 첫 창
+    try std.testing.expectEqual(@as(?u32, id1), wm.fromName("main"));
+    // 첫 창은 name 유지, 두 번째 창은 익명
+    try std.testing.expectEqualStrings("main", wm.get(id1).?.name.?);
+    try std.testing.expectEqual(@as(?[]const u8, null), wm.get(id2).?.name);
+}
+
+test "empty-string name normalizes to null (no by_name entry)" {
+    // name="" → name=null 정규화, by_name 등록 X
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .name = "" });
+    try std.testing.expectEqual(@as(?[]const u8, null), wm.get(id).?.name);
+    try std.testing.expectEqual(@as(?u32, null), wm.fromName(""));
+
+    // 다음 "" 호출도 싱글턴으로 매칭 X (새 창 생성)
+    const id2 = try wm.create(.{ .name = "" });
+    try std.testing.expect(id != id2);
+}
+
+test "create after destroyAll starts fresh" {
+    // destroyAll 뒤에 새 창 생성해도 상태 오염 없음 (by_name 정리, id monotonic)
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const a = try wm.create(.{ .name = "foo" });
+    _ = try wm.create(.{ .name = "bar" });
+    wm.destroyAll();
+
+    // 이전 name이 재사용 가능해야 함
+    const c = try wm.create(.{ .name = "foo" });
+    try std.testing.expect(c > a);
+    try std.testing.expectEqual(@as(?u32, c), wm.fromName("foo"));
+    try std.testing.expectEqual(@as(?u32, null), wm.fromName("bar"));
+
+    // 이전 창들은 destroyed 마킹된 채 맵에 잔존 (get으로 조회 가능)
+    try std.testing.expect(wm.get(a).?.destroyed);
+}
+
+// ============================================
+// 동시성 — 같은 id close race
+// ============================================
+
+const CloseRaceCtx = struct {
+    wm: *WindowManager,
+    id: u32,
+    success_count: std.atomic.Value(usize) = .init(0),
+    destroyed_count: std.atomic.Value(usize) = .init(0),
+
+    fn run(self: *CloseRaceCtx) void {
+        if (self.wm.close(self.id)) |ok| {
+            if (ok) _ = self.success_count.fetchAdd(1, .acq_rel);
+        } else |err| {
+            if (err == window.Error.WindowDestroyed) {
+                _ = self.destroyed_count.fetchAdd(1, .acq_rel);
+            }
+        }
+    }
+};
+
+test "concurrent close on same id yields exactly one success" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{});
+
+    const THREAD_COUNT = 16;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+    var ctx = CloseRaceCtx{ .wm = &wm, .id = id };
+
+    for (0..THREAD_COUNT) |i| {
+        threads[i] = try std.Thread.spawn(.{}, CloseRaceCtx.run, .{&ctx});
+    }
+    for (threads) |t| t.join();
+
+    // 정확히 한 스레드만 실제로 파괴, 나머지는 WindowDestroyed
+    try std.testing.expectEqual(@as(usize, 1), ctx.success_count.load(.acquire));
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT - 1), ctx.destroyed_count.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_calls);
+    try std.testing.expect(wm.get(id).?.destroyed);
 }
