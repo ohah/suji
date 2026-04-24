@@ -16,6 +16,8 @@ const PLUGIN_PATH = switch (builtin.os.tag) {
 // ============================================
 
 fn loadStatePlugin(reg: *loader.BackendRegistry) !void {
+    // Zig 0.16에서 Windows std.DynLib 미지원 → 전체 테스트 skip.
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try reg.register("state", PLUGIN_PATH);
     // 테스트 격리: 이전 테스트의 상태 초기화
     freeResp(reg, invokePlugin(reg, "{\"cmd\":\"state:clear\"}"));

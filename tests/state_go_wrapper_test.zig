@@ -33,6 +33,7 @@ const BRIDGE_PATH = switch (builtin.os.tag) {
 };
 
 fn setupRegistry(reg: *loader.BackendRegistry) !void {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try reg.register("state", STATE_PATH);
     try reg.register("go", BRIDGE_PATH);
     freeResp(reg, "go", invokeGo(reg, "{\"cmd\":\"go_state_clear\"}"));

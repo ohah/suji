@@ -31,6 +31,7 @@ const BRIDGE_PATH = switch (builtin.os.tag) {
 };
 
 fn setupRegistry(reg: *loader.BackendRegistry) !void {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try reg.register("state", STATE_PATH);
     try reg.register("rust", BRIDGE_PATH);
     freeResp(reg, "rust", invokeRust(reg, "{\"cmd\":\"rust_state_clear\"}"));
