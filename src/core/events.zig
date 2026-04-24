@@ -47,41 +47,45 @@ pub const EventBus = struct {
     }
 
     /// 이벤트 구독 — 리스너 ID 반환 (해제용)
-    /// 이벤트 구독 — 성공 시 리스너 id (>0), OOM 등록 실패 시 0 반환.
-    /// next_id는 성공 시에만 증가 (실패한 id는 재사용).
+    /// 이벤트 구독 — 성공 시 리스너 id 반환.
+    /// OOM은 데스크톱 앱 환경에서 실질적 복구 불가 → `@panic`. 호출자는 항상 유효한 id를 가정.
     pub fn on(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         const listener = Listener{ .id = id, .callback = .{ .zig = callback } };
-        self.addListener(event_name, listener) catch return 0;
+        self.addListener(event_name, listener) catch |e| panicOom("on", e);
         self.next_id += 1;
         return id;
     }
 
-    /// C ABI 이벤트 구독 (백엔드에서 사용). 성공 시 id, 실패 시 0.
+    /// C ABI 이벤트 구독 (백엔드에서 사용).
     pub fn onC(self: *EventBus, event_name: []const u8, callback: CEventCallback, arg: ?*anyopaque) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         const listener = Listener{ .id = id, .callback = .{ .c_abi = .{ .func = callback, .arg = arg } } };
-        self.addListener(event_name, listener) catch return 0;
+        self.addListener(event_name, listener) catch |e| panicOom("onC", e);
         self.next_id += 1;
         return id;
     }
 
-    /// 한 번만 수신. 성공 시 id, 실패 시 0.
+    /// 한 번만 수신.
     pub fn once(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         const listener = Listener{ .id = id, .callback = .{ .zig = callback }, .once = true };
-        self.addListener(event_name, listener) catch return 0;
+        self.addListener(event_name, listener) catch |e| panicOom("once", e);
         self.next_id += 1;
         return id;
+    }
+
+    fn panicOom(site: []const u8, err: anyerror) noreturn {
+        std.debug.panic("EventBus.{s}: OOM ({s}) — 시스템 메모리 고갈", .{ site, @errorName(err) });
     }
 
     /// 이벤트 발행
