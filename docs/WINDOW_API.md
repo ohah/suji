@@ -812,25 +812,61 @@ BrowserWindow API는 Zig 코어 내부 기능이지만, 여러 플러그인(dial
 notification 등)이 멀티 윈도우 상태를 인지하고 조작해야 한다. 다음 다섯 규약으로
 플러그인 ↔ 윈도우 관계를 정리한다.
 
-### 1. IPC 요청 자동 태깅 (`__window`)
+### 1. IPC 요청 자동 태깅 (`__window`) + 핸들러 `Event` 파라미터
+
+두 레이어를 함께 제공: **wire는 `__window` JSON 필드**, **API는 `event` 객체 파라미터**.
+이건 Electron의 `event.sender` 메커니즘에 대응 — wire 수단(invisible context 전달)과
+handler API(rich 객체 파라미터)를 분리.
+
+#### Wire: `__window` 자동 주입
 
 프론트엔드가 `suji.invoke("dialog:open", {...})`를 호출하면, 메인 프로세스의 CEF
 메시지 핸들러가 sender `cef_browser_t`의 id를 식별하고 **request JSON에 `__window`
-필드를 자동 주입**한다. 플러그인은 해당 필드를 옵션으로 읽는다.
+필드를 자동 주입**한다.
 
 ```
 // 프론트엔드 (윈도우 id=3에서)
 await suji.invoke("dialog:open", { filters: [...] })
 
-// 플러그인 handler가 받는 request (자동 주입)
+// wire에 실제로 흐르는 JSON (자동 주입)
 {"cmd":"dialog:open","filters":[...],"__window":3}
 ```
 
-`__window`는 **선택적 힌트**이고 생략 시 "아무 윈도우나 OK"로 해석. 모달 sheet를
-붙여야 하는 dialog 같은 플러그인은 이 필드가 있을 때만 부모 지정, 없으면 floating.
-
 구현 위치: `cef.zig`의 invoke 메시지 수신 지점에서 `cef_browser.get_identifier()`로
 id를 뽑아 request body에 merge 후 `BackendRegistry.invoke` 호출.
+
+#### API: 핸들러 `(req, event)` 2-arity
+
+핸들러는 두 번째 파라미터로 `Event` 객체를 받음. `__window`에서 파생된 rich 컨텍스트.
+
+```zig
+// Zig
+fn onDialogOpen(req: Request, event: Event) Response {
+    const filters = req.string("filters");
+    const win = event.window;   // {id, name, url, frame}
+    // 모달 sheet 붙일 대상: win.id
+    return req.ok(.{});
+}
+```
+
+```rust
+// Rust
+#[suji::handle]
+fn dialog_open(req: Request, event: Event) -> Response { ... }
+```
+
+```js
+// Node — Electron의 (event, ...args)와 거의 1:1
+handle('dialog:open', (req, event) => {
+  event.window.id    // Electron의 BrowserWindow.fromWebContents(event.sender).id 대응
+})
+```
+
+**플러그인은 `__window`를 직접 읽든 `event.window.id`를 쓰든 선택**. 저수준 접근이 필요한
+플러그인은 wire 필드를 그대로, 일반 사용자 코드는 `event` 객체 권장.
+
+`__window`는 선택적 힌트라 생략 시 "아무 윈도우나 OK"로 해석. 모달 sheet를 붙여야
+하는 dialog 같은 플러그인은 이 필드가 있을 때만 부모 지정, 없으면 floating.
 
 ### 2. 이벤트 타겟팅 (`to: windowId`)
 

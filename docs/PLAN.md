@@ -406,6 +406,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [ ] OnBeforeClose 자연 발화 (CEF macOS Alloy 런타임 — 현재 cef.quit 우회)
     - [ ] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow, Linux GTK, Windows Win32)
     - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)
+    - [ ] **핸들러 `Event` 파라미터** — Electron의 `(event, ...args)` 대응.
+          `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로
+          받음. `event.window = {id, name, url, frame}` rich 컨텍스트.
+          - Zig: `fn h(req: Request, event: Event) Response`
+          - Rust/Go/Node 동일 시그니처 확장. Node는 Electron `(event, ...args)`와 거의 1:1
+          - Frontend `suji.invoke('ch', data)`는 그대로 (호출 측 변경 없음)
   - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
     - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응
     - [ ] state 플러그인 scope 확장 (`global` / `window:{id}` / `session`)
@@ -416,6 +422,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
+    - [ ] `contextIsolation: true` — 별도 V8 world에 `window.__suji__` 생성 + `Object.freeze`된
+          프록시만 메인 월드에 노출. XSS가 bridge를 변조/레퍼런스 캡처 불가.
+          Electron의 contextBridge 대체 (더 간결). 외부 URL 로드 시 권장 기본값 후보.
+          (preload.js / contextBridge 자체는 **비제공** — WINDOW_API.md 설계 참조)
   - **설계 비제공 (문서화 완료)**: 렌더러 직접 통신, MessagePort, preload.js, contextBridge — `docs/WINDOW_API.md#설계-비제공-항목과-이유`
   - **V2 검토**: `cross_origin_isolation` 플래그 (SharedArrayBuffer 활성화), `inject` 초기 스크립트 옵션
   - **엣지 케이스 / TDD 전략 / E2E 범위**: `docs/WINDOW_API.md` 해당 섹션 참조
