@@ -5,84 +5,12 @@
 
 const std = @import("std");
 const window = @import("window");
+const TestNative = @import("test_native").TestNative;
 
 const WindowManager = window.WindowManager;
 const Native = window.Native;
 const CreateOptions = window.CreateOptions;
 const Bounds = window.Bounds;
-
-// ============================================
-// TestNative — 플랫폼 호출 기록용 stub
-// ============================================
-
-const TestNative = struct {
-    next_handle: u64 = 1000,
-    create_calls: usize = 0,
-    destroy_calls: usize = 0,
-    set_title_calls: usize = 0,
-    set_bounds_calls: usize = 0,
-    set_visible_calls: usize = 0,
-    focus_calls: usize = 0,
-    last_title: ?[]const u8 = null,
-    last_bounds: ?Bounds = null,
-    fail_next_create: bool = false,
-
-    fn asNative(self: *TestNative) Native {
-        return .{
-            .vtable = &vtable,
-            .ctx = self,
-        };
-    }
-
-    const vtable: Native.VTable = .{
-        .create_window = createWindow,
-        .destroy_window = destroyWindow,
-        .set_title = setTitle,
-        .set_bounds = setBounds,
-        .set_visible = setVisible,
-        .focus = focus,
-    };
-
-    fn fromCtx(ctx: ?*anyopaque) *TestNative {
-        return @ptrCast(@alignCast(ctx.?));
-    }
-
-    fn createWindow(ctx: ?*anyopaque, _: *const CreateOptions) anyerror!u64 {
-        const self = fromCtx(ctx);
-        if (self.fail_next_create) {
-            self.fail_next_create = false;
-            return error.NativeFailure;
-        }
-        self.create_calls += 1;
-        const handle = self.next_handle;
-        self.next_handle += 1;
-        return handle;
-    }
-
-    fn destroyWindow(ctx: ?*anyopaque, _: u64) void {
-        fromCtx(ctx).destroy_calls += 1;
-    }
-
-    fn setTitle(ctx: ?*anyopaque, _: u64, title: []const u8) void {
-        const self = fromCtx(ctx);
-        self.set_title_calls += 1;
-        self.last_title = title;
-    }
-
-    fn setBounds(ctx: ?*anyopaque, _: u64, bounds: Bounds) void {
-        const self = fromCtx(ctx);
-        self.set_bounds_calls += 1;
-        self.last_bounds = bounds;
-    }
-
-    fn setVisible(ctx: ?*anyopaque, _: u64, _: bool) void {
-        fromCtx(ctx).set_visible_calls += 1;
-    }
-
-    fn focus(ctx: ?*anyopaque, _: u64) void {
-        fromCtx(ctx).focus_calls += 1;
-    }
-};
 
 fn newManager(native: *TestNative) WindowManager {
     return WindowManager.init(std.testing.allocator, std.testing.io, native.asNative());

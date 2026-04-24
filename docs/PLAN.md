@@ -392,10 +392,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] WindowManager 스켈레톤 + Native vtable 추상화 (`src/core/window.zig`)
     - [x] SujiEvent + EventSink (`window:created`/`close`/`closed`, preventDefault)
     - [x] 동시성 안전성 (`std.Io.Mutex` + 이벤트 발화는 lock 밖)
-    - [x] TDD 단위 테스트 49개 (동시성·OOM·재진입·에러 경로·이벤트 누출 금지 커버)
-    - [ ] CefNative 구현 — `window.Native` vtable을 CEF 호출로 연결 (`src/platform/cef.zig`)
-    - [ ] EventBus 어댑터 — WindowManager.EventSink → EventBus.emit/emitCancelable
-    - [ ] IPC 라우팅 — `__core__:create_window` 등 커맨드를 WindowManager 경유로 교체
+    - [x] TDD 단위 테스트 49개 (동시성·OOM·재진입·에러 경로·이벤트 누출 금지)
+    - [x] Step A: CefNative 스켈레톤 — `window.Native` vtable을 CEF로 구현 (`src/platform/cef.zig`)
+    - [x] Step B.1: EventBusSink 어댑터 — WM.EventSink → EventBus + cancelable 리스너 레지스트리
+    - [x] Step B.2: `main.zig` 배선 — WindowStack으로 WM + CefNative + Sink 통합, 첫 윈도우 `wm.create` 경유
+    - [ ] Step B.3: `CefLifeSpanHandler::DoClose` 가로채 → `wm.close(id)` (사용자 X/Cmd+W close 취소 가능)
+    - [ ] Step B.4: `OnBeforeClose` → CefNative 테이블 정리 + WM 통지
+    - [ ] Step B.5: 기존 `createNewWindow` PoC 제거, Cmd+W → `wm.close` 경유
+    - [ ] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow, Linux GTK, Windows Win32)
     - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)
   - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
     - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응

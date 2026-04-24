@@ -4,6 +4,7 @@ const std = @import("std");
 const events = @import("events");
 const window = @import("window");
 const sink_mod = @import("event_sink");
+const TestNative = @import("test_native").TestNative;
 
 const EventBusSink = sink_mod.EventBusSink;
 const EventBus = events.EventBus;
@@ -295,41 +296,12 @@ test "onCancelable returns unique incrementing ids" {
 // WindowManager 통합 — 실제 wm.close() 경로로 preventDefault 확인
 // ============================================
 
-const FakeNative = struct {
-    destroy_calls: usize = 0,
-
-    fn asNative(self: *FakeNative) window.Native {
-        return .{ .vtable = &vtable, .ctx = self };
-    }
-    const vtable: window.Native.VTable = .{
-        .create_window = cw,
-        .destroy_window = dw,
-        .set_title = noopTitle,
-        .set_bounds = noopBounds,
-        .set_visible = noopVisible,
-        .focus = noopFocus,
-    };
-    fn fromCtx(ctx: ?*anyopaque) *FakeNative {
-        return @ptrCast(@alignCast(ctx.?));
-    }
-    fn cw(_: ?*anyopaque, _: *const window.CreateOptions) anyerror!u64 {
-        return 0x1000;
-    }
-    fn dw(ctx: ?*anyopaque, _: u64) void {
-        fromCtx(ctx).destroy_calls += 1;
-    }
-    fn noopTitle(_: ?*anyopaque, _: u64, _: []const u8) void {}
-    fn noopBounds(_: ?*anyopaque, _: u64, _: window.Bounds) void {}
-    fn noopVisible(_: ?*anyopaque, _: u64, _: bool) void {}
-    fn noopFocus(_: ?*anyopaque, _: u64) void {}
-};
-
 test "integration: cancelable listener preventDefault blocks wm.close()" {
     var bus = newBus();
     defer bus.deinit();
     var sink = newSink(&bus);
     defer sink.deinit();
-    var native = FakeNative{};
+    var native = TestNative{};
     var wm = window.WindowManager.init(std.testing.allocator, std.testing.io, native.asNative());
     defer wm.deinit();
     wm.setEventSink(sink.asSink());
@@ -351,7 +323,7 @@ test "integration: without preventDefault, wm.close() proceeds and emits window:
     defer bus.deinit();
     var sink = newSink(&bus);
     defer sink.deinit();
-    var native = FakeNative{};
+    var native = TestNative{};
     var wm = window.WindowManager.init(std.testing.allocator, std.testing.io, native.asNative());
     defer wm.deinit();
     wm.setEventSink(sink.asSink());

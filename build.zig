@@ -44,6 +44,28 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // window / event_sink / window_stack 모듈 (root_module과 테스트가 공유)
+    const window_module = b.createModule(.{
+        .root_source_file = b.path("src/core/window.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const event_sink_module = b.createModule(.{
+        .root_source_file = b.path("src/core/event_sink.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    event_sink_module.addImport("events", events_module);
+    event_sink_module.addImport("window", window_module);
+    const window_stack_module = b.createModule(.{
+        .root_source_file = b.path("src/core/window_stack.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    window_stack_module.addImport("events", events_module);
+    window_stack_module.addImport("window", window_module);
+    window_stack_module.addImport("event_sink", event_sink_module);
+
     // Suji CLI
     const root_module = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
@@ -55,6 +77,9 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("events", events_module);
     root_module.addImport("util", util_module);
     root_module.addImport("runtime", runtime_module);
+    root_module.addImport("window", window_module);
+    root_module.addImport("event_sink", event_sink_module);
+    root_module.addImport("window_stack", window_stack_module);
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
     const os_tag = @import("builtin").os.tag;
@@ -286,12 +311,15 @@ pub fn build(b: *std.Build) void {
     const events_int_test = b.addTest(.{ .root_module = events_int_mod });
     test_step.dependOn(&b.addRunArtifact(events_int_test).step);
 
-    // WindowManager 단위 테스트 (CEF 없음, 순수 로직)
-    const window_module = b.createModule(.{
-        .root_source_file = b.path("src/core/window.zig"),
+    // 공용 TestNative (window.Native stub)
+    const test_native_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_native.zig"),
         .target = target,
         .optimize = optimize,
     });
+    test_native_module.addImport("window", window_module);
+
+    // WindowManager 단위 테스트 (CEF 없음, 순수 로직)
     const window_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/window_manager_test.zig"),
         .target = target,
@@ -299,17 +327,11 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     window_test_mod.addImport("window", window_module);
+    window_test_mod.addImport("test_native", test_native_module);
     const window_test = b.addTest(.{ .root_module = window_test_mod });
     test_step.dependOn(&b.addRunArtifact(window_test).step);
 
     // EventBusSink 어댑터 단위 테스트
-    const event_sink_module = b.createModule(.{
-        .root_source_file = b.path("src/core/event_sink.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    event_sink_module.addImport("events", events_module);
-    event_sink_module.addImport("window", window_module);
     const event_sink_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/event_sink_test.zig"),
         .target = target,
@@ -319,8 +341,24 @@ pub fn build(b: *std.Build) void {
     event_sink_test_mod.addImport("event_sink", event_sink_module);
     event_sink_test_mod.addImport("events", events_module);
     event_sink_test_mod.addImport("window", window_module);
+    event_sink_test_mod.addImport("test_native", test_native_module);
     const event_sink_test = b.addTest(.{ .root_module = event_sink_test_mod });
     test_step.dependOn(&b.addRunArtifact(event_sink_test).step);
+
+    // WindowStack — WM + EventBusSink 배선 묶음
+    const window_stack_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/window_stack_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    window_stack_test_mod.addImport("window_stack", window_stack_module);
+    window_stack_test_mod.addImport("events", events_module);
+    window_stack_test_mod.addImport("window", window_module);
+    window_stack_test_mod.addImport("event_sink", event_sink_module);
+    window_stack_test_mod.addImport("test_native", test_native_module);
+    const window_stack_test = b.addTest(.{ .root_module = window_stack_test_mod });
+    test_step.dependOn(&b.addRunArtifact(window_stack_test).step);
 
     // State plugin tests
     const state_test_mod = b.createModule(.{

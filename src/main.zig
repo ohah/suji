@@ -3,6 +3,8 @@ const runtime = @import("runtime");
 const suji = @import("root.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
+const window_mod = @import("window");
+const window_stack_mod = @import("window_stack");
 const Watcher = @import("platform/watcher.zig").Watcher;
 const node_mod = @import("platform/node.zig");
 const NodeRuntime = node_mod.NodeRuntime;
@@ -682,7 +684,7 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
         std.debug.print("[suji] CEF URL: (null)\n", .{});
     }
 
-    // CEF 초기화 + 브라우저 생성
+    // CEF 초기화
     const cef_config: cef.CefConfig = .{
         .title = config.window.title,
         .width = @intCast(config.window.width),
@@ -691,7 +693,30 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
         .debug = config.window.debug,
     };
     try cef.initialize(cef_config);
-    try cef.createBrowser(cef_config);
+
+    // WindowManager 배선 (CefNative + EventBusSink)
+    var cef_native = cef.CefNative.init(allocator);
+    defer cef_native.deinit();
+
+    var stack: window_stack_mod.WindowStack = undefined;
+    stack.init(allocator, runtime.io, cef_native.asNative(), &event_bus);
+    defer stack.deinit();
+    stack.setGlobal();
+    defer window_stack_mod.WindowStack.clearGlobal();
+
+    // 첫 윈도우 생성 (이전 cef.createBrowser 자리)
+    _ = stack.manager.create(.{
+        .name = "main",
+        .title = std.mem.sliceTo(config.window.title, 0),
+        .url = if (url) |u| std.mem.sliceTo(u, 0) else null,
+        .bounds = .{
+            .width = @intCast(config.window.width),
+            .height = @intCast(config.window.height),
+        },
+    }) catch |err| {
+        std.debug.print("[suji] first window create failed: {s}\n", .{@errorName(err)});
+        return err;
+    };
 
     std.debug.print("[suji] CEF window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
     cef.run();

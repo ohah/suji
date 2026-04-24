@@ -23,7 +23,7 @@ pub const c = @cImport({
 
 const builtin = @import("builtin");
 const runtime = @import("runtime");
-const window_mod = @import("../core/window.zig");
+const window_mod = @import("window");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
@@ -174,56 +174,28 @@ pub fn initialize(config: CefConfig) !void {
     }
 }
 
-var g_client: c.cef_client_t = undefined;
 var g_devtools_client: c.cef_client_t = undefined;
 var g_window: ?*anyopaque = null; // NSWindow 강한 참조 유지
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
 var g_devtools_open: bool = false;
 
-/// 브라우저 창 생성
-pub fn createBrowser(config: CefConfig) !void {
+/// 전역 CEF 핸들러 초기화 (idempotent). CefNative.init 및 PoC createNewWindow가 호출.
+/// life_span_handler / keyboard_handler / devtools client — 모든 브라우저가 공유.
+var g_handlers_initialized: bool = false;
+fn ensureGlobalHandlers() void {
+    if (g_handlers_initialized) return;
     initLifeSpanHandler();
     initKeyboardHandler();
-    initClient(&g_client);
-
-    // DevTools 전용 client (키보드만, IPC 무시)
     zeroCefStruct(c.cef_client_t, &g_devtools_client);
     initBaseRefCounted(&g_devtools_client.base);
     g_devtools_client.get_keyboard_handler = &getKeyboardHandler;
-
-    // Window info
-    var window_info: c.cef_window_info_t = undefined;
-    zeroCefStruct(c.cef_window_info_t, &window_info);
-    window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
-    window_info.bounds = .{ .x = 0, .y = 0, .width = config.width, .height = config.height };
-    initWindowInfo(&window_info, config);
-
-    setCefString(&window_info.window_name, config.title);
-
-    // URL
-    var cef_url: c.cef_string_t = .{};
-    if (config.url) |url| {
-        setCefString(&cef_url, url);
-    }
-
-    // Browser settings
-    var browser_settings: c.cef_browser_settings_t = undefined;
-    zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
-
-    std.debug.print("[suji] CEF creating browser... size={d}\n", .{window_info.size});
-    const browser = c.cef_browser_host_create_browser_sync(
-        &window_info, &g_client, &cef_url, &browser_settings, null, null,
-    );
-    if (browser == null) {
-        std.debug.print("[suji] CEF browser creation FAILED\n", .{});
-        return error.BrowserCreationFailed;
-    }
-    std.debug.print("[suji] CEF browser created\n", .{});
+    g_handlers_initialized = true;
 }
 
-/// 새 윈도우(브라우저) 생성 — PoC: 멀티 윈도우 검증용
+/// 새 윈도우(브라우저) 생성 — PoC: 멀티 윈도우 검증용 (Step B.5에서 wm.create로 대체 예정)
 /// 반환: CEF browser ID (실패 시 -1)
 pub fn createNewWindow(title: [:0]const u8, width: i32, height: i32, url: ?[:0]const u8) i32 {
+    ensureGlobalHandlers();
     // 새 client 할당 (힙)
     const client_ptr = std.heap.page_allocator.create(c.cef_client_t) catch return -1;
     initClient(client_ptr);
@@ -274,10 +246,11 @@ pub const CefNative = struct {
     /// WindowManager가 저장하는 native_handle (u64) → CEF browser 포인터
     browsers: std.AutoHashMap(u64, *c.cef_browser_t),
     next_handle: u64 = 1,
-    /// 기본 URL (opts.url이 null일 때 사용). "" 이면 빈 URL로 CEF 호출
+    /// opts.url이 null일 때 사용. "" 이면 CEF는 about:blank 수준의 빈 페이지를 로드.
     default_url: [:0]const u8 = "",
 
     pub fn init(allocator: std.mem.Allocator) CefNative {
+        ensureGlobalHandlers();
         var self: CefNative = .{
             .allocator = allocator,
             .browsers = std.AutoHashMap(u64, *c.cef_browser_t).init(allocator),
