@@ -286,6 +286,22 @@ pub fn build(b: *std.Build) void {
     const events_int_test = b.addTest(.{ .root_module = events_int_mod });
     test_step.dependOn(&b.addRunArtifact(events_int_test).step);
 
+    // WindowManager 단위 테스트 (CEF 없음, 순수 로직)
+    const window_module = b.createModule(.{
+        .root_source_file = b.path("src/core/window.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const window_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/window_manager_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    window_test_mod.addImport("window", window_module);
+    const window_test = b.addTest(.{ .root_module = window_test_mod });
+    test_step.dependOn(&b.addRunArtifact(window_test).step);
+
     // State plugin tests
     const state_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/state_plugin_test.zig"),
