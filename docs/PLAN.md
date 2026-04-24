@@ -404,8 +404,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] 구조화 디버그 로거 (`~/.suji/logs/` 실행별 파일 + ISO8601 레벨 필터)
     - [x] macOS NSWindow close cascade 개선 (`g_window` 싱글 참조 제거, per-browser tracking)
     - [ ] OnBeforeClose 자연 발화 (CEF macOS Alloy 런타임 — 현재 cef.quit 우회)
-    - [ ] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow, Linux GTK, Windows Win32)
-    - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)
+    - [x] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow 완료, Linux GTK / Windows Win32는 no-op 스텁)
+    - [x] IPC `__window` 자동 태깅 — wire 레벨. `cef.zig:handleBrowserInvoke`에서 sender
+          browser의 WM id를 `injectWindowField`로 request JSON에 merge. 이미 태그된 요청,
+          비-객체/빈 객체/whitespace 엣지 케이스 모두 처리. `window_ipc.injectWindowField`
+          순수 함수로 단위 테스트 7종 + E2E (`tests/e2e/window-injection.test.ts`)로 검증.
+    - [ ] `windows[]` 배열 파싱 (렌더러 측 — config의 `windows` 항목으로 초기 창 배치 선언)
     - [ ] **핸들러 `Event` 파라미터** — Electron의 `(event, ...args)` 대응.
           `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로
           받음. `event.window = {id, name, url, frame}` rich 컨텍스트.

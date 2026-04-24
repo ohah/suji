@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (307개)
+zig build test     # 단위 테스트 (339개)
 zig build run      # CLI 도움말
 
 # 예제 실행
@@ -20,7 +20,13 @@ cd examples/zig-backend && suji dev     # Zig 단독
 cd examples/rust-backend && suji dev    # Rust 단독
 cd examples/go-backend && suji dev      # Go 단독
 cd examples/node-backend && suji dev    # Node.js 단독
+
+# E2E 테스트 (puppeteer + bun)
+bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 ```
+
+E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어
+검증. 기존 run-*.sh 스크립트가 자동으로 프로세스 정리까지 한다.
 
 ## CLI
 
