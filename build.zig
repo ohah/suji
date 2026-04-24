@@ -71,6 +71,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     window_ipc_module.addImport("window", window_module);
+    const logger_module = b.createModule(.{
+        .root_source_file = b.path("src/core/logger.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const platform_module = b.createModule(.{
+        .root_source_file = b.path("src/core/platform.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const quit_policy_module = b.createModule(.{
+        .root_source_file = b.path("src/core/quit_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    quit_policy_module.addImport("platform", platform_module);
 
     // Suji CLI
     const root_module = b.createModule(.{
@@ -87,6 +103,9 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("event_sink", event_sink_module);
     root_module.addImport("window_stack", window_stack_module);
     root_module.addImport("window_ipc", window_ipc_module);
+    root_module.addImport("logger", logger_module);
+    root_module.addImport("quit_policy", quit_policy_module);
+    root_module.addImport("platform", platform_module);
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
     const os_tag = @import("builtin").os.tag;
@@ -379,6 +398,28 @@ pub fn build(b: *std.Build) void {
     window_ipc_test_mod.addImport("test_native", test_native_module);
     const window_ipc_test = b.addTest(.{ .root_module = window_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(window_ipc_test).step);
+
+    // logger — 구조화 로깅
+    const logger_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/logger_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    logger_test_mod.addImport("logger", logger_module);
+    const logger_test = b.addTest(.{ .root_module = logger_test_mod });
+    test_step.dependOn(&b.addRunArtifact(logger_test).step);
+
+    // quit_policy — 플랫폼별 quit 결정
+    const quit_policy_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/quit_policy_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    quit_policy_test_mod.addImport("quit_policy", quit_policy_module);
+    const quit_policy_test = b.addTest(.{ .root_module = quit_policy_test_mod });
+    test_step.dependOn(&b.addRunArtifact(quit_policy_test).step);
 
     // State plugin tests
     const state_test_mod = b.createModule(.{

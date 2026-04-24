@@ -398,7 +398,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] Step B.2: `main.zig` 배선 — WindowStack으로 WM + CefNative + Sink 통합, 첫 윈도우 `wm.create` 경유
     - [x] Step B.3+B.4: CEF life_span 통합 — `DoClose` 취소 가능 이벤트 라우팅 + `OnBeforeClose` 테이블 정리 + WM 통지. `tryClose`/`markClosedExternal`/`findByNativeHandle` 추가. `destroyLocked` reorder (destroyed 마킹을 native 호출 전에 — DoClose 재진입 시 중복 이벤트 방지)
     - [x] Step B.5: `createNewWindow` PoC 제거 — `create_window` IPC 커맨드를 `window_ipc.handleCreateWindow`로 라우팅해 WM 경유
-    - [ ] Cmd+W 단축키를 `wm.close` 경유로 (현재는 `host.close_browser` 직접 호출)
+    - [x] Cmd+W 단축키를 `wm.close` 경유로 전환 (WM 이벤트 파이프라인 통과)
+    - [x] `window:all-closed` 이벤트 + 플랫폼별 quit 정책 (Electron `app.quitOnAllWindowsClosed` 호환, macOS=stay, Windows/Linux=quit)
+    - [x] 구조화 디버그 로거 (`~/.suji/logs/` 실행별 파일 + ISO8601 레벨 필터)
+    - [x] macOS NSWindow close cascade 개선 (`g_window` 싱글 참조 제거, per-browser tracking)
+    - [ ] OnBeforeClose 자연 발화 (CEF macOS Alloy 런타임 — 현재 cef.quit 우회)
     - [ ] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow, Linux GTK, Windows Win32)
     - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)
   - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라

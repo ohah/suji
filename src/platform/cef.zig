@@ -24,6 +24,9 @@ pub const c = @cImport({
 const builtin = @import("builtin");
 const runtime = @import("runtime");
 const window_mod = @import("window");
+const logger = @import("logger");
+
+const log = logger.module("cef");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
@@ -175,7 +178,6 @@ pub fn initialize(config: CefConfig) !void {
 }
 
 var g_devtools_client: c.cef_client_t = undefined;
-var g_window: ?*anyopaque = null; // NSWindow 강한 참조 유지
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
 var g_devtools_open: bool = false;
 
@@ -202,12 +204,18 @@ fn ensureGlobalHandlers() void {
 // - 잘못된 스레드 호출은 debug에서 crash, release에서 CEF CHECK abort
 
 pub const CefNative = struct {
+    pub const BrowserEntry = struct {
+        browser: *c.cef_browser_t,
+        /// macOS: NSWindow 포인터 (destroyWindow에서 close 메시지 송신용).
+        /// Linux/Windows: null (CEF가 자체 창 관리).
+        ns_window: ?*anyopaque,
+    };
+
     allocator: std.mem.Allocator,
     /// 모든 윈도우가 공유하는 client (콜백이 전부 module-global이라 공유 안전)
     client: c.cef_client_t = undefined,
-    /// WindowManager의 native_handle (= CEF browser identifier를 u64로 캐스팅) → CEF browser 포인터.
-    /// browser identifier를 그대로 handle로 쓰므로 CEF 콜백이 별도 매핑 없이 역조회 가능.
-    browsers: std.AutoHashMap(u64, *c.cef_browser_t),
+    /// WindowManager의 native_handle (= CEF browser identifier를 u64로 캐스팅) → (browser, NSWindow).
+    browsers: std.AutoHashMap(u64, BrowserEntry),
     /// opts.url이 null일 때 사용. "" 이면 CEF는 about:blank 수준의 빈 페이지를 로드.
     default_url: [:0]const u8 = "",
 
@@ -215,7 +223,7 @@ pub const CefNative = struct {
         ensureGlobalHandlers();
         var self: CefNative = .{
             .allocator = allocator,
-            .browsers = std.AutoHashMap(u64, *c.cef_browser_t).init(allocator),
+            .browsers = std.AutoHashMap(u64, BrowserEntry).init(allocator),
         };
         initClient(&self.client);
         return self;
@@ -261,7 +269,8 @@ pub const CefNative = struct {
     }
 
     fn getHost(self: *CefNative, handle: u64) ?*c.cef_browser_host_t {
-        const br = self.browsers.get(handle) orelse return null;
+        const entry = self.browsers.get(handle) orelse return null;
+        const br = entry.browser;
         return asPtr(c.cef_browser_host_t, br.get_host.?(br));
     }
 
@@ -293,7 +302,7 @@ pub const CefNative = struct {
             .width = @intCast(opts.bounds.width),
             .height = @intCast(opts.bounds.height),
         };
-        initWindowInfo(&window_info, .{
+        const ns_window = initWindowInfo(&window_info, .{
             .title = title_z,
             .width = @intCast(opts.bounds.width),
             .height = @intCast(opts.bounds.height),
@@ -320,7 +329,7 @@ pub const CefNative = struct {
         // handle = CEF browser identifier (프로세스 내 unique). life_span 콜백이
         // 같은 정수로 역조회 가능.
         const handle: u64 = @intCast(br.get_identifier.?(br));
-        self.browsers.put(handle, br) catch {
+        self.browsers.put(handle, .{ .browser = br, .ns_window = ns_window }) catch {
             // CEF browser는 이미 살아있음 → close_browser로 정리해 handle 누수 방지
             const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
             if (host) |h| h.close_browser.?(h, 1);
@@ -332,10 +341,21 @@ pub const CefNative = struct {
     fn destroyWindow(ctx: ?*anyopaque, handle: u64) void {
         const self = fromCtx(ctx);
         assertUiThread();
-        const host = self.getHost(handle) orelse return;
-        // force=1: 사용자 확인 없이 즉시 close 시작 (WindowManager.destroy 계약).
-        // 실제 파괴는 async (OnBeforeClose) — 테이블 정리는 그 콜백에서 Step B.
-        host.close_browser.?(host, 1);
+        log.debug("CefNative.destroyWindow handle={d}", .{handle});
+        const entry = self.browsers.get(handle) orelse {
+            log.warn("CefNative.destroyWindow: handle={d} not in table", .{handle});
+            return;
+        };
+        if (comptime is_macos) {
+            // macOS: NSWindow close가 content view + CEF browser view를 dealloc시켜
+            // CEF 내부 cleanup을 연쇄 트리거 → OnBeforeClose fire. close_browser는 생략
+            // (중복 호출이 경쟁상태 유발해 OnBeforeClose 예약 실패 관찰됨).
+            closeMacWindow(entry.ns_window);
+        } else {
+            const br = entry.browser;
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            if (host) |h| h.close_browser.?(h, 1);
+        }
     }
 
     fn setVisible(ctx: ?*anyopaque, handle: u64, visible: bool) void {
@@ -397,6 +417,11 @@ pub fn run() void {
 pub fn shutdown() void {
     c.cef_shutdown();
     std.debug.print("[suji] CEF shutdown\n", .{});
+}
+
+/// 메시지 루프 종료 요청. 현재 콜백 완료 후 run()이 반환.
+pub fn quit() void {
+    c.cef_quit_message_loop();
 }
 
 // ============================================
@@ -714,40 +739,60 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
 /// 반환: 0 = 진행, 1 = 취소 (브라우저 유지)
 fn doClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) i32 {
     const br = browser orelse return 0;
-    const wm = window_mod.WindowManager.global orelse return 0;
     const handle: u64 = @intCast(br.get_identifier.?(br));
-    const id = wm.findByNativeHandle(handle) orelse return 0;
+    const wm = window_mod.WindowManager.global orelse {
+        log.debug("DoClose handle={d} WM.global=null → proceed", .{handle});
+        return 0;
+    };
+    const id = wm.findByNativeHandle(handle) orelse {
+        log.debug("DoClose handle={d} not in WM → proceed", .{handle});
+        return 0;
+    };
     const w = wm.get(id) orelse return 0;
 
-    // WM이 이미 close 중 → WM이 close_browser를 직접 호출해서 온 DoClose. 통과.
-    if (w.destroyed) return 0;
+    if (w.destroyed) {
+        log.debug("DoClose id={d} already destroyed (WM-initiated) → proceed", .{id});
+        return 0;
+    }
 
-    // 사용자/OS 기인 close — 취소 가능 이벤트 발화 + 결과 반환
-    const proceed = wm.tryClose(id) catch return 0;
+    log.debug("DoClose id={d} external close → tryClose", .{id});
+    const proceed = wm.tryClose(id) catch |e| {
+        log.err("DoClose tryClose failed: {s}", .{@errorName(e)});
+        return 0;
+    };
+    log.debug("DoClose id={d} proceed={}", .{ id, proceed });
     return if (proceed) 0 else 1;
 }
 
 fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
     const br = browser orelse return;
     const handle: u64 = @intCast(br.get_identifier.?(br));
+    log.debug("OnBeforeClose handle={d}", .{handle});
 
-    // CefNative 테이블 purge
     if (g_cef_native) |cn| cn.purge(handle);
 
-    // WM 통지 (이미 destroyed면 wm.close가 처리한 것이므로 skip)
     notifyWm: {
         const wm = window_mod.WindowManager.global orelse break :notifyWm;
         const id = wm.findByNativeHandle(handle) orelse break :notifyWm;
         const w = wm.get(id) orelse break :notifyWm;
-        if (w.destroyed) break :notifyWm;
+        if (w.destroyed) {
+            log.debug("OnBeforeClose id={d} already destroyed — skip markClosedExternal", .{id});
+            break :notifyWm;
+        }
+        log.debug("OnBeforeClose id={d} → markClosedExternal", .{id});
         wm.markClosedExternal(id) catch {};
     }
 
-    // 메인 브라우저 close면 메시지 루프 종료
-    if (g_browser) |main| {
-        if (br.get_identifier.?(br) != main.get_identifier.?(main)) return;
+    const is_main = if (g_browser) |main_br|
+        br.get_identifier.?(br) == main_br.get_identifier.?(main_br)
+    else
+        true;
+    if (is_main) {
+        log.info("main browser closed → quitting message loop", .{});
+        c.cef_quit_message_loop();
+    } else {
+        log.debug("non-main browser closed handle={d} (no quit)", .{handle});
     }
-    c.cef_quit_message_loop();
 }
 
 // ============================================
@@ -814,8 +859,25 @@ fn onPreKeyEvent(
         return 1;
     }
 
-    // Cmd+W — 창 닫기
+    // Cmd+W — 창 닫기. WM 경유 → window:close 취소 가능 이벤트 발화 후 파괴.
+    // WM 미등록이면 CEF 직접 close (폴백, 이벤트 없음).
     if (key == 'W' and !shift) {
+        const handle: u64 = @intCast(br.get_identifier.?(br));
+        log.debug("cmd+w pressed browser_id={d}", .{handle});
+        if (window_mod.WindowManager.global) |wm| {
+            if (wm.findByNativeHandle(handle)) |id| {
+                log.debug("cmd+w → wm.close id={d}", .{id});
+                const ok = wm.close(id) catch |e| {
+                    log.err("cmd+w wm.close failed: {s}", .{@errorName(e)});
+                    return 1;
+                };
+                log.debug("cmd+w wm.close returned destroyed={}", .{ok});
+                return 1;
+            }
+            log.warn("cmd+w: handle={d} not found in WM (fallback to direct close)", .{handle});
+        } else {
+            log.warn("cmd+w: WM.global is null (fallback to direct close)", .{});
+        }
         const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
         if (host) |h| h.close_browser.?(h, 0);
         return 1;
@@ -1537,17 +1599,19 @@ fn mimeTypeForPath(path: []const u8) [:0]const u8 {
     return "application/octet-stream";
 }
 
-/// 플랫폼별 윈도우 초기화
+/// 플랫폼별 윈도우 초기화. 반환값: macOS에서만 NSWindow 포인터 (이후 close 트리거용).
+/// Linux/Windows는 CEF가 자체 창을 만들므로 null.
 const initWindowInfo = if (is_macos) struct {
-    fn call(window_info: *c.cef_window_info_t, config: CefConfig) void {
-        const content_view = createMacWindow(config.title, config.width, config.height);
-        if (content_view) |cv| {
+    fn call(window_info: *c.cef_window_info_t, config: CefConfig) ?*anyopaque {
+        const handles = createMacWindow(config.title, config.width, config.height);
+        if (handles.content_view) |cv| {
             window_info.parent_view = cv;
         }
+        return handles.ns_window;
     }
 }.call else struct {
-    fn call(_: *c.cef_window_info_t, _: CefConfig) void {
-        // Linux/Windows: CEF 자체 윈도우 생성
+    fn call(_: *c.cef_window_info_t, _: CefConfig) ?*anyopaque {
+        return null;
     }
 }.call;
 
@@ -1792,9 +1856,14 @@ fn activateNSApp() void {
     func(app, @ptrCast(sel), 1);
 }
 
-fn createMacWindow(title: [:0]const u8, width: i32, height: i32) ?*anyopaque {
-    const NSWindow = getClass("NSWindow") orelse return null;
-    const window_alloc = msgSend(NSWindow, "alloc") orelse return null;
+pub const MacWindowHandles = struct {
+    content_view: ?*anyopaque,
+    ns_window: ?*anyopaque,
+};
+
+fn createMacWindow(title: [:0]const u8, width: i32, height: i32) MacWindowHandles {
+    const NSWindow = getClass("NSWindow") orelse return .{ .content_view = null, .ns_window = null };
+    const window_alloc = msgSend(NSWindow, "alloc") orelse return .{ .content_view = null, .ns_window = null };
 
     const NSRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
     const initSel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
@@ -1803,10 +1872,10 @@ fn createMacWindow(title: [:0]const u8, width: i32, height: i32) ?*anyopaque {
     const window = initFn(window_alloc, @ptrCast(initSel), .{
         .x = 200, .y = 200,
         .w = @floatFromInt(width), .h = @floatFromInt(height),
-    }, style, 2, 0) orelse return null;
+    }, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
 
     // setTitle
-    const NSString = getClass("NSString") orelse return null;
+    const NSString = getClass("NSString") orelse return .{ .content_view = null, .ns_window = window };
     const strSel = objc.sel_registerName("stringWithUTF8String:");
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     const ns_title = strFn(NSString, @ptrCast(strSel), title.ptr);
@@ -1814,13 +1883,23 @@ fn createMacWindow(title: [:0]const u8, width: i32, height: i32) ?*anyopaque {
     const setTitleFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     setTitleFn(window, @ptrCast(setTitleSel), ns_title);
 
-    const contentView = msgSend(window, "contentView") orelse return null;
-    g_window = window; // NSWindow 참조 유지
+    const contentView = msgSend(window, "contentView");
+    // NSWindow는 releasedWhenClosed=YES(기본값) + NSApp window list 보관으로 수명 관리.
+    // 추가 retain 없이 자연스럽게 close 시 dealloc.
 
     // makeKeyAndOrderFront
     const makeKeySel = objc.sel_registerName("makeKeyAndOrderFront:");
     const makeKeyFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     makeKeyFn(window, @ptrCast(makeKeySel), null);
 
-    return contentView;
+    return .{ .content_view = contentView, .ns_window = window };
+}
+
+/// macOS: NSWindow에 `close` 메시지 송신. NSBrowserView가 content view에서 떨어져
+/// CEF 내부 cleanup이 연쇄 → 결과적으로 OnBeforeClose가 발화.
+fn closeMacWindow(ns_window: ?*anyopaque) void {
+    const w = ns_window orelse return;
+    const closeSel = objc.sel_registerName("close");
+    const closeFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    closeFn(w, @ptrCast(closeSel));
 }

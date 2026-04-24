@@ -6,6 +6,10 @@ const cef = @import("platform/cef.zig");
 const window_mod = @import("window");
 const window_stack_mod = @import("window_stack");
 const window_ipc = @import("window_ipc");
+const logger = @import("logger");
+const quit_policy = @import("quit_policy");
+
+const log = logger.module("main");
 const Watcher = @import("platform/watcher.zig").Watcher;
 const node_mod = @import("platform/node.zig");
 const NodeRuntime = node_mod.NodeRuntime;
@@ -28,6 +32,32 @@ pub fn main(init: std.process.Init) !void {
     cef.executeSubprocess();
 
     const allocator = init.gpa;
+
+    // 로거 초기화 — 서브프로세스는 logger.global=null로 두어 stderr만 사용.
+    // 메인 프로세스는 `~/.suji/logs/suji-YYYYMMDD-HHMMSS-PID.log` 파일로도 기록.
+    var log_file_opt: ?std.Io.File = null;
+    const log_level: logger.Level = blk: {
+        if (runtime.env("SUJI_LOG_LEVEL")) |v| {
+            break :blk logger.Level.parse(v) catch .info;
+        }
+        break :blk .info;
+    };
+    var log_file_storage: std.Io.File = undefined;
+    const setup_err: ?anyerror = if (setupLogFile(&log_file_storage)) blk: {
+        log_file_opt = log_file_storage;
+        break :blk null;
+    } else |e| e;
+    var lg = logger.Logger.init(runtime.io, .{ .level = log_level, .file = log_file_opt });
+    logger.global = &lg;
+    if (setup_err) |e| {
+        log.warn("log file setup failed ({s}); stderr only", .{@errorName(e)});
+    }
+    defer {
+        logger.global = null;
+        if (log_file_opt) |f| f.close(runtime.io);
+    }
+
+    log.info("suji starting pid={d} log_level={s}", .{ std.c.getpid(), @tagName(log_level) });
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
@@ -63,6 +93,55 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("Unknown command: {s}\n", .{command});
         printUsage();
     }
+}
+
+/// EventBus 리스너 — window:all-closed 발화 시 플랫폼별 quit 결정.
+/// Electron 기본 호환: macOS는 유지, Windows/Linux는 종료.
+/// 향후 config.app.quit_on_all_closed (optional bool)로 override 지원 예정.
+fn onWindowAllClosed(_: [*:0]const u8) void {
+    const platform = quit_policy.Platform.current();
+    const override: ?bool = null; // TODO: config에서 읽기
+    const should_quit = quit_policy.shouldQuitOnAllClosed(platform, override);
+    log.info(
+        "window-all-closed platform={s} should_quit={}",
+        .{ @tagName(platform), should_quit },
+    );
+    if (should_quit) cef.quit();
+}
+
+/// `~/.suji/logs/` 에 실행별 로그 파일 생성 + 7일 지난 오래된 로그 cleanup.
+/// 실패하면 파일 출력 없이 stderr만 사용 (호출자가 error를 삼킴).
+fn setupLogFile(out_file: *std.Io.File) !void {
+    const home = runtime.env("HOME") orelse return error.NoHome;
+    var dir_buf: [1024]u8 = undefined;
+    const logs_dir_path = try logger.buildLogsDir(&dir_buf, home);
+    const cwd = std.Io.Dir.cwd();
+    cwd.createDirPath(runtime.io, logs_dir_path) catch |e| switch (e) {
+        error.PathAlreadyExists => {},
+        else => return e,
+    };
+
+    // cleanup
+    {
+        var logs_dir = cwd.openDir(runtime.io, logs_dir_path, .{ .iterate = true }) catch return error.DirOpen;
+        defer logs_dir.close(runtime.io);
+        const now_ns: i128 = std.Io.Timestamp.now(runtime.io, .real).toNanoseconds();
+        logger.cleanupOldLogs(logs_dir, runtime.io, 7, now_ns) catch {};
+    }
+
+    // 파일 경로 생성
+    const now_ms = std.Io.Timestamp.now(runtime.io, .real).toMilliseconds();
+    var fname_buf: [128]u8 = undefined;
+    var path_buf: [2048]u8 = undefined;
+    var dir_buf2: [1024]u8 = undefined;
+    const pid: i32 = @intCast(std.c.getpid());
+    const full_path = try logger.buildLogFilePath(
+        .{ .out = &path_buf, .dir = &dir_buf2, .fname = &fname_buf },
+        home,
+        now_ms,
+        pid,
+    );
+    out_file.* = try cwd.createFile(runtime.io, full_path, .{});
 }
 
 fn printUsage() void {
@@ -647,6 +726,10 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
 
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
+
+    // window:all-closed 디버그 리스너 — 백엔드가 직접 등록하는 것과 동등한 경로로
+    // 이벤트가 흐르는지 로그로 가시화. Electron의 `app.on('window-all-closed', ...)` 대응.
+    _ = event_bus.on(window_mod.events.all_closed, onWindowAllClosed);
 
     // CEF IPC 콜백 연결
     cef.setInvokeHandler(&cefInvokeHandler);

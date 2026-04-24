@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (273개)
+zig build test     # 테스트 (306개)
 zig build run      # CLI 도움말
 
 # 예제 실행
