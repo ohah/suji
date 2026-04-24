@@ -105,3 +105,10 @@ jobs:
 
       - name: Test
         run: zig build test
+
+      - name: Build state plugin
+        working-directory: plugins/state/zig
+        run: zig build
+
+      - name: Test state plugin
+        run: zig build test-state

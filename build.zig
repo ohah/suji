@@ -99,7 +99,7 @@ pub fn build(b: *std.Build) void {
         break :blk true;
     };
     // Node.js 지원 (libnode가 설치된 경우만)
-    root_module.addIncludePath(.{ .cwd_relative = "src/platform/node" });
+    root_module.addIncludePath(b.path("src/platform/node"));
     const node_options = b.addOptions();
     node_options.addOption(bool, "node_enabled", node_available);
     root_module.addImport("node_config", node_options.createModule());
@@ -132,21 +132,25 @@ pub fn build(b: *std.Build) void {
 
     if (os_tag == .macos) {
         // macOS: CEF 프레임워크 로드 경로 수정 + ad-hoc 코드서명
+        const suji_bin = b.getInstallPath(.bin, "suji");
+        const entitlements = b.pathFromRoot("macos-entitlements.plist");
+
         const fix_rpath = b.addSystemCommand(&.{
             "install_name_tool", "-change",
             "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
         });
         const cef_fw_abs = std.fmt.allocPrint(b.allocator, "{s}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{cef_base}) catch @panic("OOM");
         fix_rpath.addArg(cef_fw_abs);
-        fix_rpath.addArg("zig-out/bin/suji");
+        fix_rpath.addArg(suji_bin);
         fix_rpath.step.dependOn(&install_artifact.step);
 
         const codesign = b.addSystemCommand(&.{
             "codesign", "--force", "--sign", "-",
-            "--entitlements", "macos-entitlements.plist",
-            "--deep",
-            "zig-out/bin/suji",
+            "--entitlements",
         });
+        codesign.addArg(entitlements);
+        codesign.addArg("--deep");
+        codesign.addArg(suji_bin);
         codesign.step.dependOn(&fix_rpath.step);
         b.getInstallStep().dependOn(&codesign.step);
 

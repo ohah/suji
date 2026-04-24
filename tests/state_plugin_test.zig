@@ -1,9 +1,15 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const loader = @import("loader");
 const events = @import("events");
 
-// State 플러그인 dylib 경로
-const PLUGIN_PATH = "plugins/state/zig/zig-out/lib/libbackend.dylib";
+// State 플러그인 동적 라이브러리 경로 (OS별 확장자)
+const PLUGIN_PATH = switch (builtin.os.tag) {
+    .macos => "plugins/state/zig/zig-out/lib/libbackend.dylib",
+    .linux => "plugins/state/zig/zig-out/lib/libbackend.so",
+    .windows => "plugins/state/zig/zig-out/bin/backend.dll",
+    else => @compileError("unsupported OS"),
+};
 
 // ============================================
 // 헬퍼
@@ -15,7 +21,7 @@ fn loadStatePlugin(reg: *loader.BackendRegistry) !void {
     freeResp(reg, invokePlugin(reg, "{\"cmd\":\"state:clear\"}"));
 }
 
-fn invokePlugin(reg: *const loader.BackendRegistry, request: []const u8) ?[]const u8 {
+fn invokePlugin(reg: *loader.BackendRegistry, request: []const u8) ?[]const u8 {
     var req_buf: [4096]u8 = undefined;
     const len = @min(request.len, req_buf.len - 1);
     @memcpy(req_buf[0..len], request[0..len]);
@@ -177,7 +183,7 @@ test "state plugin: concurrent set/get (10 threads)" {
     }
 }
 
-fn concurrentWorker(reg: *const loader.BackendRegistry, thread_id: usize) void {
+fn concurrentWorker(reg: *loader.BackendRegistry, thread_id: usize) void {
     for (0..10) |j| {
         var set_buf: [256]u8 = undefined;
         const set_req = std.fmt.bufPrint(&set_buf, "{{\"cmd\":\"state:set\",\"key\":\"thread_{d}\",\"value\":{d}}}", .{ thread_id, j }) catch continue;
@@ -209,7 +215,7 @@ test "state plugin: rapid fire 100 concurrent sets" {
     // 크래시/데드락 없이 완료되면 성공
 }
 
-fn rapidFireWorker(reg: *const loader.BackendRegistry, thread_id: usize) void {
+fn rapidFireWorker(reg: *loader.BackendRegistry, thread_id: usize) void {
     for (0..5) |j| {
         var buf: [256]u8 = undefined;
         const req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"state:set\",\"key\":\"rapid_{d}_{d}\",\"value\":{d}}}", .{ thread_id, j, thread_id * 100 + j }) catch continue;
