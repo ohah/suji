@@ -1088,8 +1088,16 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\    var cbs = s._listeners[event] || [];
         \\    for (var i = 0; i < cbs.length; i++) cbs[i](data);
         \\  };
+        \\  // Electron 호환: quit() / platform
+        \\  s.quit = function() {
+        \\    raw_invoke("__core__", JSON.stringify({__core:true,request:JSON.stringify({cmd:"quit"})}));
+        \\  };
         \\})();
     ;
+
+    // Platform 문자열을 개별 eval로 주입 (컴파일타임 결정)
+    const platform_js = "window.__suji__.platform = \"" ++ comptime platformLiteral() ++ "\";";
+
     var code_str: c.cef_string_t = .{};
     setCefString(&code_str, js_code);
     var empty_url: c.cef_string_t = .{};
@@ -1097,6 +1105,21 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
     var retval: ?*c.cef_v8_value_t = null;
     var exception: ?*c.cef_v8_exception_t = null;
     _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
+
+    // Platform 주입
+    var platform_str: c.cef_string_t = .{};
+    setCefString(&platform_str, platform_js);
+    _ = ctx.eval.?(ctx, &platform_str, &empty_url, 0, &retval, &exception);
+}
+
+/// 컴파일타임 플랫폼 문자열 (V8 바인딩의 window.__suji__.platform 값).
+fn platformLiteral() []const u8 {
+    return switch (builtin.os.tag) {
+        .macos => "macos",
+        .linux => "linux",
+        .windows => "windows",
+        else => @compileError("Suji: unsupported OS"),
+    };
 }
 
 /// V8 함수 실행 콜백 (invoke, emit, on)

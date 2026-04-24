@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (306개)
+zig build test     # 테스트 (307개)
 zig build run      # CLI 도움말
 
 # 예제 실행
@@ -59,6 +59,8 @@ suji::export_handlers!(ping);
 // suji::invoke("go", request)  — 크로스 호출
 // suji::send("channel", data)  — 이벤트 발신
 // suji::on("channel", cb, arg) — 이벤트 수신
+// suji::quit()                 — 앱 종료 (Electron app.quit())
+// suji::platform()             — "macos" | "linux" | "windows"
 ```
 
 ```go
@@ -69,6 +71,8 @@ var _ = suji.Bind(&App{})
 // suji.Invoke("rust", request)
 // suji.Send("channel", data)
 // suji.On("channel", callback)  — EventBus 연결 (bridge.c)
+// suji.Quit()                   — 앱 종료
+// suji.Platform()               — "macos" | "linux" | "windows"
 ```
 
 ```js
@@ -78,6 +82,8 @@ await suji.invoke("greet", { name: "Suji" })                 // 인자 전달
 await suji.invoke("greet", { name: "Suji" }, { target: "rust" }) // 특정 백엔드 지정
 suji.on("event", (data) => console.log(data))
 suji.emit("event", { msg: "hello" })
+suji.quit()                                                  // 앱 종료 요청
+suji.platform                                                // "macos" | "linux" | "windows" (상수)
 ```
 
 ## suji.json 설정

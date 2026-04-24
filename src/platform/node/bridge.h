@@ -44,6 +44,9 @@ typedef void (*suji_core_on_callback_fn)(const char* channel, const char* data, 
 typedef unsigned long long (*suji_core_on_fn)(const char* channel, suji_core_on_callback_fn cb, void* arg);
 typedef void (*suji_core_off_fn)(unsigned long long id);
 
+typedef void (*suji_core_quit_fn)(void);
+typedef const char* (*suji_core_platform_fn)(void);
+
 struct SujiNodeCore {
     suji_core_invoke_fn invoke;
     suji_core_free_fn free;
@@ -51,6 +54,8 @@ struct SujiNodeCore {
     suji_core_on_fn on;
     suji_core_off_fn off;
     suji_core_register_fn reg;
+    suji_core_quit_fn quit;
+    suji_core_platform_fn platform;
 };
 
 void suji_node_set_core(struct SujiNodeCore core);

@@ -12,6 +12,10 @@ typedef struct {
     void (*reg)(const char* channel);
     // Zig plugin 전용. Go plugin은 sync/os 표준 패키지 사용 권장.
     const void* (*get_io)(void);
+    // 앱 종료 요청 (Electron app.quit() 호환).
+    void (*quit)(void);
+    // 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
+    const char* (*platform)(void);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* channel) {
@@ -24,6 +28,14 @@ static const char* core_invoke(SujiCore* core, const char* name, const char* req
 
 static void core_emit(SujiCore* core, const char* channel, const char* data) {
     core->emit(channel, data);
+}
+
+static void core_quit(SujiCore* core) {
+    core->quit();
+}
+
+static const char* core_platform(SujiCore* core) {
+    return core->platform();
 }
 
 // bridge.c에 정의된 함수 선언
@@ -97,6 +109,37 @@ func Send(channel, data string) {
 	defer C.free(unsafe.Pointer(cData))
 	C.core_emit(core, cCh, cData)
 }
+
+// Quit — 앱 종료 요청 (Electron app.quit() 호환).
+// 주로 On("window:all-closed", ...) 핸들러에서 플랫폼 확인 후 호출.
+// core 주입 전이면 silent no-op.
+func Quit() {
+	if core == nil {
+		return
+	}
+	C.core_quit(core)
+}
+
+// Platform — 플랫폼 이름 ("macos" | "linux" | "windows" | "other").
+// Electron process.platform 대응 (단 Suji는 "darwin" 대신 "macos").
+func Platform() string {
+	if core == nil {
+		return "unknown"
+	}
+	ptr := C.core_platform(core)
+	if ptr == nil {
+		return "unknown"
+	}
+	return C.GoString(ptr)
+}
+
+// 플랫폼 상수 — Platform() 반환값과 비교할 때 사용.
+// Suji는 macOS/Linux/Windows만 지원.
+const (
+	PlatformMacOS   = "macos"
+	PlatformLinux   = "linux"
+	PlatformWindows = "windows"
+)
 
 //export backend_init
 func backend_init(c *C.SujiCore) {

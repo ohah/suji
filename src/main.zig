@@ -946,6 +946,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         }, response_buf, wm);
     }
 
+    // quit 커맨드 — 프론트 `__suji__.quit()`가 라우팅됨
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"quit\"") != null) {
+        cef.quit();
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"quit\"}}", .{}) catch return null;
+        return result;
+    }
+
     if (std.mem.indexOf(u8, req_clean, "core_info") != null) {
         var out_pos: usize = 0;
         const out = response_buf;

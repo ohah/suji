@@ -37,6 +37,8 @@ interface SujiBridge {
   on(channel: string, fn: (channel: string, data: string) => void): number;
   off(subId: number): void;
   register(channel: string): void;
+  quit(): void;
+  platform(): string;
 }
 
 // ============================================
@@ -220,3 +222,35 @@ export function once<T = unknown>(
 export function register(channel: string): void {
   getBridge().register(channel);
 }
+
+// ============================================
+// Electron 호환 API — quit / platform
+// ============================================
+
+/**
+ * 앱 종료 요청 (Electron `app.quit()` 호환).
+ *
+ * 주로 `on('window:all-closed', ...)` 핸들러에서 플랫폼 확인 후 호출:
+ *
+ * ```ts
+ * on('window:all-closed', () => {
+ *   if (platform() !== PLATFORM_MACOS) quit();
+ * });
+ * ```
+ */
+export function quit(): void {
+  getBridge().quit();
+}
+
+/**
+ * 현재 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
+ * Electron `process.platform` 대응 (Suji는 `"darwin"` 대신 `"macos"`).
+ */
+export function platform(): string {
+  return getBridge().platform();
+}
+
+/** 플랫폼 상수 — `platform()` 반환값과 비교할 때 사용. Suji는 macOS/Linux/Windows만 지원. */
+export const PLATFORM_MACOS = 'macos';
+export const PLATFORM_LINUX = 'linux';
+export const PLATFORM_WINDOWS = 'windows';

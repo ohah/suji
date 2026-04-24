@@ -423,11 +423,11 @@ pub const BackendRegistry = struct {
 var quit_handler: ?*const fn () void = null;
 
 /// 플랫폼 문자열 상수 — loader / SDK / tests가 동일 문자열 공유.
+/// Suji는 macOS / Linux / Windows만 지원. 그 외 OS는 컴파일 단계 에러.
 pub const platform_names = struct {
     pub const macos: [:0]const u8 = "macos";
     pub const linux: [:0]const u8 = "linux";
     pub const windows: [:0]const u8 = "windows";
-    pub const other: [:0]const u8 = "other";
 };
 
 pub fn platformName() [*:0]const u8 {
@@ -436,6 +436,6 @@ pub fn platformName() [*:0]const u8 {
         .macos => platform_names.macos,
         .linux => platform_names.linux,
         .windows => platform_names.windows,
-        else => platform_names.other,
+        else => @compileError("Suji: unsupported OS (only macos/linux/windows)"),
     };
 }

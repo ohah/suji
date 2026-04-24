@@ -80,7 +80,7 @@ static std::unordered_map<std::string, Global<Function>> g_handlers;
 static std::mutex g_handler_mutex;
 
 // SujiCore (크로스 호출 + 이벤트)
-static SujiNodeCore g_core = {nullptr, nullptr, nullptr, nullptr};
+static SujiNodeCore g_core = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
 // IPC 요청/응답 큐 (스레드 간 통신)
 struct IpcRequest {
@@ -564,6 +564,24 @@ static void js_suji_register(const v8::FunctionCallbackInfo<Value>& args) {
 }
 
 // ============================================
+// __suji_quit() / __suji_platform() — Electron 호환 API
+// ============================================
+
+static void js_suji_quit(const v8::FunctionCallbackInfo<Value>& args) {
+    (void)args;
+    if (g_core.quit) g_core.quit();
+    // core 미연결 상태는 silent no-op (SDK robustness).
+}
+
+static void js_suji_platform(const v8::FunctionCallbackInfo<Value>& args) {
+    Isolate* isolate = args.GetIsolate();
+    const char* name = (g_core.platform != nullptr) ? g_core.platform() : "unknown";
+    args.GetReturnValue().Set(
+        String::NewFromUtf8(isolate, name ? name : "unknown").ToLocalChecked()
+    );
+}
+
+// ============================================
 // JS에서 호출하는 네이티브 함수: __suji_on(channel, callback) → subId
 // ============================================
 
@@ -716,6 +734,8 @@ static int run_node_internal(const char* entry_path) {
         set_fn("__suji_on", js_suji_on);
         set_fn("__suji_off", js_suji_off);
         set_fn("__suji_register", js_suji_register);
+        set_fn("__suji_quit", js_suji_quit);
+        set_fn("__suji_platform", js_suji_platform);
 
         // 엔트리 JS 파일 로드 — @suji/node SDK를 주입하고 사용자 코드 실행
         std::string safe_path = escape_js_single(entry_path);
@@ -727,7 +747,9 @@ static int run_node_internal(const char* entry_path) {
             "  send: __suji_send,"
             "  on: __suji_on,"
             "  off: __suji_off,"
-            "  register: __suji_register"
+            "  register: __suji_register,"
+            "  quit: __suji_quit,"
+            "  platform: __suji_platform"
             "};"
             "const { createRequire } = require('module');"
             "const r = createRequire('") + safe_path + "');"

@@ -20,13 +20,12 @@ test "SujiCore exposes quit + platform fn pointers" {
     try std.testing.expect(@intFromPtr(api.platform) != 0);
 }
 
-test "loader.platformName returns known string" {
+test "loader.platformName returns macos/linux/windows" {
     const name = std.mem.span(loader.platformName());
     const p = loader.platform_names;
     const valid = std.mem.eql(u8, name, p.macos) or
         std.mem.eql(u8, name, p.linux) or
-        std.mem.eql(u8, name, p.windows) or
-        std.mem.eql(u8, name, p.other);
+        std.mem.eql(u8, name, p.windows);
     try std.testing.expect(valid);
 }
 

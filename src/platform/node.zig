@@ -99,7 +99,7 @@ pub const NodeRuntime = struct {
         }
     }
 
-    /// SujiCore를 Node bridge에 연결 (크로스 호출 + 이벤트)
+    /// SujiCore를 Node bridge에 연결 (크로스 호출 + 이벤트 + quit/platform)
     pub fn setCore(core: anytype) void {
         bridge.suji_node_set_core(.{
             .invoke = core.invoke,
@@ -108,6 +108,8 @@ pub const NodeRuntime = struct {
             .on = core.on,
             .off = core.off,
             .reg = core.register,
+            .quit = core.quit,
+            .platform = core.platform,
         });
     }
 
