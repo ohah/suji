@@ -1,0 +1,96 @@
+---
+title: Rust 백엔드 SDK
+description: suji::handle 매크로 + invoke / send / on
+---
+
+# Rust 백엔드 SDK
+
+`suji` crate (crates/suji-rs). cdylib으로 빌드되어 main suji 프로세스에 `dlopen` 됨.
+
+## Cargo.toml
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+suji = { path = "../../crates/suji-rs" }
+serde_json = "1"
+```
+
+## 핸들러
+
+```rust
+use suji::prelude::*;
+use serde_json::{json, Value};
+
+#[suji::handle]
+fn ping() -> String {
+    "pong".into()
+}
+
+#[suji::handle]
+fn greet(req: Value) -> Value {
+    let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("world");
+    json!({ "msg": format!("hello {}", name) })
+}
+
+suji::export_handlers!(ping, greet);
+```
+
+이벤트 리스너:
+
+```rust
+extern "C" fn on_window_all_closed(
+    _ch: *const c_char,
+    _data: *const c_char,
+    _arg: *mut std::os::raw::c_void,
+) {
+    if suji::platform() != suji::PLATFORM_MACOS {
+        suji::quit();
+    }
+}
+
+suji::export_handlers!(
+    ping, greet;
+    "window:all-closed" => on_window_all_closed
+);
+```
+
+## 유틸리티
+
+```rust
+suji::invoke(backend: &str, request: &str) -> Option<String>
+suji::send(channel: &str, data: &str)
+suji::on(channel: &str, callback: extern "C" fn(...), arg: *mut c_void) -> u64
+suji::off(listener_id: u64)
+suji::quit()
+suji::platform() -> &'static str       // "macos" | "linux" | "windows"
+
+// 상수
+suji::PLATFORM_MACOS
+suji::PLATFORM_LINUX
+suji::PLATFORM_WINDOWS
+```
+
+## 로드맵 — InvokeEvent 지원 (미구현)
+
+Zig SDK에 추가된 `(req, event)` 2-arity는 Rust에도 확장 예정:
+
+```rust
+#[suji::handle]
+fn save(req: Value, event: InvokeEvent) -> Value {
+    let win_id = event.window.id;
+    // ...
+}
+```
+
+현재는 wire의 `__window` 필드를 직접 파싱해서 사용 가능:
+
+```rust
+#[suji::handle]
+fn save(req: Value) -> Value {
+    let win_id = req.get("__window").and_then(|v| v.as_u64()).unwrap_or(0);
+    // ...
+}
+```

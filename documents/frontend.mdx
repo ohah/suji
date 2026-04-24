@@ -1,0 +1,104 @@
+---
+title: 프론트엔드 API
+description: window.__suji__ 네이티브 바인딩 + @suji/api npm 래퍼
+---
+
+# 프론트엔드 API
+
+CEF renderer의 V8 컨텍스트에 자동 주입되는 `window.__suji__` 객체와 npm 래퍼.
+
+## 두 가지 API 레이어
+
+```
+┌────────────────────────┐
+│ @suji/api (npm 래퍼)    │  권장 — 타입 안전 + JSON 자동 처리
+└────────────┬───────────┘
+             │ wraps
+┌────────────▼───────────┐
+│ window.__suji__        │  raw 바인딩 — CEF가 V8 context에 주입
+└────────────────────────┘
+```
+
+### 권장 — `@suji/api`
+
+```ts
+import { invoke, on, send, quit, platform } from '@suji/api';
+
+const r = await invoke('ping');                           // 객체 반환
+const r2 = await invoke('greet', { name: 'Suji' });
+const r3 = await invoke('ping', {}, { target: 'rust' });  // 특정 백엔드
+
+const cancel = on('theme-changed', (data) => { ... });
+send('clicked', { button: 'save' });
+quit();
+platform;  // "macos" | "linux" | "windows"
+```
+
+### Raw — `window.__suji__`
+
+주입된 전역. TypeScript 타입 없음, 모든 인자는 **문자열**이어야 함.
+
+```js
+// invoke(channel: string, dataJSONString: string, optionsJSONString: string) → Promise<any>
+await window.__suji__.invoke('ping', '{}', '{"target":"zig"}')
+
+// core(requestJSONString: string) → Promise<any>  — 코어 커맨드용
+await window.__suji__.core(JSON.stringify({ cmd: 'create_window', title: 'X' }))
+
+// send(channel, dataJSONString): void
+window.__suji__.send('clicked', '{}')
+
+// on(channel, callback): unsubscribeFn
+const off = window.__suji__.on('event', (data) => { ... })
+```
+
+## invoke 옵션
+
+```ts
+interface InvokeOptions {
+  target?: string;  // 특정 백엔드 지정 ("zig" | "rust" | "go" | "node")
+}
+```
+
+- `target` 미지정 — 채널 이름으로 자동 라우팅 (백엔드가 `handle(ch, ...)` 등록한 것에 자동 매칭)
+- 같은 채널을 여러 백엔드가 등록한 경우 **반드시 `target` 명시** (아니면 `no handler` 에러)
+
+## 코어 커맨드 (`__suji__.core`)
+
+프레임워크 내장 기능. 백엔드 거치지 않고 Zig 코어가 직접 처리.
+
+| cmd | 파라미터 | 응답 |
+|---|---|---|
+| `create_window` | `title`, `url?`, `name?`, `width?`, `height?` | `{from:"zig-core", windowId:N}` |
+| `set_title` | `windowId`, `title` | `{windowId:N, ok:bool}` |
+| `set_bounds` | `windowId`, `x?`, `y?`, `width?`, `height?` | `{windowId:N, ok:bool}` |
+| `quit` | — | `{cmd:"quit"}` |
+| `core_info` | — | `{backends:[...]}` |
+
+예:
+
+```js
+const w = await window.__suji__.core(JSON.stringify({
+  cmd: 'create_window',
+  title: 'Settings',
+  name: 'settings',          // 선택 — 백엔드에서 event.window.name으로 식별
+  url: 'http://localhost:5173/settings',
+}));
+console.log(w.windowId);  // 2, 3, ...
+```
+
+## Electron 대응
+
+| Electron | Suji |
+|---|---|
+| `ipcRenderer.invoke(ch, ...args)` | `invoke(ch, data, options)` — args 단일 객체 |
+| `ipcRenderer.send(ch, data)` | `send(ch, data)` |
+| `ipcRenderer.on(ch, cb)` | `on(ch, cb)` |
+| `ipcRenderer.once(ch, cb)` | `once(ch, cb)` |
+| `app.quit()` | `quit()` |
+| `process.platform` | `platform` (`"macos"` not `"darwin"`) |
+| `BrowserWindow.getAllWindows()` | `core({cmd:"core_info"})` (추후 별도 API 예정) |
+| `preload.js` | **미제공** — CEF 환경이라 Node API 노출 X |
+| `contextBridge` | **미제공** — 대신 `contextIsolation: true` 옵션 (roadmap) |
+
+자세한 차이는 [`events.mdx`](./events.mdx#electron과의-차이) 참조.

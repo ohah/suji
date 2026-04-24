@@ -1,0 +1,106 @@
+---
+title: 이벤트 & Electron 대응
+description: 이벤트 채널 목록 + Electron API 대응표
+---
+
+# 이벤트 & Electron 대응
+
+## 이벤트 종류
+
+### 창 라이프사이클 (WM이 발화)
+
+| 채널 | payload | 발화 시점 |
+|---|---|---|
+| `window:created` | `{id, name?}` | 창 생성 직후 |
+| `window:close` | `{id}` | 창이 닫히기 직전 (cancelable 예정) |
+| `window:closed` | `{id}` | 창이 실제로 파괴된 직후 |
+| `window:all-closed` | `{}` | 마지막 창이 닫힌 직후 (Electron canonical) |
+
+### Electron 패턴: all-closed → quit
+
+```js
+// Frontend
+suji.on('window:all-closed', () => {
+  if (suji.platform !== 'macos') suji.quit();
+});
+```
+
+```zig
+// Zig backend
+fn onAllClosed(_: suji.Event) void {
+    if (!std.mem.eql(u8, suji.platform(), suji.PLATFORM_MACOS)) suji.quit();
+}
+```
+
+macOS는 창이 모두 닫혀도 앱은 dock에 유지 (Electron과 동일). 나머지 플랫폼은 종료.
+
+## Electron API 대응표
+
+| Electron | Suji |
+|---|---|
+| `ipcRenderer.invoke(ch, ...args)` | `suji.invoke(ch, data, options)` — data는 단일 객체 |
+| `ipcRenderer.send(ch, data)` | `suji.send(ch, data)` |
+| `ipcRenderer.on(ch, fn)` | `suji.on(ch, fn)` |
+| `ipcMain.handle(ch, (event, ...args) => {})` | 백엔드 `handle(ch, (req, event) => {})` |
+| `ipcMain.on(ch, fn)` | 백엔드 `on(ch, fn)` |
+| `event.sender` / `BrowserWindow.fromWebContents(e.sender)` | `event.window` rich 객체 (`{id, name}`) |
+| `win.webContents.send(ch, data)` | (roadmap) `suji.emit(ch, data, {to: winId})` |
+| `BrowserWindow.getAllWindows()` | (roadmap) `suji.windows.all()` |
+| `app.quit()` | `suji.quit()` |
+| `process.platform` | `suji.platform` — **"macos"** (not "darwin") |
+| `MessageChannelMain` | **미지원 (V1)** |
+| `remote` 모듈 | **미지원** (Electron도 deprecated) |
+| `preload.js` | **미지원** — Suji 렌더러는 Node 노출 자체가 없음 |
+| `contextBridge` | **미제공** — 대신 `contextIsolation: true`면 `Object.freeze` 프록시 자동 주입 (roadmap) |
+
+## Electron과의 차이 (주요)
+
+### 1. `invoke` 인자 스타일: variadic → 단일 객체
+
+```js
+// Electron
+ipcRenderer.invoke('save', filename, content, options)
+
+// Suji
+suji.invoke('save', { filename, content, options })
+```
+
+**이유**: 크로스-언어 JSON 직렬화. Zig/Rust/Go/Node 백엔드가 같은 wire 포맷을 쓰려면
+positional varargs보다 named 필드 객체가 자연스러움.
+
+### 2. 핸들러 시그니처: `(event, ...args)` → `(req, event)`
+
+```js
+// Electron
+ipcMain.handle('save', (event, filename, content) => {
+  const sender = event.sender;
+})
+```
+
+```zig
+// Suji (Zig)
+fn save(req: Request, event: InvokeEvent) Response {
+    const filename = req.string("filename");
+    const sender_id = event.window.id;
+}
+```
+
+- Suji는 `req` 먼저 (주 데이터 우선), `event` 둘째 (메타데이터)
+- Electron은 `event` 먼저 (sender 강조)
+- **이유**: Rust `#[handle]` 매크로 / Go 메서드 바인딩은 고정 arity가 단순
+
+### 3. Wire 레벨 `__window` 자동 태깅
+
+Electron은 프레임 ID를 V8 IPC에 암묵 전달 → handler 호출 시 `event.sender`로 풀음.
+Suji는 **JSON payload에 `__window`, `__window_name` 필드 자동 주입**. `event.window`는
+이 필드에서 파생된 편의 객체.
+
+이점:
+- 저수준 접근 필요한 플러그인은 wire 필드 직접 읽음 (JSON에 박혀있음)
+- 크로스-언어에서 context 전파가 자연스러움 (V8 hidden context 같은 것 불필요)
+- 로그/감사에서 "어느 창이 호출했는지" wire 레벨에서 확인 가능
+
+### 4. 플랫폼 문자열: `darwin` → `macos`
+
+Electron: `"darwin"` / `"linux"` / `"win32"`
+Suji: `"macos"` / `"linux"` / `"windows"` — BSD 커널 이름이 아닌 **사용자 친화적 OS 이름**

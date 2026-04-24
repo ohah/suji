@@ -1,0 +1,132 @@
+---
+title: Zig 백엔드 SDK
+description: suji.app() builder + handle / on / InvokeEvent / Request / Response
+---
+
+# Zig 백엔드 SDK
+
+`@import("suji")`로 접근. dylib으로 빌드되어 main suji 프로세스에 `dlopen` 됨.
+
+## App 빌더
+
+```zig
+const suji = @import("suji");
+const std = @import("std");
+
+pub const my_app = suji.app()
+    .named("my-plugin")                    // 선택 — ready/bye 로그 prefix 구분
+    .handle("ping", ping)                  // 1-arity
+    .handle("save", save)                  // 2-arity (InvokeEvent)
+    .on("window:all-closed", onAllClosed); // 이벤트 리스너
+
+fn ping(req: suji.Request) suji.Response {
+    return req.ok(.{ .msg = "pong" });
+}
+
+fn save(req: suji.Request, event: suji.InvokeEvent) suji.Response {
+    const content = req.string("content") orelse "";
+    std.debug.print("save from window {d}\n", .{event.window.id});
+    return req.ok(.{ .ok = true });
+}
+
+fn onAllClosed(_: suji.Event) void {
+    if (!std.mem.eql(u8, suji.platform(), suji.PLATFORM_MACOS)) {
+        suji.quit();
+    }
+}
+
+comptime {
+    _ = suji.exportApp(my_app);
+}
+```
+
+## 타입
+
+### `Request`
+
+```zig
+pub const Request = struct {
+    raw: []const u8,                      // 원본 JSON
+    arena: std.mem.Allocator,             // 요청 스코프 arena
+
+    pub fn string(self, key: []const u8) ?[]const u8;
+    pub fn int(self, key: []const u8) ?i64;
+    pub fn float(self, key: []const u8) ?f64;
+    pub fn bool(self, key: []const u8) ?bool;
+    pub fn ok(self, value: anytype) Response;
+    pub fn err(self, message: []const u8) Response;
+};
+```
+
+### `Response`
+
+```zig
+pub const Response = struct {
+    data: []const u8,  // 직렬화된 JSON 바이트
+};
+```
+
+`req.ok(.{...})` / `req.err(...)`로만 생성. 직접 구성할 일 없음.
+
+### `InvokeEvent` (Phase 2.5)
+
+```zig
+pub const InvokeEvent = struct {
+    window: Window,
+
+    pub const Window = struct {
+        id: u32,              // wire `__window` 필드 — 호출한 창의 WM id
+        name: ?[]const u8,    // wire `__window_name` 필드 — 창 이름 (익명 창은 null)
+    };
+};
+```
+
+핸들러 시그니처 2가지 모두 허용:
+
+```zig
+fn h1(req: Request) Response { ... }                    // 기본
+fn h2(req: Request, event: InvokeEvent) Response { ... } // 창 식별 필요 시
+```
+
+1-arity는 comptime wrapper로 2-arity에 adapt되어 내부 저장은 단일 타입. 호환성 유지.
+
+### `Event` (Window listener용)
+
+```zig
+pub const Event = struct {
+    channel: []const u8,
+    data: []const u8,
+};
+```
+
+`on("window:all-closed", fn(Event) void)` 같은 리스너 콜백이 받음.
+`InvokeEvent`와 다른 역할 — 이벤트 구독용 payload.
+
+## 유틸리티
+
+```zig
+suji.platform() []const u8;        // "macos" | "linux" | "windows"
+suji.quit() void;                   // Electron app.quit() 대응
+suji.PLATFORM_MACOS, PLATFORM_LINUX, PLATFORM_WINDOWS  // 상수
+```
+
+## 크로스 호출
+
+```zig
+fn callRust(req: suji.Request) suji.Response {
+    var resp_buf: [1024]u8 = undefined;
+    if (req.invoke("rust", "{\"cmd\":\"hash\",\"data\":\"abc\"}", &resp_buf)) |resp| {
+        // resp는 다른 백엔드의 JSON 응답
+        return req.ok(.{ .from_rust = resp });
+    }
+    return req.err("rust failed");
+}
+```
+
+## 이벤트 발신
+
+```zig
+suji.send("theme-changed", "{\"color\":\"dark\"}");
+```
+
+모든 창의 `__suji__.on("theme-changed", ...)` 리스너에 JSON 파싱되어 전달.

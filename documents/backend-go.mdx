@@ -1,0 +1,90 @@
+---
+title: Go 백엔드 SDK
+description: suji.Bind + cgo 브릿지
+---
+
+# Go 백엔드 SDK
+
+`github.com/ohah/suji-go` (sdks/suji-go). cgo + `-buildmode=c-shared`로 빌드되어
+main suji 프로세스에 `dlopen` 됨.
+
+## main.go
+
+```go
+package main
+
+import "C"
+
+import (
+    "fmt"
+    "os"
+    "github.com/ohah/suji-go"
+)
+
+type App struct{}
+
+func (a *App) Ping() string {
+    return "pong"
+}
+
+func (a *App) Greet(name string) string {
+    return fmt.Sprintf("hello %s", name)
+}
+
+func (a *App) Add(x, y int) int {
+    return x + y
+}
+
+var _ = suji.Bind(&App{})
+
+func init() {
+    suji.On("window:all-closed", onAllClosed)
+}
+
+func onAllClosed(_ string, _ string) {
+    if suji.Platform() != suji.PlatformMacOS {
+        fmt.Fprintln(os.Stderr, "non-macOS → quit")
+        suji.Quit()
+    }
+}
+
+func main() {}  // cgo 요구
+```
+
+## 유틸리티
+
+```go
+suji.Invoke(backend string, request string) string       // 크로스 호출
+suji.Send(channel string, data string)                   // 이벤트 발신
+suji.On(channel string, callback func(string, string))   // 이벤트 구독
+suji.Quit()                                              // 앱 종료
+suji.Platform() string                                   // "macos" | "linux" | "windows"
+
+// 상수
+suji.PlatformMacOS
+suji.PlatformLinux
+suji.PlatformWindows
+```
+
+## cgo 주의사항
+
+백엔드에서 `//export <Name>` 패턴과 preamble의 수동 `extern` 선언이 충돌하지 않도록:
+
+```c
+// cgo가 자동 생성하는 prototype은 const qualifier가 없음 → 수동 extern도 맞춰야.
+extern void go_on_window_all_closed(char* ch, char* data, void* arg);
+```
+
+Go 빌드는 `CGO_ENABLED=1` + `CC=/usr/bin/clang` 필요 (macOS Homebrew LLVM 충돌 회피 —
+suji CLI가 자동 설정).
+
+## 로드맵 — InvokeEvent
+
+현재는 wire의 `__window` 필드를 request JSON에서 직접 파싱:
+
+```go
+// TODO Phase 2.5 확장 — 현재는 수동 파싱
+func (a *App) Save(content string) string {
+    // 현재 SDK는 원 JSON에 접근 못 함. 추후 InvokeEvent 지원 예정.
+}
+```

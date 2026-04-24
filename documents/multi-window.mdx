@@ -1,0 +1,159 @@
+---
+title: 멀티윈도우
+description: create_window, set_title, set_bounds + __window wire 자동 태깅
+---
+
+# 멀티윈도우
+
+Suji는 하나의 프로세스에서 여러 브라우저 창을 띄울 수 있음. WindowManager가 창
+라이프사이클을 관리하고, 프론트엔드가 `__suji__.core` IPC로 조작.
+
+## 창 생성
+
+### 기본
+
+```js
+const w = await window.__suji__.core(JSON.stringify({
+  cmd: 'create_window',
+  title: 'Second Window',
+  url: 'http://localhost:5173/secondary',
+}));
+// w = { from: "zig-core", cmd: "create_window", windowId: 2 }
+```
+
+### 명명된 창
+
+```js
+await window.__suji__.core(JSON.stringify({
+  cmd: 'create_window',
+  title: 'Settings',
+  name: 'settings',                      // WM 등록 이름 — 이후 event.window.name으로 식별
+  url: 'http://localhost:5173/settings',
+}));
+```
+
+**같은 name으로 재호출하면 기존 창이 반환됨** (singleton 패턴).
+
+## 창 제어
+
+### `set_title`
+
+```js
+await window.__suji__.core(JSON.stringify({
+  cmd: 'set_title',
+  windowId: 2,
+  title: 'New Title',
+}));
+// { windowId: 2, ok: true }
+```
+
+### `set_bounds`
+
+```js
+await window.__suji__.core(JSON.stringify({
+  cmd: 'set_bounds',
+  windowId: 2,
+  x: 100,
+  y: 100,
+  width: 1200,
+  height: 800,
+}));
+```
+
+- macOS: Cocoa 좌표 자동 변환 (화면 좌상단 기준 Y 입력)
+- Linux / Windows: no-op (스텁) — 추후 GTK/Win32 구현 예정
+
+## 어느 창에서 호출됐는지 식별 — `__window` wire 자동 태깅
+
+프론트엔드가 `__suji__.invoke('save', data)`를 호출하면 수신 코어가 sender browser를
+식별해 request JSON에 자동으로 두 필드를 주입:
+
+```json
+{
+  "cmd": "save",
+  "content": "...",
+  "__window": 2,                    // 항상 — sender 창의 WM id
+  "__window_name": "settings"       // 창에 name이 설정된 경우만
+}
+```
+
+백엔드는 이를 통해 "어느 창에서 호출됐는지" 분기 가능.
+
+### Zig SDK — `InvokeEvent`
+
+```zig
+fn save(req: suji.Request, event: suji.InvokeEvent) suji.Response {
+    std.debug.print("save from window id={d} name={s}\n", .{
+        event.window.id,
+        event.window.name orelse "(anonymous)",
+    });
+    if (event.window.name) |n| {
+        if (std.mem.eql(u8, n, "settings")) {
+            // settings 창 전용 분기
+        }
+    }
+    return req.ok(.{});
+}
+```
+
+### Rust / Go / Node — 직접 파싱 (SDK 확장 중)
+
+Phase 2.5의 `InvokeEvent` 파라미터는 Zig SDK에만 완성됨. 다른 언어는 request JSON에서
+직접 읽음:
+
+```rust
+#[suji::handle]
+fn save(req: Value) -> Value {
+    let win_id = req.get("__window").and_then(|v| v.as_u64()).unwrap_or(0);
+    let win_name = req.get("__window_name").and_then(|v| v.as_str());
+    // ...
+}
+```
+
+```js
+// Node
+handle('save', (data) => {
+  const winId = data.__window;           // number
+  const winName = data.__window_name;    // string | undefined
+});
+```
+
+## 이벤트 발신 타겟팅 (roadmap)
+
+현재 `suji.send('event', data)`는 모든 창에 브로드캐스트. 특정 창에만 보내는
+`sendTo` / `{to: winId}` 옵션은 Phase 2.5 후속 과제.
+
+## 전체 창 목록 (roadmap)
+
+현재 별도 API 없음. Phase 2.5에서 `suji.windows.all()` 또는 `core({cmd:"list_windows"})`
+추가 예정.
+
+## 창 이벤트
+
+```js
+// 창 생성됨
+window.__suji__.on('window:created', (data) => {
+  // data = { id: 2, name: "settings" }
+});
+
+// 창 닫힘 직전 (cancelable)
+window.__suji__.on('window:close', (data) => {
+  // preventDefault는 아직 renderer 측 미지원 — 백엔드에서만 가능
+});
+
+// 창 닫힘 완료
+window.__suji__.on('window:closed', (data) => {
+  // data = { id: 2 }
+});
+
+// 모든 창 닫힘
+window.__suji__.on('window:all-closed', () => {
+  // Electron canonical: macOS 제외하면 quit
+});
+```
+
+## 안전성 invariants
+
+- **id는 monotonic + non-reusing** — 창을 닫아도 id 재사용 안 됨
+- **JSON-unsafe name은 wire 주입 skip** — `"`, `\`, control char 포함된 name은 `__window_name`이 생략됨 (id만 주입). JSON 파서 깨짐 방지
+- **Cross-hop 보존** — 이미 `"__window"` 있는 request는 재주입 안 함 (백엔드-백엔드 호출 시 원 sender 정보 유지)

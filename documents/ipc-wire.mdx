@@ -1,0 +1,150 @@
+---
+title: IPC 와이어 포맷
+description: JSON payload 구조 + __window 자동 태깅 + cross-hop 규칙
+---
+
+# IPC 와이어 포맷
+
+Suji의 모든 IPC는 **JSON 문자열**을 단일 payload로 주고받음. V8 hidden context나
+바이너리 프레임 없음 → 크로스-언어에서 같은 메시지가 그대로 흐름.
+
+## 메시지 흐름
+
+```
+[Renderer]  ──invoke──▶  [Core (Zig)]  ──dispatch──▶  [Backend (Zig/Rust/Go/Node)]
+    │                         │                              │
+    ◀────response JSON────────◀──────response JSON───────────◀
+```
+
+- **Renderer → Core**: CEF `CefProcessMessage` 채널로 JSON 문자열 전달
+- **Core → Backend**:
+  - Zig 백엔드: 같은 프로세스, 함수 호출 (`Request.raw`)
+  - Rust/Go 백엔드: `dlopen` cdylib, `char*` JSON
+  - Node 백엔드: 같은 프로세스, libnode V8 스레드 재진입
+
+## Request JSON 기본 구조
+
+```json
+{
+  "cmd": "save",              // 핸들러 채널명 (필수)
+  "content": "...",           // 사용자 payload 필드 (자유)
+  "filename": "out.txt",
+
+  "__window": 2,              // (자동 주입) sender 창의 WM id
+  "__window_name": "settings" // (자동 주입, 조건부) sender 창의 이름
+}
+```
+
+### 예약 필드 (`__` 접두사)
+
+코어가 wire에 자동 주입하는 메타데이터. 사용자 코드는 **읽기만** 하고 쓰지 않음.
+
+| 필드 | 타입 | 조건 | 의미 |
+|---|---|---|---|
+| `__window` | number | 항상 (renderer invoke) | sender 창의 WindowManager id |
+| `__window_name` | string | `create_window`에서 `name` 지정된 경우만 | 창의 논리적 이름 |
+
+## `__window` 자동 태깅 규칙
+
+### 주입 위치
+
+`src/core/window_ipc.zig::injectWindowField`가 담당. CEF `BrowserId → WM id` 변환 후
+**request JSON의 루트 객체에 필드 삽입**.
+
+### 멱등성 (cross-hop 보존)
+
+이미 `"__window"`가 포함된 request는 재주입 안 함. 이유:
+
+```
+renderer(id=2) → core → backendA → core.invoke("backendB", req)
+                                                         └─ 여기서 재주입하면 원 sender 정보 손실
+```
+
+backend → backend 재호출 시 원 sender 창 id를 그대로 전파할 수 있음.
+
+### JSON-unsafe name skip
+
+`name`에 `"`, `\`, 또는 control char (`< 0x20`)가 포함되면 `__window_name` 주입만
+생략 (id는 정상 주입). 이유: 이스케이프 없이 직접 삽입 → JSON 파서가 깨질 수 있음.
+수명 짧은 필드의 안전한 쪽 기본값.
+
+```zig
+fn isJsonSafe(s: []const u8) bool {
+    for (s) |c| {
+        if (c == '"' or c == '\\' or c < 0x20) return false;
+    }
+    return true;
+}
+```
+
+### 빈 객체 / 공백 처리
+
+```
+{}                    → {"__window":2}
+{ }                   → { ,"__window":2}  ❌ 아님
+{"cmd":"save"}        → {"cmd":"save","__window":2}
+```
+
+공백은 trim 후 `}` 직전에 삽입. 빈 객체는 separator 생략. 구현은 `injectWindowField`
+소스 참고.
+
+## Response JSON 구조
+
+모든 핸들러는 JSON 객체 반환.
+
+```json
+{ "ok": true, "msg": "pong" }
+
+{ "error": "invalid filename" }
+```
+
+명시적 포맷 강제는 없지만 SDK 관례:
+- 성공: `{ "ok": true, ... }` 또는 결과 필드 직접
+- 실패: `{ "error": "..." }`
+
+Zig SDK의 `req.ok(.{...})` / `req.err("...")`가 자동으로 이 관례 적용.
+
+## 크로스-백엔드 invoke
+
+```
+Backend A: suji.invoke("rust", "{\"cmd\":\"ping\"}")
+  → Core: registry lookup ("rust" 등록된 dylib)
+  → Rust cdylib 진입점 호출
+  → Rust handler 실행
+  → response JSON 문자열 반환
+  → A가 결과 파싱
+```
+
+- target 이름은 backend lang 문자열 (`"zig"`, `"rust"`, `"go"`, `"node"`)
+- 프론트엔드 `suji.invoke(channel, ...)` 는 **채널명 기준 자동 라우팅** — target 생략 가능
+
+## 이벤트 발신 (send)
+
+```json
+// core → 모든 렌더러 브로드캐스트
+{
+  "channel": "data-updated",
+  "data": { "items": [...] }
+}
+```
+
+현재 타겟 지정 불가 (모든 창에 브로드). `{to: winId}` 옵션은 Phase 2.5 후속.
+
+## 크기 & 인코딩
+
+- UTF-8 JSON (BOM 없음)
+- Zig / CEF / libnode 모두 UTF-8 native
+- 현재 명시적 크기 제한 없음 — 단일 payload가 수 MB를 넘으면 CEF IPC가 파편화될 수
+  있으므로 실무에선 청킹 권장
+
+## 디버깅
+
+`SUJI_TRACE_IPC=1` 환경변수로 Zig 백엔드 핸들러가 원 JSON 덤프:
+
+```bash
+SUJI_TRACE_IPC=1 suji dev
+# [zig/ping] window.id=2 name=settings raw={"cmd":"ping","__window":2,"__window_name":"settings"}
+```
+
+CEF DevTools (`--remote-debugging-port=9222`)에서 `console.log(await suji.invoke(...))`로
+직접 확인 가능.

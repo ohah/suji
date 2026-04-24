@@ -1,0 +1,134 @@
+---
+title: Node.js 백엔드 SDK
+description: libnode 임베딩 + @suji/node 패키지
+---
+
+# Node.js 백엔드 SDK
+
+`@suji/node` npm 패키지. libnode를 suji 프로세스에 **임베딩**해서 실행 —
+별도 프로세스 없음. `~/.suji/node/24.14.1/libnode.dylib` 필요.
+
+## suji.json
+
+```json
+{
+  "backend": {
+    "lang": "node",
+    "entry": "backends/node"
+  }
+}
+```
+
+## main.js
+
+```js
+const { handle, invoke, invokeSync, on, send, quit, platform, PLATFORM_MACOS } = require('@suji/node');
+
+// 기본 핸들러
+handle('ping', () => ({ msg: 'pong' }));
+handle('greet', (data) => ({ msg: `hello ${data.name || 'world'}` }));
+
+// 크로스 호출 — 동기 (핸들러 내부)
+handle('call-rust', () => {
+  const resp = invokeSync('rust', JSON.stringify({ cmd: 'ping' }));
+  return { rust_said: JSON.parse(resp) };
+});
+
+// 크로스 호출 — 비동기 (핸들러 외부, Promise)
+on('theme-change-request', async () => {
+  const resp = await invoke('zig', JSON.stringify({ cmd: 'get-theme' }));
+  send('theme-changed', resp);
+});
+
+// Electron 패턴
+on('window:all-closed', () => {
+  if (platform() !== PLATFORM_MACOS) quit();
+});
+```
+
+## API
+
+### `handle(channel, fn)`
+
+IPC 핸들러 등록. `fn`은 **동기** 함수 — 파싱된 request 객체 받고 응답 객체 반환.
+
+```ts
+type Handler = (data: any) => any;
+handle('ping', (data) => ({ msg: 'pong', echo: data }));
+```
+
+### `invoke(backend, request) → Promise<string>`
+
+비동기 크로스 호출. 핸들러 **외부**에서 사용 (event loop 블록 X).
+
+### `invokeSync(backend, request) → string`
+
+동기 크로스 호출. 핸들러 **내부** 전용. Node main thread가 block되는 동안
+재진입 가능 (deadlock 방지 메커니즘 내장).
+
+### `send(channel, data)`
+
+이벤트 발신. JSON 문자열을 받음.
+
+```js
+send('progress', JSON.stringify({ percent: 50 }));
+```
+
+### `on(channel, callback)`
+
+이벤트 구독.
+
+```js
+on('data-updated', (data) => {
+  const payload = JSON.parse(data);
+  // ...
+});
+```
+
+### `quit()` / `platform()`
+
+- `quit()` — Electron `app.quit()` 대응
+- `platform()` — `"macos"` | `"linux"` | `"windows"` (Electron은 `"darwin"`)
+
+## 실행 환경
+
+libnode 임베딩이라 `node_modules` 그대로 사용 가능:
+
+```json
+// backends/node/package.json
+{
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "axios": "^1.6.0"
+  }
+}
+```
+
+```bash
+cd backends/node && npm install
+suji dev  # main.js에서 require('lodash') 정상 동작
+```
+
+## 로드맵 — InvokeEvent
+
+현재는 handler가 data만 받음. Phase 2.5 확장 시:
+
+```js
+// 향후
+handle('save', (req, event) => {
+  if (event.window.name === 'settings') {
+    // ...
+  }
+  return { ok: true };
+});
+```
+
+지금은 data에 `__window` 필드가 자동 주입되므로 직접 꺼낼 수 있음:
+
+```js
+handle('save', (data) => {
+  const winId = data.__window;  // 1, 2, 3, ... 호출한 창
+  const winName = data.__window_name;  // "settings" | undefined
+  // ...
+});
+```

@@ -1,0 +1,41 @@
+---
+title: Suji API Reference
+description: Electron 스타일 크로스-언어 데스크톱 앱 프레임워크 API 스펙
+---
+
+# Suji
+
+Zig 코어 기반의 올인원 데스크톱 앱 프레임워크. Electron의 IPC 모델을 Zig/Rust/Go/Node.js
+4개 백엔드로 확장.
+
+## 빠른 시작
+
+```bash
+npx @suji/cli init my-app --backend=multi
+cd my-app
+suji dev
+```
+
+## API 구성
+
+| 영역 | 문서 |
+|---|---|
+| 프론트엔드 JS (`window.__suji__`) | [`frontend.mdx`](./frontend.mdx) |
+| Zig 백엔드 SDK | [`backend-zig.mdx`](./backend-zig.mdx) |
+| Rust / Go / Node SDK | [`backend-rust.mdx`](./backend-rust.mdx), [`backend-go.mdx`](./backend-go.mdx), [`backend-node.mdx`](./backend-node.mdx) |
+| 멀티윈도우 | [`multi-window.mdx`](./multi-window.mdx) |
+| 이벤트 & Electron 대응 | [`events.mdx`](./events.mdx) |
+| IPC 와이어 포맷 | [`ipc-wire.mdx`](./ipc-wire.mdx) |
+
+## 설계 원칙
+
+- **Electron 호환 계층**: 친숙한 네이밍 (`invoke`, `on`, `send`, `handle`)
+- **크로스-언어**: 같은 IPC 포맷을 Zig/Rust/Go/Node 백엔드가 공유
+- **허브-스포크**: 렌더러는 코어(메인) 프로세스만 거쳐 통신 (직접 renderer↔renderer X)
+- **JSON 와이어**: 모든 IPC payload는 JSON — 언어별 직렬화 차이 없음
+
+## 지원 플랫폼
+
+- macOS (Apple Silicon + Intel)
+- Linux (x86_64)
+- Windows (x86_64)
