@@ -179,7 +179,7 @@ var g_window: ?*anyopaque = null; // NSWindow 강한 참조 유지
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
 var g_devtools_open: bool = false;
 
-/// 전역 CEF 핸들러 초기화 (idempotent). CefNative.init 및 PoC createNewWindow가 호출.
+/// 전역 CEF 핸들러 초기화 (idempotent). CefNative.init에서 호출.
 /// life_span_handler / keyboard_handler / devtools client — 모든 브라우저가 공유.
 var g_handlers_initialized: bool = false;
 fn ensureGlobalHandlers() void {
@@ -190,44 +190,6 @@ fn ensureGlobalHandlers() void {
     initBaseRefCounted(&g_devtools_client.base);
     g_devtools_client.get_keyboard_handler = &getKeyboardHandler;
     g_handlers_initialized = true;
-}
-
-/// 새 윈도우(브라우저) 생성 — PoC: 멀티 윈도우 검증용 (Step B.5에서 wm.create로 대체 예정)
-/// 반환: CEF browser ID (실패 시 -1)
-pub fn createNewWindow(title: [:0]const u8, width: i32, height: i32, url: ?[:0]const u8) i32 {
-    ensureGlobalHandlers();
-    // 새 client 할당 (힙)
-    const client_ptr = std.heap.page_allocator.create(c.cef_client_t) catch return -1;
-    initClient(client_ptr);
-
-    var window_info: c.cef_window_info_t = undefined;
-    zeroCefStruct(c.cef_window_info_t, &window_info);
-    window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
-    window_info.bounds = .{ .x = 0, .y = 0, .width = width, .height = height };
-    initWindowInfo(&window_info, .{ .title = title, .width = width, .height = height });
-
-    setCefString(&window_info.window_name, title);
-
-    var cef_url: c.cef_string_t = .{};
-    if (url) |u| {
-        setCefString(&cef_url, u);
-    }
-
-    var browser_settings: c.cef_browser_settings_t = undefined;
-    zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
-
-    std.debug.print("[suji] Creating new window: title={s} size={d}x{d}\n", .{ title, width, height });
-    const browser = c.cef_browser_host_create_browser_sync(
-        &window_info, client_ptr, &cef_url, &browser_settings, null, null,
-    );
-    if (browser == null) {
-        std.debug.print("[suji] New window creation FAILED\n", .{});
-        return -1;
-    }
-    const br: *c.cef_browser_t = @ptrCast(browser);
-    const browser_id = br.get_identifier.?(br);
-    std.debug.print("[suji] New window created: browser_id={d}\n", .{browser_id});
-    return browser_id;
 }
 
 // ============================================

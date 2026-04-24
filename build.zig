@@ -65,6 +65,12 @@ pub fn build(b: *std.Build) void {
     window_stack_module.addImport("events", events_module);
     window_stack_module.addImport("window", window_module);
     window_stack_module.addImport("event_sink", event_sink_module);
+    const window_ipc_module = b.createModule(.{
+        .root_source_file = b.path("src/core/window_ipc.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    window_ipc_module.addImport("window", window_module);
 
     // Suji CLI
     const root_module = b.createModule(.{
@@ -80,6 +86,7 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("window", window_module);
     root_module.addImport("event_sink", event_sink_module);
     root_module.addImport("window_stack", window_stack_module);
+    root_module.addImport("window_ipc", window_ipc_module);
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
     const os_tag = @import("builtin").os.tag;
@@ -359,6 +366,19 @@ pub fn build(b: *std.Build) void {
     window_stack_test_mod.addImport("test_native", test_native_module);
     const window_stack_test = b.addTest(.{ .root_module = window_stack_test_mod });
     test_step.dependOn(&b.addRunArtifact(window_stack_test).step);
+
+    // window_ipc — create_window 커맨드 핸들러
+    const window_ipc_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/window_ipc_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    window_ipc_test_mod.addImport("window_ipc", window_ipc_module);
+    window_ipc_test_mod.addImport("window", window_module);
+    window_ipc_test_mod.addImport("test_native", test_native_module);
+    const window_ipc_test = b.addTest(.{ .root_module = window_ipc_test_mod });
+    test_step.dependOn(&b.addRunArtifact(window_ipc_test).step);
 
     // State plugin tests
     const state_test_mod = b.createModule(.{
