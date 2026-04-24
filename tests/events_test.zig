@@ -107,3 +107,27 @@ test "EventBus emit nonexistent event" {
     // 리스너 없는 이벤트 발행 — 크래시 안 남
     bus.emit("nonexistent", "data");
 }
+
+// ============================================
+// 회귀 방지 — 키 소유 이슈 (caller의 stack 버퍼로 등록해도 EventBus가 복사해야)
+// ============================================
+
+test "on() copies event_name (caller's ephemeral buffer safe)" {
+    resetState();
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+
+    // caller가 스택 버퍼에 이름을 만들어 넘김 (실제 C SDK가 하는 패턴: nullTerminate 경유 스택 버퍼)
+    {
+        var scratch: [64]u8 = undefined;
+        const name = "window:all-closed";
+        @memcpy(scratch[0..name.len], name);
+        _ = bus.on(scratch[0..name.len], testCallback);
+        // scratch 버퍼 내용 덮어쓰기 — 만약 bus가 키를 복사 안 했다면 키가 쓰레기가 됨
+        @memset(scratch[0..name.len], 0xAA);
+    }
+
+    // 원본 문자열로 emit — 키 복사가 정상이면 매칭, 아니면 미매칭
+    bus.emit("window:all-closed", "{}");
+    try std.testing.expectEqual(@as(usize, 1), call_count);
+}

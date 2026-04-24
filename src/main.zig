@@ -574,6 +574,13 @@ fn runDev(allocator: std.mem.Allocator) !void {
     defer registry.deinit();
     registry.setGlobal();
     registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
+
+    // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
+    // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
+    var event_bus = suji.EventBus.init(allocator, runtime.io);
+    defer event_bus.deinit();
+    registry.setEventBus(&event_bus);
+
     try loadPluginsFromConfig(allocator, &config, &registry, false);
     try loadBackendsFromConfig(allocator, &config, &registry, false);
 
@@ -586,7 +593,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] starting frontend dev server...\n", .{});
     var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
-        try openWindow(allocator, &config, &registry, .dev);
+        try openWindow(allocator, &config, &registry, &event_bus, .dev);
         return;
     };
     defer frontend_proc.kill(runtime.io);
@@ -594,7 +601,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
     runtime.io.sleep(.fromSeconds(2), .awake) catch {};
 
-    try openWindow(allocator, &config, &registry, .dev);
+    try openWindow(allocator, &config, &registry, &event_bus, .dev);
 }
 
 // ============================================
@@ -697,21 +704,29 @@ fn runProd(allocator: std.mem.Allocator) !void {
     var registry = suji.BackendRegistry.init(allocator, runtime.io);
     defer registry.deinit();
     registry.setGlobal();
-    registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
-    try loadPluginsFromConfig(allocator, &config, &registry, true);
-    try loadBackendsFromConfig(allocator, &config, &registry, true);
+    registry.setQuitHandler(&cef.quit);
 
-    try openWindow(allocator, &config, &registry, .dist);
-}
-
-const WindowMode = enum { dev, dist };
-
-fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, mode: WindowMode) !void {
-    // EventBus 생성
+    // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
     defer event_bus.deinit();
     registry.setEventBus(&event_bus);
 
+    try loadPluginsFromConfig(allocator, &config, &registry, true);
+    try loadBackendsFromConfig(allocator, &config, &registry, true);
+
+    try openWindow(allocator, &config, &registry, &event_bus, .dist);
+}
+
+const WindowMode = enum { dev, dist };
+
+fn openWindow(
+    allocator: std.mem.Allocator,
+    config: *const suji.Config,
+    registry: *suji.BackendRegistry,
+    event_bus: *suji.EventBus,
+    mode: WindowMode,
+) !void {
+    _ = registry; // 이미 runDev/runProd에서 setEventBus 했음. 파라미터는 기존 호출 시그니처 유지용
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
 
@@ -772,7 +787,7 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
     cef_native.registerGlobal(); // life_span_handler 콜백이 참조
 
     var stack: window_stack_mod.WindowStack = undefined;
-    stack.init(allocator, runtime.io, cef_native.asNative(), &event_bus);
+    stack.init(allocator, runtime.io, cef_native.asNative(), event_bus);
     stack.setGlobal();
 
     // 첫 윈도우 생성 (이전 cef.createBrowser 자리)

@@ -183,6 +183,7 @@ pub const EventBus = struct {
     pub fn deinit(self: *EventBus) void {
         var iter = self.listeners.iterator();
         while (iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
             entry.value_ptr.deinit(self.allocator);
         }
         self.listeners.deinit();
@@ -195,7 +196,12 @@ pub const EventBus = struct {
         } else {
             var list = std.ArrayList(Listener).empty;
             list.append(self.allocator, listener) catch {};
-            self.listeners.put(event_name, list) catch {};
+            // event_name은 caller의 스택 버퍼일 수 있음 (backend SDK의 nullTerminate 경유).
+            // 바깥에 벗어나면 메모리 재사용되므로 키는 HashMap이 소유하도록 복사.
+            const owned_key = self.allocator.dupe(u8, event_name) catch return;
+            self.listeners.put(owned_key, list) catch {
+                self.allocator.free(owned_key);
+            };
         }
     }
 
