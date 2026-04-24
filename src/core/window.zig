@@ -122,18 +122,22 @@ pub const EventSink = struct {
 
 pub const WindowManager = struct {
     allocator: std.mem.Allocator,
+    io: std.Io,
     native: Native,
     sink: ?EventSink = null,
     windows: std.AutoHashMap(u32, *Window),
     /// name → id (소유: name_store). fromName lookup에만 사용
     by_name: std.StringHashMap(u32),
     next_id: u32 = 1,
+    /// create/destroy/close/setters를 직렬화. 이벤트 발화는 lock 밖에서.
+    lock: std.Io.Mutex = .init,
 
     pub var global: ?*WindowManager = null;
 
-    pub fn init(allocator: std.mem.Allocator, native: Native) WindowManager {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, native: Native) WindowManager {
         return .{
             .allocator = allocator,
+            .io = io,
             .native = native,
             .windows = std.AutoHashMap(u32, *Window).init(allocator),
             .by_name = std.StringHashMap(u32).init(allocator),
@@ -161,61 +165,74 @@ pub const WindowManager = struct {
 
     /// 새 창 생성. name 중복 + forceNew=false면 기존 id 반환.
     pub fn create(self: *WindowManager, opts: CreateOptions) Error!u32 {
-        // name 싱글턴 정책
-        if (opts.name) |name| {
-            if (!opts.force_new) {
-                if (self.by_name.get(name)) |existing_id| return existing_id;
+        // Phase 1: 등록까지 lock 안에서 원자적으로 수행
+        const CreateResult = struct { id: u32, is_new: bool, has_name: bool };
+        const result: CreateResult = blk: {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+
+            // name 싱글턴 정책
+            if (opts.name) |name| {
+                if (!opts.force_new) {
+                    if (self.by_name.get(name)) |existing_id| {
+                        break :blk .{ .id = existing_id, .is_new = false, .has_name = true };
+                    }
+                }
             }
-        }
 
-        const handle = self.native.createWindow(&opts) catch return Error.NativeCreateFailed;
+            const handle = self.native.createWindow(&opts) catch return Error.NativeCreateFailed;
 
-        const win = self.allocator.create(Window) catch return Error.OutOfMemory;
-        errdefer self.allocator.destroy(win);
+            const win = self.allocator.create(Window) catch return Error.OutOfMemory;
+            errdefer self.allocator.destroy(win);
 
-        const owned_title = self.allocator.dupe(u8, opts.title) catch return Error.OutOfMemory;
-        errdefer self.allocator.free(owned_title);
+            const owned_title = self.allocator.dupe(u8, opts.title) catch return Error.OutOfMemory;
+            errdefer self.allocator.free(owned_title);
 
-        const owned_name: ?[]const u8 = if (opts.name) |n|
-            (self.allocator.dupe(u8, n) catch return Error.OutOfMemory)
-        else
-            null;
-        errdefer if (owned_name) |n| self.allocator.free(n);
+            const owned_name: ?[]const u8 = if (opts.name) |n|
+                (self.allocator.dupe(u8, n) catch return Error.OutOfMemory)
+            else
+                null;
+            errdefer if (owned_name) |n| self.allocator.free(n);
 
-        const id = self.next_id;
-        self.next_id += 1;
+            const id = self.next_id;
+            self.next_id += 1;
 
-        win.* = .{
-            .id = id,
-            .native_handle = handle,
-            .name = owned_name,
-            .title = owned_title,
-            .bounds = opts.bounds,
-            .parent_id = opts.parent_id,
-            .state = .{},
+            win.* = .{
+                .id = id,
+                .native_handle = handle,
+                .name = owned_name,
+                .title = owned_title,
+                .bounds = opts.bounds,
+                .parent_id = opts.parent_id,
+                .state = .{},
+            };
+
+            self.windows.put(id, win) catch return Error.OutOfMemory;
+            if (owned_name) |n| {
+                self.by_name.put(n, id) catch {};
+            }
+            break :blk .{ .id = id, .is_new = true, .has_name = owned_name != null };
         };
 
-        self.windows.put(id, win) catch return Error.OutOfMemory;
-        if (owned_name) |n| {
-            self.by_name.put(n, id) catch {}; // 실패해도 창 자체는 생성됨
+        // Phase 2: 이벤트 발화 (lock 밖 — listener가 다른 WindowManager 메서드 호출해도 deadlock 없음)
+        if (result.is_new) {
+            if (self.sink) |s| {
+                var buf: [512]u8 = undefined;
+                const payload: []const u8 = if (result.has_name) blk: {
+                    // lock 밖에서 name을 다시 꺼내려면 windows 조회 필요 (lock 재획득)
+                    self.lock.lockUncancelable(self.io);
+                    defer self.lock.unlock(self.io);
+                    const name = if (self.windows.get(result.id)) |w| w.name else null;
+                    break :blk std.fmt.bufPrint(&buf, "{{\"windowId\":{d},\"name\":\"{s}\"}}", .{ result.id, name orelse "" }) catch "";
+                } else std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{result.id}) catch "";
+                s.emit("window:created", payload);
+            }
         }
-
-        // window:created 이벤트 (단방향 알림, 취소 불가)
-        if (self.sink) |s| {
-            var buf: [512]u8 = undefined;
-            const payload: []const u8 = if (owned_name) |n|
-                std.fmt.bufPrint(&buf, "{{\"windowId\":{d},\"name\":\"{s}\"}}", .{ id, n }) catch ""
-            else
-                std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
-            s.emit("window:created", payload);
-        }
-        return id;
+        return result.id;
     }
 
-    /// 창 파괴 (강제). 이벤트 X, 취소 불가. `window:closed` 이벤트는 `close()` 경로에서만.
-    pub fn destroy(self: *WindowManager, id: u32) Error!void {
-        const win = self.windows.get(id) orelse return Error.WindowNotFound;
-        if (win.destroyed) return Error.WindowDestroyed;
+    /// lock 이미 잡은 상태에서 실제 파괴. 내부 헬퍼.
+    fn destroyLocked(self: *WindowManager, win: *Window) void {
         self.native.destroyWindow(win.native_handle);
         win.destroyed = true;
         if (win.name) |n| {
@@ -223,14 +240,28 @@ pub const WindowManager = struct {
         }
     }
 
-    /// 정책적 close. `window:close`(취소 가능) 발화 → preventDefault 아니면 파괴 +
-    /// `window:closed`(단방향) 발화. 이미 destroyed면 WindowDestroyed.
-    /// 반환값: true면 실제 파괴됨, false면 listener가 취소.
-    pub fn close(self: *WindowManager, id: u32) Error!bool {
+    /// 창 파괴 (강제). 이벤트 X, 취소 불가. `window:closed` 이벤트는 `close()` 경로에서만.
+    pub fn destroy(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
         if (win.destroyed) return Error.WindowDestroyed;
+        self.destroyLocked(win);
+    }
 
-        // 취소 가능 이벤트 발화 (sink 없으면 바로 진행)
+    /// 정책적 close. `window:close`(취소 가능) 발화 → preventDefault 아니면 파괴 +
+    /// `window:closed`(단방향) 발화. 이벤트는 lock 밖에서 발화 (deadlock 방지).
+    /// 반환값: true면 실제 파괴됨, false면 listener가 취소.
+    pub fn close(self: *WindowManager, id: u32) Error!bool {
+        // Phase 1: 유효성 확인 (lock)
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            const win = self.windows.get(id) orelse return Error.WindowNotFound;
+            if (win.destroyed) return Error.WindowDestroyed;
+        }
+
+        // Phase 2: 취소 가능 이벤트 (lock 밖)
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
             const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
@@ -239,8 +270,16 @@ pub const WindowManager = struct {
             if (ev.default_prevented) return false;
         }
 
-        // 실제 파괴 + 단방향 알림
-        try self.destroy(id);
+        // Phase 3: 실제 파괴 (lock, listener 도중 destroy됐는지 재확인)
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            const win = self.windows.get(id) orelse return Error.WindowNotFound;
+            if (win.destroyed) return Error.WindowDestroyed;
+            self.destroyLocked(win);
+        }
+
+        // Phase 4: 단방향 이벤트 (lock 밖)
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
             const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
@@ -252,20 +291,32 @@ pub const WindowManager = struct {
     /// 모든 창 파괴. 프로세스 종료 시 호출. 각 창마다 `window:closed` 단방향 이벤트 발화.
     /// 취소 불가 (강제).
     pub fn destroyAll(self: *WindowManager) void {
-        var it = self.windows.iterator();
-        while (it.next()) |entry| {
-            const w = entry.value_ptr.*;
-            if (!w.destroyed) {
-                self.native.destroyWindow(w.native_handle);
-                w.destroyed = true;
-                if (self.sink) |s| {
-                    var buf: [512]u8 = undefined;
-                    const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{w.id}) catch "";
-                    s.emit("window:closed", payload);
+        // Phase 1: 파괴 + id 수집 (lock)
+        var closed_ids: std.ArrayList(u32) = .empty;
+        defer closed_ids.deinit(self.allocator);
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            var it = self.windows.iterator();
+            while (it.next()) |entry| {
+                const w = entry.value_ptr.*;
+                if (!w.destroyed) {
+                    self.native.destroyWindow(w.native_handle);
+                    w.destroyed = true;
+                    closed_ids.append(self.allocator, w.id) catch {};
                 }
             }
+            self.by_name.clearRetainingCapacity();
         }
-        self.by_name.clearRetainingCapacity();
+
+        // Phase 2: 이벤트 발화 (lock 밖)
+        if (self.sink) |s| {
+            for (closed_ids.items) |id| {
+                var buf: [512]u8 = undefined;
+                const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+                s.emit("window:closed", payload);
+            }
+        }
     }
 
     pub fn get(self: *const WindowManager, id: u32) ?*const Window {
@@ -277,6 +328,8 @@ pub const WindowManager = struct {
     }
 
     pub fn setTitle(self: *WindowManager, id: u32, title: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
         if (win.destroyed) return Error.WindowDestroyed;
         const owned = self.allocator.dupe(u8, title) catch return Error.OutOfMemory;
@@ -286,6 +339,8 @@ pub const WindowManager = struct {
     }
 
     pub fn setBounds(self: *WindowManager, id: u32, bounds: Bounds) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
         if (win.destroyed) return Error.WindowDestroyed;
         win.bounds = bounds;
@@ -293,6 +348,8 @@ pub const WindowManager = struct {
     }
 
     pub fn setVisible(self: *WindowManager, id: u32, visible: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
         if (win.destroyed) return Error.WindowDestroyed;
         win.state.visible = visible;
@@ -300,6 +357,8 @@ pub const WindowManager = struct {
     }
 
     pub fn focus(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
         if (win.destroyed) return Error.WindowDestroyed;
         self.native.focus(win.native_handle);

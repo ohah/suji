@@ -85,7 +85,7 @@ const TestNative = struct {
 };
 
 fn newManager(native: *TestNative) WindowManager {
-    return WindowManager.init(std.testing.allocator, native.asNative());
+    return WindowManager.init(std.testing.allocator, std.testing.io, native.asNative());
 }
 
 // ============================================
@@ -549,4 +549,128 @@ test "destroy does not emit window:closed (only close does)" {
     try wm.destroy(id);
     // destroy()는 강제 파괴, 이벤트 발화 X
     try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}
+
+// ============================================
+// 동시성 — 같은 name으로 N 스레드 create → singleton 유지
+// ============================================
+
+const ConcurrentCreateArgs = struct {
+    wm: *WindowManager,
+    name: []const u8,
+    out: *u32,
+};
+
+fn concurrentCreateWorker(args: ConcurrentCreateArgs) void {
+    args.out.* = args.wm.create(.{ .name = args.name }) catch 0;
+}
+
+test "concurrent create with same name yields single window" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const THREAD_COUNT = 10;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+    var results: [THREAD_COUNT]u32 = undefined;
+
+    for (0..THREAD_COUNT) |i| {
+        results[i] = 0;
+        threads[i] = try std.Thread.spawn(.{}, concurrentCreateWorker, .{ConcurrentCreateArgs{
+            .wm = &wm,
+            .name = "shared",
+            .out = &results[i],
+        }});
+    }
+    for (0..THREAD_COUNT) |i| threads[i].join();
+
+    // 모든 스레드가 같은 id 반환
+    const first = results[0];
+    try std.testing.expect(first != 0);
+    for (results) |r| try std.testing.expectEqual(first, r);
+
+    // 실제 native.create는 1회만
+    try std.testing.expectEqual(@as(usize, 1), native.create_calls);
+    try std.testing.expectEqual(@as(usize, 1), wm.windows.count());
+}
+
+const ConcurrentDistinctArgs = struct {
+    wm: *WindowManager,
+    idx: usize,
+    out: *u32,
+};
+
+fn concurrentDistinctWorker(args: ConcurrentDistinctArgs) void {
+    var buf: [32]u8 = undefined;
+    const name = std.fmt.bufPrint(&buf, "win_{d}", .{args.idx}) catch return;
+    args.out.* = args.wm.create(.{ .name = name }) catch 0;
+}
+
+test "concurrent create with distinct names yields N windows" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const THREAD_COUNT = 10;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+    var results: [THREAD_COUNT]u32 = undefined;
+
+    for (0..THREAD_COUNT) |i| {
+        results[i] = 0;
+        threads[i] = try std.Thread.spawn(.{}, concurrentDistinctWorker, .{ConcurrentDistinctArgs{
+            .wm = &wm,
+            .idx = i,
+            .out = &results[i],
+        }});
+    }
+    for (0..THREAD_COUNT) |i| threads[i].join();
+
+    // 모두 다른 id
+    var seen = std.AutoHashMap(u32, void).init(std.testing.allocator);
+    defer seen.deinit();
+    for (results) |r| {
+        try std.testing.expect(r != 0);
+        try std.testing.expect(!seen.contains(r));
+        try seen.put(r, {});
+    }
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT), native.create_calls);
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT), wm.windows.count());
+}
+
+test "concurrent mixed create + setTitle doesn't crash" {
+    // 한 스레드는 새 창을 만들고 다른 스레드는 기존 창 제목을 수정
+    // 내부 mutex가 없으면 HashMap corruption/crash 가능
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    // 사전 창 1개
+    const existing = try wm.create(.{});
+
+    const THREAD_COUNT = 20;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+
+    const CtxCreate = struct {
+        fn run(wm_ptr: *WindowManager) void {
+            _ = wm_ptr.create(.{}) catch {};
+        }
+    };
+    const CtxSetTitle = struct {
+        fn run(wm_ptr: *WindowManager, id: u32) void {
+            _ = wm_ptr.setTitle(id, "bang") catch {};
+        }
+    };
+
+    var i: usize = 0;
+    while (i < THREAD_COUNT) : (i += 1) {
+        if (i % 2 == 0) {
+            threads[i] = try std.Thread.spawn(.{}, CtxCreate.run, .{&wm});
+        } else {
+            threads[i] = try std.Thread.spawn(.{}, CtxSetTitle.run, .{ &wm, existing });
+        }
+    }
+    for (threads) |t| t.join();
+
+    // 크래시 없이 완료되고 창 수가 기존(1) + 새로 생성된 스레드 수(10)
+    try std.testing.expectEqual(@as(usize, 11), wm.windows.count());
 }
