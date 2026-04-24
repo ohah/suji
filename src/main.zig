@@ -333,6 +333,12 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
     if (suji.BackendRegistry.global) |g| {
         NodeRuntime.setCore(&g.core_api);
     }
+
+    // 다른 백엔드가 core.invoke("node", ...)로 들어올 때 BackendRegistry가
+    // libnode 임베드 런타임으로 폴백할 수 있도록 함수 포인터 주입.
+    if (node_enabled) {
+        suji.BackendRegistry.node_invoke_fallback = node_mod.bridge.suji_node_invoke;
+    }
 }
 
 fn buildBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {

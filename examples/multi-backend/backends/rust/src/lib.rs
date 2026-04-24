@@ -35,7 +35,7 @@ pub extern "C" fn backend_init(core: *const SujiCore) {
         let core_ref: &'static SujiCore = unsafe { std::mem::transmute(&*core) };
         let _ = CORE.set(core_ref);
         // 핸들러 채널 등록
-        for name in &["ping", "greet", "call_go", "collab", "emit_event"] {
+        for name in &["ping", "greet", "call_go", "collab", "emit_event", "rust-stress"] {
             let ch = CString::new(*name).unwrap();
             (core_ref.register)(ch.as_ptr());
         }
@@ -52,6 +52,30 @@ pub extern "C" fn backend_handle_ipc(request: *const c_char) -> *mut c_char {
     let req_str = unsafe { CStr::from_ptr(request) }.to_str().unwrap_or("");
     let parsed: Value = serde_json::from_str(req_str).unwrap_or(json!({"cmd": req_str}));
     let cmd = parsed.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+
+    // 재진입 경로: 이미 tokio runtime thread 위에 있으면 block_on 재호출은 panic.
+    // 체인에서 Rust → Go → Node → ... → Rust 로 돌아올 때 발생.
+    // rust-stress는 동기 로직이라 block_on 없이 직접 처리.
+    if cmd == "rust-stress" {
+        let depth = parsed.get("depth").and_then(|v| v.as_i64()).unwrap_or(0);
+        let result = if depth <= 0 {
+            json!({"base":"rust","remaining":0}).to_string()
+        } else {
+            let next_req = json!({"cmd":"go-stress","depth":depth-1}).to_string();
+            let core = CORE.get().unwrap();
+            let name = CString::new("go").unwrap();
+            let req_c = CString::new(next_req).unwrap();
+            let resp_ptr = (core.invoke)(name.as_ptr(), req_c.as_ptr());
+            let child: Value = if resp_ptr.is_null() {
+                json!({"error":"go invoke failed"})
+            } else {
+                let s = unsafe { CStr::from_ptr(resp_ptr) }.to_string_lossy().to_string();
+                serde_json::from_str(&s).unwrap_or(json!({"raw":s}))
+            };
+            json!({"at":"rust","child":child}).to_string()
+        };
+        return CString::new(result).unwrap().into_raw();
+    }
 
     let rt = RT.get().unwrap();
     let result = rt.block_on(async {

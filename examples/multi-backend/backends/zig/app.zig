@@ -9,7 +9,8 @@ pub const my_app = suji.app()
     .handle("call_go", callGo)
     .handle("collab", collab)
     .handle("chain_all", chainAll)
-    .handle("emit_event", emitEvent);
+    .handle("emit_event", emitEvent)
+    .handle("zig-stress", stressDeep);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong from zig" });
@@ -77,6 +78,32 @@ fn emitEvent(req: suji.Request) suji.Response {
     suji.send("zig-event", "{\"from\":\"zig\",\"msg\":\"hello from zig backend\"}");
     return req.ok(.{ .sent = "zig-event" });
 }
+
+// ============================================
+// 스트레스 테스트: 재귀 크로스 호출 체인
+// ============================================
+// req: {"cmd":"stress_deep","depth":N,"next":"rust|go|node|zig"}
+// 다음 백엔드에 depth-1로 invoke. depth==0이면 base 반환.
+// 체인 예: node -> zig -> rust -> go -> node -> ...
+fn stressDeep(req: suji.Request) suji.Response {
+    const depth = req.int("depth") orelse 0;
+    if (depth <= 0) {
+        return req.okMulti(&.{
+            .{ "base", "\"zig\"" },
+            .{ "remaining", "0" },
+        });
+    }
+    // 체인: node→zig(여기)→rust
+    var buf: [256]u8 = undefined;
+    const next_req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"rust-stress\",\"depth\":{d}}}", .{depth - 1}) catch "";
+    const child = req.invoke("rust", next_req) orelse return req.err("rust invoke failed");
+    return req.okMulti(&.{
+        .{ "at", "\"zig\"" },
+        .{ "child", child },
+    });
+}
+
+const std = @import("std");
 
 comptime {
     _ = suji.exportApp(my_app);

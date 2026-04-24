@@ -183,8 +183,11 @@ suji/
 - **옵션**: `suji.json`에 `"gpu": true/false` 설정 추가 고려
 
 ### Node.js 양방향 크로스 호출
-`suji.invokeSync()` 중 대상 백엔드가 Node로 콜백 시 `drain_ipc_queue_inline()`으로 처리.
-다만 깊은 재귀 체인(A→Node→B→Node→C→...)은 테스트되지 않음.
+`suji.invokeSync()` 중 대상 백엔드가 Node로 콜백 시 같은 스레드에서 inline 실행
+(`g_in_sync_invoke` 플래그로 감지, V8 Locker 재진입). BackendRegistry는 `node` 백엔드에
+대한 `invoke` 폴백을 `node_invoke_fallback` 포인터로 받는다 (main이 주입).
+깊은 재귀 체인(node→zig→rust→go→node→... 최대 depth=40, 10사이클)까지 E2E로 검증됨
+(`tests/e2e/cef-ipc.test.ts` stress 섹션).
 
 ## 배포 / 설치
 
@@ -204,7 +207,7 @@ suji/
 | 프론트엔드 JS | npm | `@suji/api` | `packages/suji-js` 존재 |
 | Rust SDK | crates.io | `suji` | `crates/suji-rs` 존재 |
 | Go SDK | go module | `github.com/ohah/suji-go` | `sdks/suji-go` 존재 |
-| Node.js SDK | npm | `suji` (require) | 미구현 |
+| Node.js SDK | npm | `@suji/node` (require) | `packages/suji-node` 존재 |
 
 ### 배포 우선순위
 1. GitHub Releases — CI에서 플랫폼별 바이너리 빌드 + 자동 릴리즈

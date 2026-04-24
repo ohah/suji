@@ -55,7 +55,7 @@ func callRust(request string) string {
 func backend_init(c *C.SujiCore) {
 	core = c
 	// 핸들러 채널 등록
-	for _, name := range []string{"ping", "greet", "call_rust", "collab", "stats_for_rust", "emit_event"} {
+	for _, name := range []string{"ping", "greet", "call_rust", "collab", "stats_for_rust", "emit_event", "go-stress"} {
 		cName := C.CString(name)
 		C.core_register(c, cName)
 		C.free(unsafe.Pointer(cName))
@@ -97,6 +97,24 @@ func backend_handle_ipc(request *C.char) *C.char {
 		words := len(strings.Fields(data))
 		chars := len(data)
 		result = fmt.Sprintf(`{"from":"go","words":%d,"chars":%d}`, words, chars)
+
+	case "go-stress":
+		depth := extractIntField(reqStr, "depth")
+		if depth <= 0 {
+			result = `{"base":"go","remaining":0}`
+		} else {
+			nextReq := fmt.Sprintf(`{"cmd":"node-stress","depth":%d}`, depth-1)
+			cName := C.CString("node")
+			cReq := C.CString(nextReq)
+			respPtr := C.core_invoke(core, cName, cReq)
+			C.free(unsafe.Pointer(cName))
+			C.free(unsafe.Pointer(cReq))
+			child := "{}"
+			if respPtr != nil {
+				child = C.GoString(respPtr)
+			}
+			result = fmt.Sprintf(`{"at":"go","child":%s}`, child)
+		}
 
 	case "emit_event":
 		msg := extractField(reqStr, "msg")
@@ -144,6 +162,37 @@ func extractField(json, field string) string {
 		return ""
 	}
 	return json[start : start+end]
+}
+
+// 정수 필드 파싱 (단순 JSON 스캐너, 중첩 무시)
+func extractIntField(json, field string) int {
+	key := fmt.Sprintf(`"%s":`, field)
+	i := strings.Index(json, key)
+	if i == -1 {
+		return 0
+	}
+	start := i + len(key)
+	end := start
+	for end < len(json) && (json[end] == '-' || (json[end] >= '0' && json[end] <= '9')) {
+		end++
+	}
+	if end == start {
+		return 0
+	}
+	n := 0
+	negative := false
+	s := start
+	if json[s] == '-' {
+		negative = true
+		s++
+	}
+	for ; s < end; s++ {
+		n = n*10 + int(json[s]-'0')
+	}
+	if negative {
+		return -n
+	}
+	return n
 }
 
 //export backend_free

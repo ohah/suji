@@ -96,6 +96,10 @@ static std::mutex g_ipc_mutex;
 static std::vector<IpcRequest*> g_ipc_queue;
 static uv_async_t g_ipc_async;
 
+// Node main thread가 invokeSync로 block 중인지 표시.
+// 재진입 경로(다른 backend가 다시 Node로 invoke)에서 큐 대신 inline 실행 판단에 사용.
+static thread_local bool g_in_sync_invoke = false;
+
 // Async invoke: JS→백엔드 비동기 호출 (Promise 반환)
 struct AsyncInvokeRequest {
     std::string backend;
@@ -410,9 +414,15 @@ static void js_suji_invoke_sync(const v8::FunctionCallbackInfo<Value>& args) {
     String::Utf8Value backend(isolate, args[0]);
     String::Utf8Value request(isolate, args[1]);
 
+    // 재진입 감지용 플래그 설정. 다른 백엔드가 체인 중에 다시 Node로 invoke하면
+    // 큐에 넣어도 이 스레드가 block 중이라 영원히 처리 안 됨.
+    // suji_node_invoke가 이 플래그를 보고 inline 실행으로 대체.
+    const bool prev_sync = g_in_sync_invoke;
+    g_in_sync_invoke = true;
     const char* result = g_core.invoke(*backend, *request);
+    g_in_sync_invoke = prev_sync;
 
-    // invoke 중 대상 백엔드가 Node로 콜백했을 수 있으므로 pending IPC 처리
+    // invoke 중 외부 스레드에서 들어온 pending IPC 처리
     drain_ipc_queue_inline();
 
     if (result) {
@@ -764,7 +774,26 @@ int suji_node_wait_ready(int timeout_ms) {
 const char* suji_node_invoke(const char* channel, const char* data) {
     if (!g_running.load()) return strdup("{\"error\":\"node not running\"}");
 
-    // IPC 요청을 큐에 넣고 Node 스레드에서 처리 대기
+    // 재진입 경로: Node main thread가 이미 invokeSync로 block 중이면,
+    // 큐에 넣어도 event loop가 돌 수 없어 영원히 처리 안 됨. 현재 스레드가
+    // Node main thread 그 자체(체인이 같은 프로세스에서 동기로 내려옴)이므로
+    // V8은 이미 locked 상태. 직접 handler를 호출해서 결과를 리턴한다.
+    if (g_in_sync_invoke && g_setup) {
+        Isolate* isolate = g_setup->isolate();
+        // Locker는 같은 스레드에서 재진입 가능 (재귀 lock)
+        Locker locker(isolate);
+        Isolate::Scope iso_scope(isolate);
+        HandleScope handle_scope(isolate);
+        Context::Scope ctx_scope(g_setup->context());
+
+        IpcRequest inline_req;
+        inline_req.channel = channel;
+        inline_req.data = data;
+        execute_ipc_request(isolate, &inline_req);
+        return strdup(inline_req.response.c_str());
+    }
+
+    // 정상 경로: 외부 스레드에서 Node에 invoke. 큐에 넣고 Node event loop가 처리.
     auto* req = new IpcRequest();
     req->channel = channel;
     req->data = data;

@@ -83,6 +83,19 @@ handle('node-chain-all', () => {
 
 // 유틸리티
 
+// 스트레스 테스트: 재귀 크로스 호출 체인
+// 체인: node -> zig -> rust -> go -> node -> ... (4주기 반복)
+// depth를 1씩 감소하다 0이 되면 base 반환.
+handle('node-stress', (data) => {
+  const depth = data.depth | 0;
+  if (depth <= 0) {
+    return { base: 'node', remaining: 0 };
+  }
+  // node 다음은 zig
+  const child = safeInvoke('zig', { cmd: 'zig-stress', depth: depth - 1 });
+  return { at: 'node', child };
+});
+
 handle('node-hash', (data) => {
   const text = data.text || 'hello suji';
   return {

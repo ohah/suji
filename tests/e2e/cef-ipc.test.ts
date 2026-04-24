@@ -244,3 +244,115 @@ describe("stress", () => {
     expect(result).toBe(6);
   });
 });
+
+// ============================================
+// Node.js 양방향 크로스 호출 깊은 재귀 체인
+// 체인: node → zig → rust → go → node → ... (4주기 반복)
+// 목적: Node의 invokeSync가 drain_ipc_queue_inline을 통해 재귀 콜백을 안전하게
+// 처리하는지, 모든 백엔드가 깊이 관계없이 값을 정확히 전달하는지 검증.
+// ============================================
+// ============================================
+// 체인: node → zig → rust → go → node → ... (4주기 반복)
+// 목적: Node invokeSync가 재귀 콜백을 안전하게 처리하는지 검증.
+// ============================================
+describe("stress: deep recursive cross-backend chain", () => {
+  test("depth=0 (node base case)", async () => {
+    const resp: any = await invoke("node-stress", { depth: 0 });
+    expect(resp.base).toBe("node");
+    expect(resp.remaining).toBe(0);
+  });
+
+  test("depth=1 (node→zig base)", async () => {
+    const resp: any = await invoke("node-stress", { depth: 1 });
+    expect(resp.at).toBe("node");
+    expect(resp.child.base).toBe("zig");
+  });
+
+  test("depth=4 (full cycle, Node 재진입 없음)", async () => {
+    // node(start)→zig→rust→go→node(base). 마지막 node는 base case라 재진입 없음.
+    const resp: any = await invoke("node-stress", { depth: 4 });
+    expect(resp.at).toBe("node");
+    expect(resp.child.at).toBe("zig");
+    expect(resp.child.child.at).toBe("rust");
+    expect(resp.child.child.child.at).toBe("go");
+    expect(resp.child.child.child.child.base).toBe("node");
+  });
+
+  test("depth=5 (Node 재진입 경로 첫 진입)", async () => {
+    // node(start) → zig → rust → go → node(recur) → zig(base). 중간 node가 재귀.
+    const resp: any = await invoke("node-stress", { depth: 5 });
+    expect(resp.at).toBe("node");
+    expect(resp.child.at).toBe("zig");
+    expect(resp.child.child.at).toBe("rust");
+    expect(resp.child.child.child.at).toBe("go");
+    expect(resp.child.child.child.child.at).toBe("node"); // 재진입 node
+    expect(resp.child.child.child.child.child.base).toBe("zig");
+  });
+
+  test("depth=20 (5 cycles, Node 재진입 여러 번)", async () => {
+    const resp: any = await invoke("node-stress", { depth: 20 });
+    let cur: any = resp;
+    const chain: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      expect(cur.at).toBeDefined();
+      chain.push(cur.at);
+      cur = cur.child;
+    }
+    expect(cur.base).toBeDefined();
+    const expected = ["node", "zig", "rust", "go"];
+    for (let i = 0; i < 20; i++) {
+      expect(chain[i]).toBe(expected[i % 4]);
+    }
+  });
+
+  test("depth=40 (10 cycles, 재진입 스트레스)", async () => {
+    const resp: any = await invoke("node-stress", { depth: 40 });
+    let cur: any = resp;
+    let count = 0;
+    while (cur?.at) {
+      count += 1;
+      cur = cur.child;
+    }
+    expect(count).toBe(40);
+    expect(cur.base).toBeDefined();
+  });
+
+  test("Rust 시작 체인: rust-stress depth=3 (rust→go→node→zig base)", async () => {
+    // Node를 중간에만 거치고 재진입은 없는 경로
+    const resp: any = await invoke("rust-stress", { depth: 3 });
+    expect(resp.at).toBe("rust");
+    expect(resp.child.at).toBe("go");
+    expect(resp.child.child.at).toBe("node");
+    expect(resp.child.child.child.base).toBe("zig");
+  });
+
+  test("연속 독립 체인 10회 (깊이 4)", async () => {
+    // 재진입 없는 depth=4를 10번 순차 호출해 메모리/IPC 누수 없는지 확인
+    const results = await page.evaluate(async () => {
+      const s = (window as any).__suji__;
+      const out: string[] = [];
+      for (let i = 0; i < 10; i++) {
+        const r: any = await s.invoke("node-stress", { depth: 4 });
+        out.push(r?.child?.child?.child?.child?.base ?? "fail");
+      }
+      return out;
+    });
+    expect(results.filter((r: string) => r === "node")).toHaveLength(10);
+  });
+
+  test("10 concurrent depth=4 invocations", async () => {
+    // 동시 IPC가 교차돼도 각 응답이 자기 correlation id로 매칭되는지
+    const results = await page.evaluate(async () => {
+      const s = (window as any).__suji__;
+      const promises = [];
+      for (let i = 0; i < 10; i++) {
+        promises.push(s.invoke("node-stress", { depth: 4 }));
+      }
+      const settled = await Promise.allSettled(promises);
+      return settled.map((r: any) =>
+        r.status === "fulfilled" ? "ok" : String(r.reason)
+      );
+    });
+    expect(results.filter((r: string) => r === "ok")).toHaveLength(10);
+  });
+});

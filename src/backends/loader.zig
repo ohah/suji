@@ -95,6 +95,11 @@ pub const BackendRegistry = struct {
 
     pub var global: ?*BackendRegistry = null;
 
+    /// Node.js 백엔드 폴백 (libnode 임베드 시 main이 설정).
+    /// coreInvoke에서 backend name이 "node"인데 dlopen registry에 없을 때 사용.
+    /// 시그니처는 bridge.suji_node_invoke와 동일.
+    pub var node_invoke_fallback: ?*const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8 = null;
+
     pub fn init(allocator: std.mem.Allocator, io: std.Io) BackendRegistry {
         var reg = BackendRegistry{
             .backends = std.StringHashMap(Backend).init(allocator),
@@ -225,7 +230,32 @@ pub const BackendRegistry = struct {
             // 백엔드 응답 포인터를 그대로 반환 (호출자가 core.free로 해제)
             return @ptrCast(@constCast(r.ptr));
         }
+
+        // dlopen registry에 없으면 Node 백엔드 폴백 시도 (libnode 임베드 시만).
+        // Node는 채널 단위로 handler를 관리하므로 request의 "cmd" 필드를 channel로 사용.
+        if (std.mem.eql(u8, name, "node")) {
+            if (node_invoke_fallback) |nf| {
+                const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
+                var ch_buf: [256]u8 = undefined;
+                const channel = extractCmdField(req_span) orelse name;
+                const len = @min(channel.len, ch_buf.len - 1);
+                @memcpy(ch_buf[0..len], channel[0..len]);
+                ch_buf[len] = 0;
+                const resp_ptr = nf(@ptrCast(&ch_buf), @ptrCast(request));
+                if (resp_ptr) |p| return @ptrCast(@constCast(p));
+            }
+        }
+
         return @ptrCast(@constCast("{}"));
+    }
+
+    /// JSON 요청에서 "cmd" 문자열 필드 추출 (단순 스캐너, 이스케이프 미지원).
+    fn extractCmdField(json: []const u8) ?[]const u8 {
+        const key = "\"cmd\":\"";
+        const i = std.mem.indexOf(u8, json, key) orelse return null;
+        const start = i + key.len;
+        const end_rel = std.mem.indexOfScalar(u8, json[start..], '"') orelse return null;
+        return json[start .. start + end_rel];
     }
 
     // C ABI 콜백: 이벤트 발행
