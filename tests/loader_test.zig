@@ -10,6 +10,41 @@ test "SujiCore struct size" {
     try std.testing.expect(@sizeOf(loader.SujiCore) > 0);
 }
 
+test "SujiCore exposes quit + platform fn pointers" {
+    // 필드 존재 확인 — 컴파일 성공이 핵심 (타입 불일치 시 빌드 실패)
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    defer reg.deinit();
+    const api = reg.core_api;
+    // 두 함수 포인터는 init 시점에 항상 non-null 값이 설정됨
+    try std.testing.expect(@intFromPtr(api.quit) != 0);
+    try std.testing.expect(@intFromPtr(api.platform) != 0);
+}
+
+test "loader.platformName returns known string" {
+    const name = std.mem.span(loader.platformName());
+    const valid = std.mem.eql(u8, name, "macos") or
+        std.mem.eql(u8, name, "linux") or
+        std.mem.eql(u8, name, "windows") or
+        std.mem.eql(u8, name, "other");
+    try std.testing.expect(valid);
+}
+
+test "BackendRegistry.setQuitHandler stores injected handler" {
+    const Test = struct {
+        var called: bool = false;
+        fn h() void {
+            called = true;
+        }
+    };
+    Test.called = false;
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setQuitHandler(&Test.h);
+    // 직접 coreQuit 호출은 pub이 아니라 간접 검증: api.quit()
+    reg.core_api.quit();
+    try std.testing.expect(Test.called);
+}
+
 // ============================================
 // BackendRegistry
 // ============================================

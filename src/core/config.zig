@@ -17,6 +17,10 @@ pub const Config = struct {
     pub const App = struct {
         name: [:0]const u8 = "Suji App",
         version: [:0]const u8 = "0.1.0",
+        /// Electron `app.quitOnAllWindowsClosed` 호환.
+        /// null이면 플랫폼 기본값(macOS=false, Linux/Windows=true).
+        /// bool이면 플랫폼 무관 강제.
+        quit_on_all_closed: ?bool = null,
     };
 
     pub const Protocol = enum { suji, file };
@@ -81,6 +85,8 @@ pub const Config = struct {
                 const app = app_val.object;
                 if (app.get("name")) |v| if (v == .string) { config.app.name = dupeStr(a, v.string); };
                 if (app.get("version")) |v| if (v == .string) { config.app.version = dupeStr(a, v.string); };
+                if (app.get("quitOnAllWindowsClosed")) |v| if (v == .bool) { config.app.quit_on_all_closed = v.bool; };
+                if (app.get("quit_on_all_closed")) |v| if (v == .bool) { config.app.quit_on_all_closed = v.bool; };
             }
         }
 

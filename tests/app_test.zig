@@ -170,3 +170,67 @@ test "Request err" {
     try std.testing.expect(std.mem.indexOf(u8, resp.data, "not found") != null);
     try std.testing.expect(std.mem.indexOf(u8, resp.data, "error") != null);
 }
+
+// ============================================
+// quit / platform API (Electron 호환)
+// ============================================
+
+test "suji.quit() is no-op when core not injected" {
+    // backend_init 호출 없이 quit() 호출 — silent no-op이어야
+    app_mod.quit();
+}
+
+test "suji.platform() returns 'unknown' when core not injected" {
+    try std.testing.expectEqualStrings("unknown", app_mod.platform());
+}
+
+// core 주입 시나리오 검증용 테스트 스텁
+const QuitFlag = struct {
+    var called: bool = false;
+    fn onQuit() callconv(.c) void {
+        called = true;
+    }
+    fn onPlatform() callconv(.c) [*:0]const u8 {
+        return "test-platform";
+    }
+};
+
+test "suji.quit() calls injected core fn_ptr" {
+    const ExternSujiCore = app_mod.ExternSujiCore;
+    QuitFlag.called = false;
+    var core = ExternSujiCore{
+        .invoke_fn = null,
+        .free_fn = null,
+        .emit = null,
+        .on_fn = null,
+        .off_fn = null,
+        .register_fn = null,
+        .get_io = null,
+        .quit_fn = &QuitFlag.onQuit,
+        .platform_fn = null,
+    };
+    app_mod.setGlobalCore(&core);
+    defer app_mod.setGlobalCore(null);
+
+    app_mod.quit();
+    try std.testing.expect(QuitFlag.called);
+}
+
+test "suji.platform() returns injected core's platform string" {
+    const ExternSujiCore = app_mod.ExternSujiCore;
+    var core = ExternSujiCore{
+        .invoke_fn = null,
+        .free_fn = null,
+        .emit = null,
+        .on_fn = null,
+        .off_fn = null,
+        .register_fn = null,
+        .get_io = null,
+        .quit_fn = null,
+        .platform_fn = &QuitFlag.onPlatform,
+    };
+    app_mod.setGlobalCore(&core);
+    defer app_mod.setGlobalCore(null);
+
+    try std.testing.expectEqualStrings("test-platform", app_mod.platform());
+}

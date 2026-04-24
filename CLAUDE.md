@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 테스트 (306개)
+zig build test     # 테스트 (316개)
 zig build run      # CLI 도움말
 
 # 예제 실행
@@ -37,10 +37,18 @@ suji run
 // Zig
 pub const my_app = suji.app()
     .handle("ping", ping)
-    .on("clicked", handler);
+    .on("clicked", handler)
+    .on("window:all-closed", onAllClosed);  // Electron 패턴
+
 fn ping(req: suji.Request) suji.Response { return req.ok(.{ .msg = "pong" }); }
+
+fn onAllClosed(_: suji.Event) void {
+    if (!std.mem.eql(u8, suji.platform(), "macos")) suji.quit();
+}
 // req.invoke("rust", request)  — 크로스 호출
 // suji.send("channel", data)   — 이벤트 발신
+// suji.quit()                  — 앱 종료 요청 (Electron app.quit())
+// suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
 
 ```rust
@@ -79,7 +87,11 @@ JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완�
 ```json
 {
   "$schema": "./suji.schema.json",
-  "app": { "name": "My App", "version": "1.0.0" },
+  "app": {
+    "name": "My App",
+    "version": "1.0.0",
+    "quitOnAllWindowsClosed": null    // true/false/null(=플랫폼 기본: macOS=false, Win/Linux=true)
+  },
   "window": {
     "title": "My App",
     "width": 1024,

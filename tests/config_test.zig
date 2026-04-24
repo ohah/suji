@@ -9,6 +9,7 @@ test "Config default values" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("Suji App", cfg.app.name);
     try std.testing.expectEqualStrings("0.1.0", cfg.app.version);
+    try std.testing.expectEqual(@as(?bool, null), cfg.app.quit_on_all_closed);
     try std.testing.expectEqual(@as(i64, 1024), cfg.window.width);
     try std.testing.expectEqual(@as(i64, 768), cfg.window.height);
     try std.testing.expectEqualStrings("Suji App", cfg.window.title);
@@ -19,6 +20,21 @@ test "Config default values" {
     try std.testing.expectEqualStrings("frontend", cfg.frontend.dir);
     try std.testing.expectEqualStrings("http://localhost:5173", cfg.frontend.dev_url);
     try std.testing.expectEqualStrings("frontend/dist", cfg.frontend.dist_dir);
+}
+
+test "Config.App.quit_on_all_closed default is null (platform default)" {
+    const app = config.Config.App{};
+    try std.testing.expectEqual(@as(?bool, null), app.quit_on_all_closed);
+}
+
+test "Config.App.quit_on_all_closed can be set to true" {
+    const app = config.Config.App{ .quit_on_all_closed = true };
+    try std.testing.expectEqual(@as(?bool, true), app.quit_on_all_closed);
+}
+
+test "Config.App.quit_on_all_closed can be set to false" {
+    const app = config.Config.App{ .quit_on_all_closed = false };
+    try std.testing.expectEqual(@as(?bool, false), app.quit_on_all_closed);
 }
 
 test "Config protocol default is file" {

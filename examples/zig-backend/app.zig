@@ -1,9 +1,13 @@
+const std = @import("std");
 const suji = @import("suji");
 
 pub const app = suji.app()
     .handle("ping", ping)
     .handle("greet", greet)
-    .handle("add", add);
+    .handle("add", add)
+    // Electron 스타일: `app.on('window-all-closed', ...)` 대응.
+    // macOS는 창 닫혀도 앱 유지(dock), 그 외는 종료 — 전형적인 Electron 패턴.
+    .on("window:all-closed", onWindowAllClosed);
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong" });
@@ -18,6 +22,15 @@ fn add(req: suji.Request) suji.Response {
     const a = req.int("a") orelse 0;
     const b = req.int("b") orelse 0;
     return req.ok(.{ .result = a + b });
+}
+
+fn onWindowAllClosed(_: suji.Event) void {
+    const platform = suji.platform();
+    std.debug.print("[Zig] window-all-closed received (platform={s})\n", .{platform});
+    if (!std.mem.eql(u8, platform, "macos")) {
+        std.debug.print("[Zig] non-macOS → suji.quit()\n", .{});
+        suji.quit();
+    }
 }
 
 comptime {

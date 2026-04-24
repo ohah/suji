@@ -15,6 +15,14 @@ pub const SujiCore = extern struct {
     /// 반환값은 `*const std.Io`로 캐스팅해서 사용.
     /// Rust/Go plugin은 무시 (자체 OS I/O 사용).
     get_io: *const fn () callconv(.c) ?*const anyopaque,
+    /// 앱 종료 요청 (Electron `app.quit()` 호환).
+    /// 메인 프로세스가 `setQuitHandler`로 실제 종료 함수를 주입해야 동작.
+    /// 주입 안 된 경우 no-op (SDK/core 버전 불일치로부터 안전).
+    quit: *const fn () callconv(.c) void,
+    /// 플랫폼 이름: "macos" | "linux" | "windows" | "other".
+    /// 컴파일 타임 결정 — dylib 백엔드는 자기가 컴파일된 타겟의 플랫폼을 본다
+    /// (프로세스가 실행되는 OS와 일치해야 정상).
+    platform: *const fn () callconv(.c) [*:0]const u8,
 };
 
 /// dlopen 바깥에서 프로세스 내에 임베드되는 언어 런타임 (Node.js, 향후 Python/Lua).
@@ -147,6 +155,8 @@ pub const BackendRegistry = struct {
                 .off = coreOff,
                 .register = coreRegister,
                 .get_io = coreGetIo,
+                .quit = coreQuit,
+                .platform = corePlatform,
             },
         };
         _ = &reg;
@@ -170,6 +180,12 @@ pub const BackendRegistry = struct {
 
     pub fn setEventBus(self: *BackendRegistry, bus: *events.EventBus) void {
         self.event_bus = bus;
+    }
+
+    /// 앱 종료 함수 주입 (main.zig가 cef.quit 같은 걸 등록).
+    /// 주입 전 coreQuit 호출은 no-op.
+    pub fn setQuitHandler(_: *BackendRegistry, handler: *const fn () void) void {
+        quit_handler = handler;
     }
 
     /// 글로벌 참조 설정 (C 콜백에서 접근 가능하게)
@@ -398,4 +414,26 @@ pub const BackendRegistry = struct {
         const g = global orelse return null;
         return @ptrCast(&g.io);
     }
+
+    fn coreQuit() callconv(.c) void {
+        if (quit_handler) |h| h();
+    }
+
+    fn corePlatform() callconv(.c) [*:0]const u8 {
+        return platformName();
+    }
 };
+
+/// main이 주입하는 앱 종료 함수. 주입 전까진 coreQuit는 no-op.
+var quit_handler: ?*const fn () void = null;
+
+/// 컴파일 타임 결정된 플랫폼 문자열 리터럴 (z-terminated).
+pub fn platformName() [*:0]const u8 {
+    const builtin = @import("builtin");
+    return switch (builtin.os.tag) {
+        .macos => "macos",
+        .linux => "linux",
+        .windows => "windows",
+        else => "other",
+    };
+}

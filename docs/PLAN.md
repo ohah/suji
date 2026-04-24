@@ -400,8 +400,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] Step B.5: `createNewWindow` PoC 제거 — `create_window` IPC 커맨드를 `window_ipc.handleCreateWindow`로 라우팅해 WM 경유
     - [x] Cmd+W 단축키를 `wm.close` 경유로 전환 (WM 이벤트 파이프라인 통과)
     - [x] `window:all-closed` 이벤트 + 플랫폼별 quit 정책 (Electron `app.quitOnAllWindowsClosed` 호환, macOS=stay, Windows/Linux=quit)
+    - [x] `suji.quit()` + `suji.platform` 전 언어 SDK 노출 (Zig 완료, Rust/Go/Node 대기)
+    - [x] `suji.json` `app.quit_on_all_closed` config override (Electron `quitOnAllWindowsClosed` 동등)
     - [x] 구조화 디버그 로거 (`~/.suji/logs/` 실행별 파일 + ISO8601 레벨 필터)
     - [x] macOS NSWindow close cascade 개선 (`g_window` 싱글 참조 제거, per-browser tracking)
+    - [ ] `suji.quit()` / `suji.platform` Rust/Go/Node SDK + Frontend V8 바인딩 확장
     - [ ] OnBeforeClose 자연 발화 (CEF macOS Alloy 런타임 — 현재 cef.quit 우회)
     - [ ] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow, Linux GTK, Windows Win32)
     - [ ] IPC `__window` 자동 태깅 + `windows[]` 배열 파싱 (렌더러 측 포함)

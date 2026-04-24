@@ -95,16 +95,19 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-/// EventBus 리스너 — window:all-closed 발화 시 플랫폼별 quit 결정.
-/// Electron 기본 호환: macOS는 유지, Windows/Linux는 종료.
-/// 향후 config.app.quit_on_all_closed (optional bool)로 override 지원 예정.
+/// config.app.quit_on_all_closed 을 리스너에 전달하기 위한 모듈 레벨 저장소.
+/// EventBus 콜백은 ctx 인자가 없어 (zig callback signature) 이 방식으로 공유.
+/// 프로세스 내에 openWindow는 1회만 실행되므로 단일 값으로 충분.
+var quit_override_storage: ?bool = null;
+
+/// EventBus 리스너 — window:all-closed 발화 시 플랫폼별 + config override 기반 quit 결정.
+/// Electron 기본: macOS 유지, Windows/Linux 종료. config로 override 가능.
 fn onWindowAllClosed(_: [*:0]const u8) void {
     const platform = quit_policy.Platform.current();
-    const override: ?bool = null; // TODO: config에서 읽기
-    const should_quit = quit_policy.shouldQuitOnAllClosed(platform, override);
+    const should_quit = quit_policy.shouldQuitOnAllClosed(platform, quit_override_storage);
     log.info(
-        "window-all-closed platform={s} should_quit={}",
-        .{ @tagName(platform), should_quit },
+        "window-all-closed platform={s} override={?} should_quit={}",
+        .{ @tagName(platform), quit_override_storage, should_quit },
     );
     if (should_quit) cef.quit();
 }
@@ -587,6 +590,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     var registry = suji.BackendRegistry.init(allocator, runtime.io);
     defer registry.deinit();
     registry.setGlobal();
+    registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
     try loadPluginsFromConfig(allocator, &config, &registry, false);
     try loadBackendsFromConfig(allocator, &config, &registry, false);
 
@@ -710,6 +714,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     var registry = suji.BackendRegistry.init(allocator, runtime.io);
     defer registry.deinit();
     registry.setGlobal();
+    registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
     try loadPluginsFromConfig(allocator, &config, &registry, true);
     try loadBackendsFromConfig(allocator, &config, &registry, true);
 
@@ -727,8 +732,9 @@ fn openWindow(allocator: std.mem.Allocator, config: *const suji.Config, registry
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
 
-    // window:all-closed 디버그 리스너 — 백엔드가 직접 등록하는 것과 동등한 경로로
-    // 이벤트가 흐르는지 로그로 가시화. Electron의 `app.on('window-all-closed', ...)` 대응.
+    // window:all-closed 리스너 — Electron의 `app.on('window-all-closed', ...)` 코어 기본.
+    // config.app.quit_on_all_closed 로 플랫폼 기본 override 가능.
+    quit_override_storage = config.app.quit_on_all_closed;
     _ = event_bus.on(window_mod.events.all_closed, onWindowAllClosed);
 
     // CEF IPC 콜백 연결

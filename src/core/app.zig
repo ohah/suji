@@ -369,7 +369,7 @@ fn findMatchingBrace(json: []const u8, start: usize) usize {
 // SujiCore (크로스 호출 + 이벤트)
 // ============================================
 
-const ExternSujiCore = extern struct {
+pub const ExternSujiCore = extern struct {
     invoke_fn: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) [*c]const u8,
     free_fn: ?*const fn ([*c]const u8) callconv(.c) void,
     emit: ?*const fn ([*c]const u8, [*c]const u8) callconv(.c) void,
@@ -378,9 +378,36 @@ const ExternSujiCore = extern struct {
     register_fn: ?*const fn ([*c]const u8) callconv(.c) void,
     /// 메인 프로세스의 std.Io 포인터 getter (Zig plugin 전용).
     get_io: ?*const fn () callconv(.c) ?*const anyopaque,
+    /// 앱 종료 요청.
+    quit_fn: ?*const fn () callconv(.c) void = null,
+    /// 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
+    platform_fn: ?*const fn () callconv(.c) [*:0]const u8 = null,
 };
 
 var _global_core: ?*const ExternSujiCore = null;
+
+/// 테스트 전용 core 주입 hook. 프로덕션 경로는 `exportApp` → `backend_init`.
+pub fn setGlobalCore(core: ?*const ExternSujiCore) void {
+    _global_core = core;
+}
+
+/// 앱 종료 요청 (Electron `app.quit()` 호환).
+/// 백엔드가 `on("window:all-closed")` 등의 리스너에서 플랫폼/조건 판단 후 호출.
+/// core가 주입 전이거나 SDK/core 버전 불일치로 quit_fn이 없으면 silent no-op.
+pub fn quit() void {
+    const core = _global_core orelse return;
+    const fn_ptr = core.quit_fn orelse return;
+    fn_ptr();
+}
+
+/// 현재 플랫폼 이름 — "macos" | "linux" | "windows" | "other".
+/// Electron `process.platform` 대응. 대소문자 그대로 반환 (Electron은 "darwin"이지만
+/// Suji는 명시적 "macos").
+pub fn platform() []const u8 {
+    const core = _global_core orelse return "unknown";
+    const fn_ptr = core.platform_fn orelse return "unknown";
+    return std.mem.span(fn_ptr());
+}
 
 /// Plugin 개발자 API — 메인 프로세스의 std.Io를 반환.
 /// 이걸로 std.Io.Mutex/RwLock, std.Io.Dir, sleep 등을 호출.
