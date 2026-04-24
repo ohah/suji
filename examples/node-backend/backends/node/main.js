@@ -1,6 +1,17 @@
-const { handle, send } = require('@suji/node');
+const { handle, send, on, quit, platform, PLATFORM_MACOS } = require('@suji/node');
 const os = require('os');
 const crypto = require('crypto');
+
+// Electron 패턴: window:all-closed 이벤트에서 플랫폼별 quit.
+// macOS는 창 닫혀도 앱 유지 (dock), 나머지는 종료.
+on('window:all-closed', () => {
+  const p = platform();
+  console.error(`[Node] window-all-closed received (platform=${p})`);
+  if (p !== PLATFORM_MACOS) {
+    console.error('[Node] non-macOS → suji.quit()');
+    quit();
+  }
+});
 
 handle('ping', () => ({ msg: 'pong' }));
 

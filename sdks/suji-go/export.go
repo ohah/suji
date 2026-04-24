@@ -68,23 +68,50 @@ func Invoke(backend, request string) string {
 }
 
 // On registers an event listener connected to EventBus.
+// core 주입 전 호출 시 pending 큐에 쌓이고 backend_init에서 일괄 flush.
+// 이 덕에 사용자 `init()`에서 suji.On(...) 직접 호출 가능.
 func On(channel string, callback func(channel, data string)) uint64 {
-	if core == nil {
-		return 0
-	}
-
 	goListenerMu.Lock()
 	id := goListenerNextID
 	goListenerNextID++
 	goListeners[id] = callback
 	goListenerMu.Unlock()
 
-	// bridge.c → suji_bridge_on → core.on(channel, goEventBridge, id)
+	if core == nil {
+		// core 미주입 — pending 큐로
+		pendingMu.Lock()
+		pendingListeners = append(pendingListeners, pendingListener{channel: channel, id: id})
+		pendingMu.Unlock()
+		return id
+	}
+
 	cCh := C.CString(channel)
 	defer C.free(unsafe.Pointer(cCh))
 	C.suji_bridge_on(unsafe.Pointer(core), cCh, unsafe.Pointer(uintptr(id)))
-
 	return id
+}
+
+type pendingListener struct {
+	channel string
+	id      uint64
+}
+
+var (
+	pendingListeners []pendingListener
+	pendingMu        sync.Mutex
+)
+
+// flushPendingListeners — core가 주입된 직후 backend_init에서 호출.
+// 사용자 init() 시점에 등록된 listener를 실제 bridge.on에 연결.
+func flushPendingListeners() {
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	for _, pl := range pendingListeners {
+		cCh := C.CString(pl.channel)
+		C.suji_bridge_on(unsafe.Pointer(core), cCh, unsafe.Pointer(uintptr(pl.id)))
+		C.free(unsafe.Pointer(cCh))
+	}
+	pendingListeners = nil
 }
 
 func Off(id uint64) {
@@ -152,6 +179,8 @@ func backend_init(c *C.SujiCore) {
 		C.free(unsafe.Pointer(cName))
 	}
 	mu.RUnlock()
+	// 사용자 init()에서 대기 중이던 이벤트 리스너 등록
+	flushPendingListeners()
 	fmt.Fprintf(os.Stderr, "[Go] ready\n")
 }
 

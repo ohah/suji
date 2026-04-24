@@ -92,3 +92,24 @@ export declare function once<T = unknown>(channel: string, callback: (data: T) =
  * 명시적으로 코어 라우팅 테이블에 등록해야 할 때 사용.
  */
 export declare function register(channel: string): void;
+/**
+ * 앱 종료 요청 (Electron `app.quit()` 호환).
+ *
+ * 주로 `on('window:all-closed', ...)` 핸들러에서 플랫폼 확인 후 호출:
+ *
+ * ```ts
+ * on('window:all-closed', () => {
+ *   if (platform() !== PLATFORM_MACOS) quit();
+ * });
+ * ```
+ */
+export declare function quit(): void;
+/**
+ * 현재 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
+ * Electron `process.platform` 대응 (Suji는 `"darwin"` 대신 `"macos"`).
+ */
+export declare function platform(): string;
+/** 플랫폼 상수 — `platform()` 반환값과 비교할 때 사용. Suji는 macOS/Linux/Windows만 지원. */
+export declare const PLATFORM_MACOS = "macos";
+export declare const PLATFORM_LINUX = "linux";
+export declare const PLATFORM_WINDOWS = "windows";

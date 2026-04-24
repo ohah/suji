@@ -152,7 +152,15 @@ pub mod prelude {
 
 #[macro_export]
 macro_rules! export_handlers {
+    // 기본 형태: handlers만
     ($($handler:ident),* $(,)?) => {
+        $crate::export_handlers!(@impl [$($handler),*]; []);
+    };
+    // 확장 형태: handlers + event listeners (`channel => extern_fn`)
+    ($($handler:ident),* $(,)? ; $($ch:literal => $listener:ident),* $(,)?) => {
+        $crate::export_handlers!(@impl [$($handler),*]; [$($ch => $listener),*]);
+    };
+    (@impl [$($handler:ident),*]; [$($ch:literal => $listener:ident),*]) => {
         #[no_mangle]
         pub extern "C" fn backend_init(core: *const $crate::SujiCore) {
             if !core.is_null() {
@@ -162,6 +170,11 @@ macro_rules! export_handlers {
                 $(
                     let ch = std::ffi::CString::new(stringify!($handler)).unwrap();
                     (core_ref.register)(ch.as_ptr());
+                )*
+                // 이벤트 리스너 등록 (있으면)
+                $(
+                    let ch = std::ffi::CString::new($ch).unwrap();
+                    (core_ref.on)(ch.as_ptr(), Some($listener), std::ptr::null_mut());
                 )*
             }
             eprintln!("[Rust] ready");
