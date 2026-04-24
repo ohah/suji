@@ -147,3 +147,35 @@ test "nullTerminateOrAlloc boundary: src.len == buf.len" {
     try std.testing.expectEqualStrings("abcde", std.mem.span(r.ptr));
     std.heap.page_allocator.free(r.heap_slice.?);
 }
+
+// ============================================
+// 회귀 테스트 — startNodeBackend: setCore → start 순서
+// ============================================
+//
+// main.js top-level에서 `suji.on(...)`, `suji.quit()`, `suji.platform()` 호출은
+// bridge의 `g_core`를 거친다. `g_core`가 null인 채 start()가 main.js를 실행하면
+// "core not connected" exception으로 리스너 등록 실패 → `window:all-closed` 등
+// Electron 패턴이 조용히 깨진다 (commit 21d66d0 이전 regression).
+//
+// 이 invariant는 startNodeBackend 함수 내부 호출 순서로만 보장되므로 소스 레벨에서
+// 정적 검증한다.
+
+test "startNodeBackend: NodeRuntime.setCore precedes rt.start()" {
+    // `zig build test`는 프로젝트 루트에서 실행되므로 상대경로로 접근 가능.
+    const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(source);
+
+    const marker = "fn startNodeBackend(";
+    const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.StartNodeBackendNotFound;
+    // 함수 body 끝: 다음 top-level `\nfn ` 또는 파일 끝
+    const search_from = fn_start + marker.len;
+    const body_end = std.mem.indexOfPos(u8, source, search_from, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // 주석에도 "rt.start()" 같은 문자열이 들어갈 수 있으므로, 실제 호출만
+    // 매치되도록 접두사(`&g.`, `try `)를 포함해 검색.
+    const setcore_pos = std.mem.indexOf(u8, body, "NodeRuntime.setCore(&g.") orelse return error.SetCoreCallMissing;
+    const start_pos = std.mem.indexOf(u8, body, "try rt.start(") orelse return error.StartCallMissing;
+
+    try std.testing.expect(setcore_pos < start_pos);
+}
