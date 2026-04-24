@@ -2,6 +2,7 @@ const std = @import("std");
 const suji = @import("suji");
 
 pub const app = suji.app()
+    .named("state")
     .handle("state:get", stateGet)
     .handle("state:set", stateSet)
     .handle("state:delete", stateDelete)

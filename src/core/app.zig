@@ -26,6 +26,9 @@ pub const App = struct {
     handler_count: usize = 0,
     listeners: [MAX_LISTENERS]EventListener = undefined,
     listener_count: usize = 0,
+    /// ready/bye 로그 prefix. 동일 프로세스에서 Zig SDK로 빌드된 dylib이 여러 개일 때
+    /// 구분 가능. 미지정 시 "Zig". (.name("state-plugin") → "[state-plugin] ready")
+    name: []const u8 = "Zig",
 
     const MAX_HANDLERS = 64;
     const MAX_LISTENERS = 64;
@@ -53,6 +56,13 @@ pub const App = struct {
         var new = self;
         new.listeners[new.listener_count] = .{ .channel = channel, .func = func };
         new.listener_count += 1;
+        return new;
+    }
+
+    /// ready/bye 로그 prefix 지정. 같은 Zig SDK로 빌드된 dylib이 여러 개일 때 구분용.
+    pub fn named(comptime self: App, comptime n: []const u8) App {
+        var new = self;
+        new.name = n;
         return new;
     }
 
@@ -469,7 +479,7 @@ pub fn exportApp(comptime application: App) type {
                     }
                 }
             }
-            std.debug.print("[Zig] ready\n", .{});
+            std.debug.print("[{s}] ready\n", .{application.name});
         }
 
         export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 {
@@ -500,7 +510,7 @@ pub fn exportApp(comptime application: App) type {
         }
 
         export fn backend_destroy() callconv(.c) void {
-            std.debug.print("[Zig] bye (suji SDK)\n", .{});
+            std.debug.print("[{s}] bye (suji SDK)\n", .{application.name});
         }
     };
 }

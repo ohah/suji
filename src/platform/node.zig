@@ -122,11 +122,15 @@ pub const NodeRuntime = struct {
     }
 
     pub fn shutdown(self: *NodeRuntime) void {
+        // 중복 호출 방지 — entry_path.len == 0이면 이미 shutdown 완료.
+        // 없으면 allocator.free(entry_path)가 double-free로 allocator 손상.
+        if (self.entry_path.len == 0) return;
         self.stop();
         bridge.suji_node_shutdown();
         self.initialized = false;
         // caller가 dupeZ로 넘겨주는 경로 — NodeRuntime이 소유자 계약(startNodeBackend
         // 참조)이라 여기서 free. 이 경로가 빠지면 Node 백엔드 실행당 path 크기만큼 누수.
         self.allocator.free(self.entry_path);
+        self.entry_path = "";
     }
 };

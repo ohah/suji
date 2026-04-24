@@ -134,6 +134,7 @@ pub const BackendRegistry = struct {
             embed_runtimes_initialized = true;
         }
         const owned = try g.allocator.dupe(u8, name);
+        errdefer g.allocator.free(owned);
         try embed_runtimes.put(owned, rt);
     }
 
