@@ -897,7 +897,7 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
     // Node.js 백엔드 폴백 (libnode 활성화된 경우만)
     // target="node"일 때 channel="node"으로 오므로, data에서 cmd 추출
     if (node_enabled and g_node_runtime != null) {
-        const node_channel = extractJsonString(data, "\"cmd\":\"") orelse channel;
+        const node_channel = util.extractJsonString(data, "cmd") orelse channel;
         if (NodeRuntime.invoke(node_channel, data)) |resp| {
             const len = @min(resp.len, response_buf.len);
             @memcpy(response_buf[0..len], resp[0..len]);
@@ -913,8 +913,8 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
 fn cefHandleFanout(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     // data: {"__fanout":true,"backends":"zig,rust,go","request":"{\"cmd\":\"ping\"}"}
     // backends와 request 추출
-    const backends_str = extractJsonString(data, "\"backends\":\"") orelse return null;
-    const request_str = extractJsonString(data, "\"request\":\"") orelse return null;
+    const backends_str = util.extractJsonString(data, "backends") orelse return null;
+    const request_str = util.extractJsonString(data, "request") orelse return null;
 
     // request에서 이스케이프된 따옴표 복원
     var req_buf: [4096]u8 = undefined;
@@ -945,9 +945,9 @@ fn cefHandleFanout(registry: *suji.BackendRegistry, data: []const u8, response_b
 
 /// chain: Backend A → Core → Backend B
 fn cefHandleChain(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
-    const from = extractJsonString(data, "\"from\":\"") orelse return null;
-    const to = extractJsonString(data, "\"to\":\"") orelse return null;
-    const request_escaped = extractJsonString(data, "\"request\":\"") orelse return null;
+    const from = util.extractJsonString(data, "from") orelse return null;
+    const to = util.extractJsonString(data, "to") orelse return null;
+    const request_escaped = util.extractJsonString(data, "request") orelse return null;
     var req_buf: [4096]u8 = undefined;
     const req_clean = unescapeJson(request_escaped, &req_buf);
     var req_nt: [4096]u8 = undefined;
@@ -977,7 +977,7 @@ fn cefHandleChain(registry: *suji.BackendRegistry, data: []const u8, response_bu
 /// core: Zig 코어 직접 호출
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     // data: {"__core":true,"request":"{\"cmd\":\"core_info\"}"}
-    const request_str = extractJsonString(data, "\"request\":\"") orelse return null;
+    const request_str = util.extractJsonString(data, "request") orelse return null;
     var req_buf: [4096]u8 = undefined;
     const req_clean = unescapeJson(request_str, &req_buf);
 
@@ -985,9 +985,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.indexOf(u8, req_clean, "create_window") != null) {
         const wm = window_mod.WindowManager.global orelse return null;
         return window_ipc.handleCreateWindow(.{
-            .title = extractJsonString(req_clean, "\"title\":\"") orelse "New Window",
-            .url = extractJsonString(req_clean, "\"url\":\""),
-            .name = extractJsonString(req_clean, "\"name\":\""),
+            .title = util.extractJsonString(req_clean, "title") orelse "New Window",
+            .url = util.extractJsonString(req_clean, "url"),
+            .name = util.extractJsonString(req_clean, "name"),
             .width = 600,
             .height = 400,
         }, response_buf, wm);
@@ -996,23 +996,23 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     // set_title 커맨드
     if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"set_title\"") != null) {
         const wm = window_mod.WindowManager.global orelse return null;
-        const win_id: u32 = @intCast(extractJsonInt(req_clean, "\"windowId\":") orelse return null);
+        const win_id: u32 = @intCast(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleSetTitle(.{
             .window_id = win_id,
-            .title = extractJsonString(req_clean, "\"title\":\"") orelse "",
+            .title = util.extractJsonString(req_clean, "title") orelse "",
         }, response_buf, wm);
     }
 
     // set_bounds 커맨드
     if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"set_bounds\"") != null) {
         const wm = window_mod.WindowManager.global orelse return null;
-        const win_id: u32 = @intCast(extractJsonInt(req_clean, "\"windowId\":") orelse return null);
+        const win_id: u32 = @intCast(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleSetBounds(.{
             .window_id = win_id,
-            .x = @intCast(extractJsonInt(req_clean, "\"x\":") orelse 0),
-            .y = @intCast(extractJsonInt(req_clean, "\"y\":") orelse 0),
-            .width = @intCast(extractJsonInt(req_clean, "\"width\":") orelse 0),
-            .height = @intCast(extractJsonInt(req_clean, "\"height\":") orelse 0),
+            .x = @intCast(util.extractJsonInt(req_clean, "x") orelse 0),
+            .y = @intCast(util.extractJsonInt(req_clean, "y") orelse 0),
+            .width = @intCast(util.extractJsonInt(req_clean, "width") orelse 0),
+            .height = @intCast(util.extractJsonInt(req_clean, "height") orelse 0),
         }, response_buf, wm);
     }
 
@@ -1043,31 +1043,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     }
 }
 
-/// JSON 문자열에서 "key":"value" 패턴의 value 추출
-fn extractJsonString(json: []const u8, pattern: []const u8) ?[]const u8 {
-    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
-    const start = idx + pattern.len;
-    // 이스케이프되지 않은 " 찾기
-    var i = start;
-    while (i < json.len) : (i += 1) {
-        if (json[i] == '\\') { i += 1; continue; }
-        if (json[i] == '"') return json[start..i];
-    }
-    return null;
-}
-
-/// `"key":123` 패턴에서 숫자 추출. pattern은 `"key":` 까지 포함해서 넘기면 됨.
-/// 공백/음수 허용. parseInt 실패 또는 패턴 없으면 null.
-fn extractJsonInt(json: []const u8, pattern: []const u8) ?i64 {
-    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
-    var start = idx + pattern.len;
-    while (start < json.len and json[start] == ' ') : (start += 1) {}
-    var end = start;
-    if (end < json.len and json[end] == '-') end += 1;
-    while (end < json.len and json[end] >= '0' and json[end] <= '9') : (end += 1) {}
-    if (end == start) return null;
-    return std.fmt.parseInt(i64, json[start..end], 10) catch null;
-}
+// JSON 필드 추출은 core/util.zig(util.extractJsonString / util.extractJsonInt) 사용
 
 /// JSON 이스케이프 복원: \" → ", \\ → \
 fn unescapeJson(src: []const u8, buf: []u8) []const u8 {

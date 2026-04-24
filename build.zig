@@ -38,11 +38,13 @@ pub fn build(b: *std.Build) void {
     loader_module.addImport("runtime", runtime_module);
 
     // 외부 패키지용 모듈 export (사용자가 @import("suji")로 가져감)
-    _ = b.addModule("suji", .{
+    const suji_module = b.addModule("suji", .{
         .root_source_file = b.path("src/core/app.zig"),
         .target = target,
         .optimize = optimize,
     });
+    suji_module.addImport("events", events_module);
+    suji_module.addImport("util", util_module);
 
     // window / event_sink / window_stack 모듈 (root_module과 테스트가 공유)
     const window_module = b.createModule(.{
@@ -284,11 +286,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .link_libc = true,
     });
-    app_test_mod.addImport("app", b.createModule(.{
+    const app_test_app_mod = b.createModule(.{
         .root_source_file = b.path("src/core/app.zig"),
         .target = target,
         .optimize = optimize,
-    }));
+    });
+    app_test_app_mod.addImport("events", events_module);
+    app_test_app_mod.addImport("util", util_module);
+    app_test_mod.addImport("app", app_test_app_mod);
     const app_test = b.addTest(.{ .root_module = app_test_mod });
     test_step.dependOn(&b.addRunArtifact(app_test).step);
 

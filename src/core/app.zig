@@ -312,43 +312,12 @@ fn appendJsonValue(allocator: std.mem.Allocator, parts: *std.ArrayList(u8), valu
 }
 
 // ============================================
-// JSON 필드 추출
+// JSON 필드 추출 — core/util.zig로 위임 (경량 파서)
 // ============================================
 
-fn extractStringField(json: []const u8, key: []const u8) ?[]const u8 {
-    var search_buf: [256]u8 = undefined;
-    const pattern = std.fmt.bufPrint(&search_buf, "\"{s}\":\"", .{key}) catch return null;
-    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
-    const start = idx + pattern.len;
-    const end = std.mem.indexOfPos(u8, json, start, "\"") orelse return null;
-    return json[start..end];
-}
-
-fn extractIntField(json: []const u8, key: []const u8) ?i64 {
-    var search_buf: [256]u8 = undefined;
-    const pattern = std.fmt.bufPrint(&search_buf, "\"{s}\":", .{key}) catch return null;
-    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
-    var start = idx + pattern.len;
-    while (start < json.len and json[start] == ' ') start += 1;
-    var end = start;
-    if (end < json.len and json[end] == '-') end += 1;
-    while (end < json.len and json[end] >= '0' and json[end] <= '9') end += 1;
-    if (end == start) return null;
-    return std.fmt.parseInt(i64, json[start..end], 10) catch null;
-}
-
-fn extractFloatField(json: []const u8, key: []const u8) ?f64 {
-    var search_buf: [256]u8 = undefined;
-    const pattern = std.fmt.bufPrint(&search_buf, "\"{s}\":", .{key}) catch return null;
-    const idx = std.mem.indexOf(u8, json, pattern) orelse return null;
-    var start = idx + pattern.len;
-    while (start < json.len and json[start] == ' ') start += 1;
-    var end = start;
-    if (end < json.len and json[end] == '-') end += 1;
-    while (end < json.len and (json[end] >= '0' and json[end] <= '9' or json[end] == '.')) end += 1;
-    if (end == start) return null;
-    return std.fmt.parseFloat(f64, json[start..end]) catch null;
-}
+const extractStringField = util.extractJsonString;
+const extractIntField = util.extractJsonInt;
+const extractFloatField = util.extractJsonFloat;
 
 /// JSON 값 추출 (문자열/숫자/bool/object/array 등): {"key":value} → value 슬라이스
 pub fn extractJsonValue(json: []const u8, field: []const u8) ?[]const u8 {
