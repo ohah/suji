@@ -56,6 +56,12 @@ const chained_app = app_mod.app()
     .handle("ping", pingHandler)
     .on("clicked", clickHandler);
 
+// Phase 2.5 — 1-arity / 2-arity 혼합 등록 검증용 (module scope — comptime chain 필수)
+const mixed_arity_app = app_mod.app()
+    .handle("w1", whoamiHandler)
+    .handle("w2", whoamiHandler)
+    .handle("p", pingHandler);
+
 test "App.name defaults to \"Zig\"" {
     try std.testing.expectEqualStrings("Zig", default_app.name);
 }
@@ -144,6 +150,123 @@ test "handleIpc: 기존 1-arity 핸들러는 그대로 동작 (호환성)" {
 test "InvokeEvent type has window.id: u32" {
     const e = app_mod.InvokeEvent{ .window = .{ .id = 123 } };
     try std.testing.expectEqual(@as(u32, 123), e.window.id);
+}
+
+test "handleIpc: 음수 __window는 0으로 clamp (방어적 처리)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // 악의적/실수로 음수가 들어와도 u32 overflow 없이 0으로 처리
+    const resp = test_app.handleIpc(arena.allocator(), "{\"cmd\":\"whoami\",\"__window\":-5}");
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":0") != null);
+}
+
+test "handleIpc: malformed __window (문자열)도 0 default" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami\",\"__window\":\"abc\"}",
+    );
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":0") != null);
+}
+
+test "handleIpc: 큰 windowId도 손실 없이 전달" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // u32 max = 4294967295
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami\",\"__window\":4294967295}",
+    );
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":4294967295") != null);
+}
+
+test "1-arity wrapper가 내부 fn의 return을 그대로 전달 (comptime adapter 검증)" {
+    // whoami(2-arity)가 직접 호출됐을 때와 handlers[i].func(wrapper)로 호출했을 때
+    // 응답 bytes가 동일해야 1-arity wrapper가 투명하게 동작한다는 증거.
+    var arena1 = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena1.deinit();
+    var arena2 = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena2.deinit();
+
+    // ping은 1-arity → wrapper가 감싼 후 저장됨. 직접 호출했을 때와 결과 비교.
+    const direct = pingHandler(.{ .raw = "{\"cmd\":\"ping\"}", .arena = arena1.allocator() });
+    // handlers[0].func는 wrapper
+    const via_wrapper = test_app.handlers[0].func(
+        .{ .raw = "{\"cmd\":\"ping\"}", .arena = arena2.allocator() },
+        .{ .window = .{ .id = 0 } },
+    );
+    try std.testing.expectEqualStrings(direct.data, via_wrapper.data);
+}
+
+test "1-arity wrapper는 event 값과 무관 (여러 window.id로 호출해도 동일 응답)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const req: app_mod.Request = .{ .raw = "{\"cmd\":\"ping\"}", .arena = arena.allocator() };
+    const r0 = test_app.handlers[0].func(req, .{ .window = .{ .id = 0 } });
+    const r1 = test_app.handlers[0].func(req, .{ .window = .{ .id = 1 } });
+    const r999 = test_app.handlers[0].func(req, .{ .window = .{ .id = 999 } });
+    try std.testing.expectEqualStrings(r0.data, r1.data);
+    try std.testing.expectEqualStrings(r1.data, r999.data);
+}
+
+test "handleIpc: cmd 필드 없는 JSON → null" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    try std.testing.expect(test_app.handleIpc(arena.allocator(), "{}") == null);
+    try std.testing.expect(test_app.handleIpc(arena.allocator(), "{\"foo\":\"bar\"}") == null);
+}
+
+test "handleIpc: malformed JSON (닫는 brace 없음)도 안전하게 null 반환" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    // extractStringField는 naive scanner라 malformed에서도 crash 없어야 함.
+    try std.testing.expect(test_app.handleIpc(arena.allocator(), "garbage") == null);
+    try std.testing.expect(test_app.handleIpc(arena.allocator(), "{\"cmd") == null);
+}
+
+test "2-arity 핸들러: req 데이터와 event 데이터 모두 접근 가능" {
+    // whoami는 event.window.id만 사용하지만, 이 테스트는 req+event 조합이 의도대로
+    // 독립 경로를 갖는지 확인 — request에 name/window 둘 다 있어도 event가 window 담당.
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+
+    const resp = test_app.handleIpc(
+        arena.allocator(),
+        "{\"cmd\":\"whoami\",\"__window\":7,\"name\":\"ignored\"}",
+    );
+    try std.testing.expect(resp != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"window_id\":7") != null);
+    // "name" 필드는 whoami가 무시 — 응답에 안 나와야
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "ignored") == null);
+}
+
+test "handle 빌더: 여러 2-arity 핸들러 혼합 등록 가능" {
+    try std.testing.expectEqual(@as(usize, 3), mixed_arity_app.handler_count);
+    try std.testing.expectEqualStrings("w1", mixed_arity_app.handlers[0].channel);
+    try std.testing.expectEqualStrings("w2", mixed_arity_app.handlers[1].channel);
+    try std.testing.expectEqualStrings("p", mixed_arity_app.handlers[2].channel);
+}
+
+test "InvokeEvent는 값 타입 (struct)이라 복사되고 호출자의 것은 불변" {
+    // 타입 정보로 struct 여부만 확인 — Zig는 포인터 아니면 자동 복사.
+    const info = @typeInfo(app_mod.InvokeEvent);
+    try std.testing.expect(info == .@"struct");
+}
+
+test "InvokeEvent.Window 중첩 타입이 public하게 접근 가능" {
+    const W = app_mod.InvokeEvent.Window;
+    const w: W = .{ .id = 55 };
+    try std.testing.expectEqual(@as(u32, 55), w.id);
 }
 
 test "Request string extraction" {
