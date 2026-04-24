@@ -402,7 +402,13 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   - **설계 비제공 (문서화 완료)**: 렌더러 직접 통신, MessagePort, preload.js, contextBridge — `docs/WINDOW_API.md#설계-비제공-항목과-이유`
   - **V2 검토**: `cross_origin_isolation` 플래그 (SharedArrayBuffer 활성화), `inject` 초기 스크립트 옵션
   - **엣지 케이스 / TDD 전략 / E2E 범위**: `docs/WINDOW_API.md` 해당 섹션 참조
-  - **핵심 결정사항**: id 기반 API (핸들 X), id monotonic (재사용 X), async 메서드는 이벤트 폴백, create write lock, closed 창 emit은 silent no-op
+  - **핵심 결정사항** (확정):
+    - **Electron 호환 계층**: 허브-스포크, 렌더러 직접 통신 X, preload.js X, MessagePort V2, SharedArrayBuffer는 옵션 플래그만
+    - **플러그인 API**: id 기반 (핸들 X) + SDK는 OO wrapper, async 완료는 이벤트 폴백, `executeJavaScript` 필수, `onWindowClosed` SDK 편의 wrapper 제공
+    - **안전성**: id monotonic (재사용 X), create 전체 write lock, closed 창 emit은 silent no-op, orphan은 destroyAll, 부모-자식은 시각 관계만 (재귀 close X)
+    - **TDD 인프라**: Light 투자 (MockBrowser/MockWebView 각 10~20줄만). 필요 시점에 확장. WindowManager 단위는 CEF 없이 풀-TDD
+    - **구현 순서**: Phase 2 (기본) + Phase 2.5 (데이터 인프라) **분리 유지**. 2.5 없이 Phase 2만 완료되면 플러그인이 멀티 윈도우 인지 불가
+    - **E2E 실행**: macOS CI만 (필수/권장). Linux/Windows는 컴파일/단위만
 - [ ] CLI 도구
   - [x] `suji init` — 프로젝트 스캐폴딩 (rust/go/multi)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
