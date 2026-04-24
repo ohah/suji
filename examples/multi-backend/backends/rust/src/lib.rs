@@ -13,6 +13,25 @@ struct SujiCore {
     off: extern "C" fn(u64),
     register: extern "C" fn(*const c_char),
     get_io: extern "C" fn() -> *const std::os::raw::c_void,
+    quit: extern "C" fn(),
+    platform: extern "C" fn() -> *const c_char,
+}
+
+extern "C" fn on_window_all_closed(
+    _ch: *const c_char,
+    _data: *const c_char,
+    _arg: *mut std::os::raw::c_void,
+) {
+    let core = match CORE.get() { Some(c) => c, None => return };
+    let p_ptr = (core.platform)();
+    let p = if p_ptr.is_null() { "unknown" } else {
+        unsafe { CStr::from_ptr(p_ptr) }.to_str().unwrap_or("unknown")
+    };
+    eprintln!("[Rust] window-all-closed received (platform={})", p);
+    if p != "macos" {
+        eprintln!("[Rust] non-macOS → suji quit()");
+        (core.quit)();
+    }
 }
 unsafe impl Send for SujiCore {}
 unsafe impl Sync for SujiCore {}
@@ -39,6 +58,9 @@ pub extern "C" fn backend_init(core: *const SujiCore) {
             let ch = CString::new(*name).unwrap();
             (core_ref.register)(ch.as_ptr());
         }
+        // window:all-closed 리스너 — Electron 패턴
+        let ev = CString::new("window:all-closed").unwrap();
+        (core_ref.on)(ev.as_ptr(), Some(on_window_all_closed), std::ptr::null_mut());
     }
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()

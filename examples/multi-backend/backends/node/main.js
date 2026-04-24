@@ -1,6 +1,16 @@
-const { handle, invokeSync, send } = require('@suji/node');
+const { handle, invokeSync, send, on, quit, platform, PLATFORM_MACOS } = require('@suji/node');
 const os = require('os');
 const crypto = require('crypto');
+
+// Electron 패턴: window:all-closed → macOS 유지, 나머지 종료.
+on('window:all-closed', () => {
+  const p = platform();
+  console.error(`[Node] window-all-closed received (platform=${p})`);
+  if (p !== PLATFORM_MACOS) {
+    console.error('[Node] non-macOS → suji.quit()');
+    quit();
+  }
+});
 
 function safeInvoke(backend, request) {
   try {

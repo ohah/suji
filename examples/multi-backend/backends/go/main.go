@@ -11,6 +11,8 @@ typedef struct {
     void (*off)(unsigned long long id);
     void (*reg)(const char* channel);
     const void* (*get_io)(void);
+    void (*quit)(void);
+    const char* (*platform)(void);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* ch) {
@@ -23,6 +25,16 @@ static const char* core_invoke(SujiCore* core, const char* name, const char* req
 
 static void core_emit(SujiCore* core, const char* channel, const char* data) {
     core->emit(channel, data);
+}
+
+static void core_quit(SujiCore* core) { core->quit(); }
+static const char* core_platform(SujiCore* core) { return core->platform(); }
+
+// window:all-closed 콜백 (goEventBridge 패턴 대신 단순 C 콜백)
+extern void go_on_window_all_closed(const char* ch, const char* data, void* arg);
+
+static unsigned long long register_window_all_closed(SujiCore* core) {
+    return core->on("window:all-closed", (void*)go_on_window_all_closed, (void*)0);
 }
 */
 import "C"
@@ -60,7 +72,29 @@ func backend_init(c *C.SujiCore) {
 		C.core_register(c, cName)
 		C.free(unsafe.Pointer(cName))
 	}
+	// Electron 패턴: window:all-closed 리스너
+	C.register_window_all_closed(c)
 	fmt.Fprintf(os.Stderr, "[Go] ready\n")
+}
+
+//export go_on_window_all_closed
+func go_on_window_all_closed(ch *C.char, data *C.char, arg unsafe.Pointer) {
+	_ = ch
+	_ = data
+	_ = arg
+	if core == nil {
+		return
+	}
+	pPtr := C.core_platform(core)
+	p := "unknown"
+	if pPtr != nil {
+		p = C.GoString(pPtr)
+	}
+	fmt.Fprintf(os.Stderr, "[Go] window-all-closed received (platform=%s)\n", p)
+	if p != "macos" {
+		fmt.Fprintln(os.Stderr, "[Go] non-macOS → quit()")
+		C.core_quit(core)
+	}
 }
 
 //export backend_handle_ipc

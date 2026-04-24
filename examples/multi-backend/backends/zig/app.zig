@@ -10,7 +10,18 @@ pub const my_app = suji.app()
     .handle("collab", collab)
     .handle("chain_all", chainAll)
     .handle("emit_event", emitEvent)
-    .handle("zig-stress", stressDeep);
+    .handle("zig-stress", stressDeep)
+    // Electron 패턴 (macOS는 유지, 나머지는 종료).
+    .on("window:all-closed", onWindowAllClosed);
+
+fn onWindowAllClosed(_: suji.Event) void {
+    const p = suji.platform();
+    std.debug.print("[Zig] window-all-closed received (platform={s})\n", .{p});
+    if (!std.mem.eql(u8, p, suji.PLATFORM_MACOS)) {
+        std.debug.print("[Zig] non-macOS → suji.quit()\n", .{});
+        suji.quit();
+    }
+}
 
 fn ping(req: suji.Request) suji.Response {
     return req.ok(.{ .msg = "pong from zig" });
