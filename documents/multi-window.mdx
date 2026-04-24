@@ -96,27 +96,34 @@ fn save(req: suji.Request, event: suji.InvokeEvent) suji.Response {
 }
 ```
 
-### Rust / Go / Node — 직접 파싱 (SDK 확장 중)
+### Rust / Go / Node SDK — InvokeEvent 편의 래퍼
 
-Phase 2.5의 `InvokeEvent` 파라미터는 Zig SDK에만 완성됨. 다른 언어는 request JSON에서
-직접 읽음:
+Phase 2.5에서 4개 언어 SDK 모두에 `InvokeEvent` 자동 주입이 들어옴.
 
 ```rust
+// Rust — proc macro가 파라미터 타입이 InvokeEvent면 wire에서 자동 파생
 #[suji::handle]
-fn save(req: Value) -> Value {
-    let win_id = req.get("__window").and_then(|v| v.as_u64()).unwrap_or(0);
-    let win_name = req.get("__window_name").and_then(|v| v.as_str());
-    // ...
+fn save(filename: String, event: suji::InvokeEvent) -> serde_json::Value {
+    serde_json::json!({ "from_window": event.window.id })
+}
+```
+
+```go
+// Go — reflect 경로가 *suji.InvokeEvent 타입을 감지
+func (a *App) Save(text string, event *suji.InvokeEvent) suji.M {
+    return suji.M{ "from_window": event.Window.ID }
 }
 ```
 
 ```js
-// Node
-handle('save', (data) => {
-  const winId = data.__window;           // number
-  const winName = data.__window_name;    // string | undefined
-});
+// Node — handler.length >= 2 이면 event 전달
+const { handle } = require('@suji/node');
+handle('save', (data, event) => ({
+  from_window: event.window.id,
+}));
 ```
+
+wire로 직접 파싱도 여전히 가능 (`req.__window` / `req.__window_name`). 편의 래퍼와 동등.
 
 ## 이벤트 발신 타겟팅
 
@@ -134,11 +141,26 @@ suji.send('toast', { text: 'saved' }, { to: 2 });
 suji.sendTo(2, "toast", "{\"text\":\"saved\"}");
 ```
 
+```rust
+// Rust
+suji::send_to(event.window.id, "toast", r#"{"text":"saved"}"#);
+```
+
+```go
+// Go
+suji.SendTo(event.Window.ID, "toast", `{"text":"saved"}`)
+```
+
+```js
+// Node
+const { sendTo } = require('@suji/node');
+sendTo(event.window.id, 'toast', { text: 'saved' });
+```
+
 - `to`가 생략되거나 0이면 broadcast.
 - 대상 창이 이미 닫혔으면 **silent no-op** (Electron과 동일).
-- **Zig 리스너는 target 무관하게 항상 수신** — 필터링은 JS dispatch 레이어에서만.
+- **백엔드 리스너는 target 무관하게 항상 수신** — 필터링은 JS dispatch 레이어에서만.
   이 정책 덕분에 로깅/감사 플러그인이 모든 send 이벤트를 놓치지 않음.
-- Rust/Go/Node SDK의 `sendTo` 확장은 후속.
 
 ## 전체 창 목록 (roadmap)
 

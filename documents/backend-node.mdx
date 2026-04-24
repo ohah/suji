@@ -109,26 +109,44 @@ cd backends/node && npm install
 suji dev  # main.js에서 require('lodash') 정상 동작
 ```
 
-## 로드맵 — InvokeEvent
+## InvokeEvent (Phase 2.5)
 
-현재는 handler가 data만 받음. Phase 2.5 확장 시:
+handler가 2-arity `(data, event) => ...`이면 wire의 `__window`/`__window_name`에서
+파생된 `InvokeEvent`를 두 번째 인자로 받는다. 1-arity는 기존처럼 동작 — 선택적 확장.
 
 ```js
-// 향후
-handle('save', (req, event) => {
+const { handle } = require('@suji/node');
+
+handle('save', (data, event) => {
+  console.log(`save from window id=${event.window.id} name=${event.window.name}`);
   if (event.window.name === 'settings') {
-    // ...
+    // settings 창 전용 분기
   }
   return { ok: true };
 });
 ```
 
-지금은 data에 `__window` 필드가 자동 주입되므로 직접 꺼낼 수 있음:
+TypeScript:
+```ts
+import { handle, type InvokeEvent } from '@suji/node';
+
+handle('save', (data: { text: string }, event: InvokeEvent) => ({
+  ok: true,
+  from_window: event.window.id,
+}));
+```
+
+분기 기준은 `handler.length` — arrow/함수 선언 양쪽 모두 인자 수가 JS runtime에 노출되므로 자동 적용.
+
+## `sendTo` — 특정 창에만 이벤트 전달 (Phase 2.5)
 
 ```js
-handle('save', (data) => {
-  const winId = data.__window;  // 1, 2, 3, ... 호출한 창
-  const winName = data.__window_name;  // "settings" | undefined
-  // ...
+const { sendTo } = require('@suji/node');
+
+handle('save', (data, event) => {
+  sendTo(event.window.id, 'saved', { ok: true });
+  return { ok: true };
 });
 ```
+
+Electron `webContents.send` 대응. 대상이 닫혔거나 bridge가 구버전이면 silent no-op.

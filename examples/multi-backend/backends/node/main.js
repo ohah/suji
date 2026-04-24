@@ -1,4 +1,4 @@
-const { handle, invokeSync, send, on, quit, platform, PLATFORM_MACOS } = require('@suji/node');
+const { handle, invokeSync, send, sendTo, on, quit, platform, PLATFORM_MACOS } = require('@suji/node');
 const os = require('os');
 const crypto = require('crypto');
 
@@ -27,6 +27,19 @@ handle('node-ping', () => ({ msg: 'pong from Node.js!' }));
 handle('node-greet', (data) => ({
   greeting: `Hello ${data.name || 'world'} from Node.js!`
 }));
+
+// Phase 2.5: 2-arity (data, event) — sender 창 컨텍스트.
+// 프론트가 `invoke('node-whoami')`를 호출하면 __window/__window_name에서 파생된 event를 받는다.
+handle('node-whoami', (_data, event) => ({
+  from: 'node',
+  window: event.window,
+}));
+
+// Phase 2.5: sendTo — sender 창에게만 이벤트 에코백 (Electron webContents.send).
+handle('node-echo-to-sender', (data, event) => {
+  sendTo(event.window.id, 'node-echo', { text: data.text || 'hi', from: 'node' });
+  return { sent_to: event.window.id };
+});
 
 // 런타임/시스템 정보
 

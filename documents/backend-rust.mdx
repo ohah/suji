@@ -73,24 +73,32 @@ suji::PLATFORM_LINUX
 suji::PLATFORM_WINDOWS
 ```
 
-## 로드맵 — InvokeEvent 지원 (미구현)
+## InvokeEvent (Phase 2.5)
 
-Zig SDK에 추가된 `(req, event)` 2-arity는 Rust에도 확장 예정:
+`#[suji::handle]` 매크로가 파라미터 타입이 `InvokeEvent`인 걸 감지하면 wire의
+`__window`/`__window_name`에서 자동 파생해서 주입. 일반 필드는 기존처럼 이름으로 JSON 추출.
 
 ```rust
+use suji::prelude::*;
+use serde_json::{json, Value};
+
 #[suji::handle]
-fn save(req: Value, event: InvokeEvent) -> Value {
-    let win_id = event.window.id;
-    // ...
+fn save(filename: String, event: InvokeEvent) -> Value {
+    let win_id = event.window.id;                 // u32
+    let win_name = event.window.name.as_deref();  // Option<&str>
+    if win_name == Some("settings") {
+        // settings 창 전용 분기
+    }
+    json!({ "ok": true, "filename": filename, "from_window": win_id })
 }
 ```
 
-현재는 wire의 `__window` 필드를 직접 파싱해서 사용 가능:
+파싱 실패 / 누락 / 타입 불일치는 모두 `id=0, name=None` default로 안전 폴백.
+
+## `send_to` — 특정 창에만 이벤트 전달 (Phase 2.5)
 
 ```rust
-#[suji::handle]
-fn save(req: Value) -> Value {
-    let win_id = req.get("__window").and_then(|v| v.as_u64()).unwrap_or(0);
-    // ...
-}
+suji::send_to(event.window.id, "saved", &json!({ "ok": true }).to_string());
 ```
+
+Electron `webContents.send` 대응. 대상 창이 닫혔거나 core 주입 전이면 silent no-op.

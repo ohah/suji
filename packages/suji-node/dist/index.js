@@ -29,6 +29,7 @@ exports.handle = handle;
 exports.invoke = invoke;
 exports.invokeSync = invokeSync;
 exports.send = send;
+exports.sendTo = sendTo;
 exports.on = on;
 exports.off = off;
 exports.once = once;
@@ -59,7 +60,7 @@ function getBridge() {
  * handle('greet', (data) => ({ hello: data.name }));
  */
 function handle(channel, handler) {
-    getBridge().handle(channel, (raw) => {
+    getBridge().handle(channel, (raw, event) => {
         let data;
         try {
             data = JSON.parse(raw);
@@ -67,7 +68,11 @@ function handle(channel, handler) {
         catch {
             data = raw;
         }
-        const result = handler(data);
+        // 핸들러 arity: 1이면 event 생략 (기존 시그니처 호환), 2면 같이 전달.
+        // bridge.cc가 event 객체를 항상 두 번째 인자로 넘기므로 arity가 유일한 분기 기준.
+        const result = handler.length >= 2
+            ? handler(data, event)
+            : handler(data);
         if (typeof result === 'string')
             return result;
         return JSON.stringify(result);
@@ -124,6 +129,19 @@ function invokeSync(backend, request = {}) {
  */
 function send(channel, data = {}) {
     getBridge().send(channel, JSON.stringify(data));
+}
+/**
+ * 특정 창에만 이벤트 전달 (Electron `webContents.send` 대응).
+ * 대상 창이 닫혔거나 bridge가 구버전이면 silent no-op.
+ *
+ * @example
+ * sendTo(2, 'toast', { text: 'saved' });
+ */
+function sendTo(windowId, channel, data = {}) {
+    const bridge = getBridge();
+    if (!bridge.sendTo)
+        return;
+    bridge.sendTo(windowId, channel, JSON.stringify(data));
 }
 // ============================================
 // Channel registration

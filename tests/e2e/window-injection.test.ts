@@ -217,3 +217,166 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
     await cdp3.detach();
   }, 15000);
 });
+
+/**
+ * Phase 2.5 — `send(..., {to: winId})` 타겟 라우팅 E2E.
+ *
+ * CEF의 v8 emit 바인딩 → CefProcessMessage의 3번째 int arg → main의 `handleBrowserEmit` →
+ * `EventBus.emitTo` → `cef.evalJs(target, ...)` → 해당 창의 브라우저 하나만 dispatch.
+ * 이 전체 경로가 살아 있어야 특정 창에만 이벤트가 도달하고 나머지는 받지 않는다.
+ */
+describe("Phase 2.5 — send {to: winId} 타겟 라우팅", () => {
+  // 각 창에 __probes[] 배열 + 동일 채널 on-리스너를 설치.
+  // page1/cdp2 양쪽에서 동일 JS를 실행 — 메인 창은 Page API, 새 창은 raw CDP.
+  const installProbe = async (ch: string, p?: Page, session?: CDPSession) => {
+    const script = `
+      (function(){
+        window.__probes = window.__probes || [];
+        window.__suji__.on(${JSON.stringify(ch)}, function(data){
+          window.__probes.push(data);
+        });
+      })();
+    `;
+    if (p) {
+      await p.evaluate(script as any);
+    } else if (session) {
+      await session.send("Runtime.evaluate", { expression: script });
+    }
+  };
+
+  const readProbes = async (p?: Page, session?: CDPSession): Promise<unknown[]> => {
+    const expr = "JSON.stringify(window.__probes || [])";
+    if (p) return JSON.parse(await p.evaluate(() => JSON.stringify((window as any).__probes || [])));
+    if (session) {
+      const r = await session.send("Runtime.evaluate", {
+        expression: expr,
+        returnByValue: true,
+      });
+      return JSON.parse(r.result.value as string);
+    }
+    return [];
+  };
+
+  const clearProbes = async (p?: Page, session?: CDPSession) => {
+    const script = "window.__probes = [];";
+    if (p) await p.evaluate(() => { (window as any).__probes = []; });
+    else if (session) await session.send("Runtime.evaluate", { expression: script });
+  };
+
+  test("창1→창2 sendTo: 창2만 수신, 창1은 수신 안 함", async () => {
+    // 새 창 생성
+    const excluded = new Set<Target>(browser.targets().filter((t) => t.type() === "page"));
+    const created = await createWindow(page1, "Window-sendTo-2");
+    expect(created.windowId).toBeGreaterThanOrEqual(2);
+    const target2 = await waitForNewPageTarget(excluded);
+    const cdp2 = await target2.createCDPSession();
+
+    // 양쪽에 probe 설치
+    const CH = "sendto-e2e";
+    await installProbe(CH, page1);
+    await installProbe(CH, undefined, cdp2);
+    await clearProbes(page1);
+    await clearProbes(undefined, cdp2);
+
+    // 창 1에서 창 2로만 전송.
+    // bridge emit JS wrapper가 자체적으로 JSON.stringify 하므로 object를 그대로 넘긴다.
+    await page1.evaluate(
+      (ch, winId) =>
+        (window as any).__suji__.emit(ch, { msg: "to-2-only" }, winId),
+      CH,
+      created.windowId,
+    );
+    await new Promise((r) => setTimeout(r, 400));
+
+    const p1 = await readProbes(page1);
+    const p2 = await readProbes(undefined, cdp2);
+
+    expect(p1).toEqual([]); // 창 1은 자기 자신이라도 target이 2면 수신 X
+    expect(p2).toEqual([{ msg: "to-2-only" }]);
+
+    await cdp2.detach();
+  }, 20000);
+
+  test("broadcast (target 생략): 모든 창이 수신", async () => {
+    // 기존 창 재사용 — 이전 테스트에서 만든 창이 여전히 살아있음
+    const pageTargets = browser.targets().filter((t) => t.type() === "page");
+    expect(pageTargets.length).toBeGreaterThanOrEqual(2);
+    const otherTarget = pageTargets.find((t) => t !== page1.target())!;
+    const cdpOther = await otherTarget.createCDPSession();
+
+    const CH = "broadcast-e2e";
+    await installProbe(CH, page1);
+    await installProbe(CH, undefined, cdpOther);
+    await clearProbes(page1);
+    await clearProbes(undefined, cdpOther);
+
+    // to 생략 — 브로드캐스트
+    await page1.evaluate(
+      (ch) => (window as any).__suji__.emit(ch, { msg: "to-all" }),
+      CH,
+    );
+    await new Promise((r) => setTimeout(r, 400));
+
+    const p1 = await readProbes(page1);
+    const p2 = await readProbes(undefined, cdpOther);
+
+    expect(p1).toEqual([{ msg: "to-all" }]);
+    expect(p2).toEqual([{ msg: "to-all" }]);
+
+    await cdpOther.detach();
+  }, 20000);
+
+  // 각 언어 백엔드의 sendTo(SDK 경로)가 실제로 sender 창에만 이벤트를 전달하는지 검증.
+  // SDK별 구현:
+  //   Zig:  suji.sendTo(event.window.id, "zig-echo", ...)
+  //   Rust: (core.emit_to)(win_id, "rust-echo", ...) — 예제가 SDK 없이 직접 FFI.
+  //   Go:   C.core_emit_to(core, winID, "go-echo", ...) — 예제 직접 FFI.
+  //   Node: sendTo(event.window.id, "node-echo", { ... }) — @suji/node.
+  const backendCases = [
+    { lang: "zig",  cmd: "zig-echo-to-sender",  channel: "zig-echo",  target: "zig" },
+    { lang: "rust", cmd: "rust-echo-to-sender", channel: "rust-echo", target: "rust" },
+    { lang: "go",   cmd: "go-echo-to-sender",   channel: "go-echo",   target: "go" },
+    { lang: "node", cmd: "node-echo-to-sender", channel: "node-echo", target: "node" },
+  ] as const;
+
+  for (const { lang, cmd, channel, target } of backendCases) {
+    test(`${lang} 백엔드 sendTo: 호출한 창에만 echo 도착`, async () => {
+      const pageTargets = browser.targets().filter((t) => t.type() === "page");
+      const otherTarget = pageTargets.find((t) => t !== page1.target())!;
+      const cdpOther = await otherTarget.createCDPSession();
+
+      await installProbe(channel, page1);
+      await installProbe(channel, undefined, cdpOther);
+      await clearProbes(page1);
+      await clearProbes(undefined, cdpOther);
+
+      // 1) page1 (id=1) → 이 창에만 echo 도착
+      await page1.evaluate(
+        (c, t) =>
+          (window as any).__suji__.invoke(c, { text: "from-page1" }, { target: t }),
+        cmd,
+        target,
+      );
+      await new Promise((r) => setTimeout(r, 500));
+
+      expect(await readProbes(page1)).toEqual([{ from: lang, text: "from-page1" }]);
+      expect(await readProbes(undefined, cdpOther)).toEqual([]);
+
+      await clearProbes(page1);
+      await clearProbes(undefined, cdpOther);
+
+      // 2) 다른 창 → 해당 창에만 echo 도착, page1은 받지 않음
+      await cdpOther.send("Runtime.evaluate", {
+        expression: `window.__suji__.invoke(${JSON.stringify(cmd)}, { text: "from-w2" }, { target: ${JSON.stringify(target)} })`,
+        awaitPromise: true,
+        returnByValue: true,
+      });
+      await new Promise((r) => setTimeout(r, 500));
+
+      expect(await readProbes(page1)).toEqual([]);
+      expect(await readProbes(undefined, cdpOther)).toEqual([{ from: lang, text: "from-w2" }]);
+
+      await cdpOther.detach();
+    }, 25000);
+  }
+});

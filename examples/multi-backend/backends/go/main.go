@@ -13,6 +13,7 @@ typedef struct {
     const void* (*get_io)(void);
     void (*quit)(void);
     const char* (*platform)(void);
+    void (*emit_to)(unsigned int window_id, const char* channel, const char* data);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* ch) {
@@ -25,6 +26,10 @@ static const char* core_invoke(SujiCore* core, const char* name, const char* req
 
 static void core_emit(SujiCore* core, const char* channel, const char* data) {
     core->emit(channel, data);
+}
+
+static void core_emit_to(SujiCore* core, unsigned int window_id, const char* channel, const char* data) {
+    core->emit_to(window_id, channel, data);
 }
 
 static void core_quit(SujiCore* core) { core->quit(); }
@@ -69,7 +74,7 @@ func callRust(request string) string {
 func backend_init(c *C.SujiCore) {
 	core = c
 	// 핸들러 채널 등록
-	for _, name := range []string{"ping", "greet", "call_rust", "collab", "stats_for_rust", "emit_event", "go-stress"} {
+	for _, name := range []string{"ping", "greet", "call_rust", "collab", "stats_for_rust", "emit_event", "go-stress", "go-whoami", "go-echo-to-sender"} {
 		cName := C.CString(name)
 		C.core_register(c, cName)
 		C.free(unsafe.Pointer(cName))
@@ -165,6 +170,33 @@ func backend_handle_ipc(request *C.char) *C.char {
 			C.core_emit(core, cCh, cData)
 		}
 		result = fmt.Sprintf(`{"from":"go","cmd":"emit_event","sent_to":"go-event"}`)
+
+	// Phase 2.5: wire의 __window / __window_name 에서 sender 창 컨텍스트 파생.
+	case "go-whoami":
+		winID := extractIntField(reqStr, "__window")
+		winName := extractField(reqStr, "__window_name")
+		if winName == "" {
+			result = fmt.Sprintf(`{"from":"go","window":{"id":%d,"name":null}}`, winID)
+		} else {
+			result = fmt.Sprintf(`{"from":"go","window":{"id":%d,"name":"%s"}}`, winID, winName)
+		}
+
+	// Phase 2.5: sendTo — sender 창에게만 이벤트 에코백.
+	case "go-echo-to-sender":
+		winID := extractIntField(reqStr, "__window")
+		text := extractField(reqStr, "text")
+		if text == "" {
+			text = "hi"
+		}
+		if core != nil {
+			cCh := C.CString("go-echo")
+			defer C.free(unsafe.Pointer(cCh))
+			payload := fmt.Sprintf(`{"from":"go","text":"%s"}`, text)
+			cData := C.CString(payload)
+			defer C.free(unsafe.Pointer(cData))
+			C.core_emit_to(core, C.uint(winID), cCh, cData)
+		}
+		result = fmt.Sprintf(`{"from":"go","sent_to":%d}`, winID)
 
 	default:
 		result = fmt.Sprintf(`{"from":"go","echo":"%s"}`, cmd)

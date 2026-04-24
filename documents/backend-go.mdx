@@ -78,13 +78,31 @@ extern void go_on_window_all_closed(char* ch, char* data, void* arg);
 Go 빌드는 `CGO_ENABLED=1` + `CC=/usr/bin/clang` 필요 (macOS Homebrew LLVM 충돌 회피 —
 suji CLI가 자동 설정).
 
-## 로드맵 — InvokeEvent
+## InvokeEvent (Phase 2.5)
 
-현재는 wire의 `__window` 필드를 request JSON에서 직접 파싱:
+메서드 파라미터 타입이 `*suji.InvokeEvent` 또는 `suji.InvokeEvent`이면 reflect 경로가
+wire의 `__window`/`__window_name`에서 자동 파생해서 주입. 나머지 파라미터는 기존처럼
+이름 규칙(`name` / `text` / `data` / ...)으로 매칭.
 
 ```go
-// TODO Phase 2.5 확장 — 현재는 수동 파싱
-func (a *App) Save(content string) string {
-    // 현재 SDK는 원 JSON에 접근 못 함. 추후 InvokeEvent 지원 예정.
+type App struct{}
+
+func (a *App) Save(text string, event *suji.InvokeEvent) suji.M {
+    fmt.Printf("save from window id=%d name=%s\n",
+        event.Window.ID, event.Window.Name)
+    if event.Window.Name == "settings" {
+        // settings 창 전용 분기
+    }
+    return suji.M{"ok": true, "text": text, "from_window": event.Window.ID}
 }
 ```
+
+필드 없음 / 타입 불일치는 `ID=0, Name=""` default.
+
+## `SendTo` — 특정 창에만 이벤트 전달 (Phase 2.5)
+
+```go
+suji.SendTo(event.Window.ID, "saved", `{"ok":true}`)
+```
+
+Electron `webContents.send` 대응. 대상이 닫혔거나 core 주입 전이면 silent no-op.

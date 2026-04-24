@@ -12,6 +12,8 @@ pub const my_app = suji.app()
     .handle("chain_all", chainAll)
     .handle("emit_event", emitEvent)
     .handle("zig-stress", stressDeep)
+    .handle("zig-whoami", whoami)
+    .handle("zig-echo-to-sender", echoToSender)
     // Electron 패턴 (macOS는 유지, 나머지는 종료).
     .on("window:all-closed", onWindowAllClosed);
 
@@ -125,6 +127,25 @@ fn stressDeep(req: suji.Request) suji.Response {
         .{ "at", "\"zig\"" },
         .{ "child", child },
     });
+}
+
+// Phase 2.5: 2-arity 핸들러 — sender 창 컨텍스트를 바로 응답에 담는다.
+fn whoami(req: suji.Request, event: suji.InvokeEvent) suji.Response {
+    // 익명 창(name=null)은 빈 문자열로 내보낸다 — JSON 직렬화 편의.
+    return req.ok(.{
+        .window_id = event.window.id,
+        .window_name = event.window.name orelse "",
+    });
+}
+
+// Phase 2.5: sendTo — sender 창에게만 이벤트 에코백.
+fn echoToSender(req: suji.Request, event: suji.InvokeEvent) suji.Response {
+    const text = req.string("text") orelse "hi";
+    var buf: [256]u8 = undefined;
+    const payload = std.fmt.bufPrint(&buf, "{{\"from\":\"zig\",\"text\":\"{s}\"}}", .{text}) catch "{}";
+    // 직접 sendTo는 SDK에 없음 → core의 emit_to_fn 호출용 wrapper 필요. 이 예제는 app.sendTo만 쓴다.
+    suji.sendTo(event.window.id, "zig-echo", payload);
+    return req.ok(.{ .sent_to = event.window.id });
 }
 
 comptime {

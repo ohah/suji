@@ -22,7 +22,19 @@
  * send('my-event', { msg: 'hello from Node.js' });
  * ```
  */
-export type HandlerFn<TReq = unknown, TRes = unknown> = (data: TReq) => TRes;
+/** IPC 요청의 sender 창 컨텍스트 (Electron event.sender/BrowserWindow 대응). */
+export interface InvokeEvent {
+    window: {
+        id: number;
+        /** 익명 창이면 null. */
+        name: string | null;
+    };
+}
+/**
+ * 1-arity: 기존 `(data) => result` — 호환.
+ * 2-arity: `(data, event) => result` — Zig SDK의 `fn(Request, InvokeEvent)` 대응.
+ */
+export type HandlerFn<TReq = unknown, TRes = unknown> = ((data: TReq) => TRes) | ((data: TReq, event: InvokeEvent) => TRes);
 /**
  * 핸들러 등록 — 프론트엔드/다른 백엔드에서 이 채널로 호출 가능
  *
@@ -62,6 +74,14 @@ export declare function invokeSync<T = unknown>(backend: string, request?: Recor
  * send('data-updated', { items: [1, 2, 3] });
  */
 export declare function send(channel: string, data?: unknown): void;
+/**
+ * 특정 창에만 이벤트 전달 (Electron `webContents.send` 대응).
+ * 대상 창이 닫혔거나 bridge가 구버전이면 silent no-op.
+ *
+ * @example
+ * sendTo(2, 'toast', { text: 'saved' });
+ */
+export declare function sendTo(windowId: number, channel: string, data?: unknown): void;
 /**
  * 이벤트 수신 — 프론트엔드/다른 백엔드에서 발신한 이벤트를 수신
  *

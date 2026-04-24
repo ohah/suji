@@ -17,6 +17,8 @@ pub struct SujiCore {
     get_io: extern "C" fn() -> *const std::os::raw::c_void,
     quit: extern "C" fn(),
     platform: extern "C" fn() -> *const c_char,
+    // Electron webContents.send 대응 — Phase 2.5.
+    emit_to: extern "C" fn(u32, *const c_char, *const c_char),
 }
 
 extern "C" fn on_window_all_closed(
@@ -56,7 +58,7 @@ pub extern "C" fn backend_init(core: *const SujiCore) {
         let core_ref: &'static SujiCore = unsafe { std::mem::transmute(&*core) };
         let _ = CORE.set(core_ref);
         // 핸들러 채널 등록
-        for name in &["ping", "greet", "call_go", "collab", "emit_event", "rust-stress", "rust-thread-node"] {
+        for name in &["ping", "greet", "call_go", "collab", "emit_event", "rust-stress", "rust-thread-node", "rust-whoami", "rust-echo-to-sender"] {
             let ch = CString::new(*name).unwrap();
             (core_ref.register)(ch.as_ptr());
         }
@@ -127,6 +129,32 @@ pub extern "C" fn backend_handle_ipc(request: *const c_char) -> *mut c_char {
             json!({"at":"rust","child":child}).to_string()
         };
         return CString::new(result).unwrap().into_raw();
+    }
+
+    // Phase 2.5: 2-arity 동치 — wire의 __window / __window_name 에서 직접 파생.
+    // (이 예제는 SDK 매크로가 아닌 수동 핸들러 경로라서 req 파싱.)
+    if cmd == "rust-whoami" {
+        let win_id = parsed.get("__window").and_then(|v| v.as_u64()).unwrap_or(0);
+        let win_name = parsed.get("__window_name").and_then(|v| v.as_str());
+        let wrapped = json!({
+            "from": "rust",
+            "window": { "id": win_id, "name": win_name },
+        }).to_string();
+        return CString::new(wrapped).unwrap().into_raw();
+    }
+
+    // Phase 2.5: sendTo — sender 창에게만 이벤트 에코백 (webContents.send).
+    if cmd == "rust-echo-to-sender" {
+        let win_id = parsed.get("__window").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let text = parsed.get("text").and_then(|v| v.as_str()).unwrap_or("hi");
+        if let Some(core) = CORE.get() {
+            let ch = CString::new("rust-echo").unwrap();
+            let payload = json!({ "from": "rust", "text": text }).to_string();
+            let data = CString::new(payload).unwrap();
+            (core.emit_to)(win_id, ch.as_ptr(), data.as_ptr());
+        }
+        let wrapped = json!({"from":"rust","sent_to":win_id}).to_string();
+        return CString::new(wrapped).unwrap().into_raw();
     }
 
     let rt = RT.get().unwrap();
