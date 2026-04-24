@@ -698,6 +698,441 @@ suji.On("window:close", func(event *suji.Event, data string) {
 | `window:sheet-begin` | `{ windowId }` | macOS 시트 열림 |
 | `window:sheet-end` | `{ windowId }` | macOS 시트 닫힘 |
 
+## 멀티 윈도우 데이터 모델
+
+### 기본 원칙: Electron 허브-스포크
+
+Suji는 Electron과 동일하게 **메인 프로세스(Zig 코어)가 허브**, 각 렌더러가 스포크인
+구조를 채택한다. **렌더러 간 직접 통신은 지원하지 않는다**.
+
+```
+Renderer A            Main(Zig)             Renderer B
+     │                    │                    │
+invoke ──────────────────>│                    │
+                          │ (백엔드/플러그인)   │
+     <───── 응답 ─────────│                    │
+                          │ emit with {to:B} ─>│ on
+```
+
+### 세 가지 데이터 경로만 제공
+
+더 많은 API를 만들지 않는 게 원칙. 개발자가 고민할 선택지를 좁게:
+
+| 경로 | 언제 쓰나 | API |
+|---|---|---|
+| **요청/응답 (invoke)** | 데이터 조회, 명령 실행 | `await suji.invoke(channel, data, {target?})` |
+| **한 방향 알림 (emit/send)** | 상태 변화 전파 | `suji.emit(event, data, {to?})` |
+| **공유 상태** | 여러 창이 같은 데이터 구독 | `state` 플러그인 + `state:{key}` 이벤트 |
+
+### Electron API와 네이밍 대응
+
+Electron 앱 포팅 시 찾기-바꾸기 수준으로 줄어들도록 용어를 맞춘다:
+
+| Electron | Suji |
+|---|---|
+| `ipcRenderer.invoke(ch, data)` | `suji.invoke(ch, data)` |
+| `ipcRenderer.send(ch, data)` | `suji.emit(ch, data)` |
+| `ipcRenderer.on(ch, fn)` | `suji.on(ch, fn)` |
+| `ipcMain.handle(ch, fn)` | 백엔드 `handle(ch, fn)` |
+| `ipcMain.on(ch, fn)` | 백엔드 `on(ch, fn)` |
+| `win.webContents.send(ch, data)` | `suji.emit(ch, data, {to: winId})` or `suji.sendTo(winId, ch, data)` |
+| `MessageChannelMain` | **미지원 (V1)** — 아래 참조 |
+| `remote` 모듈 | **미지원** (Electron도 deprecated) |
+| `preload.js` | **미지원** — 아래 참조 |
+| `contextBridge` | 코어가 `window.__suji__`만 자동 주입 |
+
+### 설계 비제공 항목과 이유
+
+Electron에 있지만 **Suji V1에서 의도적으로 제공하지 않는** API들. 질문이 많을 것 같은
+항목을 문서화해둔다.
+
+#### 렌더러 직접 통신 (MessageChannelMain 등)
+
+**비용이 이득보다 큼**:
+
+- **보안 경계 붕괴**: 외부 URL 로드 시 악성 JS가 다른 창과 직접 통신 가능. Electron도
+  `remote` 모듈을 deprecated하고 제거한 이력 있음.
+- **권한/감사 포인트 소실**: dialog/fs 같은 플러그인이 "어느 창이 호출했는지" 기반
+  권한 정책(`__window` 태깅)을 적용할 수 없게 됨.
+- **디버깅 난이도**: main 경유면 로그 한 곳에서 전수 추적. 직접 통신이면 각 창
+  콘솔을 돌아다니며 포트별 로그를 맞춰봐야 함.
+- **Source of truth 흐려짐**: state 플러그인 같은 중앙 store 패턴의 의미 희석.
+- **구현 복잡도**: Chromium의 port broker 인프라를 Suji가 재구현해야 함
+  (Electron이 수천 시간 투자한 feature).
+
+**성능이 정말 필요한 경우**의 대안:
+- 큰 바이너리: `suji://` 커스텀 프로토콜로 `fetch` (이미 제공 중, 스트리밍 가능)
+- 고빈도 양방향: V2에서 실수요 증명 후 `MessageChannelMain` 상당 검토.
+
+#### SharedArrayBuffer
+
+기술적으로는 **COOP/COEP 헤더만 주입하면 Chromium 표준으로 동작**. Electron에서도
+wasm threaded runtime 용도로만 쓰이고 창 간 데이터 공유 수단은 아님
+(다른 프로세스라 공유 불가).
+
+V1 제공 방식: `suji.json`에 `"cross_origin_isolation": true` 옵션만 추가. true면
+`suji://` 스킴 응답에 헤더 자동 주입. 기본값 false.
+
+```json
+{
+  "window": { "cross_origin_isolation": true }
+}
+```
+
+#### preload.js
+
+Electron의 preload는 **renderer에 Node API가 노출되는 문제**를 격리하려고 만든
+장치(contextBridge + isolated world). Suji의 렌더러는 **순수 CEF/V8 환경**이라
+Node API가 애초에 노출되지 않는다. preload가 해결하려던 문제 자체가 없음.
+
+"페이지 로드 전 초기 스크립트 실행"이 필요한 경우:
+- **대부분의 앱**: 프론트엔드 번들 엔트리(`main.tsx`/`main.ts`)에서 처리하면 충분
+- **번들 이전 타이밍이 필요하다는 수요가 증명되면** V2에서 옵션 추가:
+  ```json
+  { "window": { "inject": ["theme-preload.js"] } }
+  ```
+  CEF `OnContextCreated`에서 지정 파일을 `ExecuteJavaScript`로 eval.
+  `contextBridge` 같은 복잡한 API는 제공하지 않음 — 일반 JS 그대로.
+
+### 고성능/대용량 데이터 권장 경로
+
+| 데이터 크기 | 권장 방식 |
+|---|---|
+| < 100KB (대부분) | JSON invoke (현재) |
+| 이미지/파일/바이너리 | `suji://` 커스텀 프로토콜로 `fetch` (이미 제공) |
+| 실시간 스트림 | `CefResourceRequestHandler` chunked (V2 검토) |
+
+메인 허브 JSON IPC만으로 80% 해결. 큰 데이터는 suji:// 채널로 우회.
+
+---
+
+## 플러그인 통합
+
+BrowserWindow API는 Zig 코어 내부 기능이지만, 여러 플러그인(dialog/menu/tray/
+notification 등)이 멀티 윈도우 상태를 인지하고 조작해야 한다. 다음 다섯 규약으로
+플러그인 ↔ 윈도우 관계를 정리한다.
+
+### 1. IPC 요청 자동 태깅 (`__window`)
+
+프론트엔드가 `suji.invoke("dialog:open", {...})`를 호출하면, 메인 프로세스의 CEF
+메시지 핸들러가 sender `cef_browser_t`의 id를 식별하고 **request JSON에 `__window`
+필드를 자동 주입**한다. 플러그인은 해당 필드를 옵션으로 읽는다.
+
+```
+// 프론트엔드 (윈도우 id=3에서)
+await suji.invoke("dialog:open", { filters: [...] })
+
+// 플러그인 handler가 받는 request (자동 주입)
+{"cmd":"dialog:open","filters":[...],"__window":3}
+```
+
+`__window`는 **선택적 힌트**이고 생략 시 "아무 윈도우나 OK"로 해석. 모달 sheet를
+붙여야 하는 dialog 같은 플러그인은 이 필드가 있을 때만 부모 지정, 없으면 floating.
+
+구현 위치: `cef.zig`의 invoke 메시지 수신 지점에서 `cef_browser.get_identifier()`로
+id를 뽑아 request body에 merge 후 `BackendRegistry.invoke` 호출.
+
+### 2. 이벤트 타겟팅 (`to: windowId`)
+
+현재 `suji.send(event, data)`는 EventBus 브로드캐스트 + 모든 WebView에 eval. 멀티
+윈도우에서는 **특정 윈도우로만 이벤트 전달** 옵션이 필요하다.
+
+```zig
+// Zig: 전체 브로드캐스트 (기존)
+suji.send("updated", data);
+
+// Zig: 특정 창 — Electron webContents.send와 대응
+suji.sendTo(window_id, "updated", data);
+```
+
+```rust
+// Rust
+suji::send("updated", &data);                  // 브로드캐스트
+suji::send_to(window_id, "updated", &data);    // 특정 창
+```
+
+```js
+// 프론트엔드에서 발행 (한 창이 다른 창에 알림)
+suji.emit("updated", data);                     // 모든 창
+suji.emit("updated", data, { to: windowId });   // 특정 창
+```
+
+구현: `EventBus.emit`에 optional target 인자 추가. WebView eval 시 target이 지정되면
+해당 CEF browser에만 `ExecuteJavaScript` 호출, 나머지는 기존처럼 전체.
+
+### 3. SujiCore에 Window API 포인터 노출
+
+플러그인이 `BrowserWindow`를 조작할 수 있도록 `SujiCore`에 getter 추가.
+`get_io` 패턴과 동일.
+
+```zig
+pub const SujiCore = extern struct {
+    // ... 기존 필드
+    get_io: *const fn () callconv(.c) ?*const anyopaque,
+    get_window_api: *const fn () callconv(.c) ?*const SujiWindowAPI,  // 신규
+};
+```
+
+플러그인 SDK는 이를 얇게 감싸서 노출:
+
+```zig
+// Zig SDK
+pub fn window() *const SujiWindowAPI {
+    return @ptrCast(@alignCast(core.get_window_api().?));
+}
+// 사용
+suji.window().set_title(id, "Hello");
+```
+
+```rust
+// Rust SDK — BrowserWindow struct
+BrowserWindow::from_id(id).unwrap().set_title("Hello");
+```
+
+포인터 stability: `SujiWindowAPI`는 `WindowManager.global`의 static vtable.
+BackendRegistry 복사/이동 영향 없음.
+
+### 4. 생명주기 이벤트 포맷 — id/name 필수 포함
+
+플러그인이 per-window 상태를 관리할 수 있도록 모든 윈도우 이벤트 data에
+`windowId`와 (있으면) `name`을 포함. 이벤트 목록(#이벤트-전체-이벤트-목록 참조)은
+이미 이 포맷을 따르지만 플러그인 관점에서 핵심만 강조:
+
+| 이벤트 | 데이터 | 플러그인 활용 예 |
+|---|---|---|
+| `window:created` | `{ windowId, name }` | state 플러그인이 per-window scope 할당 |
+| `window:closed` | `{ windowId, name }` | cleanup, 리소스 해제 |
+| `window:focus` | `{ windowId }` | menu/tray 플러그인이 "활성 창" 추적 |
+| `window:blur` | `{ windowId }` | 동일 |
+
+### 5. BrowserWindow API는 코어 내장 (플러그인으로 분리 금지)
+
+**원칙**: `BrowserWindow` 구현을 외부 dlopen 플러그인으로 빼지 않는다. 두 가지 이유:
+
+- **stale 함수 포인터 위험**: 플러그인 unload 시 다른 플러그인/백엔드가 소유한
+  `SujiWindowAPI` 포인터가 무효화됨. 코어 내장이면 이런 문제 없음.
+- **CEF 스레드 정책**: `cef_browser_host_create_browser_sync`는 UI 스레드 전용.
+  코어가 직접 관리하면 스레드 경계 제어가 단순해짐.
+
+플러그인은 이 API의 **사용자**지 **구현자**가 아니다.
+
+### 플러그인별 구체 활용 예
+
+| 플러그인 | `__window` 사용 | `get_window_api` 사용 | 이벤트 구독 |
+|---|---|---|---|
+| **dialog** | 부모 sheet 지정 | `BrowserWindow::from_id().native_handle()` | - |
+| **menu** | 메뉴 클릭 시 활성 창 emit target | `setMenu`, `setMenuBarVisible` | `window:focus` |
+| **tray** | - | `BrowserWindow::show_all`, `hide_all` | `window:created`, `window:closed` |
+| **notification** | - | `flashFrame`, `focus`, `executeJavaScript` | - |
+| **state** | 선택적 per-window scope | - | `window:closed` (scope purge) |
+| **fs** | - | - | - |
+
+### 플러그인 API 설계 결정
+
+#### 핸들 vs id — **id 기반 채택**
+
+BrowserWindow API는 `id: u32`를 첫 인자로 받는 방식. 이유:
+- Plugin이 handle을 오래 보관하다 creator가 close → handle 무효화 추적(generation counter) 필요 → 구현 복잡
+- id는 invalid 시 명확한 `error.WindowDestroyed` 반환으로 방어적
+- Rust/Go/Node SDK는 얇은 wrapper로 OO 스타일 제공 (`BrowserWindow { id }`) — 코어는 단순하게 유지
+
+```zig
+// 코어 (Zig) — id 기반
+suji.window().set_title(id, "Hello");
+
+// Rust SDK — OO wrapper (내부는 id)
+BrowserWindow::from_id(id)?.set_title("Hello");
+```
+
+#### 비동기 완료는 이벤트 폴백
+
+`loadURL`, `capturePage`, `print` 같은 비동기 메서드는 **vtable은 sync 호출**로 두고,
+완료 시점은 이벤트로 알린다 (Electron 스타일).
+
+```zig
+suji.window().load_url(id, "https://example.com");
+suji.on("window:did-finish-load", |ev| { ... });   // data.windowId로 구분
+```
+
+이유: vtable에 callback 인자를 넣으면 크로스 언어 callback 처리(lifetime/ownership) 복잡도 급증.
+이벤트는 기존 EventBus 경로 재사용.
+
+#### SDK 편의 wrapper: `onWindowClosed` 등
+
+매 플러그인이 `suji.on("window:closed", ...)` 수동 구독하지 않도록 SDK가 편의 wrapper 제공:
+
+```zig
+// plugin init에서
+suji.onWindowClosed(|id| {
+    // per-window state purge 등
+});
+```
+
+내부적으로는 EventBus 구독. 기본 훅 제공만 할 뿐 별도 자료구조 유지 X.
+
+#### `executeJavaScript`는 플러그인 필수 기능으로 지정
+
+menu 클릭 시 대상 창 reload, notification에서 커스텀 스크립트 주입 등 플러그인 시나리오가 많음.
+`SujiWindowAPI.execute_javascript(id, code, null)` 형태로 Phase 4 webContents에 포함되며,
+플러그인 유즈케이스로도 공식 명시.
+
+---
+
+## 엣지 케이스
+
+구현 전 반드시 명세/테스트해야 하는 케이스들.
+
+### Critical (반드시 처리)
+
+| 케이스 | 실패 방식 | 정책 |
+|---|---|---|
+| 같은 `name`으로 동시 create (두 스레드) | HashMap race, 두 개 창 생성 | `create` 전체를 WindowManager write lock으로 감쌈. name 검사 + 삽입 원자적 |
+| create 완료 전 close 요청 | `create_browser_sync` 리턴 전 close 시도 | `creating` 플래그 + create 완료 후에만 close 유효. 대기 중이면 pending queue |
+| `backend_destroy` 없이 프로세스 종료 | orphan 창/리스너, cef 프레임워크 cleanup 누락 | main.zig 정상 종료 경로에서 `WindowManager.destroyAll` 명시 호출 |
+| closed 창에 `emit {to: id}` | stale id로 eval 시도 → crash 가능 | **silent no-op + debug 로그**. Electron과 동일 정책 |
+| id 재사용으로 stale 참조가 신규 창 가리킴 | Plugin이 old id 보관 중 → 새 창이 같은 id 받으면 오동작 | **monotonic u32 (재사용 없음)**. 실질적으로 무한 |
+
+### High
+
+| 케이스 | 처리 |
+|---|---|
+| 부모 close 시 자식 창 | **재귀 close 없음, 시각 관계만** (WINDOW_API.md 원칙). 자식은 독립 존속 |
+| 포커스된 창 destroy | OS가 다음 창으로 포커스 이전. Suji가 `window:focus {newId}` 이벤트 발행 보장 |
+| 모달 중 parent destroy | 자식 모달 먼저 close. macOS는 자동, Linux/Windows는 명시 처리 |
+| fullscreen 중 close/destroy | OS별 상이. 각 OS 테스트 필수 |
+| `show: false`로 생성 직후 close | 렌더링 시작 전에도 `window:closed` 이벤트 정상 발행 |
+| iframe 내부에서 invoke | top frame의 browser id로 `__window` 태깅 (iframe 구분 필요하면 별도 메커니즘) |
+
+### Medium
+
+| 케이스 | 처리 |
+|---|---|
+| 멀티 모니터 이동 / DPI 변경 | `window:display-metrics-changed` 이벤트 발행, size/position 재계산 |
+| OS별 max window 수 | macOS/Windows 사실상 무제한, Linux WM 의존. 앱 레벨 상한 없음. 스트레스 테스트만 |
+| 같은 이벤트 namespace (전역 vs 창별) | V1은 전역만 (`window:close`). 창별(`window:{id}:close`)은 V2 필요 시 |
+| preventDefault 후 다시 close 호출 | 재시도 정상 close 가능. default_prevented는 매 발화마다 초기화 |
+
+### Low
+
+| 케이스 | 처리 |
+|---|---|
+| 시스템 sleep/wake, 화면 잠금 | CEF가 알아서 처리. 추가 이벤트 발행 안 함 |
+| 스크린 해상도 변경 중 창 위치 | OS가 처리. Suji는 display-metrics-changed 이벤트 발행 후 앱이 반응 |
+| GPU 컨텍스트 소실 | CEF 내부에서 복구. 앱 레벨 처리 불필요 |
+
+---
+
+## TDD 전략
+
+3개 층 분리. inner loop는 빠른 층에서만.
+
+### 1단계: WindowManager 단위 테스트 (✅ 완전 TDD 가능)
+
+CEF 없이 순수 로직만. 밀리초 단위 red/green cycle.
+
+대상:
+- HashMap put/get, name lookup, forceNew 정책
+- id 단조 생성 (재사용 없음)
+- 설정 merge/override (forceNew=false + 옵션 다를 때 무시 정책)
+- 이벤트 발행 (mock EventBus)
+- `SujiEvent.default_prevented` 취소 동작
+- closed 창 API 호출 시 `error.WindowDestroyed`
+- 동시성: write lock으로 race 방지 (concurrent test)
+
+예:
+```zig
+test "create with same name returns existing id (singleton)" {
+    var wm = WindowManager.initForTest(testing.allocator);
+    defer wm.deinit();
+    const id1 = try wm.create(.{ .name = "settings" });
+    const id2 = try wm.create(.{ .name = "settings", .force_new = false });
+    try expectEqual(id1, id2);
+}
+
+test "closed window methods return WindowDestroyed" {
+    var wm = WindowManager.initForTest(testing.allocator);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try expectError(error.WindowDestroyed, wm.setTitle(id, "x"));
+}
+```
+
+파일: `tests/window_manager_test.zig`.
+
+### 2단계: IPC 경로 통합 테스트 (🟡 반쯤 TDD 가능)
+
+CEF 창은 안 띄우고 IPC handler 경로만 검증.
+
+대상:
+- `__core__:create_window` 요청 → id 응답
+- `__window` 자동 태깅 (mock sender browser id로 request 주입 → plugin handler가 받은 data에 포함 확인)
+- `emit {to: id}` 라우팅 (실제 WebView eval은 mock, "어느 browser id로 호출됐는지"만 검증)
+- Plugin이 `suji.window()` 호출해서 WindowManager 동작 (vtable 연결 확인)
+
+필요 mock:
+- MockBrowser (id만 가진 stub) — 10줄
+- MockWebViewEval (호출 기록 스파이) — 20줄
+
+**Mock 투자는 Light 수준**. 필요해지면 확장.
+
+파일: `tests/window_ipc_test.zig`.
+
+### 3단계: E2E (❌ TDD 아닌 회귀 방지용)
+
+각 Phase 끝에 실제 창 띄워서 회귀 방지. **inner loop 용도 X**.
+
+파일: `tests/e2e/cef-ipc.test.ts`에 window describe 섹션 추가.
+
+---
+
+## E2E 범위
+
+현재 36개 E2E에 Phase 2 완료 시 25개 정도 추가 예상.
+
+### 필수 (macOS CI 포함)
+
+- **창 CRUD**: create → 이벤트 → close → destroy 흐름
+- **name 싱글턴**: forceNew=false 중복 시 기존 id 반환
+- **기본 제어**: setTitle / setSize / setPosition / show / hide / focus
+- **라이프사이클 이벤트**: created, closed, focus, blur, resize 각 data에 `windowId`/`name` 포함
+- **preventDefault**: close 이벤트 취소 시 창 유지
+- **멀티 윈도우 IPC**:
+  - 창 A에서 invoke → plugin handler가 받는 request의 `__window`에 A의 id 태깅 확인
+  - `suji.emit("x", data, {to: B})` → B만 수신, 나머지 창 수신 X
+  - broadcast emit → 모든 창 수신
+- **quitOnAllWindowsClosed**: 마지막 창 close 시 프로세스 종료 (타임아웃 기반)
+- **플러그인 통합 (state 대표)**:
+  - `state.set("k", "v", {scope: "window:3"})`
+  - window 3 close → 해당 scope 자동 purge 검증
+- **동시성 회귀**:
+  - 10개 창 동시 생성
+  - 같은 name으로 동시 create 10회 → id 1개만 생성되는지
+
+### 권장 (macOS CI만)
+
+- 부모-자식 시각 관계 (parent 이동 시 child 따라옴)
+- 프레임리스/투명 창 생성 성공 (픽셀 비교는 X)
+- 모달 (parent 상호작용 차단)
+- Cmd+W, Cmd+Q 기본 단축키 동작
+
+### 제외 (ROI 낮음 또는 flaky)
+
+- 픽셀 렌더링 정확성 (screenshot 비교) — 환경별 편차 커서 flaky
+- 애니메이션 타이밍
+- OS 벤더 UI (vibrancy 색상, traffic light 정확 위치)
+- GPU 가속 fps 측정 (CI GPU 없음)
+- Linux GUI (xvfb는 SwiftShader라 진실된 렌더링 X)
+- Windows GUI (CI session 0 제약)
+
+### 실행 환경
+
+- **macOS CI (macos-14)**: 위 "필수" + "권장" 전부 실행. 실제 Apple GPU
+- **Linux CI (ubuntu-24.04)**: 컴파일 + 단위 + state plugin 테스트만. window 관련 E2E 제외
+- **Windows CI (windows-latest)**: 컴파일 + 단위만. E2E 불가
+
+---
+
 ## 각 SDK API 예시
 
 ### Zig (코어 내부)

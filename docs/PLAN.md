@@ -388,12 +388,21 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 - [ ] 플러그인: menu — 메뉴바 (CEF `cef_menu_model_capi.h` 사용, 기본 NSMenu Edit 메뉴는 이미 제공)
 - [~] window — 멀티 윈도우 + BrowserWindow API (`docs/WINDOW_API.md`)
   - [x] Phase 1: 설계 확정 + PoC (`__core__:create_window`, `cef.zig:createNewWindow`, Electron 방식 동등성, name 중복 싱글턴)
-  - [ ] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태)
+  - [ ] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태) + IPC `__window` 자동 태깅 + `windows[]` 배열 파싱
+  - [ ] Phase 2.5: 멀티 윈도우 데이터 인프라
+    - [ ] `suji.emit(event, data, {to: winId})` / `sendTo` — Electron `webContents.send` 대응
+    - [ ] state 플러그인 scope 확장 (`global` / `window:{id}` / `session`)
+    - [ ] `SujiCore.get_window_api` — 플러그인이 BrowserWindow 조작 가능
+    - [ ] 생명주기 이벤트 data에 `windowId`/`name` 필수 포함 표준화
   - [ ] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식)
   - [ ] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
+  - **설계 비제공 (문서화 완료)**: 렌더러 직접 통신, MessagePort, preload.js, contextBridge — `docs/WINDOW_API.md#설계-비제공-항목과-이유`
+  - **V2 검토**: `cross_origin_isolation` 플래그 (SharedArrayBuffer 활성화), `inject` 초기 스크립트 옵션
+  - **엣지 케이스 / TDD 전략 / E2E 범위**: `docs/WINDOW_API.md` 해당 섹션 참조
+  - **핵심 결정사항**: id 기반 API (핸들 X), id monotonic (재사용 X), async 메서드는 이벤트 폴백, create write lock, closed 창 emit은 silent no-op
 - [ ] CLI 도구
   - [x] `suji init` — 프로젝트 스캐폴딩 (rust/go/multi)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
