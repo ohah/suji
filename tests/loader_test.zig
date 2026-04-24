@@ -197,7 +197,7 @@ test "SujiCore.get_io tracks most recent setGlobal" {
 // 수십 바이트씩 GPA leak 리포트가 쌓였다.
 // 수정: 중복 체크 → 통과 시에만 dupe + put. put 실패 시도 free.
 
-test "coreRegister: allocator.dupe must come AFTER duplicate check" {
+test "coreRegister: putRoute (dupe+put) must come AFTER duplicate check" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/backends/loader.zig",
@@ -214,10 +214,63 @@ test "coreRegister: allocator.dupe must come AFTER duplicate check" {
     const body = source[fn_start..body_end];
 
     const dup_check_pos = std.mem.indexOf(u8, body, "reg.routes.getPtr(") orelse return error.DuplicateCheckMissing;
-    const dupe_pos = std.mem.indexOf(u8, body, "reg.allocator.dupe(u8, channel)") orelse return error.DupeCallMissing;
+    const put_pos = std.mem.indexOf(u8, body, "reg.putRoute(") orelse return error.PutRouteCallMissing;
 
-    // dupe가 duplicate 체크 뒤에 와야 early return 경로에서 누수 없음.
-    try std.testing.expect(dup_check_pos < dupe_pos);
+    // putRoute가 duplicate 체크 뒤에 와야 early return 경로에서 누수 없음.
+    try std.testing.expect(dup_check_pos < put_pos);
+}
+
+// putRoute 자체가 dupe → put 하는지 정적 검증.
+test "putRoute: dupe key into HashMap ownership" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/backends/loader.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const marker = "pub fn putRoute(";
+    const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.PutRouteNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + marker.len, "\n    pub fn ") orelse
+        std.mem.indexOfPos(u8, source, fn_start + marker.len, "\n    fn ") orelse
+        source.len;
+    const body = source[fn_start..body_end];
+
+    if (std.mem.indexOf(u8, body, "allocator.dupe(u8,") == null) return error.DupeMissing;
+    if (std.mem.indexOf(u8, body, "errdefer self.allocator.free") == null) return error.ErrdeferMissing;
+    if (std.mem.indexOf(u8, body, "self.routes.put(owned") == null) return error.PutMissing;
+}
+
+// BackendRegistry.deinit은 routes/embed_runtimes의 duped 키를 모두 free해야 한다.
+test "BackendRegistry.deinit: frees HashMap keys (routes + embed_runtimes)" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/backends/loader.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const marker = "pub fn deinit(self: *BackendRegistry)";
+    const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.DeinitNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + marker.len, "\n    pub fn ") orelse
+        std.mem.indexOfPos(u8, source, fn_start + marker.len, "\n    fn ") orelse
+        source.len;
+    const body = source[fn_start..body_end];
+
+    // routes 키 순회 free
+    if (std.mem.indexOf(u8, body, "self.routes.iterator()") == null) return error.RoutesIterMissing;
+    // embed_runtimes 키 순회 free
+    if (std.mem.indexOf(u8, body, "embed_runtimes.iterator()") == null) return error.EmbedRuntimesIterMissing;
+    // 실제 free 호출
+    var free_count: usize = 0;
+    var search_from: usize = 0;
+    while (std.mem.indexOfPos(u8, body, search_from, "self.allocator.free(entry.key_ptr.*)")) |pos| {
+        free_count += 1;
+        search_from = pos + 1;
+    }
+    try std.testing.expect(free_count >= 2);
 }
 
 // ============================================

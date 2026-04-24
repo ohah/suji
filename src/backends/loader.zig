@@ -242,6 +242,15 @@ pub const BackendRegistry = struct {
         try self.backends.put(name, backend);
     }
 
+    /// 라우팅 엔트리 추가 (키를 dupe하여 HashMap이 소유권을 가짐).
+    /// deinit이 키를 free하려면 반드시 이 경로로 put해야 한다. 문자열 리터럴을
+    /// 직접 `reg.routes.put(...)`하면 deinit이 잘못된 포인터를 free하려다 crash.
+    pub fn putRoute(self: *BackendRegistry, channel: []const u8, backend: []const u8) !void {
+        const owned = try self.allocator.dupe(u8, channel);
+        errdefer self.allocator.free(owned);
+        try self.routes.put(owned, backend);
+    }
+
     /// 특정 백엔드의 라우팅 엔트리 제거
     pub fn clearRoutesFor(self: *BackendRegistry, backend_name: []const u8) void {
         var iter = self.routes.iterator();
@@ -253,13 +262,32 @@ pub const BackendRegistry = struct {
     }
 
     pub fn deinit(self: *BackendRegistry) void {
-        var iter = self.backends.iterator();
-        while (iter.next()) |entry| {
-            var backend = entry.value_ptr;
-            backend.deinit();
-        }
+        // 프로세스 종료 중에는 backend.deinit()을 호출하지 않는다.
+        //   - backend.deinit() → dlclose → dylib code region이 unmap됨
+        //   - Rust tokio worker / Go goroutine / Node 등 남은 워커 스레드가 그 뒤에도
+        //     살아서 스케줄되면 unmap된 code를 실행하다 SIGSEGV (librust_backend 케이스).
+        //   - OS가 exit() 시 모든 매핑을 자동 회수하므로 graceful dlclose는 불필요.
+        //   - 핫 리로드 경로(registry.reload)는 여전히 개별 backend.deinit을 호출함.
         self.backends.deinit();
+
+        // routes 키는 coreRegister에서 dupe한 소유 문자열. HashMap.deinit만으론
+        // 키 메모리가 해제되지 않음 → 전수 순회하며 직접 free.
+        var routes_iter = self.routes.iterator();
+        while (routes_iter.next()) |entry| {
+            self.allocator.free(entry.key_ptr.*);
+        }
         self.routes.deinit();
+
+        // embed_runtimes는 프로세스 전역. 마지막 registry가 deinit될 때 비운다.
+        if (embed_runtimes_initialized) {
+            var er_iter = embed_runtimes.iterator();
+            while (er_iter.next()) |entry| {
+                self.allocator.free(entry.key_ptr.*);
+            }
+            embed_runtimes.deinit();
+            embed_runtimes_initialized = false;
+        }
+
         global = null;
     }
 
@@ -389,10 +417,7 @@ pub const BackendRegistry = struct {
             return;
         }
 
-        const owned_channel = reg.allocator.dupe(u8, channel) catch return;
-        reg.routes.put(owned_channel, backend) catch {
-            reg.allocator.free(owned_channel);
-        };
+        reg.putRoute(channel, backend) catch {};
     }
 
     // C ABI 콜백: 응답 메모리 해제 (coreInvoke가 복사한 Suji 소유 메모리)

@@ -186,20 +186,11 @@ test "Watcher start and stop quickly" {
 test "BackendRegistry clearRoutesFor" {
     const loader = @import("loader");
     var reg = loader.BackendRegistry.init(std.testing.allocator, io);
-    defer {
-        // routes 키 메모리 해제 (BackendRegistry.deinit은 키를 해제하지 않음)
-        var iter = reg.routes.iterator();
-        while (iter.next()) |entry| std.testing.allocator.free(entry.key_ptr.*);
-        reg.deinit();
-    }
+    defer reg.deinit();
 
-    // 라우팅 엔트리 수동 추가
-    const ch1 = try std.testing.allocator.dupe(u8, "ping");
-    const ch2 = try std.testing.allocator.dupe(u8, "greet");
-    const ch3 = try std.testing.allocator.dupe(u8, "hello");
-    try reg.routes.put(ch1, "zig");
-    try reg.routes.put(ch2, "zig");
-    try reg.routes.put(ch3, "rust");
+    try reg.putRoute("ping", "zig");
+    try reg.putRoute("greet", "zig");
+    try reg.putRoute("hello", "rust");
 
     // zig 라우트만 제거
     reg.clearRoutesFor("zig");
@@ -214,14 +205,9 @@ test "BackendRegistry clearRoutesFor" {
 test "BackendRegistry clearRoutesFor nonexistent backend" {
     const loader = @import("loader");
     var reg = loader.BackendRegistry.init(std.testing.allocator, io);
-    defer {
-        var iter = reg.routes.iterator();
-        while (iter.next()) |entry| std.testing.allocator.free(entry.key_ptr.*);
-        reg.deinit();
-    }
+    defer reg.deinit();
 
-    const ch = try std.testing.allocator.dupe(u8, "ping");
-    try reg.routes.put(ch, "zig");
+    try reg.putRoute("ping", "zig");
 
     // 없는 백엔드 제거 — 크래시 안 남
     reg.clearRoutesFor("nonexistent");
@@ -321,14 +307,9 @@ test "BackendRegistry reload nonexistent backend loads fresh" {
 test "BackendRegistry clearRoutesFor multiple calls safe" {
     const loader = @import("loader");
     var reg = loader.BackendRegistry.init(std.testing.allocator, io);
-    defer {
-        var iter = reg.routes.iterator();
-        while (iter.next()) |entry| std.testing.allocator.free(entry.key_ptr.*);
-        reg.deinit();
-    }
+    defer reg.deinit();
 
-    const ch = try std.testing.allocator.dupe(u8, "test");
-    try reg.routes.put(ch, "backend");
+    try reg.putRoute("test", "backend");
 
     // 여러 번 호출해도 크래시 안 남
     reg.clearRoutesFor("backend");

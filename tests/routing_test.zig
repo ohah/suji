@@ -21,9 +21,9 @@ test "BackendRegistry routes put and get" {
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
-    try reg.routes.put("ping", "zig");
-    try reg.routes.put("greet", "rust");
-    try reg.routes.put("stats", "go");
+    try reg.putRoute("ping", "zig");
+    try reg.putRoute("greet", "rust");
+    try reg.putRoute("stats", "go");
 
     try std.testing.expectEqualStrings("zig", reg.getBackendForChannel("ping").?);
     try std.testing.expectEqualStrings("rust", reg.getBackendForChannel("greet").?);
@@ -39,7 +39,7 @@ test "BackendRegistry duplicate route rejected" {
 
     // 첫 번째 등록
     reg.registering_backend = "zig";
-    try reg.routes.put("ping", "zig");
+    try reg.putRoute("ping", "zig");
     reg.registering_backend = null;
 
     // 두 번째 등록 시도 — coreRegister가 중복 거부
@@ -57,8 +57,8 @@ test "BackendRegistry duplicate route rejected" {
 test "BackendRegistry routes deinit clears" {
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
 
-    try reg.routes.put("ping", "zig");
-    try reg.routes.put("greet", "rust");
+    try reg.putRoute("ping", "zig");
+    try reg.putRoute("greet", "rust");
 
     reg.deinit();
     // deinit 후 접근 불가 (use-after-free 방지를 위해 재생성)
@@ -71,9 +71,9 @@ test "BackendRegistry multiple channels same backend" {
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
 
-    try reg.routes.put("ping", "zig");
-    try reg.routes.put("greet", "zig");
-    try reg.routes.put("add", "zig");
+    try reg.putRoute("ping", "zig");
+    try reg.putRoute("greet", "zig");
+    try reg.putRoute("add", "zig");
 
     try std.testing.expectEqualStrings("zig", reg.getBackendForChannel("ping").?);
     try std.testing.expectEqualStrings("zig", reg.getBackendForChannel("greet").?);
