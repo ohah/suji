@@ -381,6 +381,8 @@ pub const BackendRegistry = struct {
         const backend = reg.registering_backend orelse return;
 
         if (reg.routes.getPtr(channel)) |existing_ptr| {
+            // 이미 ''로 차단된 채널은 재경고 불필요 (이전 충돌에서 처리됨).
+            if (existing_ptr.*.len == 0) return;
             // 중복: 값을 빈 문자열로 덮어쓰기 (자동 라우팅 차단). target 옵션 강제.
             std.debug.print("[suji] ERROR: channel '{s}' duplicate ('{s}' and '{s}') — use target option\n", .{ channel, existing_ptr.*, backend });
             existing_ptr.* = "";

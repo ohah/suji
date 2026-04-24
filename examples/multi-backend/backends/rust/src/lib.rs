@@ -4,8 +4,10 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::OnceLock;
 
+// pub — `backend_init`이 pub extern이면서 파라미터 타입이 private이면 Rust linter가
+// "type `SujiCore` is more private than the item" 경고. public으로 맞춤.
 #[repr(C)]
-struct SujiCore {
+pub struct SujiCore {
     invoke: extern "C" fn(*const c_char, *const c_char) -> *const c_char,
     free: extern "C" fn(*const c_char),
     emit: extern "C" fn(*const c_char, *const c_char),
