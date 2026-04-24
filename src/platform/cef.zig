@@ -434,10 +434,22 @@ fn onBeforeCommandLineProcessing(
     setCefString(&wildcard, "*");
     cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
 
-    // GPU 활성화: CEF가 `@executable_path/libEGL.dylib`, `libGLESv2.dylib` 등을 찾는데,
-    // build.zig의 post-install이 zig-out/bin/ 옆에 절대 경로 심링크를 배치하고,
-    // .app 번들은 bundle_macos.zig의 symlinkGpuLibs가 Contents/MacOS/ 옆에 배치한다.
-    // WebGL/CSS 애니메이션/비디오 가속이 정상 동작.
+    // GPU 가속 정책:
+    // - macOS: 활성화. build.zig post-install + bundle_macos.zig가 libEGL/libGLESv2/
+    //   libvk_swiftshader + vk_swiftshader_icd.json을 실행파일 옆에 심링크로 배치.
+    //   ANGLE Metal 경로로 Apple GPU 가속 (WebGL 2.0 확인됨).
+    // - Linux/Windows: GPU asset 배치 로직 미구현. disable-gpu로 소프트웨어 렌더링
+    //   폴백 (CEF가 자체 SwiftShader로 crash 없이 실행). 향후 OS별 asset 배치 추가 시
+    //   아래 조건 블록 제거.
+    if (builtin.os.tag != .macos) {
+        var disable_gpu: c.cef_string_t = .{};
+        setCefString(&disable_gpu, "disable-gpu");
+        cmd.append_switch.?(cmd, &disable_gpu);
+
+        var disable_gpu_compositing: c.cef_string_t = .{};
+        setCefString(&disable_gpu_compositing, "disable-gpu-compositing");
+        cmd.append_switch.?(cmd, &disable_gpu_compositing);
+    }
 }
 
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {
