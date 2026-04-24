@@ -399,7 +399,23 @@ static void drain_ipc_queue_inline() {
 }
 
 // suji.invokeSync(backend, request) → string (동기, 핸들러 내부용)
-// 호출 후 IPC 큐를 드레인하여 양방향 크로스콜 deadlock 방지
+//
+// 양방향 크로스콜 deadlock 방지 전략:
+//
+// 1. 동일 스레드 재귀 (Zig → Rust → Go → Node 동기 체인):
+//    g_in_sync_invoke thread_local 플래그로 감지해서 suji_node_invoke가
+//    inline(V8 Locker 재진입) 경로로 빠짐. 이 경로는 js_suji_invoke_sync가
+//    어차피 이 스레드에서 block 중이므로 큐/event loop 불필요.
+//
+// 2. 다른 스레드 재진입 (Rust가 std::thread::spawn으로 Node 재진입 등):
+//    워커 스레드에서 g_core.invoke를 실행하고, Node main thread는 완료될 때까지
+//    polling하며 큐를 주기적으로 drain. 외부 스레드가 queue에 push한 요청을
+//    main이 처리해줘야 워커의 invoke가 리턴된다.
+//
+// V8 Locker는 polling 중 다른 스레드가 isolate를 쓸 수 있게 잠시 놓아주지 않으면
+// 안 된다 (process_ipc_queue 등은 uv_async_send로 깨어나 자체적으로 Locker 잡음 —
+// 하지만 js_suji_invoke_sync가 Locker를 계속 쥐고 있으면 Blocked). 따라서 polling
+// 구간에서는 Unlocker로 isolate를 놓아주고, drain 직전/직후만 명시적으로 다시 잡는다.
 static void js_suji_invoke_sync(const v8::FunctionCallbackInfo<Value>& args) {
     Isolate* isolate = args.GetIsolate();
     if (!g_core.invoke) {
@@ -411,23 +427,48 @@ static void js_suji_invoke_sync(const v8::FunctionCallbackInfo<Value>& args) {
         return;
     }
 
-    String::Utf8Value backend(isolate, args[0]);
-    String::Utf8Value request(isolate, args[1]);
+    String::Utf8Value backend_utf(isolate, args[0]);
+    String::Utf8Value request_utf(isolate, args[1]);
+    std::string backend_str(*backend_utf, backend_utf.length());
+    std::string request_str(*request_utf, request_utf.length());
 
-    // 재진입 감지용 플래그 설정. 다른 백엔드가 체인 중에 다시 Node로 invoke하면
-    // 큐에 넣어도 이 스레드가 block 중이라 영원히 처리 안 됨.
-    // suji_node_invoke가 이 플래그를 보고 inline 실행으로 대체.
-    const bool prev_sync = g_in_sync_invoke;
-    g_in_sync_invoke = true;
-    const char* result = g_core.invoke(*backend, *request);
-    g_in_sync_invoke = prev_sync;
+    // 워커 스레드에서 g_core.invoke 실행, main thread는 drain polling.
+    std::atomic<bool> done{false};
+    std::string result_str;
+    bool has_result = false;
 
-    // invoke 중 외부 스레드에서 들어온 pending IPC 처리
-    drain_ipc_queue_inline();
+    std::thread worker([&]() {
+        // 워커 스레드도 체인 내 재진입 inline 경로를 쓸 수 있게 플래그 설정.
+        // (워커에서 Zig/Rust/Go를 통해 다시 Node로 들어오는 동기 체인 대비)
+        g_in_sync_invoke = true;
+        const char* r = g_core.invoke(backend_str.c_str(), request_str.c_str());
+        g_in_sync_invoke = false;
+        if (r) {
+            result_str.assign(r);
+            g_core.free(r);
+            has_result = true;
+        }
+        done.store(true, std::memory_order_release);
+    });
 
-    if (result) {
-        args.GetReturnValue().Set(String::NewFromUtf8(isolate, result).ToLocalChecked());
-        g_core.free(result);
+    // Main thread: worker가 끝날 때까지 큐 drain 반복.
+    // Unlocker로 V8 locker를 놓아야 다른 스레드의 process_ipc_queue가 Locker를
+    // 잡을 수 있다. 우리가 drain_ipc_queue_inline을 직접 호출할 때만 다시 잡는다.
+    while (!done.load(std::memory_order_acquire)) {
+        {
+            v8::Unlocker unlocker(isolate);
+            // 다른 스레드에서 uv_async_send가 Node event loop를 깨우고
+            // process_ipc_queue가 돌 수 있는 틈을 줌.
+            std::this_thread::sleep_for(std::chrono::microseconds(200));
+        }
+        // 추가 안전장치: 우리가 직접 inline drain (process_ipc_queue와 중복 safe,
+        // swap으로 큐를 비움).
+        drain_ipc_queue_inline();
+    }
+    worker.join();
+
+    if (has_result) {
+        args.GetReturnValue().Set(String::NewFromUtf8(isolate, result_str.c_str()).ToLocalChecked());
     } else {
         args.GetReturnValue().SetNull();
     }

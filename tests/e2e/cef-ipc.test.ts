@@ -356,6 +356,24 @@ describe("stress: deep recursive cross-backend chain", () => {
     expect(results.filter((r: string) => r === "ok")).toHaveLength(10);
   });
 
+  test("다른 스레드 재진입: Rust가 std::thread로 Node 호출 (Node 한가한 상태)", async () => {
+    // Node main이 block되지 않은 상태에서 sub-thread가 Node queue에 push.
+    // Node event loop가 uv_async_send로 깨어나 정상 처리 → deadlock 없음.
+    const resp: any = await invoke("rust-thread-node");
+    expect(resp.node_resp).toContain("pong");
+  }, 15000);
+
+  test("다른 스레드 재진입 + Node main block: deadlock 재현/수정 검증", async () => {
+    // 1) JS → Node main(invokeSync "rust-thread-node") 진입 → Node main thread block
+    // 2) Rust handler가 std::thread::spawn으로 sub-thread 생성, 거기서 core.invoke("node")
+    // 3) Node main이 block 중이면 queue drain 안 됨 → 30s timeout (수정 전)
+    // 수정 후: js_suji_invoke_sync가 워커 스레드에서 g_core.invoke 실행 + 메인이 polling drain
+    const resp: any = await invoke("node-thread-deadlock");
+    expect(resp.result).toBeDefined();
+    // 정상 응답이면 안쪽 Rust가 Node를 호출해서 ping 응답을 받은 것
+    expect(JSON.stringify(resp)).toContain("pong");
+  }, 15000);
+
   test("응답 메모리 누수 회귀 방지: 200회 체인 호출", async () => {
     // coreFree가 no-op였던 시절엔 매 크로스 호출마다 응답 strdup이 leak됨.
     // depth=2 × 200회 = coreInvoke→coreFree 왕복 최소 400회.

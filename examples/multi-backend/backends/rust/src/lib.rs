@@ -35,7 +35,7 @@ pub extern "C" fn backend_init(core: *const SujiCore) {
         let core_ref: &'static SujiCore = unsafe { std::mem::transmute(&*core) };
         let _ = CORE.set(core_ref);
         // 핸들러 채널 등록
-        for name in &["ping", "greet", "call_go", "collab", "emit_event", "rust-stress"] {
+        for name in &["ping", "greet", "call_go", "collab", "emit_event", "rust-stress", "rust-thread-node"] {
             let ch = CString::new(*name).unwrap();
             (core_ref.register)(ch.as_ptr());
         }
@@ -56,6 +56,34 @@ pub extern "C" fn backend_handle_ipc(request: *const c_char) -> *mut c_char {
     // 재진입 경로: 이미 tokio runtime thread 위에 있으면 block_on 재호출은 panic.
     // 체인에서 Rust → Go → Node → ... → Rust 로 돌아올 때 발생.
     // rust-stress는 동기 로직이라 block_on 없이 직접 처리.
+    // 별도 OS 스레드에서 Node 재진입 호출 — thread_local g_in_sync_invoke가 false인 경로
+    // 기술 부채 C (다른 스레드 재진입 deadlock) 재현 및 수정 검증용.
+    // 구조: Node main thread가 js_suji_invoke_sync("rust", ...) 로 block 중.
+    //       Rust는 std::thread::spawn으로 sub-thread 생성, 거기서 core.invoke("node", ...) 호출.
+    //       Sub-thread는 Node main이 queue를 처리해주기를 기다린다.
+    if cmd == "rust-thread-node" {
+        let result = std::thread::spawn(|| {
+            let core = CORE.get().unwrap();
+            let name = CString::new("node").unwrap();
+            let req = CString::new(r#"{"cmd":"node-ping"}"#).unwrap();
+            let resp = (core.invoke)(name.as_ptr(), req.as_ptr());
+            let out = if resp.is_null() {
+                String::from("null")
+            } else {
+                unsafe { CStr::from_ptr(resp) }.to_string_lossy().to_string()
+            };
+            // core.free는 Suji 코어 소유 메모리 해제 (length-prefix header)
+            if !resp.is_null() {
+                (core.free)(resp);
+            }
+            out
+        })
+        .join()
+        .unwrap_or_else(|_| "thread panic".into());
+        let wrapped = json!({"from":"rust","node_resp":result}).to_string();
+        return CString::new(wrapped).unwrap().into_raw();
+    }
+
     if cmd == "rust-stress" {
         let depth = parsed.get("depth").and_then(|v| v.as_i64()).unwrap_or(0);
         let result = if depth <= 0 {

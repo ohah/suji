@@ -83,6 +83,13 @@ handle('node-chain-all', () => {
 
 // 유틸리티
 
+// 기술 부채 C 재현: Node main thread가 invokeSync로 block 중일 때
+// 다른 OS 스레드에서 Node 재진입 invoke가 들어오면 queue는 쌓이지만 drain되지 않아 timeout.
+// 체인: JS → Node(invokeSync "rust") → Rust → std::thread → Node(재진입)
+handle('node-thread-deadlock', () => {
+  return { result: safeInvoke('rust', { cmd: 'rust-thread-node' }) };
+});
+
 // 스트레스 테스트: 재귀 크로스 호출 체인
 // 체인: node -> zig -> rust -> go -> node -> ... (4주기 반복)
 // depth를 1씩 감소하다 0이 되면 base 반환.

@@ -183,11 +183,22 @@ suji/
 - **옵션**: `suji.json`에 `"gpu": true/false` 설정 추가 고려
 
 ### Node.js 양방향 크로스 호출
-`suji.invokeSync()` 중 대상 백엔드가 Node로 콜백 시 같은 스레드에서 inline 실행
-(`g_in_sync_invoke` 플래그로 감지, V8 Locker 재진입). BackendRegistry는 `node` 백엔드에
-대한 `invoke` 폴백을 `node_invoke_fallback` 포인터로 받는다 (main이 주입).
-깊은 재귀 체인(node→zig→rust→go→node→... 최대 depth=40, 10사이클)까지 E2E로 검증됨
-(`tests/e2e/cef-ipc.test.ts` stress 섹션).
+`suji.invokeSync()`에 두 가지 deadlock 방지 경로:
+
+1. **동일 스레드 재귀** (Zig→Rust→Go→Node 동기 체인): `g_in_sync_invoke` thread_local
+   플래그로 감지, `suji_node_invoke`가 inline(V8 Locker 재진입)으로 handler 실행.
+2. **다른 스레드 재진입** (Rust `std::thread::spawn`에서 Node 호출 등): `js_suji_invoke_sync`가
+   워커 스레드에서 `g_core.invoke`를 실행하고 Node main thread는 V8 Unlocker로 isolate를
+   놓아준 뒤 `drain_ipc_queue_inline`을 polling. 외부 스레드가 push한 queue가 정상 drain.
+
+BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runtimes` 테이블로 관리
+(main이 `registerEmbedRuntime("node", ...)`로 주입).
+
+검증:
+- 깊은 재귀 체인(node→zig→rust→go→node→... 최대 depth=40, 10사이클)
+- 다른 스레드 재진입 (`rust-thread-node` + `node-thread-deadlock`)
+- 응답 메모리 누수 회귀 (200회 체인 호출)
+모두 `tests/e2e/cef-ipc.test.ts` stress 섹션에서 E2E 검증.
 
 ## 배포 / 설치
 
