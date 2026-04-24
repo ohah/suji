@@ -189,20 +189,28 @@ pub const EventBus = struct {
         self.listeners.deinit();
     }
 
-    // 내부 헬퍼
+    // 내부 헬퍼. OOM은 silent (addListener는 void 반환 유지) — 부분 실패 시 partial
+    // allocation 모두 해제해 leak 방지.
     fn addListener(self: *EventBus, event_name: []const u8, listener: Listener) void {
         if (self.listeners.getPtr(event_name)) |list| {
             list.append(self.allocator, listener) catch {};
-        } else {
-            var list = std.ArrayList(Listener).empty;
-            list.append(self.allocator, listener) catch {};
-            // event_name은 caller의 스택 버퍼일 수 있음 (backend SDK의 nullTerminate 경유).
-            // 바깥에 벗어나면 메모리 재사용되므로 키는 HashMap이 소유하도록 복사.
-            const owned_key = self.allocator.dupe(u8, event_name) catch return;
-            self.listeners.put(owned_key, list) catch {
-                self.allocator.free(owned_key);
-            };
+            return;
         }
+        // event_name은 caller의 스택 버퍼일 수 있음 (backend SDK의 nullTerminate 경유).
+        // 키는 HashMap이 소유하도록 복사.
+        var list = std.ArrayList(Listener).empty;
+        list.append(self.allocator, listener) catch {
+            list.deinit(self.allocator);
+            return;
+        };
+        const owned_key = self.allocator.dupe(u8, event_name) catch {
+            list.deinit(self.allocator);
+            return;
+        };
+        self.listeners.put(owned_key, list) catch {
+            self.allocator.free(owned_key);
+            list.deinit(self.allocator);
+        };
     }
 
     fn emitToJs(self: *EventBus, event_name: []const u8, data: []const u8) void {

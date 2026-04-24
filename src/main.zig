@@ -593,7 +593,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] starting frontend dev server...\n", .{});
     var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
-        try openWindow(allocator, &config, &registry, &event_bus, .dev);
+        try openWindow(allocator, &config, &event_bus, .dev);
         return;
     };
     defer frontend_proc.kill(runtime.io);
@@ -601,7 +601,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
     runtime.io.sleep(.fromSeconds(2), .awake) catch {};
 
-    try openWindow(allocator, &config, &registry, &event_bus, .dev);
+    try openWindow(allocator, &config, &event_bus, .dev);
 }
 
 // ============================================
@@ -714,7 +714,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     try loadPluginsFromConfig(allocator, &config, &registry, true);
     try loadBackendsFromConfig(allocator, &config, &registry, true);
 
-    try openWindow(allocator, &config, &registry, &event_bus, .dist);
+    try openWindow(allocator, &config, &event_bus, .dist);
 }
 
 const WindowMode = enum { dev, dist };
@@ -722,11 +722,9 @@ const WindowMode = enum { dev, dist };
 fn openWindow(
     allocator: std.mem.Allocator,
     config: *const suji.Config,
-    registry: *suji.BackendRegistry,
     event_bus: *suji.EventBus,
     mode: WindowMode,
 ) !void {
-    _ = registry; // 이미 runDev/runProd에서 setEventBus 했음. 파라미터는 기존 호출 시그니처 유지용
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
 
