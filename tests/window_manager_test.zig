@@ -345,7 +345,7 @@ test "destroyAll destroys all windows and leaves by_name empty" {
     _ = try wm.create(.{ .name = "b" });
     _ = try wm.create(.{});
 
-    wm.destroyAll();
+    try wm.destroyAll();
 
     try std.testing.expectEqual(@as(usize, 3), native.destroy_calls);
     try std.testing.expectEqual(@as(?u32, null), wm.fromName("a"));
@@ -466,7 +466,10 @@ test "create emits window:created with id" {
     try std.testing.expect(contains(sink.events.items[0].data, expected));
 }
 
-test "create with name emits window:created with name field" {
+test "window:created payload never contains name (Electron-style, id-only)" {
+    // Electron의 BrowserWindow 이벤트는 id만 전달. name singleton은 코어 편의 기능이지만
+    // payload에 넣으면 이스케이프/길이 문제가 생김 → 아예 빼고, 리스너가 필요하면
+    // wm.get(id).?.name을 조회.
     var native = TestNative{};
     var sink = TestSink{};
     defer sink.deinit();
@@ -475,7 +478,7 @@ test "create with name emits window:created with name field" {
     wm.setEventSink(sink.asSink());
 
     _ = try wm.create(.{ .name = "about" });
-    try std.testing.expect(contains(sink.events.items[0].data, "\"name\":\"about\""));
+    try std.testing.expect(!contains(sink.events.items[0].data, "\"name\""));
 }
 
 test "close emits cancelable window:close, then window:closed on success" {
@@ -561,7 +564,7 @@ test "destroyAll emits window:closed for each live window" {
     _ = try wm.create(.{});
     sink.events.clearRetainingCapacity();
 
-    wm.destroyAll();
+    try wm.destroyAll();
     var closed_count: usize = 0;
     for (sink.events.items) |e| {
         if (std.mem.eql(u8, e.name, "window:closed")) closed_count += 1;
@@ -777,7 +780,7 @@ test "create after destroyAll starts fresh" {
 
     const a = try wm.create(.{ .name = "foo" });
     _ = try wm.create(.{ .name = "bar" });
-    wm.destroyAll();
+    try wm.destroyAll();
 
     // 이전 name이 재사용 가능해야 함
     const c = try wm.create(.{ .name = "foo" });
@@ -871,7 +874,7 @@ test "destroyAll event payloads carry each windowId" {
     const id2 = try wm.create(.{});
     sink.reset();
 
-    wm.destroyAll();
+    try wm.destroyAll();
 
     // 각 창마다 window:closed 하나씩, payload에 해당 id 포함
     try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
@@ -997,9 +1000,9 @@ test "create propagates OOM, leaks no memory, and reclaims native handle" {
 // JSON escape 버그 재현/회귀
 // ============================================
 
-test "window:created payload with quoted name is valid JSON" {
-    // name에 `"` 같은 JSON 특수문자가 들어가면 raw 보간된 payload는 깨진 JSON이 된다.
-    // payload는 프론트엔드 IPC 수신부가 JSON.parse하므로 항상 valid해야 함.
+test "window:created payload is valid JSON regardless of name content/length" {
+    // Electron-style: payload에 name이 들어가지 않으므로 이스케이프/truncate 이슈 자체 X.
+    // name이 특수문자를 포함하거나 매우 길어도 payload는 항상 valid JSON이어야 한다.
     var native = TestNative{};
     var sink = TestSink{};
     defer sink.deinit();
@@ -1007,18 +1010,23 @@ test "window:created payload with quoted name is valid JSON" {
     defer wm.deinit();
     wm.setEventSink(sink.asSink());
 
-    _ = try wm.create(.{ .name = "foo\"bar" });
-    const payload = sink.events.items[0].data;
+    // (a) JSON 특수문자
+    _ = try wm.create(.{ .name = "foo\"bar\\baz\n" });
+    // (b) 고정 버퍼 크기(512)를 훨씬 초과하는 name
+    const long = "x" ** 4096;
+    _ = try wm.create(.{ .name = long });
 
-    const Parsed = struct { windowId: u32, name: []const u8 };
-    const parsed = try std.json.parseFromSlice(
-        Parsed,
-        std.testing.allocator,
-        payload,
-        .{},
-    );
-    defer parsed.deinit();
-    try std.testing.expectEqualStrings("foo\"bar", parsed.value.name);
+    const Parsed = struct { windowId: u32 };
+    for (sink.events.items) |ev| {
+        const parsed = try std.json.parseFromSlice(
+            Parsed,
+            std.testing.allocator,
+            ev.data,
+            .{ .ignore_unknown_fields = true },
+        );
+        defer parsed.deinit();
+        try std.testing.expect(parsed.value.windowId > 0);
+    }
 }
 
 // ============================================
@@ -1101,4 +1109,122 @@ test "by_name OOM must not silently break singleton policy" {
             // OOM 반환 — 정상 실패 경로
         }
     }
+}
+
+// ============================================
+// destroyAll OOM — 일관된 에러 전파 (half-state 금지)
+// ============================================
+
+test "destroyAll returns OOM when capacity reservation fails, leaves windows alive" {
+    // destroyAll이 closed_ids.ensureTotalCapacity 실패 시 조용히 스킵하면
+    // 창은 파괴됐는데 window:closed 이벤트가 안 발화되는 half-state가 된다.
+    // Electron식: OOM은 fatal. 코어는 에러 전파, 호출자(앱)가 abort 결정.
+    //
+    // 계약: destroyAll이 에러 반환 시 창은 아무것도 파괴하지 않는다 (all-or-nothing).
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+
+    // probe: destroyAll 경로 total_allocs 측정
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = std.math.maxInt(usize) });
+    var wm_probe = WindowManager.init(probe.allocator(), std.testing.io, native.asNative());
+    wm_probe.setEventSink(sink.asSink());
+    _ = try wm_probe.create(.{});
+    _ = try wm_probe.create(.{});
+    const allocs_before = probe.alloc_index;
+    try wm_probe.destroyAll();
+    const destroyall_allocs = probe.alloc_index - allocs_before;
+    wm_probe.deinit();
+    sink.reset();
+
+    // destroyAll 경로 첫 alloc 실패 유도
+    native = .{};
+    var one = OneShotFail{ .backing = std.testing.allocator, .fail_at = allocs_before };
+    var wm = WindowManager.init(one.allocator(), std.testing.io, native.asNative());
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{});
+    _ = try wm.create(.{});
+    sink.reset();
+
+    const res = wm.destroyAll();
+    try std.testing.expectError(window.Error.OutOfMemory, res);
+
+    // 창이 실제 파괴되지 않아야 (all-or-nothing)
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_calls);
+    // 이벤트도 발화 안 됨 (한 창만 부분 발화 금지)
+    var closed_count: usize = 0;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, "window:closed")) closed_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 0), closed_count);
+
+    _ = destroyall_allocs;
+}
+
+// ============================================
+// 동시 close + preventDefault — 모든 스레드가 취소돼야 함 (설계 검증)
+// ============================================
+
+const ConcurrentPreventCtx = struct {
+    wm: *WindowManager,
+    id: u32,
+    cancelled: std.atomic.Value(usize) = .init(0),
+    succeeded: std.atomic.Value(usize) = .init(0),
+    errored: std.atomic.Value(usize) = .init(0),
+
+    fn run(self: *ConcurrentPreventCtx) void {
+        if (self.wm.close(self.id)) |ok| {
+            if (ok) {
+                _ = self.succeeded.fetchAdd(1, .acq_rel);
+            } else {
+                _ = self.cancelled.fetchAdd(1, .acq_rel);
+            }
+        } else |_| {
+            _ = self.errored.fetchAdd(1, .acq_rel);
+        }
+    }
+};
+
+/// 모든 cancelable 이벤트에 preventDefault를 호출하는 thread-safe sink.
+/// TestSink는 ArrayList append에 mutex가 없어 동시 발화 테스트에서 crash.
+const PreventAllSink = struct {
+    fn asSink() window.EventSink {
+        return .{ .vtable = &vtable, .ctx = null };
+    }
+    const vtable: window.EventSink.VTable = .{
+        .emit = onEmit,
+        .emit_cancelable = onEmitCancelable,
+    };
+    fn onEmit(_: ?*anyopaque, _: []const u8, _: []const u8) void {}
+    fn onEmitCancelable(_: ?*anyopaque, _: []const u8, _: []const u8, ev: *window.SujiEvent) void {
+        ev.preventDefault();
+    }
+};
+
+test "concurrent close with preventDefault cancels on every thread" {
+    // 모든 스레드가 같은 id로 close → listener가 항상 preventDefault → 어떤 스레드도
+    // 실제 파괴 못 해야 함 (close는 false 반환).
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(PreventAllSink.asSink());
+
+    const id = try wm.create(.{});
+
+    const THREAD_COUNT = 16;
+    var threads: [THREAD_COUNT]std.Thread = undefined;
+    var ctx = ConcurrentPreventCtx{ .wm = &wm, .id = id };
+
+    for (0..THREAD_COUNT) |i| {
+        threads[i] = try std.Thread.spawn(.{}, ConcurrentPreventCtx.run, .{&ctx});
+    }
+    for (threads) |t| t.join();
+
+    try std.testing.expectEqual(@as(usize, THREAD_COUNT), ctx.cancelled.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 0), ctx.succeeded.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 0), ctx.errored.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_calls);
+    try std.testing.expect(!wm.get(id).?.destroyed);
 }

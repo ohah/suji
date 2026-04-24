@@ -180,7 +180,7 @@ pub const WindowManager = struct {
         // forceNew=true인 경우 by_name 등록 X + Window.name=null (name 탈취 방지)
         const effective_name: ?[]const u8 = if (opts.force_new) null else requested_name;
 
-        const CreateResult = struct { id: u32, is_new: bool, name: ?[]const u8 };
+        const CreateResult = struct { id: u32, is_new: bool };
         const result: CreateResult = blk: {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
@@ -188,7 +188,7 @@ pub const WindowManager = struct {
             // name 싱글턴 정책 (forceNew=false 경로만 도달)
             if (effective_name) |name| {
                 if (self.by_name.get(name)) |existing_id| {
-                    break :blk .{ .id = existing_id, .is_new = false, .name = null };
+                    break :blk .{ .id = existing_id, .is_new = false };
                 }
             }
 
@@ -232,35 +232,22 @@ pub const WindowManager = struct {
             if (owned_name) |n| {
                 self.by_name.putAssumeCapacity(n, id);
             }
-            // owned_name 슬라이스는 Window 소유이므로 deinit 전까지 수명 안정.
-            // lock 밖 이벤트 발화에서 그대로 재사용해도 안전 (destroyLocked는 free 안 함).
-            break :blk .{ .id = id, .is_new = true, .name = owned_name };
+            break :blk .{ .id = id, .is_new = true };
         };
 
         // Phase 2: 이벤트 발화 (lock 밖 — listener가 다른 WindowManager 메서드 호출해도 deadlock 없음)
         if (result.is_new) {
             if (self.sink) |s| {
-                var buf: [512]u8 = undefined;
-                const payload = buildCreatedPayload(&buf, result.id, result.name);
+                var buf: [64]u8 = undefined;
+                const payload = buildIdPayload(&buf, result.id);
                 s.emit(events.created, payload);
             }
         }
         return result.id;
     }
 
-    /// `window:created` payload 빌더. name은 JSON 이스케이프되어 들어간다.
-    fn buildCreatedPayload(buf: []u8, id: u32, name: ?[]const u8) []const u8 {
-        var w = std.Io.Writer.fixed(buf);
-        w.print("{{\"windowId\":{d}", .{id}) catch return w.buffered();
-        if (name) |n| {
-            w.writeAll(",\"name\":") catch return w.buffered();
-            std.json.Stringify.encodeJsonString(n, .{}, &w) catch return w.buffered();
-        }
-        w.writeByte('}') catch return w.buffered();
-        return w.buffered();
-    }
-
-    /// `{"windowId":N}` payload. close/closed/destroyAll 공용.
+    /// `{"windowId":N}` payload. created/close/closed 공용 (Electron-style id-only).
+    /// name은 payload에 포함하지 않음 — 리스너는 `wm.get(id).?.name`으로 조회.
     fn buildIdPayload(buf: []u8, id: u32) []const u8 {
         var w = std.Io.Writer.fixed(buf);
         w.print("{{\"windowId\":{d}}}", .{id}) catch return w.buffered();
@@ -329,22 +316,23 @@ pub const WindowManager = struct {
     }
 
     /// 모든 창 파괴. 프로세스 종료 시 호출. 각 창마다 `window:closed` 단방향 이벤트 발화.
-    /// 취소 불가 (강제).
-    pub fn destroyAll(self: *WindowManager) void {
-        // Phase 1: 파괴 + id 수집 (lock)
+    /// 취소 불가 (강제). all-or-nothing: 중간 할당 실패 시 어떤 창도 파괴하지 않음.
+    pub fn destroyAll(self: *WindowManager) Error!void {
+        // Phase 1: 파괴 + id 수집 (lock). 용량 사전 확보 실패 시 아무것도 파괴하지 않음.
         var closed_ids: std.ArrayList(u32) = .empty;
         defer closed_ids.deinit(self.allocator);
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            closed_ids.ensureTotalCapacity(self.allocator, self.windows.count()) catch {};
+            closed_ids.ensureTotalCapacity(self.allocator, self.windows.count()) catch
+                return Error.OutOfMemory;
             var it = self.windows.iterator();
             while (it.next()) |entry| {
                 const w = entry.value_ptr.*;
                 if (!w.destroyed) {
                     self.native.destroyWindow(w.native_handle);
                     w.destroyed = true;
-                    closed_ids.append(self.allocator, w.id) catch {};
+                    closed_ids.appendAssumeCapacity(w.id);
                 }
             }
             self.by_name.clearRetainingCapacity();
