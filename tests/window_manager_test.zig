@@ -992,3 +992,113 @@ test "create propagates OOM, leaks no memory, and reclaims native handle" {
         }
     }
 }
+
+// ============================================
+// JSON escape 버그 재현/회귀
+// ============================================
+
+test "window:created payload with quoted name is valid JSON" {
+    // name에 `"` 같은 JSON 특수문자가 들어가면 raw 보간된 payload는 깨진 JSON이 된다.
+    // payload는 프론트엔드 IPC 수신부가 JSON.parse하므로 항상 valid해야 함.
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{ .name = "foo\"bar" });
+    const payload = sink.events.items[0].data;
+
+    const Parsed = struct { windowId: u32, name: []const u8 };
+    const parsed = try std.json.parseFromSlice(
+        Parsed,
+        std.testing.allocator,
+        payload,
+        .{},
+    );
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("foo\"bar", parsed.value.name);
+}
+
+// ============================================
+// OOM이 by_name 등록을 조용히 스킵하면 싱글턴 정책이 깨지는 버그 재현
+// ============================================
+
+/// 특정 fail_at 인덱스의 alloc 한 번만 실패시키고 이후는 복구되는 allocator.
+/// FailingAllocator는 fail_index 이후 계속 실패하지만, 이 테스트는 create가 부분 성공
+/// (by_name.put만 실패)하는 상태를 만들기 위해 one-shot 실패가 필요.
+const OneShotFail = struct {
+    backing: std.mem.Allocator,
+    fail_at: usize,
+    count: usize = 0,
+
+    fn allocator(self: *OneShotFail) std.mem.Allocator {
+        return .{ .ptr = self, .vtable = &vtable };
+    }
+
+    const vtable: std.mem.Allocator.VTable = .{
+        .alloc = alloc,
+        .resize = resize,
+        .remap = remap,
+        .free = free,
+    };
+
+    fn ctx(p: *anyopaque) *OneShotFail {
+        return @ptrCast(@alignCast(p));
+    }
+
+    fn alloc(p: *anyopaque, len: usize, alignment: std.mem.Alignment, ra: usize) ?[*]u8 {
+        const self = ctx(p);
+        defer self.count += 1;
+        if (self.count == self.fail_at) return null;
+        return self.backing.vtable.alloc(self.backing.ptr, len, alignment, ra);
+    }
+
+    fn resize(p: *anyopaque, m: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) bool {
+        const self = ctx(p);
+        return self.backing.vtable.resize(self.backing.ptr, m, alignment, new_len, ra);
+    }
+
+    fn remap(p: *anyopaque, m: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) ?[*]u8 {
+        const self = ctx(p);
+        return self.backing.vtable.remap(self.backing.ptr, m, alignment, new_len, ra);
+    }
+
+    fn free(p: *anyopaque, m: []u8, alignment: std.mem.Alignment, ra: usize) void {
+        const self = ctx(p);
+        self.backing.vtable.free(self.backing.ptr, m, alignment, ra);
+    }
+};
+
+test "by_name OOM must not silently break singleton policy" {
+    // 회귀 방지: 첫 create 중 어떤 alloc이 실패해도, 이후 같은 name으로의 create가
+    // "새 창 생성"으로 빠지면 안 된다. 옵션 두 가지가 유효:
+    //   (a) create 자체가 OOM을 반환해서 by_name도 등록 안 됨 → 두 번째 create가 새 창 생성 OK
+    //   (b) create가 성공 → by_name이 제대로 등록되어 싱글턴 유지
+    // 허용 안 되는 것: create 성공 + by_name 누락 (현재 버그)
+    var native = TestNative{};
+
+    // probe로 total_allocs 측정
+    var probe = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = std.math.maxInt(usize) });
+    var wm_probe = WindowManager.init(probe.allocator(), std.testing.io, native.asNative());
+    _ = try wm_probe.create(.{ .name = "singleton" });
+    wm_probe.deinit();
+    const total = probe.alloc_index;
+
+    var i: usize = 0;
+    while (i < total) : (i += 1) {
+        var one = OneShotFail{ .backing = std.testing.allocator, .fail_at = i };
+        var wm = WindowManager.init(one.allocator(), std.testing.io, native.asNative());
+        defer wm.deinit();
+
+        const res = wm.create(.{ .name = "singleton" });
+        if (res) |id1| {
+            // create 성공 — 반드시 by_name에도 등록돼서 두 번째 create가 싱글턴 반환해야
+            const id2 = try wm.create(.{ .name = "singleton" });
+            try std.testing.expectEqual(id1, id2);
+        } else |_| {
+            // OOM 반환 — 정상 실패 경로
+        }
+    }
+}

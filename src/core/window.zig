@@ -192,6 +192,13 @@ pub const WindowManager = struct {
                 }
             }
 
+            // HashMap 용량을 먼저 확보해 put 실패를 원천 제거 (put 순간의 부분 성공 방지).
+            // by_name.put이 OOM으로 조용히 실패하면 싱글턴 정책이 깨지므로 사전 할당 필수.
+            self.windows.ensureUnusedCapacity(1) catch return Error.OutOfMemory;
+            if (effective_name != null) {
+                self.by_name.ensureUnusedCapacity(1) catch return Error.OutOfMemory;
+            }
+
             const handle = self.native.createWindow(&opts) catch return Error.NativeCreateFailed;
             // 후속 allocation이 실패해도 native handle이 떠돌지 않도록 회수
             errdefer self.native.destroyWindow(handle);
@@ -221,9 +228,9 @@ pub const WindowManager = struct {
                 .state = .{},
             };
 
-            self.windows.put(id, win) catch return Error.OutOfMemory;
+            self.windows.putAssumeCapacity(id, win);
             if (owned_name) |n| {
-                self.by_name.put(n, id) catch {};
+                self.by_name.putAssumeCapacity(n, id);
             }
             // owned_name 슬라이스는 Window 소유이므로 deinit 전까지 수명 안정.
             // lock 밖 이벤트 발화에서 그대로 재사용해도 안전 (destroyLocked는 free 안 함).
@@ -234,14 +241,30 @@ pub const WindowManager = struct {
         if (result.is_new) {
             if (self.sink) |s| {
                 var buf: [512]u8 = undefined;
-                const payload: []const u8 = if (result.name) |n|
-                    std.fmt.bufPrint(&buf, "{{\"windowId\":{d},\"name\":\"{s}\"}}", .{ result.id, n }) catch ""
-                else
-                    std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{result.id}) catch "";
+                const payload = buildCreatedPayload(&buf, result.id, result.name);
                 s.emit(events.created, payload);
             }
         }
         return result.id;
+    }
+
+    /// `window:created` payload 빌더. name은 JSON 이스케이프되어 들어간다.
+    fn buildCreatedPayload(buf: []u8, id: u32, name: ?[]const u8) []const u8 {
+        var w = std.Io.Writer.fixed(buf);
+        w.print("{{\"windowId\":{d}", .{id}) catch return w.buffered();
+        if (name) |n| {
+            w.writeAll(",\"name\":") catch return w.buffered();
+            std.json.Stringify.encodeJsonString(n, .{}, &w) catch return w.buffered();
+        }
+        w.writeByte('}') catch return w.buffered();
+        return w.buffered();
+    }
+
+    /// `{"windowId":N}` payload. close/closed/destroyAll 공용.
+    fn buildIdPayload(buf: []u8, id: u32) []const u8 {
+        var w = std.Io.Writer.fixed(buf);
+        w.print("{{\"windowId\":{d}}}", .{id}) catch return w.buffered();
+        return w.buffered();
     }
 
     /// lock 보유 상태에서 id → live window (not destroyed). 내부 헬퍼.
@@ -282,7 +305,7 @@ pub const WindowManager = struct {
         // Phase 2: 취소 가능 이벤트 (lock 밖)
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
-            const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+            const payload = buildIdPayload(&buf, id);
             var ev: SujiEvent = .{};
             s.emitCancelable(events.close, payload, &ev);
             if (ev.default_prevented) return false;
@@ -299,7 +322,7 @@ pub const WindowManager = struct {
         // Phase 4: 단방향 이벤트 (lock 밖)
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
-            const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+            const payload = buildIdPayload(&buf, id);
             s.emit(events.closed, payload);
         }
         return true;
@@ -331,7 +354,7 @@ pub const WindowManager = struct {
         if (self.sink) |s| {
             for (closed_ids.items) |id| {
                 var buf: [512]u8 = undefined;
-                const payload = std.fmt.bufPrint(&buf, "{{\"windowId\":{d}}}", .{id}) catch "";
+                const payload = buildIdPayload(&buf, id);
                 s.emit(events.closed, payload);
             }
         }
