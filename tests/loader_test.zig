@@ -308,3 +308,38 @@ test "onFileChanged: shouldIgnore covers npm/os-metadata feedback files" {
     const body = source[fn_start..body_end];
     if (std.mem.indexOf(u8, body, "shouldIgnore(path)") == null) return error.ShouldIgnoreNotCalled;
 }
+
+// ============================================
+// registerEmbedRuntime — dupe+put leak 없음 (std.testing.allocator이 검출)
+// ============================================
+
+test "registerEmbedRuntime + deinit: no leak on happy path" {
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    defer { loader.BackendRegistry.global = null; }
+
+    const stub: loader.EmbedRuntime = .{
+        .invoke = undefined,
+        .free_response = undefined,
+    };
+    try loader.BackendRegistry.registerEmbedRuntime("node", stub);
+    try loader.BackendRegistry.registerEmbedRuntime("python", stub);
+    // reg.deinit이 embed_runtimes 키("node","python") 모두 free 해야 leak 없음.
+}
+
+// ============================================
+// clearRoutesFor + deinit — value가 ""로 덮인 채 deinit되어도 key는 free
+// ============================================
+
+test "BackendRegistry.deinit: frees keys even after clearRoutesFor marks values empty" {
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    defer reg.deinit();
+
+    try reg.putRoute("ping", "zig");
+    try reg.putRoute("greet", "zig");
+    try reg.putRoute("other", "rust");
+
+    reg.clearRoutesFor("zig"); // ping, greet 값 "" 마킹
+    // 키 ("ping", "greet")는 여전히 HashMap에 남아있음 → deinit에서 iter + free 되어야 함.
+}
