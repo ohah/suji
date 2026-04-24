@@ -302,6 +302,26 @@ pub fn build(b: *std.Build) void {
     const window_test = b.addTest(.{ .root_module = window_test_mod });
     test_step.dependOn(&b.addRunArtifact(window_test).step);
 
+    // EventBusSink 어댑터 단위 테스트
+    const event_sink_module = b.createModule(.{
+        .root_source_file = b.path("src/core/event_sink.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    event_sink_module.addImport("events", events_module);
+    event_sink_module.addImport("window", window_module);
+    const event_sink_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/event_sink_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    event_sink_test_mod.addImport("event_sink", event_sink_module);
+    event_sink_test_mod.addImport("events", events_module);
+    event_sink_test_mod.addImport("window", window_module);
+    const event_sink_test = b.addTest(.{ .root_module = event_sink_test_mod });
+    test_step.dependOn(&b.addRunArtifact(event_sink_test).step);
+
     // State plugin tests
     const state_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/state_plugin_test.zig"),
