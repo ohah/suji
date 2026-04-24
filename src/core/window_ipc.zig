@@ -37,7 +37,7 @@ pub fn injectWindowField(
 
     // name이 JSON-safe하면 주입, 아니면 id만. (간이 escape 대신 보수적 skip)
     const safe_name: ?[]const u8 = if (window_name) |n|
-        (if (isJsonSafe(n)) n else null)
+        (if (window.isJsonSafeChars(n)) n else null)
     else
         null;
 
@@ -55,13 +55,7 @@ pub fn injectWindowField(
     ) catch null;
 }
 
-/// JSON 문자열 리터럴로 bare 삽입이 안전한지: `"`, `\`, control character 없음.
-fn isJsonSafe(s: []const u8) bool {
-    for (s) |c| {
-        if (c == '"' or c == '\\' or c < 0x20) return false;
-    }
-    return true;
-}
+// wire 안전성 guard는 window.isJsonSafeChars 사용 (동일 정의).
 
 pub const CreateWindowReq = struct {
     title: []const u8 = "New Window",
@@ -91,7 +85,14 @@ pub fn handleCreateWindow(
         .title = req.title,
         .url = req.url,
         .bounds = .{ .width = req.width, .height = req.height },
-    }) catch return null;
+    }) catch |e| switch (e) {
+        window.Error.InvalidName => return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"create_window\",\"error\":\"invalid name\"}}",
+            .{},
+        ) catch null,
+        else => return null,
+    };
     return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"create_window\",\"windowId\":{d}}}",

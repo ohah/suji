@@ -131,6 +131,62 @@ test "fromName returns null after destroy" {
 }
 
 // ============================================
+// name 검증 — 길이/JSON-unsafe 문자
+// ============================================
+
+test "create rejects name with double quote" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = "a\"b" }));
+    try std.testing.expectEqual(@as(usize, 0), native.create_calls);
+}
+
+test "create rejects name with backslash" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = "a\\b" }));
+}
+
+test "create rejects name with control character" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = "a\nb" }));
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = "a\x00b" }));
+}
+
+test "create rejects name exceeding MAX_NAME_LEN" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var buf: [window.MAX_NAME_LEN + 1]u8 = undefined;
+    @memset(&buf, 'x');
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = &buf }));
+}
+
+test "create accepts name exactly at MAX_NAME_LEN" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var buf: [window.MAX_NAME_LEN]u8 = undefined;
+    @memset(&buf, 'y');
+    const id = try wm.create(.{ .name = &buf });
+    try std.testing.expect(id >= 1);
+}
+
+test "create with empty name is treated as anonymous (no InvalidName)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    // 기존 동작: ""은 null 정규화. 검증이 추가돼도 그대로 익명으로 취급.
+    const id = try wm.create(.{ .name = "" });
+    try std.testing.expect(id >= 1);
+    try std.testing.expectEqual(@as(?u32, null), wm.fromName(""));
+}
+
+// ============================================
 // destroy / destroyed 창 동작
 // ============================================
 
@@ -932,9 +988,10 @@ test "create propagates OOM, leaks no memory, and reclaims native handle" {
 // JSON escape 버그 재현/회귀
 // ============================================
 
-test "window:created payload is valid JSON regardless of name content/length" {
-    // Electron-style: payload에 name이 들어가지 않으므로 이스케이프/truncate 이슈 자체 X.
-    // name이 특수문자를 포함하거나 매우 길어도 payload는 항상 valid JSON이어야 한다.
+test "window:created payload is valid JSON + validation blocks unsafe/overlong names" {
+    // payload에는 name이 들어가지 않으므로 허용된 name에선 항상 valid JSON.
+    // 허용되지 않는 name(JSON-unsafe / 과다 길이)은 InvalidName으로 거부되어 애초에
+    // payload까지 도달하지 않는다 — 두 경로 모두 wire 무결성을 보장.
     var native = TestNative{};
     var sink = TestSink{};
     defer sink.deinit();
@@ -942,11 +999,14 @@ test "window:created payload is valid JSON regardless of name content/length" {
     defer wm.deinit();
     wm.setEventSink(sink.asSink());
 
-    // (a) JSON 특수문자
-    _ = try wm.create(.{ .name = "foo\"bar\\baz\n" });
-    // (b) 고정 버퍼 크기(512)를 훨씬 초과하는 name
-    const long = "x" ** 4096;
-    _ = try wm.create(.{ .name = long });
+    // 허용 경로: 정상 name + 익명 창. payload는 valid JSON이어야 한다.
+    _ = try wm.create(.{ .name = "settings" });
+    _ = try wm.create(.{});
+
+    // 거부 경로: 특수문자 + MAX 초과 길이 — 둘 다 InvalidName.
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = "foo\"bar\\baz\n" }));
+    const long = "x" ** (window.MAX_NAME_LEN + 1);
+    try std.testing.expectError(window.Error.InvalidName, wm.create(.{ .name = long }));
 
     const Parsed = struct { windowId: u32 };
     for (sink.events.items) |ev| {

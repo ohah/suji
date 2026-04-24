@@ -102,7 +102,28 @@ pub const Error = error{
     WindowDestroyed,
     NativeCreateFailed,
     OutOfMemory,
+    /// name이 길이 제한 초과 또는 JSON-unsafe 문자 (`"`, `\`, control char) 포함
+    InvalidName,
 };
+
+/// WindowManager.create가 수용하는 name의 최대 바이트 길이.
+/// JSON payload 루트에 `__window_name` 으로 주입되는 값이므로 과도한 길이는 거부.
+pub const MAX_NAME_LEN: usize = 128;
+
+/// wire(JSON) 리터럴 bare 삽입에 안전한 문자열 (`"`, `\`, control char 없음).
+/// window_ipc의 __window_name 주입에서 guard로도 사용.
+pub fn isJsonSafeChars(s: []const u8) bool {
+    for (s) |c| {
+        if (c == '"' or c == '\\' or c < 0x20) return false;
+    }
+    return true;
+}
+
+/// name이 WM/wire 주입에 안전한지 검증. 빈 문자열은 별도로 처리하므로 non-empty slice 전제.
+pub fn isValidName(name: []const u8) bool {
+    if (name.len == 0 or name.len > MAX_NAME_LEN) return false;
+    return isJsonSafeChars(name);
+}
 
 /// 취소 가능 이벤트의 기본 동작 방지 상태. listener가 preventDefault() 호출.
 pub const SujiEvent = struct {
@@ -189,6 +210,9 @@ pub const WindowManager = struct {
             (if (n.len == 0) null else n)
         else
             null;
+        if (requested_name) |n| {
+            if (!isValidName(n)) return Error.InvalidName;
+        }
         // forceNew=true인 경우 by_name 등록 X + Window.name=null (name 탈취 방지)
         const effective_name: ?[]const u8 = if (opts.force_new) null else requested_name;
 
