@@ -296,19 +296,29 @@ pub const WindowManager = struct {
         // Phase 2: 이벤트 발화 (lock 밖 — listener가 다른 WindowManager 메서드 호출해도 deadlock 없음)
         if (result.is_new) {
             if (self.sink) |s| {
-                var buf: [64]u8 = undefined;
-                const payload = buildIdPayload(&buf, result.id);
+                var buf: [256]u8 = undefined;
+                // 새로 만든 창의 name (singleton 분기 없이 effective_name 그대로 — created는 항상 신규).
+                const payload = buildIdPayload(&buf, result.id, effective_name);
                 s.emit(events.created, payload);
             }
         }
         return result.id;
     }
 
-    /// `{"windowId":N}` payload. created/close/closed 공용 (Electron-style id-only).
-    /// name은 payload에 포함하지 않음 — 리스너는 `wm.get(id).?.name`으로 조회.
-    fn buildIdPayload(buf: []u8, id: u32) []const u8 {
+    /// `{"windowId":N}` 또는 `{"windowId":N,"name":"..."}` payload.
+    /// created/close/closed 공용. 표준화: name이 있고 JSON-safe면 함께 emit, 아니면 id만.
+    /// 리스너는 항상 `windowId`를 받고, name은 optional로 처리.
+    fn buildIdPayload(buf: []u8, id: u32, name: ?[]const u8) []const u8 {
         var w = std.Io.Writer.fixed(buf);
-        w.print("{{\"windowId\":{d}}}", .{id}) catch return w.buffered();
+        const safe_name: ?[]const u8 = if (name) |n|
+            (if (n.len > 0 and isJsonSafeChars(n)) n else null)
+        else
+            null;
+        if (safe_name) |n| {
+            w.print("{{\"windowId\":{d},\"name\":\"{s}\"}}", .{ id, n }) catch return w.buffered();
+        } else {
+            w.print("{{\"windowId\":{d}}}", .{id}) catch return w.buffered();
+        }
         return w.buffered();
     }
 
@@ -357,10 +367,11 @@ pub const WindowManager = struct {
             _ = try self.getLiveLocked(id);
         }
 
-        // Phase 2: 취소 가능 이벤트 (lock 밖)
+        // Phase 2: 취소 가능 이벤트 (lock 밖). name은 destroy 전에 캡처해서 close/closed 동일 사용.
+        const name_snapshot: ?[]const u8 = if (self.windows.get(id)) |w| w.name else null;
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
-            const payload = buildIdPayload(&buf, id);
+            const payload = buildIdPayload(&buf, id, name_snapshot);
             var ev: SujiEvent = .{};
             s.emitCancelable(events.close, payload, &ev);
             if (ev.default_prevented) return false;
@@ -379,7 +390,7 @@ pub const WindowManager = struct {
         // Phase 4: 단방향 이벤트 (lock 밖)
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
-            const payload = buildIdPayload(&buf, id);
+            const payload = buildIdPayload(&buf, id, name_snapshot);
             s.emit(events.closed, payload);
         }
         self.maybeEmitAllClosed(true, live_after);
@@ -389,13 +400,15 @@ pub const WindowManager = struct {
     /// 모든 창 파괴. 프로세스 종료 시 호출. 각 창마다 `window:closed` 단방향 이벤트 발화.
     /// 취소 불가 (강제). all-or-nothing: 중간 할당 실패 시 어떤 창도 파괴하지 않음.
     pub fn destroyAll(self: *WindowManager) Error!void {
-        // Phase 1: 파괴 + id 수집 (lock). 용량 사전 확보 실패 시 아무것도 파괴하지 않음.
-        var closed_ids: std.ArrayList(u32) = .empty;
-        defer closed_ids.deinit(self.allocator);
+        // Phase 1: 파괴 + id/name 수집 (lock). 용량 사전 확보 실패 시 아무것도 파괴하지 않음.
+        // name은 by_name.clearRetainingCapacity 후에도 살아있는 owned slice에서 가져옴 (Window.name은 별도 alloc).
+        const ClosedEntry = struct { id: u32, name: ?[]const u8 };
+        var closed: std.ArrayList(ClosedEntry) = .empty;
+        defer closed.deinit(self.allocator);
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            closed_ids.ensureTotalCapacity(self.allocator, self.windows.count()) catch
+            closed.ensureTotalCapacity(self.allocator, self.windows.count()) catch
                 return Error.OutOfMemory;
             var it = self.windows.iterator();
             while (it.next()) |entry| {
@@ -404,7 +417,7 @@ pub const WindowManager = struct {
                     // destroyLocked과 같은 이유로 destroyed 마킹을 native 호출 전에.
                     w.destroyed = true;
                     self.native.destroyWindow(w.native_handle);
-                    closed_ids.appendAssumeCapacity(w.id);
+                    closed.appendAssumeCapacity(.{ .id = w.id, .name = w.name });
                 }
             }
             self.by_name.clearRetainingCapacity();
@@ -412,14 +425,14 @@ pub const WindowManager = struct {
 
         // Phase 2: 이벤트 발화 (lock 밖)
         if (self.sink) |s| {
-            for (closed_ids.items) |id| {
+            for (closed.items) |c| {
                 var buf: [512]u8 = undefined;
-                const payload = buildIdPayload(&buf, id);
+                const payload = buildIdPayload(&buf, c.id, c.name);
                 s.emit(events.closed, payload);
             }
         }
         // destroyAll 이후 live=0 (모두 destroyed 마킹됨). lock 재획득 없이 직접 0 전달.
-        self.maybeEmitAllClosed(closed_ids.items.len > 0, 0);
+        self.maybeEmitAllClosed(closed.items.len > 0, 0);
     }
 
     pub fn get(self: *const WindowManager, id: u32) ?*const Window {
@@ -453,7 +466,8 @@ pub const WindowManager = struct {
         }
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
-            const payload = buildIdPayload(&buf, id);
+            const name_snapshot: ?[]const u8 = if (self.windows.get(id)) |w| w.name else null;
+            const payload = buildIdPayload(&buf, id, name_snapshot);
             var ev: SujiEvent = .{};
             s.emitCancelable(events.close, payload, &ev);
             if (ev.default_prevented) return false;
@@ -466,11 +480,14 @@ pub const WindowManager = struct {
     /// **native.destroyWindow는 호출하지 않음** — 외부가 이미 처리.
     pub fn markClosedExternal(self: *WindowManager, id: u32) Error!void {
         var live_after: usize = undefined;
+        // name은 by_name 제거 전에 캡처 — Window.name(owned slice)는 살아있어 안전.
+        var name_snapshot: ?[]const u8 = null;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
             const win = try self.getLiveLocked(id);
             win.destroyed = true;
+            name_snapshot = win.name;
             if (win.name) |n| {
                 _ = self.by_name.remove(n);
             }
@@ -478,7 +495,7 @@ pub const WindowManager = struct {
         }
         if (self.sink) |s| {
             var buf: [512]u8 = undefined;
-            const payload = buildIdPayload(&buf, id);
+            const payload = buildIdPayload(&buf, id, name_snapshot);
             s.emit(events.closed, payload);
         }
         self.maybeEmitAllClosed(true, live_after);

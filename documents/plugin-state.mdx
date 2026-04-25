@@ -1,0 +1,149 @@
+---
+title: state 플러그인
+description: KV 스토어 + 디스크 영속성 + scope (global / window / session)
+---
+
+# state 플러그인
+
+JSON 파일 영속성을 가진 KV 스토어. 첫 Suji 플러그인 사례 — Phase 2.5의 `InvokeEvent`/
+`sendTo` 데이터 인프라가 어떤 식으로 활용되는지 보여줌.
+
+## 설치
+
+multi-backend 또는 zig-backend 예제에서 자동으로 로드됨.
+직접 사용 시 `suji.json`에 등록:
+
+```json
+{
+  "plugins": ["state"]
+}
+```
+
+## Scope
+
+키는 항상 **scope 안에서만 의미**를 가진다. 같은 `"theme"` 키도 scope가 다르면 별개.
+
+| scope | 의미 | 예 |
+|---|---|---|
+| `global` | 모든 창 공유 (기본값) | 사용자 로그인 정보, 앱 전역 설정 |
+| `window:<id>` | 특정 창 전용 | 창의 패널 레이아웃, 스크롤 위치 |
+| `window` | **호출한 창 자동** — sender 창 id로 자동 치환 | invoke한 창의 로컬 상태 |
+| `session:<name>` | 자유 그룹/세션 | onboarding 진행 상태 |
+
+`scope: "window"` 특수값은 wire의 `__window:N`을 보고 자동으로 `"window:N"`으로 치환.
+sender 정보가 없으면 (`__window=0`) `global`로 폴백 — 안전 우선.
+
+## 프론트 (`@suji/plugin-state`)
+
+```ts
+import { state } from '@suji/plugin-state';
+
+// global (기본)
+await state.set('user', { name: 'yoon' });
+const user = await state.get('user');
+
+// 호출한 창 전용 — sender id 자동 치환
+await state.set('layout', 'split', { scope: 'window' });
+const layout = await state.get('layout', { scope: 'window' });
+
+// 명시적 창 — 다른 창의 state도 조회 가능
+const w2Layout = await state.get('layout', { scope: 'window:2' });
+
+// 세션 그룹
+await state.set('step', 3, { scope: 'session:onboard' });
+
+// 키 변경 구독
+state.watch('user', (val) => console.log('user changed:', val));
+state.watch('layout', (val) => console.log('layout changed:', val), { scope: 'window' });
+
+// 한 scope만 비우기
+await state.clear({ scope: 'session:onboard' });
+
+// 특정 scope의 키 목록 (prefix 제거된 user-key)
+const myKeys = await state.keys({ scope: 'window:1' });
+```
+
+### Watch 채널 규칙
+
+내부적으로 emit되는 이벤트 채널:
+
+```
+global       state:<key>           // 기존 호환 — 단축형
+window:N     state:window:N:<key>
+session:foo  state:session:foo:<key>
+```
+
+`state.watch(key, cb, { scope })`가 자동으로 올바른 채널을 구독.
+
+## Zig 백엔드 (`suji.invoke("state", ...)`)
+
+```zig
+const req = "{\"cmd\":\"state:set\",\"key\":\"theme\",\"value\":\"dark\",\"scope\":\"window:1\"}";
+_ = suji.invoke("state", req);
+```
+
+2-arity 핸들러에서 `event.window.id`로 직접 scope 조립도 가능:
+
+```zig
+fn savePref(req: suji.Request, event: suji.InvokeEvent) suji.Response {
+    var buf: [256]u8 = undefined;
+    const set_req = std.fmt.bufPrint(&buf,
+        "{{\"cmd\":\"state:set\",\"key\":\"theme\",\"value\":\"dark\",\"scope\":\"window:{d}\"}}",
+        .{ event.window.id },
+    ) catch return req.err("format");
+    _ = req.invoke("state", set_req);
+    return req.ok(.{});
+}
+```
+
+또는 그냥 `scope: "window"` 사용 — wire의 `__window`로 자동 치환.
+
+## Rust SDK (`suji-plugin-state`)
+
+```rust
+use suji_plugin_state as state;
+
+state::set("user", r#""yoon""#);                                    // global
+state::set_in("layout", r#""split""#, Some("window:2"));            // 명시
+state::clear_scope("session:onboard");
+
+let val = state::get_in("theme", Some("window:1"));
+let keys = state::keys_in(Some("window:1"));
+```
+
+## Go SDK (`github.com/ohah/suji-plugin-state`)
+
+```go
+import state "github.com/ohah/suji-plugin-state"
+
+state.Set("user", `"yoon"`)
+state.SetIn("layout", `"split"`, "window:2")
+state.ClearScope("session:onboard")
+
+val := state.GetIn("theme", "window:1")
+keys := state.KeysIn("window:1")
+```
+
+## 마이그레이션
+
+기존 (prefix 없는) `state.json` 파일은 첫 로드 시 자동으로 `global::<key>`로 변환.
+사용자 코드 변경 없이 기존 데이터가 `scope` 미지정 호출과 그대로 호환.
+
+## 디스크 포맷
+
+```json
+{
+  "global::user": "\"yoon\"",
+  "window:1::layout": "\"split\"",
+  "window:2::layout": "\"tabs\"",
+  "session:onboard::step": "3"
+}
+```
+
+저장 위치 (앱별로 분리되지 않음 — V1 한계, app name config 통합 후 분리 예정):
+
+| OS | 경로 |
+|---|---|
+| macOS | `~/Library/Application Support/suji-app/state.json` |
+| Linux | `$XDG_DATA_HOME/suji-app/state.json` 또는 `~/.local/share/suji-app/state.json` |
+| Windows | `%APPDATA%\suji-app\state.json` |

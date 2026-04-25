@@ -11,10 +11,22 @@ description: 이벤트 채널 목록 + Electron API 대응표
 
 | 채널 | payload | 발화 시점 |
 |---|---|---|
-| `window:created` | `{id, name?}` | 창 생성 직후 |
-| `window:close` | `{id}` | 창이 닫히기 직전 (cancelable 예정) |
-| `window:closed` | `{id}` | 창이 실제로 파괴된 직후 |
+| `window:created` | `{windowId, name?}` | 창 생성 직후 |
+| `window:close` | `{windowId, name?}` | 창이 닫히기 직전 (cancelable 예정) |
+| `window:closed` | `{windowId, name?}` | 창이 실제로 파괴된 직후 |
 | `window:all-closed` | `{}` | 마지막 창이 닫힌 직후 (Electron canonical) |
+
+**Phase 2.5 표준화**: `created`/`close`/`closed` 모두 `{windowId, name?}` 일관 포맷.
+- `windowId`는 항상 포함.
+- `name`은 명명된 창에서만 (익명은 생략). JSON-unsafe 문자가 있으면 안전을 위해 생략.
+- `close`/`closed`도 destroy 전에 name을 캡처해서 emit — 리스너가 `wm.get()` 조회 없이 분기 가능.
+
+플러그인 예: `state` 플러그인이 `window:closed` 수신 → 해당 scope 정리:
+```js
+suji.on('window:closed', ({ windowId }) => {
+  state.clear({ scope: `window:${windowId}` });
+});
+```
 
 ### Electron 패턴: all-closed → quit
 

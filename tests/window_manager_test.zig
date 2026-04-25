@@ -450,10 +450,9 @@ test "create emits window:created with id" {
     try std.testing.expect(contains(sink.events.items[0].data, expected));
 }
 
-test "window:created payload never contains name (Electron-style, id-only)" {
-    // Electron의 BrowserWindow 이벤트는 id만 전달. name singleton은 코어 편의 기능이지만
-    // payload에 넣으면 이스케이프/길이 문제가 생김 → 아예 빼고, 리스너가 필요하면
-    // wm.get(id).?.name을 조회.
+test "window:created payload includes name when present (Phase 2.5 표준화)" {
+    // 표준화: {windowId, name?} — 명명된 창은 name도 함께 emit, 익명은 id만.
+    // 플러그인이 wm.get(id) 조회 없이 lifecycle 이벤트만으로 분기 가능.
     var native = TestNative{};
     var sink = TestSink{};
     defer sink.deinit();
@@ -462,7 +461,48 @@ test "window:created payload never contains name (Electron-style, id-only)" {
     wm.setEventSink(sink.asSink());
 
     _ = try wm.create(.{ .name = "about" });
+    try std.testing.expect(contains(sink.events.items[0].data, "\"windowId\":1"));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"name\":\"about\""));
+}
+
+test "window:created payload omits name for anonymous windows" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{});
+    try std.testing.expect(contains(sink.events.items[0].data, "\"windowId\":1"));
     try std.testing.expect(!contains(sink.events.items[0].data, "\"name\""));
+}
+
+test "window:closed payload preserves name even after destroy (snapshot before destroy)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{ .name = "settings" });
+    sink.events.clearRetainingCapacity();
+    _ = try wm.close(id);
+
+    // close + closed 두 이벤트 모두 name 포함
+    var found_close = false;
+    var found_closed = false;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, "window:close") and contains(ev.data, "\"name\":\"settings\"")) {
+            found_close = true;
+        }
+        if (std.mem.eql(u8, ev.name, "window:closed") and contains(ev.data, "\"name\":\"settings\"")) {
+            found_closed = true;
+        }
+    }
+    try std.testing.expect(found_close);
+    try std.testing.expect(found_closed);
 }
 
 test "close emits cancelable window:close, then window:closed on success" {

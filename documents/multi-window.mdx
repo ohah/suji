@@ -72,20 +72,25 @@ await window.__suji__.core(JSON.stringify({
 {
   "cmd": "save",
   "content": "...",
-  "__window": 2,                    // 항상 — sender 창의 WM id
-  "__window_name": "settings"       // 창에 name이 설정된 경우만
+  "__window": 2,                              // 항상 — sender 창의 WM id
+  "__window_name": "settings",                // 창에 name이 설정된 경우만
+  "__window_url": "http://localhost:5173/"    // sender 창의 main frame URL (있을 때만)
 }
 ```
 
-백엔드는 이를 통해 "어느 창에서 호출됐는지" 분기 가능.
+백엔드는 이를 통해 "어느 창에서 호출됐는지", "어느 페이지에서 호출됐는지" 분기 가능.
+
+`__window_url`은 Phase 2.5에서 추가. Electron `event.sender.url`과 대응. 4개 SDK 모두
+`event.window.url` 필드로 노출 (Zig: `?[]const u8`, Rust: `Option<String>`, Go: `string`(빈 = 없음), Node: `string | null`).
 
 ### Zig SDK — `InvokeEvent`
 
 ```zig
 fn save(req: suji.Request, event: suji.InvokeEvent) suji.Response {
-    std.debug.print("save from window id={d} name={s}\n", .{
+    std.debug.print("save from id={d} name={s} url={s}\n", .{
         event.window.id,
         event.window.name orelse "(anonymous)",
+        event.window.url orelse "(none)",
     });
     if (event.window.name) |n| {
         if (std.mem.eql(u8, n, "settings")) {

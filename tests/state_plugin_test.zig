@@ -137,6 +137,113 @@ test "state plugin: channel routing via register" {
     try std.testing.expect(reg.getBackendForChannel("state:keys") != null);
 }
 
+// ============================================
+// Phase 2.5: scope (global / window:N / window 자동 / session:*)
+// ============================================
+
+test "state plugin: scope 분리 — 같은 key, 다른 scope는 독립" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadStatePlugin(&reg);
+
+    // 같은 key "theme"을 global / window:1 / window:2 / session:onboard 4개 scope에 set
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"theme\",\"value\":\"global-dark\"}"));
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"theme\",\"value\":\"w1-light\",\"scope\":\"window:1\"}"));
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"theme\",\"value\":\"w2-sepia\",\"scope\":\"window:2\"}"));
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"theme\",\"value\":\"sess-x\",\"scope\":\"session:onboard\"}"));
+
+    const g = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"theme\"}");
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "global-dark") != null);
+    freeResp(&reg, g);
+
+    const w1 = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"theme\",\"scope\":\"window:1\"}");
+    try std.testing.expect(std.mem.indexOf(u8, w1.?, "w1-light") != null);
+    freeResp(&reg, w1);
+
+    const w2 = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"theme\",\"scope\":\"window:2\"}");
+    try std.testing.expect(std.mem.indexOf(u8, w2.?, "w2-sepia") != null);
+    freeResp(&reg, w2);
+
+    const sess = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"theme\",\"scope\":\"session:onboard\"}");
+    try std.testing.expect(std.mem.indexOf(u8, sess.?, "sess-x") != null);
+    freeResp(&reg, sess);
+}
+
+test "state plugin: scope=\"window\" 특수값 → __window:N으로 자동 치환" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadStatePlugin(&reg);
+
+    // wire의 __window=3 + scope="window" → 내부적으로 "window:3"로 저장
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"layout\",\"value\":\"split\",\"scope\":\"window\",\"__window\":3}"));
+
+    // window:3 직접 지정으로 조회 가능 — scope 자동 치환이 일관됨을 증명
+    const direct = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"layout\",\"scope\":\"window:3\"}");
+    try std.testing.expect(std.mem.indexOf(u8, direct.?, "split") != null);
+    freeResp(&reg, direct);
+
+    // global에는 안 들어감
+    const g = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"layout\"}");
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "null") != null);
+    freeResp(&reg, g);
+}
+
+test "state plugin: scope=\"window\" 인데 __window 누락 시 global로 폴백" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadStatePlugin(&reg);
+
+    // __window 없음 → resolveScope이 "global"로 폴백
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"x\",\"value\":\"v\",\"scope\":\"window\"}"));
+
+    const g = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"x\"}");
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "\"v\"") != null);
+    freeResp(&reg, g);
+}
+
+test "state plugin: scope clear는 해당 scope만 비우고 다른 scope는 보존" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadStatePlugin(&reg);
+
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"a\",\"value\":1}"));
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"a\",\"value\":2,\"scope\":\"window:5\"}"));
+
+    // window:5만 클리어
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:clear\",\"scope\":\"window:5\"}"));
+
+    const g = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"a\"}");
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "1") != null);
+    freeResp(&reg, g);
+
+    const w5 = invokePlugin(&reg, "{\"cmd\":\"state:get\",\"key\":\"a\",\"scope\":\"window:5\"}");
+    try std.testing.expect(std.mem.indexOf(u8, w5.?, "null") != null);
+    freeResp(&reg, w5);
+}
+
+test "state plugin: keys?scope=X — 해당 scope의 user-key만 (prefix 제거)" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadStatePlugin(&reg);
+
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"foo\",\"value\":1,\"scope\":\"window:9\"}"));
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"bar\",\"value\":2,\"scope\":\"window:9\"}"));
+    freeResp(&reg, invokePlugin(&reg, "{\"cmd\":\"state:set\",\"key\":\"baz\",\"value\":3}")); // global
+
+    const resp = invokePlugin(&reg, "{\"cmd\":\"state:keys\",\"scope\":\"window:9\"}");
+    try std.testing.expect(resp != null);
+    // window:9의 user-key만 — "foo"/"bar"는 있고, "baz"는 없어야
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"foo\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"bar\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp.?, "\"baz\"") == null);
+    freeResp(&reg, resp);
+}
+
 test "state plugin: invokeByChannel routing" {
     var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();

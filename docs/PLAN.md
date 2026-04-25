@@ -420,13 +420,17 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           - [x] Node: `handle(ch, (data, event) => ...)` — handler.length 분기
           - [x] `event.window`에 name 추가 — wire의 `__window_name`에서 파생 (익명 창은 null).
                 WM에서 `.name("settings")`같이 지정된 창에서 호출 시 event.window.name으로 접근.
-          - [ ] `event.window`에 url/frame 추가 (현재는 id+name)
+          - [x] `event.window`에 url 추가 — wire의 `__window_url`에서 파생. cef.zig가 sender의
+                main frame URL을 자동 주입. 4개 SDK 모두 노출 (Electron event.sender.url 대응).
+          - [ ] `event.window`에 frame 추가 (iframe 식별 — 현재는 main frame만)
           - Frontend `suji.invoke('ch', data)`는 그대로 (호출 측 변경 없음)
-  - [~] Phase 2.5: 멀티 윈도우 데이터 인프라
+  - [x] Phase 2.5: 멀티 윈도우 데이터 인프라 — 핵심 4축 완료
     - [x] `suji.send(event, data, {to: winId})` + 4개 언어 SDK 모두 `sendTo(id, ch, data)` — Electron `webContents.send` 대응. E2E 통과 (4언어 × target 라우팅).
-    - [ ] state 플러그인 scope 확장 (`global` / `window:{id}` / `session`)
-    - [ ] `SujiCore.get_window_api` — 플러그인이 BrowserWindow 조작 가능
-    - [ ] 생명주기 이벤트 data에 `windowId`/`name` 필수 포함 표준화
+    - [x] state 플러그인 scope 확장 (`global` / `window:{id}` / `window`(자동) / `session:*`).
+          기존 데이터는 자동 마이그레이션 (`<scope>::<key>` prefix). watch 채널도 scope별 분리.
+    - [ ] `SujiCore.get_window_api` — 플러그인이 BrowserWindow 조작 가능 (Phase 3+)
+    - [x] 생명주기 이벤트 payload `{windowId, name?}` 표준화 — created/close/closed 모두 일관.
+          name은 destroy 전 캡처해서 closed에도 포함 → 플러그인이 wm 조회 없이 분기.
   - [ ] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식)
   - [ ] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
