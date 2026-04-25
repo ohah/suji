@@ -2249,10 +2249,9 @@ test "DevTools 메서드: 알 수 없는 id에 호출 시 WindowNotFound" {
 // `br`(sender)을 받아야지, 모듈-레벨 g_browser 같은 싱글 참조면 fail.
 // ============================================
 
-test "회귀: DevTools reload sync — Cmd+R/F5가 reloadInspecteeOrSelf 경유" {
+test "회귀: DevTools reload sync — F5/Cmd+R가 reloadInspecteeOrSelf 경유 + 매핑 lookup" {
     // OnPreKeyEvent의 reload 분기가 br.reload()를 직접 호출하면 DevTools 안에서
-    // self-reload만 됨. reloadInspecteeOrSelf 헬퍼가 sender 등록 여부 + g_devtools_inspectee
-    // 매핑으로 inspectee를 reload 해야 함 (Electron 호환).
+    // self-reload만 됨. reloadInspecteeOrSelf가 매핑 조회로 inspectee를 reload.
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/platform/cef.zig",
@@ -2261,9 +2260,11 @@ test "회귀: DevTools reload sync — Cmd+R/F5가 reloadInspecteeOrSelf 경유"
     );
     defer std.testing.allocator.free(source);
 
-    // 헬퍼 정의 + g_devtools_inspectee 글로벌 존재
+    // 멀티 매핑 기반 — HashMap + lookup 헬퍼.
     try std.testing.expect(std.mem.indexOf(u8, source, "fn reloadInspecteeOrSelf(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, source, "g_devtools_inspectee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "lookupDevToolsInspectee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "devtools_to_inspectee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "pending_devtools_inspectee") != null);
 
     // OnPreKeyEvent body에서 br.reload 직접 호출 X — 모든 reload 키가 헬퍼 경유.
     const fn_marker = "fn onPreKeyEvent(";
@@ -2278,7 +2279,7 @@ test "회귀: DevTools reload sync — Cmd+R/F5가 reloadInspecteeOrSelf 경유"
     try std.testing.expect(std.mem.indexOf(u8, body, "key == 116") != null);
 }
 
-test "회귀: openDevTools가 g_devtools_inspectee에 sender id 기록" {
+test "회귀: openDevTools가 pending_devtools_inspectee 세팅 후 show_dev_tools (멀티 매핑 hand-off)" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/platform/cef.zig",
@@ -2292,10 +2293,35 @@ test "회귀: openDevTools가 g_devtools_inspectee에 sender id 기록" {
     const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
     const body = source[fn_start..body_end];
 
-    // show_dev_tools 호출 전에 g_devtools_inspectee 세팅
-    const set_pos = std.mem.indexOf(u8, body, "g_devtools_inspectee = @intCast(") orelse return error.InspecteeSetMissing;
+    // pending 세팅이 show_dev_tools 호출 전에 와야 — 다음 onAfterCreated가 새 DevTools를 매핑.
+    const set_pos = std.mem.indexOf(u8, body, "pending_devtools_inspectee = @intCast(") orelse return error.PendingSetMissing;
     const show_pos = std.mem.indexOf(u8, body, "show_dev_tools.?(") orelse return error.ShowMissing;
     try std.testing.expect(set_pos < show_pos);
+}
+
+test "회귀: onAfterCreated가 pending hand-off로 DevTools 매핑 + onBeforeClose가 매핑 정리" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // onAfterCreated body에 pending hand-off 로직
+    const ac_marker = "fn onAfterCreated(";
+    const ac_start = std.mem.indexOf(u8, source, ac_marker) orelse return error.OnAfterCreatedNotFound;
+    const ac_end = std.mem.indexOfPos(u8, source, ac_start + ac_marker.len, "\nfn ") orelse source.len;
+    const ac_body = source[ac_start..ac_end];
+    try std.testing.expect(std.mem.indexOf(u8, ac_body, "pending_devtools_inspectee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ac_body, "devtools_to_inspectee.put") != null);
+
+    // onBeforeClose body에 map.remove
+    const bc_marker = "fn onBeforeClose(";
+    const bc_start = std.mem.indexOf(u8, source, bc_marker) orelse return error.OnBeforeCloseNotFound;
+    const bc_end = std.mem.indexOfPos(u8, source, bc_start + bc_marker.len, "\nfn ") orelse source.len;
+    const bc_body = source[bc_start..bc_end];
+    try std.testing.expect(std.mem.indexOf(u8, bc_body, "devtools_to_inspectee.remove") != null);
 }
 
 test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {

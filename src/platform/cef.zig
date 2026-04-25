@@ -1156,12 +1156,23 @@ fn initLifeSpanHandler() void {
 }
 
 fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) callconv(.c) void {
-    // 메인 윈도우만 g_browser에 저장 (첫 번째 브라우저)
+    const br = browser orelse return;
+    const id: u64 = @intCast(br.get_identifier.?(br));
+
+    // pending이 있으면 이 browser가 직전 openDevTools가 띄운 DevTools — 매핑.
+    // DevTools는 g_browser/BrowserEntry에 등록 안 함 (사용자 창이 아님).
+    if (pending_devtools_inspectee) |inspectee| {
+        ensureDevToolsMap();
+        devtools_to_inspectee.put(id, inspectee) catch {};
+        pending_devtools_inspectee = null;
+        std.debug.print("[suji] DevTools browser created: id={d} → inspectee {d}\n", .{ id, inspectee });
+        return;
+    }
+
     if (g_browser == null) {
         g_browser = browser;
     }
-    const br = browser orelse return;
-    std.debug.print("[suji] CEF browser after_created: id={d}\n", .{br.get_identifier.?(br)});
+    std.debug.print("[suji] CEF browser after_created: id={d}\n", .{id});
 }
 
 /// CEF가 browser close 요청을 처리할지 물어보는 훅.
@@ -1201,6 +1212,11 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
     log.debug("OnBeforeClose handle={d}", .{handle});
 
     if (g_cef_native) |cn| cn.purge(handle);
+
+    // DevTools 닫히면 매핑 제거 — 같은 id가 새 browser에 재할당될 때 stale 매핑 차단.
+    if (devtools_map_initialized) {
+        _ = devtools_to_inspectee.remove(handle);
+    }
 
     notifyWm: {
         const wm = window_mod.WindowManager.global orelse break :notifyWm;
@@ -1372,11 +1388,11 @@ fn devtoolsHost(browser: *c.cef_browser_t) ?*c.cef_browser_host_t {
 ///   - 미등록 + 매핑 없음: sender reload (fallback — silent fail X)
 fn reloadInspecteeOrSelf(sender: *c.cef_browser_t, ignore_cache: bool) void {
     const target = blk: {
-        if (g_cef_native) |native| {
-            const sender_id: u64 = @intCast(sender.get_identifier.?(sender));
-            if (native.browsers.get(sender_id) != null) break :blk sender;
-            // sender가 BrowserEntry에 없음 → DevTools 가정.
-            if (g_devtools_inspectee) |inspectee_id| {
+        const sender_id: u64 = @intCast(sender.get_identifier.?(sender));
+        // sender가 DevTools면 그 DevTools의 inspectee browser 찾아 reload.
+        // 멀티 윈도우 동시 DevTools라도 정확한 매핑.
+        if (lookupDevToolsInspectee(sender_id)) |inspectee_id| {
+            if (g_cef_native) |native| {
                 if (native.browsers.get(inspectee_id)) |entry| break :blk entry.browser;
             }
         }
@@ -1396,11 +1412,32 @@ fn hasDevTools(browser: *c.cef_browser_t) bool {
     return host.has_dev_tools.?(host) == 1;
 }
 
-/// 가장 최근 openDevTools 호출의 inspectee browser id. DevTools front-end에서
-/// reload 키(F5/Cmd+R) 누르면 sender = DevTools browser라 self-reload되는데,
-/// 그 시점에 이 값으로 매핑된 inspectee를 reload (Electron 호환 동작).
-/// 한계: 멀티 윈도우 동시 DevTools면 마지막 open만 매핑. 멀티 매핑은 백로그.
-var g_devtools_inspectee: ?u64 = null;
+/// devtools_browser_id → inspectee_browser_id 매핑. F5/Cmd+R DevTools self-reload
+/// 회피용 (sender DevTools면 inspectee reload — Electron 호환).
+///
+/// 흐름:
+///   1. openDevTools(inspectee): pending_devtools_inspectee = inspectee.id 저장 후 show_dev_tools 호출
+///   2. CEF가 새 DevTools browser 생성 → onAfterCreated 호출
+///   3. onAfterCreated: pending이 있으면 그 새 browser가 DevTools — map.put + pending=null
+///   4. reloadInspecteeOrSelf(sender): map.get(sender_id)이 있으면 inspectee 찾아 reload
+///   5. onBeforeClose(devtools_browser): map.remove(id) — stale 매핑 차단
+///
+/// CEF는 single UI thread라 race 없음. 멀티 윈도우 동시 DevTools 안전.
+var devtools_to_inspectee: std.AutoHashMap(u64, u64) = undefined;
+var devtools_map_initialized: bool = false;
+var pending_devtools_inspectee: ?u64 = null;
+
+fn ensureDevToolsMap() void {
+    if (devtools_map_initialized) return;
+    const native = g_cef_native orelse return;
+    devtools_to_inspectee = std.AutoHashMap(u64, u64).init(native.allocator);
+    devtools_map_initialized = true;
+}
+
+fn lookupDevToolsInspectee(devtools_id: u64) ?u64 {
+    if (!devtools_map_initialized) return null;
+    return devtools_to_inspectee.get(devtools_id);
+}
 
 fn openDevTools(browser: *c.cef_browser_t) void {
     const host = devtoolsHost(browser) orelse return;
@@ -1414,18 +1451,15 @@ fn openDevTools(browser: *c.cef_browser_t) void {
     zeroCefStruct(c.cef_browser_settings_t, &settings);
 
     var point: c.cef_point_t = .{ .x = 0, .y = 0 };
-    g_devtools_inspectee = @intCast(browser.get_identifier.?(browser));
+    // 다음 onAfterCreated가 우리가 만들 DevTools browser — 그 시점에 매핑 등록.
+    pending_devtools_inspectee = @intCast(browser.get_identifier.?(browser));
     host.show_dev_tools.?(host, &window_info, &g_devtools_client, &settings, &point);
 }
 
 fn closeDevTools(browser: *c.cef_browser_t) void {
     const host = devtoolsHost(browser) orelse return;
     if (host.has_dev_tools.?(host) != 1) return; // 이미 닫혀있으면 no-op
-    // inspectee 추적 해제 — DevTools 닫혔으므로 reload sync 필요 없음.
-    const id: u64 = @intCast(browser.get_identifier.?(browser));
-    if (g_devtools_inspectee != null and g_devtools_inspectee.? == id) {
-        g_devtools_inspectee = null;
-    }
+    // 매핑 정리는 onBeforeClose가 처리 (DevTools browser id를 그쪽에서 알 수 있음).
     host.close_dev_tools.?(host);
 }
 

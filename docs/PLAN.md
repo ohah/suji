@@ -485,10 +485,9 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           rendering 우회 필요. Electron 호환 위해 추후 구현. (4-D 후속.)
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
           OnPreKeyEvent의 reload 키(F5/Cmd+R/Cmd+Shift+R) 분기를 `reloadInspecteeOrSelf`
-          헬퍼 경유로 변경 — sender가 BrowserEntry 미등록(DevTools 추정)이면 g_devtools_inspectee
-          매핑으로 inspectee browser reload. openDevTools 시점에 inspectee id 기록.
-          F5 키도 추가 (Windows/Linux 호환). 한계: 멀티 윈도우 동시 DevTools면 마지막
-          open만 매핑 (백로그).
+          헬퍼 경유. 멀티 매핑 `devtools_to_inspectee: AutoHashMap(u64, u64)` —
+          openDevTools에서 pending 변수 set → onAfterCreated에서 새 DevTools browser와 매핑 →
+          onBeforeClose에서 정리. CEF single UI thread라 race-free, 멀티 윈도우 동시 DevTools 안전.
     - [ ] **`find_in_page` 결과 보고 이벤트** — `cef_find_handler_t.OnFindResult`로 매치 수,
           현재 인덱스, 셀렉션 영역 받음 → `window:find-result` 이벤트로 발화. 현재는 ok 응답만.
 
