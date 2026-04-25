@@ -32,11 +32,48 @@ func (a *App) GoStateDelete(name string) map[string]any {
 }
 
 func (a *App) GoStateKeys() map[string]any {
-	return map[string]any{"keys": state.Keys()}
+	// 호환: scope 미지정 = global의 user-key (prefix 없는) 반환.
+	return map[string]any{"keys": state.KeysIn("global")}
 }
 
 func (a *App) GoStateClear() map[string]any {
 	state.Clear()
+	return map[string]any{"ok": true}
+}
+
+// ============================================
+// Phase 2.5: scope 변형
+// suji.Bind paramName 매핑(0=name, 1=text, 2=data) 기반.
+// 사용 시: {"cmd":"go_state_set_in","name":"<key>","text":"<json-value>","data":"<scope>"}
+// ============================================
+
+func (a *App) GoStateSetIn(name, text, data string) map[string]any {
+	state.SetIn(name, text, data)
+	return map[string]any{"ok": true}
+}
+
+func (a *App) GoStateGetIn(name, text string) map[string]any {
+	// text 자리에 scope.
+	v := state.GetIn(name, text)
+	if v == "" {
+		return map[string]any{"value": nil}
+	}
+	return map[string]any{"value": v}
+}
+
+func (a *App) GoStateDeleteIn(name, text string) map[string]any {
+	state.DeleteIn(name, text)
+	return map[string]any{"ok": true}
+}
+
+func (a *App) GoStateKeysIn(name string) map[string]any {
+	// name 자리에 scope.
+	return map[string]any{"keys": state.KeysIn(name)}
+}
+
+func (a *App) GoStateClearScope(name string) map[string]any {
+	// name 자리에 scope.
+	state.ClearScope(name)
 	return map[string]any{"ok": true}
 }
 

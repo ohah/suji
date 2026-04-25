@@ -133,3 +133,88 @@ test "rust wrapper: object value roundtrip" {
     try std.testing.expect(contains(resp, "theme"));
     try std.testing.expect(contains(resp, "dark"));
 }
+
+// ============================================
+// Phase 2.5: scope (set_in / get_in / delete_in / keys_in / clear_scope)
+// ============================================
+
+test "rust wrapper: set_in / get_in roundtrip with window:N scope" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    // window:1 scope에 저장
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set_in\",\"key\":\"layout\",\"value\":\"\\\"split\\\"\",\"scope\":\"window:1\"}"));
+
+    // 같은 scope로 조회 → 값 있음
+    const resp_w1 = invokeRust(&reg, "{\"cmd\":\"rust_state_get_in\",\"key\":\"layout\",\"scope\":\"window:1\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", resp_w1);
+    try std.testing.expect(contains(resp_w1, "split"));
+
+    // global로는 안 보여야
+    const resp_g = invokeRust(&reg, "{\"cmd\":\"rust_state_get\",\"key\":\"layout\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", resp_g);
+    try std.testing.expect(contains(resp_g, "null"));
+}
+
+test "rust wrapper: clear_scope only clears that scope" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set\",\"key\":\"a\",\"value\":\"\\\"global-v\\\"\"}"));
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set_in\",\"key\":\"a\",\"value\":\"\\\"w5-v\\\"\",\"scope\":\"window:5\"}"));
+
+    // window:5만 비움
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_clear_scope\",\"scope\":\"window:5\"}"));
+
+    // global은 살아있음
+    const g = invokeRust(&reg, "{\"cmd\":\"rust_state_get\",\"key\":\"a\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", g);
+    try std.testing.expect(contains(g, "global-v"));
+
+    // window:5는 사라짐
+    const w5 = invokeRust(&reg, "{\"cmd\":\"rust_state_get_in\",\"key\":\"a\",\"scope\":\"window:5\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", w5);
+    try std.testing.expect(contains(w5, "null"));
+}
+
+test "rust wrapper: keys_in returns prefix-stripped user keys" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set_in\",\"key\":\"foo\",\"value\":\"1\",\"scope\":\"session:auth\"}"));
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set_in\",\"key\":\"bar\",\"value\":\"2\",\"scope\":\"session:auth\"}"));
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set\",\"key\":\"baz\",\"value\":\"3\"}")); // global
+
+    const resp = invokeRust(&reg, "{\"cmd\":\"rust_state_keys_in\",\"scope\":\"session:auth\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", resp);
+    try std.testing.expect(contains(resp, "foo"));
+    try std.testing.expect(contains(resp, "bar"));
+    try std.testing.expect(!contains(resp, "baz")); // global은 제외
+}
+
+test "rust wrapper: delete_in removes key only in that scope" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    // value를 다른 키 ("alpha"/"beta") 사용해 1글자 escape 엣지 회피.
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set\",\"key\":\"x\",\"value\":\"\\\"alpha\\\"\"}"));
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_set_in\",\"key\":\"x\",\"value\":\"\\\"beta\\\"\",\"scope\":\"window:2\"}"));
+
+    freeResp(&reg, "rust", invokeRust(&reg, "{\"cmd\":\"rust_state_delete_in\",\"key\":\"x\",\"scope\":\"window:2\"}"));
+
+    const g = invokeRust(&reg, "{\"cmd\":\"rust_state_get\",\"key\":\"x\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", g);
+    try std.testing.expect(contains(g, "alpha"));
+
+    const w2 = invokeRust(&reg, "{\"cmd\":\"rust_state_get_in\",\"key\":\"x\",\"scope\":\"window:2\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "rust", w2);
+    try std.testing.expect(contains(w2, "null"));
+}

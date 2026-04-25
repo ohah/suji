@@ -73,10 +73,10 @@ describe("state.keys", () => {
 });
 
 describe("state.clear", () => {
-  it("calls invoke with state:clear", async () => {
+  it("calls invoke with state:clear (no scope = clear all)", async () => {
     mockBridge.invoke.mockResolvedValueOnce({ result: { ok: true } });
     await state.clear();
-    expect(mockBridge.invoke).toHaveBeenCalledWith("state:clear");
+    expect(mockBridge.invoke).toHaveBeenCalledWith("state:clear", {});
   });
 });
 
@@ -87,5 +87,64 @@ describe("state.watch", () => {
     const args = mockBridge.on.mock.calls[0];
     expect(args[0]).toBe("state:user");
     expect(typeof cancel).toBe("function");
+  });
+});
+
+// ============================================
+// Phase 2.5: scope 옵션
+// ============================================
+
+describe("state.* with scope option", () => {
+  it("get with scope passes scope param", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { value: "split" } });
+    await state.get("layout", { scope: "window" });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("state:get", { key: "layout", scope: "window" });
+  });
+
+  it("set with scope passes scope param", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { ok: true } });
+    await state.set("layout", "split", { scope: "window:2" });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("state:set", {
+      key: "layout",
+      value: "split",
+      scope: "window:2",
+    });
+  });
+
+  it("delete with scope passes scope param", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { ok: true } });
+    await state.delete("layout", { scope: "window" });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("state:delete", {
+      key: "layout",
+      scope: "window",
+    });
+  });
+
+  it("keys with scope passes scope param only", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { keys: ["a"] } });
+    await state.keys({ scope: "session:onboard" });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("state:keys", { scope: "session:onboard" });
+  });
+
+  it("clear with scope passes scope param", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { ok: true } });
+    await state.clear({ scope: "window:5" });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("state:clear", { scope: "window:5" });
+  });
+
+  it("watch with scope=window:N uses state:window:N:{key} channel", () => {
+    state.watch("layout", () => {}, { scope: "window:3" });
+    expect(mockBridge.on).toHaveBeenCalledTimes(1);
+    expect(mockBridge.on.mock.calls[0][0]).toBe("state:window:3:layout");
+  });
+
+  it("watch with scope=global falls back to legacy state:{key} channel", () => {
+    state.watch("user", () => {}, { scope: "global" });
+    expect(mockBridge.on).toHaveBeenCalledWith("state:user", expect.anything());
+  });
+
+  it("watch with scope=session uses state:<scope>:{key}", () => {
+    state.watch("step", () => {}, { scope: "session:onboard" });
+    expect(mockBridge.on).toHaveBeenCalledWith("state:session:onboard:step", expect.anything());
   });
 });

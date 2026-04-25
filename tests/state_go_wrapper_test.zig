@@ -133,3 +133,84 @@ test "go wrapper: object value roundtrip" {
     try std.testing.expect(contains(resp, "theme"));
     try std.testing.expect(contains(resp, "dark"));
 }
+
+// ============================================
+// Phase 2.5: scope 변형 (SetIn / GetIn / DeleteIn / KeysIn / ClearScope)
+// fixture가 paramName 매핑(0=name, 1=text, 2=data)에 맞춰 명명한다 — wire는
+// {"cmd":"go_state_set_in","name":"<key>","text":"<value>","data":"<scope>"}.
+// ============================================
+
+test "go wrapper: SetIn / GetIn roundtrip with window:N scope" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set_in\",\"name\":\"layout\",\"text\":\"\\\"split\\\"\",\"data\":\"window:1\"}"));
+
+    const resp_w1 = invokeGo(&reg, "{\"cmd\":\"go_state_get_in\",\"name\":\"layout\",\"text\":\"window:1\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", resp_w1);
+    try std.testing.expect(contains(resp_w1, "split"));
+
+    // global에는 안 들어감
+    const resp_g = invokeGo(&reg, "{\"cmd\":\"go_state_get\",\"name\":\"layout\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", resp_g);
+    try std.testing.expect(contains(resp_g, "null"));
+}
+
+test "go wrapper: ClearScope only clears that scope" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set\",\"name\":\"a\",\"text\":\"\\\"global-v\\\"\"}"));
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set_in\",\"name\":\"a\",\"text\":\"\\\"w5-v\\\"\",\"data\":\"window:5\"}"));
+
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_clear_scope\",\"name\":\"window:5\"}"));
+
+    const g = invokeGo(&reg, "{\"cmd\":\"go_state_get\",\"name\":\"a\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", g);
+    try std.testing.expect(contains(g, "global-v"));
+
+    const w5 = invokeGo(&reg, "{\"cmd\":\"go_state_get_in\",\"name\":\"a\",\"text\":\"window:5\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", w5);
+    try std.testing.expect(contains(w5, "null"));
+}
+
+test "go wrapper: KeysIn returns prefix-stripped user keys" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set_in\",\"name\":\"foo\",\"text\":\"1\",\"data\":\"session:auth\"}"));
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set_in\",\"name\":\"bar\",\"text\":\"2\",\"data\":\"session:auth\"}"));
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set\",\"name\":\"baz\",\"text\":\"3\"}"));
+
+    const resp = invokeGo(&reg, "{\"cmd\":\"go_state_keys_in\",\"name\":\"session:auth\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", resp);
+    try std.testing.expect(contains(resp, "foo"));
+    try std.testing.expect(contains(resp, "bar"));
+    try std.testing.expect(!contains(resp, "baz"));
+}
+
+test "go wrapper: DeleteIn removes key only in that scope" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try setupRegistry(&reg);
+
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set\",\"name\":\"x\",\"text\":\"\\\"alpha\\\"\"}"));
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_set_in\",\"name\":\"x\",\"text\":\"\\\"beta\\\"\",\"data\":\"window:2\"}"));
+
+    freeResp(&reg, "go", invokeGo(&reg, "{\"cmd\":\"go_state_delete_in\",\"name\":\"x\",\"text\":\"window:2\"}"));
+
+    const g = invokeGo(&reg, "{\"cmd\":\"go_state_get\",\"name\":\"x\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", g);
+    try std.testing.expect(contains(g, "alpha"));
+
+    const w2 = invokeGo(&reg, "{\"cmd\":\"go_state_get_in\",\"name\":\"x\",\"text\":\"window:2\"}") orelse return error.NoResponse;
+    defer freeResp(&reg, "go", w2);
+    try std.testing.expect(contains(w2, "null"));
+}

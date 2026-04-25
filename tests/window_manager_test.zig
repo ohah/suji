@@ -921,6 +921,36 @@ test "destroyAll event payloads carry each windowId" {
     try std.testing.expect(seen2);
 }
 
+test "destroyAll closed payloads include each window's name (Phase 2.5 표준화)" {
+    // 명명된 창과 익명 창 혼합. 명명된 창의 name이 closed payload에 포함돼야.
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    _ = try wm.create(.{ .name = "main" });
+    _ = try wm.create(.{}); // 익명
+    _ = try wm.create(.{ .name = "popup" });
+    sink.reset();
+
+    try wm.destroyAll();
+
+    var found_main = false;
+    var found_popup = false;
+    var anon_with_no_name: usize = 0; // 익명 창은 name 필드가 없어야
+    for (sink.events.items) |ev| {
+        if (!std.mem.eql(u8, ev.name, window.events.closed)) continue;
+        if (contains(ev.data, "\"name\":\"main\"")) found_main = true;
+        if (contains(ev.data, "\"name\":\"popup\"")) found_popup = true;
+        if (!contains(ev.data, "\"name\"")) anon_with_no_name += 1;
+    }
+    try std.testing.expect(found_main);
+    try std.testing.expect(found_popup);
+    try std.testing.expectEqual(@as(usize, 1), anon_with_no_name);
+}
+
 // ============================================
 // 재진입 — listener 안에서 WindowManager 메서드 호출
 // ============================================
@@ -1449,6 +1479,23 @@ test "tryClose with sink emits window:close only (no window:closed)" {
     try std.testing.expect(sink.events.items[0].cancelable);
 }
 
+test "tryClose payload includes name for named window (Phase 2.5 표준화)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{ .name = "settings" });
+    sink.reset();
+    _ = try wm.tryClose(id);
+
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings(window.events.close, sink.events.items[0].name);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"name\":\"settings\""));
+}
+
 test "tryClose with preventDefault returns false, no destroy, no closed event" {
     var native = TestNative{};
     var sink = TestSink{ .prevent_for = window.events.close };
@@ -1523,6 +1570,28 @@ test "markClosedExternal emits window:closed (not window:close)" {
     // close는 발화 X, closed는 1회 (all-closed는 별개)
     try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.close));
     try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.closed));
+}
+
+test "markClosedExternal payload includes name for named window (Phase 2.5 표준화)" {
+    // by_name 제거가 emit 전에 일어나도 name snapshot이 보존돼야 한다는 회귀 방지.
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{ .name = "popup" });
+    sink.reset();
+    try wm.markClosedExternal(id);
+
+    var found = false;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, window.events.closed) and contains(ev.data, "\"name\":\"popup\"")) {
+            found = true;
+        }
+    }
+    try std.testing.expect(found);
 }
 
 // ============================================
@@ -1736,4 +1805,63 @@ test "tryClose then markClosedExternal simulates CEF user-close flow" {
     try std.testing.expect(sink.events.items[0].cancelable);
     try std.testing.expectEqualStrings(window.events.closed, sink.events.items[1].name);
     try std.testing.expect(!sink.events.items[1].cancelable);
+}
+
+// ============================================
+// Phase 2.5 헬퍼: window.escapeJsonChars (URL 등 wire 주입 전 안전 처리)
+// ============================================
+
+test "escapeJsonChars: passthrough for plain ASCII" {
+    var buf: [64]u8 = undefined;
+    const n = window.escapeJsonChars("http://localhost:5173/", &buf);
+    try std.testing.expectEqualStrings("http://localhost:5173/", buf[0..n]);
+}
+
+test "escapeJsonChars: \" → \\\" 이스케이프" {
+    var buf: [64]u8 = undefined;
+    const n = window.escapeJsonChars("a\"b", &buf);
+    try std.testing.expectEqualStrings("a\\\"b", buf[0..n]);
+}
+
+test "escapeJsonChars: \\ → \\\\ 이스케이프" {
+    var buf: [64]u8 = undefined;
+    const n = window.escapeJsonChars("a\\b", &buf);
+    try std.testing.expectEqualStrings("a\\\\b", buf[0..n]);
+}
+
+test "escapeJsonChars: control char (< 0x20) drop" {
+    var buf: [64]u8 = undefined;
+    const n = window.escapeJsonChars("a\nb\x00c\x01d", &buf);
+    // 모든 control char 제거
+    try std.testing.expectEqualStrings("abcd", buf[0..n]);
+}
+
+test "escapeJsonChars: 빈 문자열 → 0" {
+    var buf: [16]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), window.escapeJsonChars("", &buf));
+}
+
+test "escapeJsonChars: out_buf 1 byte 부족 (이스케이프 케이스) → 0" {
+    // `"` 하나 이스케이프하려면 2 바이트 필요. 버퍼 1 바이트면 0 반환.
+    var buf: [1]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), window.escapeJsonChars("\"", &buf));
+}
+
+test "escapeJsonChars: out_buf 부족 시 (일반 문자) → 0" {
+    // 5 char를 3 byte 버퍼에. 4번째 글자에서 needed=1, o+1=4 > 3 → 0.
+    var buf: [3]u8 = undefined;
+    try std.testing.expectEqual(@as(usize, 0), window.escapeJsonChars("abcde", &buf));
+}
+
+test "escapeJsonChars: 정확히 맞는 크기 OK" {
+    var buf: [3]u8 = undefined;
+    const n = window.escapeJsonChars("abc", &buf);
+    try std.testing.expectEqualStrings("abc", buf[0..n]);
+}
+
+test "escapeJsonChars: 이스케이프 + control drop 혼합" {
+    var buf: [64]u8 = undefined;
+    const n = window.escapeJsonChars("a\"b\nc\\d", &buf);
+    // \n drop, " → \", \ → \\
+    try std.testing.expectEqualStrings("a\\\"bc\\\\d", buf[0..n]);
 }
