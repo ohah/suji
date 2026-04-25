@@ -468,9 +468,22 @@ pub const CefNative = struct {
         assertUiThread();
         const self = fromCtx(ctx);
         const entry = self.browsers.get(handle) orelse return;
-        var code_buf: [JS_BUF_SIZE]u8 = undefined;
-        const code_z = nullTerminateOrTruncate(code, &code_buf) orelse return;
-        evalJsOnBrowser(entry.browser, code_z);
+        // 4KB 미만은 stack, 그 이상은 heap. 16KB 고정 스택은 큰 코드 silent drop +
+        // 매 호출마다 16KB stack 점유 → 폴백으로 변경.
+        var stack_buf: [JS_STACK_BUF_SIZE]u8 = undefined;
+        if (code.len < stack_buf.len) {
+            @memcpy(stack_buf[0..code.len], code);
+            stack_buf[code.len] = 0;
+            evalJsOnBrowser(entry.browser, stack_buf[0..code.len :0]);
+            return;
+        }
+        const heap = self.allocator.allocSentinel(u8, code.len, 0) catch {
+            log.warn("execute_javascript: alloc {d} bytes failed — code dropped", .{code.len});
+            return;
+        };
+        defer self.allocator.free(heap);
+        @memcpy(heap, code);
+        evalJsOnBrowser(entry.browser, heap);
     }
 
     /// url_cache(OnAddressChange가 갱신)에 캐시된 URL 반환. 비어있으면 null.
@@ -491,7 +504,8 @@ pub const CefNative = struct {
 };
 
 const URL_BUF_SIZE: usize = 2048;
-const JS_BUF_SIZE: usize = 16 * 1024;
+/// executeJavascript의 fast-path stack 버퍼. 4KB 미만 코드는 alloc 없이.
+const JS_STACK_BUF_SIZE: usize = 4096;
 
 /// `[]const u8` → null-terminated `[:0]const u8` 복사. buf 부족 시 null 반환.
 /// CEF API(load_url/execute_java_script)에 전달하기 전에 필요.
