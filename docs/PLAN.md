@@ -434,6 +434,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           name은 destroy 전 캡처해서 closed에도 포함 → 플러그인이 wm 조회 없이 분기.
   - [ ] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식)
   - [ ] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
+    - [ ] DevTools "Reload" 버튼 → **DevTools가 attach된 메인 창도 같이 reload** (Electron 동작 호환).
+          현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
+          reload 명령을 캐치 → host.get_browser().reload() 호출 또는 ReloadIgnoreCache.
+          확인 위치: cef.zig DevTools client (g_devtools_client) 또는 OnPreKeyEvent에 추가 핸들링.
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
