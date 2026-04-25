@@ -373,57 +373,63 @@ pub fn handleToggleDevTools(window_id: u32, response_buf: []u8, wm: *window.Wind
 // ============================================
 // Phase 4-B: 줌 (set/get zoom_factor + zoom_level)
 // CEF는 zoom_level만 — factor는 WM에서 pow(1.2, level) 변환.
-// set 응답: windowOp 형식. get 응답: 추가 `level`/`factor` 필드.
+// set 응답: windowOp 형식. get 응답: cmd별 필드(level / factor) + ok.
+// 4 핸들러가 wm 메서드와 응답 필드명만 다른 동일 패턴 → set/get 헬퍼 2개로 통합.
 // ============================================
 
 pub const SetZoomReq = struct {
     window_id: u32,
-    /// level 또는 factor 둘 중 하나만 set (caller가 분기 호출).
+    /// level 또는 factor 둘 중 하나 (caller가 어느 setter로 보낼지 분기).
     value: f64,
 };
 
-pub fn handleSetZoomLevel(req: SetZoomReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+const WmF64SetFn = *const fn (*window.WindowManager, u32, f64) window.Error!void;
+const WmF64GetFn = *const fn (*window.WindowManager, u32) window.Error!f64;
+
+fn handleZoomSet(cmd: []const u8, method: WmF64SetFn, req: SetZoomReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ok = if (wm.setZoomLevel(req.window_id, req.value)) |_| true else |_| false;
-    return respondWindowOp(response_buf, "set_zoom_level", req.window_id, ok);
+    const ok = if (method(wm, req.window_id, req.value)) |_| true else |_| false;
+    return respondWindowOp(response_buf, cmd, req.window_id, ok);
+}
+
+fn handleZoomGet(
+    cmd: []const u8,
+    field: []const u8,
+    default_value: f64,
+    method: WmF64GetFn,
+    window_id: u32,
+    response_buf: []u8,
+    wm: *window.WindowManager,
+) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const value = method(wm, window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":false,\"{s}\":{d}}}",
+            .{ cmd, window_id, field, default_value },
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":true,\"{s}\":{d}}}",
+        .{ cmd, window_id, field, value },
+    ) catch null;
+}
+
+pub fn handleSetZoomLevel(req: SetZoomReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleZoomSet("set_zoom_level", &window.WindowManager.setZoomLevel, req, response_buf, wm);
 }
 
 pub fn handleSetZoomFactor(req: SetZoomReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ok = if (wm.setZoomFactor(req.window_id, req.value)) |_| true else |_| false;
-    return respondWindowOp(response_buf, "set_zoom_factor", req.window_id, ok);
+    return handleZoomSet("set_zoom_factor", &window.WindowManager.setZoomFactor, req, response_buf, wm);
 }
 
 pub fn handleGetZoomLevel(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const level = wm.getZoomLevel(window_id) catch {
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"get_zoom_level\",\"windowId\":{d},\"ok\":false,\"level\":0}}",
-            .{window_id},
-        ) catch null;
-    };
-    return std.fmt.bufPrint(
-        response_buf,
-        "{{\"from\":\"zig-core\",\"cmd\":\"get_zoom_level\",\"windowId\":{d},\"ok\":true,\"level\":{d}}}",
-        .{ window_id, level },
-    ) catch null;
+    return handleZoomGet("get_zoom_level", "level", 0, &window.WindowManager.getZoomLevel, window_id, response_buf, wm);
 }
 
 pub fn handleGetZoomFactor(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const factor = wm.getZoomFactor(window_id) catch {
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"get_zoom_factor\",\"windowId\":{d},\"ok\":false,\"factor\":1}}",
-            .{window_id},
-        ) catch null;
-    };
-    return std.fmt.bufPrint(
-        response_buf,
-        "{{\"from\":\"zig-core\",\"cmd\":\"get_zoom_factor\",\"windowId\":{d},\"ok\":true,\"factor\":{d}}}",
-        .{ window_id, factor },
-    ) catch null;
+    return handleZoomGet("get_zoom_factor", "factor", 1, &window.WindowManager.getZoomFactor, window_id, response_buf, wm);
 }
 
 pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

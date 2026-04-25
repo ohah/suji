@@ -787,14 +787,18 @@ pub const WindowManager = struct {
         return self.native.getZoomLevel(win.native_handle);
     }
 
-    /// factor → level 변환: level = log(factor) / log(1.2). factor < 0이면 0(기본 100%) 사용.
+    /// Electron 호환 zoom factor↔level 변환 base. `pow(ZOOM_BASE, level) == factor`,
+    /// `log(factor) / log(ZOOM_BASE) == level`.
+    pub const ZOOM_BASE: f64 = 1.2;
+
+    /// factor → level 변환. factor <= 0이면 0(기본 100%) — log 도메인 회피.
     pub fn setZoomFactor(self: *WindowManager, id: u32, factor: f64) Error!void {
-        const level: f64 = if (factor > 0) @log(factor) / @log(1.2) else 0;
+        const level: f64 = if (factor > 0) @log(factor) / @log(ZOOM_BASE) else 0;
         return self.setZoomLevel(id, level);
     }
 
     pub fn getZoomFactor(self: *WindowManager, id: u32) Error!f64 {
         const level = try self.getZoomLevel(id);
-        return std.math.pow(f64, 1.2, level);
+        return std.math.pow(f64, ZOOM_BASE, level);
     }
 };

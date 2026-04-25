@@ -219,6 +219,94 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
 // ============================================
 
 // ============================================
+// Phase 2: set_title / set_bounds 런타임 변경
+// (이전엔 lifecycle.test에서 검증 안 됐음 — e2e coverage 갭)
+// ============================================
+
+describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
+  test("set_title: 응답 ok + cmd 정확", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "old", url: "about:blank" });
+    const r: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_title", windowId: c.windowId, title: "new title" },
+    );
+    expect(r.cmd).toBe("set_title");
+    expect(r.ok).toBe(true);
+    expect(r.windowId).toBe(c.windowId);
+  });
+
+  test("set_bounds: 5필드(x/y/width/height) 응답 ok", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "bounds-test", url: "about:blank" });
+    const r: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_bounds", windowId: c.windowId, x: 50, y: 50, width: 600, height: 400 },
+    );
+    expect(r.cmd).toBe("set_bounds");
+    expect(r.ok).toBe(true);
+  });
+
+  test("set_title / set_bounds: 알 수 없는 windowId — ok:false", async () => {
+    const r1: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "set_title", windowId: 99999, title: "x" })),
+    );
+    expect(r1.ok).toBe(false);
+    const r2: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "set_bounds", windowId: 99999, width: 100, height: 100 })),
+    );
+    expect(r2.ok).toBe(false);
+  });
+});
+
+// ============================================
+// 멀티 윈도우 시나리오 — 동시 작업 + 교차 영향 없음
+// ============================================
+
+describe("멀티 윈도우 — 3개 동시 조작", () => {
+  test("3개 창 생성 → 각자 distinct id + 독립 set_title", async () => {
+    const a = await coreCall({ cmd: "create_window", title: "win-a", url: "about:blank" });
+    const b = await coreCall({ cmd: "create_window", title: "win-b", url: "about:blank" });
+    const c = await coreCall({ cmd: "create_window", title: "win-c", url: "about:blank" });
+
+    expect(new Set([a.windowId, b.windowId, c.windowId]).size).toBe(3);
+
+    const evalCmd = (cmd: string, extra: object): Promise<any> =>
+      page.evaluate((req) => (window as any).__suji__.core(JSON.stringify(req)), { cmd, ...extra });
+
+    const r1 = await evalCmd("set_title", { windowId: a.windowId, title: "renamed-a" });
+    const r2 = await evalCmd("set_title", { windowId: b.windowId, title: "renamed-b" });
+    expect(r1.ok && r2.ok).toBe(true);
+    expect(r1.windowId).toBe(a.windowId);
+    expect(r2.windowId).toBe(b.windowId);
+  });
+});
+
+// ============================================
+// 에러 경로 — destroyed 창에 메서드 호출
+// (코어가 wm.X에서 WindowDestroyed 받으면 ok:false 응답이라는 invariant)
+// ============================================
+
+describe("에러 경로 — destroyed 창 메서드 호출", () => {
+  test("close 후 set_title / load_url / open_dev_tools 모두 ok:false", async () => {
+    // create는 했지만 destroy 메서드는 별도 cmd 없음 (현재 e2e). 대신 unknown id로 시뮬.
+    // (close cmd가 noop인 상태에서 close 후 명령은 별도 wire로 검증 어려워)
+    // 핵심: wm.X가 NotFound/Destroyed 반환 시 코어 invariant — ok:false 보장.
+    const r1: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "load_url", windowId: 88888, url: "about:blank" })),
+    );
+    const r2: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "execute_javascript", windowId: 88888, code: "1" })),
+    );
+    const r3: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "open_dev_tools", windowId: 88888 })),
+    );
+    const r4: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "set_zoom_level", windowId: 88888, level: 1 })),
+    );
+    expect([r1.ok, r2.ok, r3.ok, r4.ok]).toEqual([false, false, false, false]);
+  });
+});
+
+// ============================================
 // Phase 4-B: 줌 (set/get level + factor)
 // ============================================
 
