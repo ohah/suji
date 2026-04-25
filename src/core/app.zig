@@ -497,8 +497,8 @@ pub const windows = struct {
     pub fn createSimple(title: []const u8, url: []const u8) ?[]const u8 {
         var t_buf: [256]u8 = undefined;
         var u_buf: [512]u8 = undefined;
-        const t_n = escapeJsonStrInto(title, &t_buf) orelse return null;
-        const u_n = escapeJsonStrInto(url, &u_buf) orelse return null;
+        const t_n = util.escapeJsonStr(title, &t_buf) orelse return null;
+        const u_n = util.escapeJsonStr(url, &u_buf) orelse return null;
         var opts_buf: [1024]u8 = undefined;
         const opts = std.fmt.bufPrint(&opts_buf, "\"title\":\"{s}\",\"url\":\"{s}\"", .{ t_buf[0..t_n], u_buf[0..u_n] }) catch return null;
         return create(opts);
@@ -506,7 +506,7 @@ pub const windows = struct {
 
     pub fn loadURL(id: u32, url: []const u8) ?[]const u8 {
         var u_buf: [2048]u8 = undefined;
-        const u_n = escapeJsonStrInto(url, &u_buf) orelse return null;
+        const u_n = util.escapeJsonStr(url, &u_buf) orelse return null;
         var fields_buf: [2400]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"url\":\"{s}\"", .{ id, u_buf[0..u_n] }) catch return null;
         return coreCmd("load_url", fields);
@@ -520,10 +520,18 @@ pub const windows = struct {
 
     /// 렌더러에 임의 JS 실행. fire-and-forget — 결과 회신 없음.
     /// 결과가 필요하면 JS에서 `suji.send(channel, value)`로 회신.
+    /// `code` 가 4KB 미만이면 stack, 그 이상은 stderr warn 후 null. cef.zig executeJavascript와 동일
+    /// 임계값 (스택 점유 일관성). 더 큰 코드가 정말 필요하면 caller가 분할 또는 바깥에서 alloc.
     pub fn executeJavaScript(id: u32, code: []const u8) ?[]const u8 {
-        var c_buf: [16 * 1024]u8 = undefined;
-        const c_n = escapeJsonStrInto(code, &c_buf) orelse return null;
-        var fields_buf: [16 * 1024 + 128]u8 = undefined;
+        var c_buf: [JS_CODE_STACK_BUF]u8 = undefined;
+        const c_n = util.escapeJsonStr(code, &c_buf) orelse {
+            std.debug.print(
+                "[suji] warning: executeJavaScript code too large ({d} bytes after escape > {d} stack buf) — dropped\n",
+                .{ code.len, JS_CODE_STACK_BUF },
+            );
+            return null;
+        };
+        var fields_buf: [JS_CODE_STACK_BUF + 128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"code\":\"{s}\"", .{ id, c_buf[0..c_n] }) catch return null;
         return coreCmd("execute_javascript", fields);
     }
@@ -542,7 +550,7 @@ pub const windows = struct {
 
     pub fn setTitle(id: u32, title: []const u8) ?[]const u8 {
         var t_buf: [512]u8 = undefined;
-        const t_n = escapeJsonStrInto(title, &t_buf) orelse return null;
+        const t_n = util.escapeJsonStr(title, &t_buf) orelse return null;
         var fields_buf: [640]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"title\":\"{s}\"", .{ id, t_buf[0..t_n] }) catch return null;
         return coreCmd("set_title", fields);
@@ -558,34 +566,17 @@ pub const windows = struct {
         return coreCmd("set_bounds", fields);
     }
 
-    /// 내부: cmd + payload fields → "__core__" 채널로 invoke.
+    /// internal: cmd + payload fields → "__core__" 채널로 invoke.
     fn coreCmd(cmd: []const u8, fields_json: []const u8) ?[]const u8 {
-        var buf: [16 * 1024 + 256]u8 = undefined;
+        var buf: [JS_CODE_STACK_BUF + 256]u8 = undefined;
         const sep: []const u8 = if (fields_json.len > 0) "," else "";
         const req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"{s}\"{s}{s}}}", .{ cmd, sep, fields_json }) catch return null;
         return callBackend("__core__", req);
     }
-};
 
-/// JSON 문자열 escape — `"` `\\` 이스케이프 + control char drop. dst 부족 시 null.
-/// 백엔드 SDK windows API의 typed wrapper 내부에서 사용.
-fn escapeJsonStrInto(src: []const u8, dst: []u8) ?usize {
-    var w: usize = 0;
-    for (src) |b| {
-        if (b < 0x20) continue;
-        if (b == '"' or b == '\\') {
-            if (w + 2 > dst.len) return null;
-            dst[w] = '\\';
-            dst[w + 1] = b;
-            w += 2;
-        } else {
-            if (w + 1 > dst.len) return null;
-            dst[w] = b;
-            w += 1;
-        }
-    }
-    return w;
-}
+    /// JS code escape용 stack 버퍼 — cef.zig executeJavascript와 동일 임계값.
+    const JS_CODE_STACK_BUF: usize = 4096;
+};
 
 /// 다른 백엔드 호출 (invoke)
 pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {

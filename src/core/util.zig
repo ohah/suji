@@ -44,6 +44,27 @@ pub fn clampI32(v: i64) i32 {
     return @intCast(v);
 }
 
+/// JSON 문자열 리터럴 안전 escape — `"` → `\"`, `\\` → `\\\\`, control char(`< 0x20`) drop.
+/// dst 부족 시 null. 빈 src는 0 반환 (caller가 빈 결과로 처리).
+/// 백엔드 SDK windows.* typed wrapper에서 사용.
+pub fn escapeJsonStr(src: []const u8, dst: []u8) ?usize {
+    var w: usize = 0;
+    for (src) |b| {
+        if (b < 0x20) continue;
+        if (b == '"' or b == '\\') {
+            if (w + 2 > dst.len) return null;
+            dst[w] = '\\';
+            dst[w + 1] = b;
+            w += 2;
+        } else {
+            if (w + 1 > dst.len) return null;
+            dst[w] = b;
+            w += 1;
+        }
+    }
+    return w;
+}
+
 /// IPC 버퍼 크기 상수
 pub const MAX_CHANNEL_NAME = 256;
 pub const MAX_REQUEST = 8192;
