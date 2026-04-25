@@ -904,13 +904,10 @@ fn openWindow(
 fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
     const registry = suji.BackendRegistry.global orelse return null;
 
-    // 특수 채널: fanout, chain, core
-    if (std.mem.eql(u8, channel, "__fanout__")) {
-        return cefHandleFanout(registry, data, response_buf);
-    } else if (std.mem.eql(u8, channel, "__chain__")) {
-        return cefHandleChain(registry, data, response_buf);
-    } else if (std.mem.eql(u8, channel, "__core__")) {
-        return cefHandleCore(registry, data, response_buf);
+    // 특수 채널: fanout, chain, core — 동일 dispatcher 테이블이 backend SDK 경로(coreInvoke)와
+    // 공유한다. 새 channel 추가 시 SPECIAL_DISPATCHERS만 추가.
+    for (SPECIAL_DISPATCHERS) |d| {
+        if (std.mem.eql(u8, channel, d.channel)) return d.handler(registry, data, response_buf);
     }
 
     // 요청 null-terminate
@@ -1012,14 +1009,26 @@ fn cefHandleChain(registry: *suji.BackendRegistry, data: []const u8, response_bu
     return result;
 }
 
+/// special channel → handler 매핑. CEF cefInvokeHandler와 backend SDK 경로
+/// (BackendRegistry.coreInvoke → backendSpecialDispatch) 두 곳이 공유.
+/// 새 special 추가 시 여기 한 줄.
+const SpecialDispatcher = struct {
+    channel: []const u8,
+    handler: *const fn (*suji.BackendRegistry, []const u8, []u8) ?[]const u8,
+};
+const SPECIAL_DISPATCHERS = [_]SpecialDispatcher{
+    .{ .channel = suji.BackendRegistry.CHANNEL_CORE, .handler = cefHandleCore },
+    .{ .channel = suji.BackendRegistry.CHANNEL_FANOUT, .handler = cefHandleFanout },
+    .{ .channel = suji.BackendRegistry.CHANNEL_CHAIN, .handler = cefHandleChain },
+};
+
 /// 백엔드 SDK의 callBackend("__core__"|"__fanout__"|"__chain__", ...) 경로 dispatcher.
-/// CEF의 cefInvokeHandler와 동일 라우팅을 backend SDK 경로에서도 제공.
 /// BackendRegistry.special_dispatch에 inject된다.
 fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
     const registry = suji.BackendRegistry.global orelse return null;
-    if (std.mem.eql(u8, channel, "__core__")) return cefHandleCore(registry, data, response_buf);
-    if (std.mem.eql(u8, channel, "__fanout__")) return cefHandleFanout(registry, data, response_buf);
-    if (std.mem.eql(u8, channel, "__chain__")) return cefHandleChain(registry, data, response_buf);
+    for (SPECIAL_DISPATCHERS) |d| {
+        if (std.mem.eql(u8, channel, d.channel)) return d.handler(registry, data, response_buf);
+    }
     return null;
 }
 

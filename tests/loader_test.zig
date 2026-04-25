@@ -356,3 +356,142 @@ test "BackendRegistry.deinit: frees keys even after clearRoutesFor marks values 
     reg.clearRoutesFor("zig"); // ping, greet 값 "" 마킹
     // 키 ("ping", "greet")는 여전히 HashMap에 남아있음 → deinit에서 iter + free 되어야 함.
 }
+
+// ============================================
+// 회귀 테스트 — coreInvoke special channel routing (Phase 4-A)
+//
+// Backend SDK가 callBackend("__core__"|"__fanout__"|"__chain__", ...)로 호출 시
+// BackendRegistry.special_dispatch가 set돼 있으면 그쪽으로 위임. set 안 됐으면
+// 빈 `{}` 반환 (graceful fallback). 이전 회귀: special channel 분기 없어서
+// backend SDK의 windows.* 가 모두 빈 응답 받던 버그 (commit a0d00d1).
+// ============================================
+
+const SpecialDispatchSpy = struct {
+    var call_count: usize = 0;
+    var last_channel: [64]u8 = undefined;
+    var last_channel_len: usize = 0;
+    var last_data: [256]u8 = undefined;
+    var last_data_len: usize = 0;
+    /// dispatch가 응답을 채워줄 슬라이스. null이면 dispatch도 null 반환 (caller가 `{}` 처리).
+    var stub_response: ?[]const u8 = null;
+
+    fn dispatch(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
+        call_count += 1;
+        last_channel_len = @min(channel.len, last_channel.len);
+        @memcpy(last_channel[0..last_channel_len], channel[0..last_channel_len]);
+        last_data_len = @min(data.len, last_data.len);
+        @memcpy(last_data[0..last_data_len], data[0..last_data_len]);
+        const body = stub_response orelse return null;
+        const n = @min(body.len, response_buf.len);
+        @memcpy(response_buf[0..n], body[0..n]);
+        return response_buf[0..n];
+    }
+
+    fn reset() void {
+        call_count = 0;
+        last_channel_len = 0;
+        last_data_len = 0;
+        stub_response = null;
+    }
+
+    fn lastChannel() []const u8 {
+        return last_channel[0..last_channel_len];
+    }
+    fn lastData() []const u8 {
+        return last_data[0..last_data_len];
+    }
+};
+
+/// invoke C ABI 호출 + 응답 span 반환. caller는 끝나면 freeInvokeResp 호출해야 leak 없음.
+/// "{}" 같은 static string은 free no-op이라 caller가 분기 안 해도 OK.
+fn invokeAsCString(reg_api: loader.SujiCore, backend: [:0]const u8, request: [:0]const u8) ?[]const u8 {
+    const resp_ptr = reg_api.invoke(@ptrCast(backend.ptr), @ptrCast(request.ptr));
+    if (resp_ptr == null) return null;
+    const span = std.mem.span(@as([*:0]const u8, @ptrCast(resp_ptr)));
+    if (span.len == 0) return null;
+    return span;
+}
+
+fn freeInvokeResp(reg_api: loader.SujiCore, resp: ?[]const u8) void {
+    const r = resp orelse return;
+    reg_api.free(@ptrCast(r.ptr));
+}
+
+test "special_dispatch null이면 __core__ 호출은 빈 {} 반환 (회귀: a0d00d1 이전 동작 보장)" {
+    SpecialDispatchSpy.reset();
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = null;
+
+    const resp = invokeAsCString(reg.core_api, "__core__", "{\"cmd\":\"is_loading\",\"windowId\":1}");
+    try std.testing.expectEqualStrings("{}", resp.?);
+    try std.testing.expectEqual(@as(usize, 0), SpecialDispatchSpy.call_count);
+}
+
+test "special_dispatch가 set되면 __core__ 호출 → dispatcher가 channel/data 받고 응답 반환" {
+    SpecialDispatchSpy.reset();
+    SpecialDispatchSpy.stub_response = "{\"from\":\"zig-core\",\"cmd\":\"is_loading\",\"loading\":false}";
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+
+    const resp = invokeAsCString(reg.core_api, "__core__", "{\"cmd\":\"is_loading\",\"windowId\":1}").?;
+    defer freeInvokeResp(reg.core_api, resp);
+    try std.testing.expectEqual(@as(usize, 1), SpecialDispatchSpy.call_count);
+    try std.testing.expectEqualStrings("__core__", SpecialDispatchSpy.lastChannel());
+    try std.testing.expectEqualStrings("{\"cmd\":\"is_loading\",\"windowId\":1}", SpecialDispatchSpy.lastData());
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"loading\":false") != null);
+}
+
+test "special_dispatch가 null 반환하면 caller에게 {} 반환 (graceful)" {
+    SpecialDispatchSpy.reset();
+    SpecialDispatchSpy.stub_response = null; // dispatch가 null 반환
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+
+    const resp = invokeAsCString(reg.core_api, "__core__", "{}");
+    try std.testing.expectEqualStrings("{}", resp.?);
+    try std.testing.expectEqual(@as(usize, 1), SpecialDispatchSpy.call_count);
+}
+
+test "special_dispatch는 __fanout__ / __chain__ channel도 dispatch" {
+    SpecialDispatchSpy.reset();
+    SpecialDispatchSpy.stub_response = "{\"ok\":true}";
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+
+    const r1 = invokeAsCString(reg.core_api, "__fanout__", "{}");
+    defer freeInvokeResp(reg.core_api, r1);
+    try std.testing.expectEqualStrings("__fanout__", SpecialDispatchSpy.lastChannel());
+
+    const r2 = invokeAsCString(reg.core_api, "__chain__", "{}");
+    defer freeInvokeResp(reg.core_api, r2);
+    try std.testing.expectEqualStrings("__chain__", SpecialDispatchSpy.lastChannel());
+
+    try std.testing.expectEqual(@as(usize, 2), SpecialDispatchSpy.call_count);
+}
+
+test "non-special channel은 dispatcher를 거치지 않음 (회귀 방지)" {
+    // dispatcher가 set돼 있어도 일반 backend 이름은 dlopen registry로만 가야 함.
+    SpecialDispatchSpy.reset();
+    SpecialDispatchSpy.stub_response = "{\"should\":\"not be returned\"}";
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+
+    // "zig"는 등록 안 된 일반 backend → dlopen registry empty + embed_runtimes empty → `{}`.
+    const resp = invokeAsCString(reg.core_api, "zig", "{\"cmd\":\"ping\"}");
+    try std.testing.expectEqualStrings("{}", resp.?);
+    try std.testing.expectEqual(@as(usize, 0), SpecialDispatchSpy.call_count);
+}

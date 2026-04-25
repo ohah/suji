@@ -254,3 +254,38 @@ test "module().debug() filters out below warn level" {
     try std.testing.expect(std.mem.indexOf(u8, text, "below") == null);
     try std.testing.expect(std.mem.indexOf(u8, text, "passes") != null);
 }
+
+// ============================================
+// 회귀 테스트 — Config.console_output 옵션 (commit f9f3ab4)
+//
+// console_output=false면 stderr 출력 생략 (file에만). 테스트 환경에서 zig
+// test runner의 `--listen=-` IPC 모드가 stderr 노이즈로 가짜 fail 표시하던
+// 회귀 회피. 옵션이 Logger struct에 보존되고 write 경로에 반영됨을 보장.
+// ============================================
+
+test "Config.console_output default true (기존 동작 보존)" {
+    const lg = logger.Logger.init(io, .{});
+    try std.testing.expect(lg.console_output);
+}
+
+test "Config.console_output=false 명시 시 Logger.console_output=false" {
+    const lg = logger.Logger.init(io, .{ .console_output = false });
+    try std.testing.expect(!lg.console_output);
+}
+
+test "console_output=false면 file에만 쓰고 stderr는 안 씀 (file 내용만 검증)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var file = try tmp.dir.createFile(io, "co.log", .{});
+    var lg = logger.Logger.init(io, .{ .level = .info, .file = file, .console_output = false });
+
+    lg.write(.info, "co", "console suppressed line", .{});
+    file.close(io);
+
+    var r = try tmp.dir.openFile(io, "co.log", .{});
+    defer r.close(io);
+    var content: [1024]u8 = undefined;
+    const n = try r.readStreaming(io, &.{&content});
+    // file에는 정상 기록 — stderr 검증은 zig test runner 환경 의존이라 생략.
+    try std.testing.expect(std.mem.indexOf(u8, content[0..n], "console suppressed line") != null);
+}

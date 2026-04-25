@@ -124,6 +124,12 @@ pub const BackendRegistry = struct {
 
     pub var global: ?*BackendRegistry = null;
 
+    /// special channel 이름 상수 — 4곳(cef/loader/main/test)에서 동일 식별자로 비교.
+    /// 새 special channel 추가 시 여기 추가 + special_dispatch wrapper 분기.
+    pub const CHANNEL_CORE: []const u8 = "__core__";
+    pub const CHANNEL_FANOUT: []const u8 = "__fanout__";
+    pub const CHANNEL_CHAIN: []const u8 = "__chain__";
+
     /// special channel(`__core__`/`__fanout__`/`__chain__`) dispatcher.
     /// main이 backend SDK 경로에도 동일 라우팅을 제공하기 위해 주입.
     /// null이면 백엔드의 callBackend("__core__", ...)는 빈 `{}` 반환 (CEF 경로만 동작).
@@ -342,12 +348,12 @@ pub const BackendRegistry = struct {
         const reg = global orelse return @ptrCast(@constCast(""));
         const name = std.mem.span(@as([*:0]const u8, @ptrCast(backend_name)));
 
-        // special channel(`__core__`/`__fanout__`/`__chain__`) — main이 inject한 dispatcher.
-        // CEF의 cefInvokeHandler와 동일 라우팅을 backend SDK 경로에서도 제공.
+        // special channel — main이 inject한 dispatcher. CEF의 cefInvokeHandler와 동일
+        // 라우팅을 backend SDK 경로에서도 제공.
         if (special_dispatch) |dispatch| {
-            if (std.mem.eql(u8, name, "__core__") or
-                std.mem.eql(u8, name, "__fanout__") or
-                std.mem.eql(u8, name, "__chain__"))
+            if (std.mem.eql(u8, name, CHANNEL_CORE) or
+                std.mem.eql(u8, name, CHANNEL_FANOUT) or
+                std.mem.eql(u8, name, CHANNEL_CHAIN))
             {
                 const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
                 var resp_buf: [16384]u8 = undefined;
