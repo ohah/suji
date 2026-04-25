@@ -786,7 +786,8 @@ fn openWindow(
             };
             defer allocator.free(dist_path);
 
-            const url_str = switch (config.window.protocol) {
+            // 메인(첫) 창의 protocol을 dist URL 결정 기준으로 사용. 추가 창은 명시적 url 권장.
+            const url_str = switch (config.windows[0].protocol) {
                 .suji => s: {
                     // suji:// 커스텀 프로토콜 (CORS/fetch/cookie/ServiceWorker 정상 동작)
                     cef.setDistPath(dist_path);
@@ -807,13 +808,14 @@ fn openWindow(
         std.debug.print("[suji] CEF URL: (null)\n", .{});
     }
 
-    // CEF 초기화
+    // CEF 초기화 (첫 창 사이즈/타이틀 사용 — CEF는 process-level 설정).
+    const main_win = config.windows[0];
     const cef_config: cef.CefConfig = .{
-        .title = config.window.title,
-        .width = @intCast(config.window.width),
-        .height = @intCast(config.window.height),
+        .title = main_win.title,
+        .width = @intCast(main_win.width),
+        .height = @intCast(main_win.height),
         .url = url,
-        .debug = config.window.debug,
+        .debug = main_win.debug,
     };
     try cef.initialize(cef_config);
 
@@ -825,21 +827,34 @@ fn openWindow(
     stack.init(allocator, runtime.io, cef_native.asNative(), event_bus);
     stack.setGlobal();
 
-    // 첫 윈도우 생성 (이전 cef.createBrowser 자리)
-    _ = stack.manager.create(.{
-        .name = "main",
-        .title = std.mem.sliceTo(config.window.title, 0),
-        .url = if (url) |u| std.mem.sliceTo(u, 0) else null,
-        .bounds = .{
-            .width = @intCast(config.window.width),
-            .height = @intCast(config.window.height),
-        },
-    }) catch |err| {
-        std.debug.print("[suji] first window create failed: {s}\n", .{@errorName(err)});
-        return err;
-    };
+    // config.windows의 모든 창 생성. 첫 창이 main, 나머지는 자동 추가.
+    // 첫 창의 url은 위에서 계산한 dev/dist URL 사용 (windows[0].url이 없으면).
+    // 추가 창은 명시적 url 사용 (없으면 첫 창과 같은 URL로 폴백).
+    for (config.windows, 0..) |w, i| {
+        const win_name: ?[]const u8 = if (w.name) |n| std.mem.sliceTo(n, 0)
+        else if (i == 0) "main" // 첫 창은 default name="main"
+        else null;
 
-    std.debug.print("[suji] CEF window opened ({s})\n", .{if (mode == .dev) "dev" else "production"});
+        const win_url: ?[]const u8 = if (w.url) |u| std.mem.sliceTo(u, 0)
+        else if (i == 0 and url != null) std.mem.sliceTo(url.?, 0)
+        else if (url) |u| std.mem.sliceTo(u, 0) // 폴백
+        else null;
+
+        _ = stack.manager.create(.{
+            .name = win_name,
+            .title = std.mem.sliceTo(w.title, 0),
+            .url = win_url,
+            .bounds = .{
+                .width = @intCast(w.width),
+                .height = @intCast(w.height),
+            },
+        }) catch |err| {
+            std.debug.print("[suji] window[{d}] create failed: {s}\n", .{ i, @errorName(err) });
+            if (i == 0) return err; // 첫 창 실패는 fatal
+        };
+    }
+
+    std.debug.print("[suji] CEF window opened ({s}), {d} window(s)\n", .{ if (mode == .dev) "dev" else "production", config.windows.len });
     cef.run();
 
     // Node runtime 종료 (별도 스레드 join). 이게 빠지면 Cmd+Q로 CEF가 quit한 뒤

@@ -409,7 +409,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           browser의 WM id를 `injectWindowField`로 request JSON에 merge. 이미 태그된 요청,
           비-객체/빈 객체/whitespace 엣지 케이스 모두 처리. `window_ipc.injectWindowField`
           순수 함수로 단위 테스트 7종 + E2E (`tests/e2e/window-injection.test.ts`)로 검증.
-    - [ ] `windows[]` 배열 파싱 (렌더러 측 — config의 `windows` 항목으로 초기 창 배치 선언)
+    - [x] `windows[]` 배열 파싱 — config.zig의 `Config.windows: []const Window`. 시작 시 배열 길이만큼
+          `wm.create` 자동 호출. Tauri 호환 선언적 다중 창. 하위호환 X (단일 `window` 객체 제거).
     - [~] **핸들러 `InvokeEvent` 파라미터** — Electron의 `IpcMainInvokeEvent` 대응.
           `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로 받음.
           - [x] Zig: `fn h(req: Request, event: InvokeEvent) Response`. 1-arity 핸들러는 comptime

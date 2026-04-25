@@ -87,7 +87,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend
             \\{{
             \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
-            \\  "window": {{ "title": "{s}", "width": 1024, "height": 768, "debug": true }},
+            \\  "windows": [{{ "name": "main", "title": "{s}", "width": 1024, "height": 768, "debug": true }}],
             \\  "backends": [
             \\    {{ "name": "zig", "lang": "zig", "entry": "backends/zig" }},
             \\    {{ "name": "rust", "lang": "rust", "entry": "backends/rust" }},
@@ -100,7 +100,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend
             \\{{
             \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
-            \\  "window": {{ "title": "{s}", "width": 1024, "height": 768, "debug": true }},
+            \\  "windows": [{{ "name": "main", "title": "{s}", "width": 1024, "height": 768, "debug": true }}],
             \\  "backend": {{ "lang": "{s}", "entry": "." }},
             \\  "frontend": {{ "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }}
             \\}}

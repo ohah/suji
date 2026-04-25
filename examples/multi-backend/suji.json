@@ -4,13 +4,22 @@
     "name": "Multi Backend Example",
     "version": "0.1.0"
   },
-  "window": {
-    "title": "Suji Multi-Backend Demo",
-    "width": 1024,
-    "height": 768,
-    "debug": true,
-    "protocol": "suji"
-  },
+  "windows": [
+    {
+      "name": "main",
+      "title": "Suji Multi-Backend Demo",
+      "width": 1024,
+      "height": 768,
+      "debug": true,
+      "protocol": "suji"
+    },
+    {
+      "name": "settings",
+      "title": "Settings (선언적 두 번째 창)",
+      "width": 600,
+      "height": 400
+    }
+  ],
   "plugins": ["state"],
   "backends": [
     { "name": "zig", "lang": "zig", "entry": "backends/zig" },

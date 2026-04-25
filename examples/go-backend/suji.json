@@ -1,7 +1,7 @@
 {
   "$schema": "../../suji.schema.json",
   "app": { "name": "Suji Go Example", "version": "0.1.0" },
-  "window": { "title": "Suji + Go", "width": 1024, "height": 768, "debug": true },
+  "windows": [{ "title": "Suji + Go", "width": 1024, "height": 768, "debug": true }],
   "backend": { "lang": "go", "entry": "." },
   "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
 }

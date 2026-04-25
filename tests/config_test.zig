@@ -9,11 +9,16 @@ test "Config default values" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("Suji App", cfg.app.name);
     try std.testing.expectEqualStrings("0.1.0", cfg.app.version);
-    try std.testing.expectEqual(@as(i64, 1024), cfg.window.width);
-    try std.testing.expectEqual(@as(i64, 768), cfg.window.height);
-    try std.testing.expectEqualStrings("Suji App", cfg.window.title);
-    try std.testing.expect(!cfg.window.debug);
-    try std.testing.expect(cfg.window.protocol == .file);
+    // 기본 windows: 1개 항목 (Window 기본값)
+    try std.testing.expectEqual(@as(usize, 1), cfg.windows.len);
+    try std.testing.expectEqual(@as(i64, 1024), cfg.windows[0].width);
+    try std.testing.expectEqual(@as(i64, 768), cfg.windows[0].height);
+    try std.testing.expectEqualStrings("Suji App", cfg.windows[0].title);
+    try std.testing.expect(!cfg.windows[0].debug);
+    try std.testing.expect(cfg.windows[0].protocol == .file);
+    try std.testing.expect(cfg.windows[0].name == null);
+    try std.testing.expect(cfg.windows[0].url == null);
+    try std.testing.expect(cfg.windows[0].visible);
     try std.testing.expect(cfg.backend == null);
     try std.testing.expect(cfg.backends == null);
     try std.testing.expectEqualStrings("frontend", cfg.frontend.dir);
@@ -24,7 +29,7 @@ test "Config default values" {
 
 test "Config protocol default is file" {
     const cfg = config.Config{};
-    try std.testing.expect(cfg.window.protocol == .file);
+    try std.testing.expect(cfg.windows[0].protocol == .file);
 }
 
 test "Config protocol enum values" {
@@ -87,7 +92,7 @@ test "JSON single backend parsing" {
     const json_content =
         \\{
         \\  "app": { "name": "Test App", "version": "1.0.0" },
-        \\  "window": { "title": "Test", "width": 1024, "height": 768, "debug": true },
+        \\  "windows": [{ "name": "main", "title": "Test", "width": 1024, "height": 768, "debug": true }],
         \\  "backend": { "lang": "rust", "entry": "src/lib.rs" },
         \\  "frontend": { "dir": "web", "dev_url": "http://localhost:3000", "dist_dir": "web/build" }
         \\}
@@ -102,8 +107,11 @@ test "JSON single backend parsing" {
     try std.testing.expectEqualStrings("Test App", app.get("name").?.string);
     try std.testing.expectEqualStrings("1.0.0", app.get("version").?.string);
 
-    // window
-    const win = root.get("window").?.object;
+    // windows[0]
+    const wins = root.get("windows").?.array;
+    try std.testing.expectEqual(@as(usize, 1), wins.items.len);
+    const win = wins.items[0].object;
+    try std.testing.expectEqualStrings("main", win.get("name").?.string);
     try std.testing.expectEqualStrings("Test", win.get("title").?.string);
     try std.testing.expectEqual(@as(i64, 1024), win.get("width").?.integer);
     try std.testing.expectEqual(@as(i64, 768), win.get("height").?.integer);
@@ -159,49 +167,70 @@ test "JSON minimal config" {
 
 test "JSON partial config" {
     const json_content =
-        \\{ "window": { "width": 1920 } }
+        \\{ "windows": [{ "width": 1920 }] }
     ;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
     defer parsed.deinit();
     const root = parsed.value.object;
 
-    // window만 있고 나머지 없음
+    // windows만 있고 나머지 없음
     try std.testing.expect(root.get("app") == null);
     try std.testing.expect(root.get("backend") == null);
-    try std.testing.expectEqual(@as(i64, 1920), root.get("window").?.object.get("width").?.integer);
+    const wins = root.get("windows").?.array;
+    try std.testing.expectEqual(@as(i64, 1920), wins.items[0].object.get("width").?.integer);
 }
 
 test "JSON protocol suji parsing" {
     const json_content =
-        \\{ "window": { "protocol": "suji" } }
+        \\{ "windows": [{ "protocol": "suji" }] }
     ;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
     defer parsed.deinit();
     const root = parsed.value.object;
-    const win = root.get("window").?.object;
+    const win = root.get("windows").?.array.items[0].object;
     try std.testing.expectEqualStrings("suji", win.get("protocol").?.string);
 }
 
 test "JSON protocol file parsing" {
     const json_content =
-        \\{ "window": { "protocol": "file" } }
+        \\{ "windows": [{ "protocol": "file" }] }
     ;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
     defer parsed.deinit();
     const root = parsed.value.object;
-    const win = root.get("window").?.object;
+    const win = root.get("windows").?.array.items[0].object;
     try std.testing.expectEqualStrings("file", win.get("protocol").?.string);
 }
 
 test "JSON protocol absent defaults to file" {
     const json_content =
-        \\{ "window": { "title": "Test" } }
+        \\{ "windows": [{ "title": "Test" }] }
     ;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
     defer parsed.deinit();
     const root = parsed.value.object;
-    const win = root.get("window").?.object;
+    const win = root.get("windows").?.array.items[0].object;
     try std.testing.expect(win.get("protocol") == null);
+}
+
+// Phase 2 마무리: 다중 창 선언 — Tauri 호환
+test "JSON multiple windows parsing" {
+    const json_content =
+        \\{
+        \\  "windows": [
+        \\    { "name": "main", "title": "Main", "width": 1024 },
+        \\    { "name": "settings", "title": "Settings", "width": 600, "url": "http://localhost:5173/settings" }
+        \\  ]
+        \\}
+    ;
+    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    defer parsed.deinit();
+    const root = parsed.value.object;
+    const wins = root.get("windows").?.array;
+    try std.testing.expectEqual(@as(usize, 2), wins.items.len);
+    try std.testing.expectEqualStrings("main", wins.items[0].object.get("name").?.string);
+    try std.testing.expectEqualStrings("settings", wins.items[1].object.get("name").?.string);
+    try std.testing.expectEqualStrings("http://localhost:5173/settings", wins.items[1].object.get("url").?.string);
 }
 
 test "Config deinit without arena" {

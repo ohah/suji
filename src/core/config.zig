@@ -5,7 +5,9 @@ const runtime = @import("runtime");
 /// suji.json에서 로드
 pub const Config = struct {
     app: App = .{},
-    window: Window = .{},
+    /// 시작 시 자동 생성할 창 목록. 첫 항목이 main 창 (CEF 초기화 시 사이즈/타이틀 사용).
+    /// suji.json에 `windows` 배열이 없거나 비어있으면 default 1개.
+    windows: []const Window = &.{Window{}},
     backend: ?SingleBackend = null,
     backends: ?[]const MultiBackend = null,
     plugins: ?[]const [:0]const u8 = null,
@@ -26,11 +28,18 @@ pub const Config = struct {
     pub const Protocol = enum { suji, file };
 
     pub const Window = struct {
+        /// WM 등록 이름 (singleton 키). null이면 익명. 첫 창의 기본값은 "main".
+        name: ?[:0]const u8 = null,
         title: [:0]const u8 = "Suji App",
         width: i64 = 1024,
         height: i64 = 768,
         debug: bool = false,
         protocol: Protocol = .file,
+        /// 시작 시 자동 로드할 URL. null이면 frontend dev_url/dist 자동 선택 (첫 창에만 적용).
+        /// 두 번째 창부터는 명시 권장.
+        url: ?[:0]const u8 = null,
+        /// false면 hidden 상태로 생성 (Phase 3+에서 setVisible과 연동 예정).
+        visible: bool = true,
     };
 
     pub const SingleBackend = struct {
@@ -93,22 +102,34 @@ pub const Config = struct {
             }
         }
 
-        if (root.get("window")) |win_val| {
-            if (win_val == .object) {
-                const win = win_val.object;
-                if (win.get("title")) |v| if (v == .string) { config.window.title = dupeStr(a, v.string); };
-                if (win.get("width")) |v| if (v == .integer) { config.window.width = v.integer; };
-                if (win.get("height")) |v| if (v == .integer) { config.window.height = v.integer; };
-                if (win.get("debug")) |v| if (v == .bool) { config.window.debug = v.bool; };
-                if (win.get("protocol")) |v| if (v == .string) {
-                    if (std.mem.eql(u8, v.string, "file")) {
-                        config.window.protocol = .file;
-                    } else if (std.mem.eql(u8, v.string, "suji")) {
-                        config.window.protocol = .suji;
-                    } else {
-                        std.debug.print("[suji] warning: unknown protocol '{s}', using default 'file'\n", .{v.string});
-                    }
-                };
+        if (root.get("windows")) |arr_val| {
+            if (arr_val == .array) {
+                var list = std.ArrayList(Window).empty;
+                for (arr_val.array.items) |item| {
+                    if (item != .object) continue;
+                    const w = item.object;
+                    var win = Window{};
+                    if (w.get("name")) |v| if (v == .string) { win.name = dupeStr(a, v.string); };
+                    if (w.get("title")) |v| if (v == .string) { win.title = dupeStr(a, v.string); };
+                    if (w.get("width")) |v| if (v == .integer) { win.width = v.integer; };
+                    if (w.get("height")) |v| if (v == .integer) { win.height = v.integer; };
+                    if (w.get("debug")) |v| if (v == .bool) { win.debug = v.bool; };
+                    if (w.get("url")) |v| if (v == .string) { win.url = dupeStr(a, v.string); };
+                    if (w.get("visible")) |v| if (v == .bool) { win.visible = v.bool; };
+                    if (w.get("protocol")) |v| if (v == .string) {
+                        if (std.mem.eql(u8, v.string, "file")) {
+                            win.protocol = .file;
+                        } else if (std.mem.eql(u8, v.string, "suji")) {
+                            win.protocol = .suji;
+                        } else {
+                            std.debug.print("[suji] warning: unknown protocol '{s}', using default 'file'\n", .{v.string});
+                        }
+                    };
+                    list.append(a, win) catch continue;
+                }
+                if (list.items.len > 0) {
+                    config.windows = list.toOwnedSlice(a) catch &.{Window{}};
+                }
             }
         }
 

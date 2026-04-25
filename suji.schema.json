@@ -312,6 +312,22 @@
             "type": ["string", "null"],
             "default": null,
             "description": "로드할 로컬 파일 경로"
+          },
+          "debug": {
+            "type": "boolean",
+            "default": false,
+            "description": "DevTools 자동 오픈 (개발 시)"
+          },
+          "protocol": {
+            "type": "string",
+            "enum": ["file", "suji"],
+            "default": "file",
+            "description": "이 윈도우의 프론트엔드 로딩 프로토콜 (메인 윈도우만 의미 있음)"
+          },
+          "visible": {
+            "type": "boolean",
+            "default": true,
+            "description": "초기 표시 여부"
           }
         },
         "additionalProperties": false
