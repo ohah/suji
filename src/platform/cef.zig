@@ -1854,7 +1854,7 @@ fn warnUnsupportedOptionsOnce(opts: WindowInitOpts) void {
         opts.parent_id != null;
     if (!has_mac_only) return;
     g_warned_unsupported_options = true;
-    std.debug.print(
+    if (!builtin.is_test) std.debug.print(
         "[suji] warning: window appearance/constraints (frame/transparent/parent/always_on_top/title_bar_style/min·max/fullscreen/background_color) are macOS-only and were ignored on this platform\n",
         .{},
     );

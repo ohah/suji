@@ -16,6 +16,7 @@
 //! 실제 CEF 통합은 `src/platform/cef.zig`의 CefNative가 VTable 구현.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const Bounds = struct {
     x: i32 = 0,
@@ -68,16 +69,19 @@ pub const Constraints = struct {
 /// min > max (max > 0인 경우만)면 max를 0(제한 없음)으로 reset.
 /// Cocoa의 setContentMaxSize: 동작이 모호한 잘못된 입력을 정상화.
 /// 사용자에게 한 번 안내해 silent fix를 자각시킴.
+///
+/// is_test 가드: zig 0.16 test runner는 `--listen=-` IPC 모드에서 자식 프로세스의
+/// stderr 노이즈가 많으면 가짜 "failed command"로 표시. 검증은 단위 테스트가 담당.
 pub fn normalizeConstraints(c: *Constraints) void {
     if (c.max_width > 0 and c.min_width > c.max_width) {
-        std.debug.print(
+        if (!builtin.is_test) std.debug.print(
             "[suji] warning: min_width({d}) > max_width({d}) — clearing max_width\n",
             .{ c.min_width, c.max_width },
         );
         c.max_width = 0;
     }
     if (c.max_height > 0 and c.min_height > c.max_height) {
-        std.debug.print(
+        if (!builtin.is_test) std.debug.print(
             "[suji] warning: min_height({d}) > max_height({d}) — clearing max_height\n",
             .{ c.min_height, c.max_height },
         );
