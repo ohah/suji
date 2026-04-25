@@ -67,6 +67,7 @@ func TestBuildInvokeEvent(t *testing.T) {
 	params := map[string]any{
 		"__window":      float64(7),
 		"__window_name": "settings",
+		"__window_url":  "http://localhost:5173/settings",
 	}
 	ev := buildInvokeEvent(params)
 	if ev.Window.ID != 7 {
@@ -74,6 +75,9 @@ func TestBuildInvokeEvent(t *testing.T) {
 	}
 	if ev.Window.Name != "settings" {
 		t.Fatalf("window.name = %q, want %q", ev.Window.Name, "settings")
+	}
+	if ev.Window.URL != "http://localhost:5173/settings" {
+		t.Fatalf("window.url = %q, want URL", ev.Window.URL)
 	}
 }
 

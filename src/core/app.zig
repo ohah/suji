@@ -98,7 +98,8 @@ pub const App = struct {
                 const win_id_raw = extractIntField(request_json, "__window") orelse 0;
                 const win_id: u32 = if (win_id_raw >= 0) @intCast(win_id_raw) else 0;
                 const win_name = extractStringField(request_json, "__window_name");
-                const event = InvokeEvent{ .window = .{ .id = win_id, .name = win_name } };
+                const win_url = extractStringField(request_json, "__window_url");
+                const event = InvokeEvent{ .window = .{ .id = win_id, .name = win_name, .url = win_url } };
                 const resp = h.func(req, event);
                 return resp.data;
             }
@@ -211,6 +212,9 @@ pub const InvokeEvent = struct {
     pub const Window = struct {
         id: u32,
         name: ?[]const u8 = null,
+        /// sender 창의 main frame URL (Electron `event.sender.url` 대응).
+        /// 로드 중이거나 빈 페이지면 null. wire 레벨에서 `__window_url`이 주입된 경우만 설정.
+        url: ?[]const u8 = null,
     };
 };
 

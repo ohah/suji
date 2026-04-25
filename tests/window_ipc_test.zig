@@ -252,45 +252,45 @@ test "handleSetTitle response is valid JSON (parsable)" {
 
 test "injectWindowField: inserts into simple object" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 3, null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 3, null, null, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"ping\",\"__window\":3}", out);
 }
 
 test "injectWindowField: handles empty object (no leading comma)" {
     var buf: [64]u8 = undefined;
-    const out = ipc.injectWindowField("{}", 1, null, &buf).?;
+    const out = ipc.injectWindowField("{}", 1, null, null, &buf).?;
     try std.testing.expectEqualStrings("{\"__window\":1}", out);
 }
 
 test "injectWindowField: handles whitespace-only object body" {
     var buf: [64]u8 = undefined;
-    const out = ipc.injectWindowField("{  }", 5, null, &buf).?;
+    const out = ipc.injectWindowField("{  }", 5, null, null, &buf).?;
     try std.testing.expectEqualStrings("{  \"__window\":5}", out);
 }
 
 test "injectWindowField: already-tagged request is returned as-is (no double-inject)" {
     var buf: [256]u8 = undefined;
     const src = "{\"cmd\":\"ping\",\"__window\":99}";
-    const out = ipc.injectWindowField(src, 1, null, &buf).?;
+    const out = ipc.injectWindowField(src, 1, null, null, &buf).?;
     try std.testing.expectEqualStrings(src, out);
 }
 
 test "injectWindowField: non-object input returned as-is" {
     var buf: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("[1,2,3]", ipc.injectWindowField("[1,2,3]", 1, null, &buf).?);
-    try std.testing.expectEqualStrings("42", ipc.injectWindowField("42", 1, null, &buf).?);
-    try std.testing.expectEqualStrings("", ipc.injectWindowField("", 1, null, &buf).?);
+    try std.testing.expectEqualStrings("[1,2,3]", ipc.injectWindowField("[1,2,3]", 1, null, null, &buf).?);
+    try std.testing.expectEqualStrings("42", ipc.injectWindowField("42", 1, null, null, &buf).?);
+    try std.testing.expectEqualStrings("", ipc.injectWindowField("", 1, null, null, &buf).?);
 }
 
 test "injectWindowField: trailing whitespace before } still parses" {
     var buf: [64]u8 = undefined;
-    const out = ipc.injectWindowField("{\"a\":1}\n  ", 7, null, &buf).?;
+    const out = ipc.injectWindowField("{\"a\":1}\n  ", 7, null, null, &buf).?;
     try std.testing.expectEqualStrings("{\"a\":1,\"__window\":7}", out);
 }
 
 test "injectWindowField: returns null when output buffer too small" {
     var tiny: [4]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, null, &tiny);
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, null, null, &tiny);
     try std.testing.expect(out == null);
 }
 
@@ -300,7 +300,7 @@ test "injectWindowField: returns null when output buffer too small" {
 
 test "injectWindowField: name 있으면 __window_name도 주입" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 2, "settings", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 2, "settings", null, &buf).?;
     try std.testing.expectEqualStrings(
         "{\"cmd\":\"ping\",\"__window\":2,\"__window_name\":\"settings\"}",
         out,
@@ -309,56 +309,105 @@ test "injectWindowField: name 있으면 __window_name도 주입" {
 
 test "injectWindowField: name 있고 빈 객체일 때 sep 없이 주입" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{}", 1, "main", &buf).?;
+    const out = ipc.injectWindowField("{}", 1, "main", null, &buf).?;
     try std.testing.expectEqualStrings("{\"__window\":1,\"__window_name\":\"main\"}", out);
 }
 
 test "injectWindowField: __window 이미 있으면 name도 재주입 안 함" {
     var buf: [256]u8 = undefined;
     const src = "{\"cmd\":\"x\",\"__window\":9}";
-    try std.testing.expectEqualStrings(src, ipc.injectWindowField(src, 1, "should-not-appear", &buf).?);
+    try std.testing.expectEqualStrings(src, ipc.injectWindowField(src, 1, "should-not-appear", null, &buf).?);
 }
 
 test "injectWindowField: name이 null이면 __window_name 미주입 (기존 동작 보존)" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"a\"}", 4, null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"a\"}", 4, null, null, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"a\",\"__window\":4}", out);
     try std.testing.expect(std.mem.indexOf(u8, out, "__window_name") == null);
 }
 
 test "injectWindowField: name 포함 시 out_buf 작으면 null" {
     var tiny: [20]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, "very-long-window-name", &tiny);
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, "very-long-window-name", null, &tiny);
     try std.testing.expect(out == null);
 }
 
 test "injectWindowField: 빈 문자열 name도 정상 주입" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "", null, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1,\"__window_name\":\"\"}", out);
 }
 
 test "injectWindowField: trailing whitespace + name 둘 다 처리" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"a\":1}\n", 3, "main", &buf).?;
+    const out = ipc.injectWindowField("{\"a\":1}\n", 3, "main", null, &buf).?;
     try std.testing.expectEqualStrings("{\"a\":1,\"__window\":3,\"__window_name\":\"main\"}", out);
 }
 
 test "injectWindowField: name에 \" 있으면 name 생략하고 id만 주입 (JSON 깨짐 방지)" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "bad\"name", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "bad\"name", null, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1}", out);
     try std.testing.expect(std.mem.indexOf(u8, out, "__window_name") == null);
 }
 
 test "injectWindowField: name에 backslash 있으면 name 생략" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "weird\\path", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "weird\\path", null, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1}", out);
 }
 
 test "injectWindowField: name에 control char (newline) 있으면 name 생략" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "line1\nline2", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "line1\nline2", null, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1}", out);
+}
+
+// --- url 필드 -------------------------------------------------------------
+
+test "injectWindowField: url 주입 (name 없을 때)" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 2, null, "http://localhost:5173/", &buf).?;
+    try std.testing.expectEqualStrings(
+        "{\"cmd\":\"x\",\"__window\":2,\"__window_url\":\"http://localhost:5173/\"}",
+        out,
+    );
+}
+
+test "injectWindowField: url + name 둘 다 주입" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 2, "main", "http://localhost/", &buf).?;
+    try std.testing.expectEqualStrings(
+        "{\"cmd\":\"x\",\"__window\":2,\"__window_name\":\"main\",\"__window_url\":\"http://localhost/\"}",
+        out,
+    );
+}
+
+test "injectWindowField: url의 \"/\\ 이스케이프" {
+    var buf: [512]u8 = undefined;
+    const out = ipc.injectWindowField("{}", 1, null, "a\"b\\c", &buf).?;
+    // 기대: `"a\"b\\c"`로 이스케이프되어 JSON 리터럴 유효.
+    try std.testing.expectEqualStrings(
+        "{\"__window\":1,\"__window_url\":\"a\\\"b\\\\c\"}",
+        out,
+    );
+}
+
+test "injectWindowField: url의 control char는 drop (JSON 리터럴 유효 유지)" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{}", 1, null, "http://a\x00b/c", &buf).?;
+    // NUL 바이트 drop 후 "http://ab/c"만 남아야.
+    try std.testing.expectEqualStrings(
+        "{\"__window\":1,\"__window_url\":\"http://ab/c\"}",
+        out,
+    );
+}
+
+test "injectWindowField: 이미 __window 박혀있으면 url도 재주입 안 함 (cross-hop)" {
+    var buf: [256]u8 = undefined;
+    const src = "{\"cmd\":\"x\",\"__window\":3}";
+    try std.testing.expectEqualStrings(
+        src,
+        ipc.injectWindowField(src, 7, "ignored", "http://ignored/", &buf).?,
+    );
 }

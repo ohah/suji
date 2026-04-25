@@ -426,7 +426,9 @@ pub const BackendRegistry = struct {
             // 이미 ''로 차단된 채널은 재경고 불필요 (이전 충돌에서 처리됨).
             if (existing_ptr.*.len == 0) return;
             // 중복: 값을 빈 문자열로 덮어쓰기 (자동 라우팅 차단). target 옵션 강제.
-            std.debug.print("[suji] ERROR: channel '{s}' duplicate ('{s}' and '{s}') — use target option\n", .{ channel, existing_ptr.*, backend });
+            // 의도된 충돌 감지 — 자동 라우팅만 차단하고 명시적 target으로는 여전히 호출 가능.
+            // 실제 에러가 아니므로 WARN 레벨로 찍는다.
+            std.debug.print("[suji] WARN: channel '{s}' registered by multiple backends ('{s}', '{s}') — auto-routing disabled, use {{ target: \"<backend>\" }} to disambiguate\n", .{ channel, existing_ptr.*, backend });
             existing_ptr.* = "";
             return;
         }

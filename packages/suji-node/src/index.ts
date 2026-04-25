@@ -33,6 +33,8 @@ export interface InvokeEvent {
     id: number;
     /** 익명 창이면 null. */
     name: string | null;
+    /** sender 창의 main frame URL (로드 전/빈 페이지면 null). */
+    url: string | null;
   };
 }
 

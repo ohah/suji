@@ -33,7 +33,7 @@ describe('handle — 1-arity (기존 호환)', () => {
   it('파싱된 data를 단일 인자로 받는다', () => {
     const h = mock((_d: any) => ({ ok: true }));
     handle('ping', h);
-    const result = registered['ping']('{"cmd":"ping"}', { window: { id: 0, name: null } });
+    const result = registered['ping']('{"cmd":"ping"}', { window: { id: 0, name: null, url: null } });
     expect(h).toHaveBeenCalledTimes(1);
     expect(h.mock.calls[0][0]).toEqual({ cmd: 'ping' });
     expect(result).toBe('{"ok":true}');
@@ -41,7 +41,7 @@ describe('handle — 1-arity (기존 호환)', () => {
 
   it('문자열 반환은 그대로 전달 (JSON.stringify 건너뜀)', () => {
     handle('ping', () => 'raw-string');
-    expect(registered['ping']('{}', { window: { id: 0, name: null } })).toBe('raw-string');
+    expect(registered['ping']('{}', { window: { id: 0, name: null, url: null } })).toBe('raw-string');
   });
 });
 
@@ -53,8 +53,8 @@ describe('handle — 2-arity (InvokeEvent)', () => {
       return { ok: true };
     });
 
-    const ev = { window: { id: 7, name: 'settings' } };
-    registered['save']('{"cmd":"save","__window":7,"__window_name":"settings"}', ev);
+    const ev = { window: { id: 7, name: 'settings', url: 'http://localhost:5173/settings' } };
+    registered['save']('{"cmd":"save","__window":7,"__window_name":"settings","__window_url":"http://localhost:5173/settings"}', ev);
 
     expect(captured).toEqual(ev);
   });
@@ -62,7 +62,7 @@ describe('handle — 2-arity (InvokeEvent)', () => {
   it('1-arity handler는 event를 받지 않는다 (handler.length === 1 분기)', () => {
     const h = mock((_d: any) => 'ok');
     handle('ping', h);
-    registered['ping']('{}', { window: { id: 9, name: 'x' } });
+    registered['ping']('{}', { window: { id: 9, name: 'x', url: null } });
     // 1-arity — 두 번째 인자 생략
     expect(h.mock.calls[0].length).toBe(1);
   });

@@ -125,6 +125,28 @@ pub fn isValidName(name: []const u8) bool {
     return isJsonSafeChars(name);
 }
 
+/// JSON 문자열 리터럴로 bare 삽입이 가능하도록 최소 이스케이프.
+/// `"` → `\"`, `\` → `\\`, control char(`< 0x20`) → 건너뛴다(drop).
+/// URL처럼 control char이 들어올 일 거의 없는 값에 사용 (event.window.url 주입 등).
+/// out_buf 공간 부족 시 0 반환 → caller가 필드 전체 주입을 건너뛰어야.
+pub fn escapeJsonChars(src: []const u8, out_buf: []u8) usize {
+    var o: usize = 0;
+    for (src) |c| {
+        if (c < 0x20) continue; // drop control
+        const needed: usize = if (c == '"' or c == '\\') 2 else 1;
+        if (o + needed > out_buf.len) return 0;
+        if (c == '"' or c == '\\') {
+            out_buf[o] = '\\';
+            out_buf[o + 1] = c;
+            o += 2;
+        } else {
+            out_buf[o] = c;
+            o += 1;
+        }
+    }
+    return o;
+}
+
 /// 취소 가능 이벤트의 기본 동작 방지 상태. listener가 preventDefault() 호출.
 pub const SujiEvent = struct {
     default_prevented: bool = false,

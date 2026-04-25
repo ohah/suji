@@ -119,8 +119,9 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
 
     await new Promise((r) => setTimeout(r, 300));
     const tail = readLogTail(LOG_PATH, before);
+    // 핵심 검증: ping 로그가 찍혔고 __window:1 이 있다. 그 뒤 추가 필드(name/url)는 자유.
     expect(tail).toMatch(
-      /\[zig\/ping\] window\.id=1 name=\S* raw=\{"cmd":"ping","__window":1(?:,"__window_name":"[^"]*")?\}/,
+      /\[zig\/ping\] window\.id=1 name=\S* raw=\{"cmd":"ping","__window":1(?:,[^}]*)?\}/,
     );
   });
 
@@ -139,11 +140,11 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
 
     const tail = readLogTail(LOG_PATH, before);
     expect(tail).toMatch(
-      /\[zig\/ping\] window\.id=1 name=\S* raw=\{"cmd":"ping","__window":1(?:,"__window_name":"[^"]*")?\}/,
+      /\[zig\/ping\] window\.id=1 name=\S* raw=\{"cmd":"ping","__window":1(?:,[^}]*)?\}/,
     );
     expect(tail).toMatch(
       new RegExp(
-        `\\[zig/ping\\] window\\.id=${created.windowId} name=\\S* raw=\\{"cmd":"ping","__window":${created.windowId}(?:,"__window_name":"[^"]*")?\\}`,
+        `\\[zig/ping\\] window\\.id=${created.windowId} name=\\S* raw=\\{"cmd":"ping","__window":${created.windowId}(?:,[^}]*)?\\}`,
       ),
     );
     expect(created.windowId).not.toBe(1);
@@ -157,6 +158,16 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
     expect(resp.result.window_id).toBe(1);
     // main 창은 main.zig에서 .name = "main"으로 생성됨.
     expect(resp.result.window_name).toBe("main");
+  });
+
+  test("event.window.url이 sender 창의 main frame URL을 반영", async () => {
+    // page1은 http://localhost:5173 을 로드한 상태 (suji dev 환경).
+    // zig-whoami(2-arity)가 응답에 window_url을 담아 보내준다.
+    const resp = (await page1.evaluate(() =>
+      (window as any).__suji__.invoke("zig-whoami", {}, { target: "zig" }),
+    )) as { result: { window_id: number; window_name: string; window_url: string } };
+    expect(resp.result.window_id).toBe(1);
+    expect(resp.result.window_url).toMatch(/^http:\/\/localhost:5173/);
   });
 
   test("명명된 창: event.window.name이 wire + InvokeEvent를 거쳐 핸들러까지 전달", async () => {

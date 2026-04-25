@@ -131,10 +131,11 @@ fn stressDeep(req: suji.Request) suji.Response {
 
 // Phase 2.5: 2-arity 핸들러 — sender 창 컨텍스트를 바로 응답에 담는다.
 fn whoami(req: suji.Request, event: suji.InvokeEvent) suji.Response {
-    // 익명 창(name=null)은 빈 문자열로 내보낸다 — JSON 직렬화 편의.
+    // 익명 창(name=null)/URL 없음(url=null)은 빈 문자열로 내보낸다 — JSON 직렬화 편의.
     return req.ok(.{
         .window_id = event.window.id,
         .window_name = event.window.name orelse "",
+        .window_url = event.window.url orelse "",
     });
 }
 

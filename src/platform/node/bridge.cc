@@ -242,16 +242,39 @@ static void on_event_callback(const char* channel, const char* data, void*) {
 // 단일 IPC 요청 실행 (V8 isolate lock + context scope 안에서 호출)
 // ============================================
 
-// wire의 __window / __window_name 에서 `{window: {id, name}}` 객체 구성.
-// JSON 파싱 없이 간단 파서 — compact wire 포맷 가정 (Suji 코어 주입 결과). 매칭 실패는 id=0/name=null.
+// "key":"<value>" 형식에서 value 추출 (이스케이프 \" / \\ 처리).
+// 매칭 실패 시 found=false. 매칭 성공이면 *out에 파싱된 string 채워짐.
+static bool extract_string_field(const std::string& data, const std::string& key_with_quotes, std::string* out) {
+    size_t pos = data.find(key_with_quotes);
+    if (pos == std::string::npos) return false;
+    size_t p = pos + key_with_quotes.size();
+    out->clear();
+    while (p < data.size()) {
+        char c = data[p];
+        if (c == '\\' && p + 1 < data.size()) {
+            out->push_back(data[p + 1]);
+            p += 2;
+            continue;
+        }
+        if (c == '"') return true;
+        out->push_back(c);
+        p++;
+    }
+    return true; // 종결 quote 못 찾았어도 부분값은 그대로 반환 (defensive)
+}
+
+// wire의 __window / __window_name / __window_url 에서 `{window: {id, name, url}}` 객체 구성.
+// JSON 파싱 없이 간단 파서 — compact wire 포맷 가정 (Suji 코어 주입 결과). 매칭 실패는 id=0/name=null/url=null.
 static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data) {
     Local<v8::Context> ctx = g_setup->context();
     Local<v8::Object> window = v8::Object::New(isolate);
     uint32_t id = 0;
     std::string name;
+    std::string url;
     bool has_name = false;
+    bool has_url = false;
 
-    // "__window":<int> 추출
+    // "__window":<int>
     {
         const std::string key = "\"__window\":";
         size_t pos = data.find(key);
@@ -268,38 +291,21 @@ static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data
             if (any) id = n;
         }
     }
-    // "__window_name":"<...>" 추출 (이스케이프 고려, compact 형식)
-    {
-        const std::string key = "\"__window_name\":\"";
-        size_t pos = data.find(key);
-        if (pos != std::string::npos) {
-            size_t p = pos + key.size();
-            std::string buf;
-            while (p < data.size()) {
-                char c = data[p];
-                if (c == '\\' && p + 1 < data.size()) {
-                    buf.push_back(data[p + 1]);
-                    p += 2;
-                    continue;
-                }
-                if (c == '"') break;
-                buf.push_back(c);
-                p++;
-            }
-            name = buf;
-            has_name = true;
-        }
-    }
+
+    has_name = extract_string_field(data, "\"__window_name\":\"", &name);
+    has_url = extract_string_field(data, "\"__window_url\":\"", &url);
+
+    auto set_str_or_null = [&](const char* k, bool has, const std::string& v) {
+        Local<Value> val = has
+            ? Local<Value>::Cast(String::NewFromUtf8(isolate, v.c_str()).ToLocalChecked())
+            : Local<Value>::Cast(v8::Null(isolate));
+        window->Set(ctx, String::NewFromUtf8(isolate, k).ToLocalChecked(), val).Check();
+    };
 
     window->Set(ctx, String::NewFromUtf8(isolate, "id").ToLocalChecked(),
                 v8::Integer::NewFromUnsigned(isolate, id)).Check();
-    if (has_name) {
-        window->Set(ctx, String::NewFromUtf8(isolate, "name").ToLocalChecked(),
-                    String::NewFromUtf8(isolate, name.c_str()).ToLocalChecked()).Check();
-    } else {
-        window->Set(ctx, String::NewFromUtf8(isolate, "name").ToLocalChecked(),
-                    v8::Null(isolate)).Check();
-    }
+    set_str_or_null("name", has_name, name);
+    set_str_or_null("url", has_url, url);
 
     Local<v8::Object> event = v8::Object::New(isolate);
     event->Set(ctx, String::NewFromUtf8(isolate, "window").ToLocalChecked(), window).Check();

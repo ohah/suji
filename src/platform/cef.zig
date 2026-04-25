@@ -545,6 +545,18 @@ fn cefUserfreeToUtf8(userfree: c.cef_string_userfree_t, buf: []u8) []const u8 {
     return result;
 }
 
+/// 브라우저의 main frame URL 추출 — Phase 2.5 `event.window.url` 원천.
+/// 실패(프레임 없음/URL 빈 문자열)는 null → 호출자가 wire 필드 생략.
+fn getMainFrameUrl(browser: *c.cef_browser_t, buf: []u8) ?[]const u8 {
+    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return null;
+    const get_url = frame.get_url orelse return null;
+    const userfree = get_url(frame);
+    if (userfree == null) return null;
+    const url = cefUserfreeToUtf8(userfree, buf);
+    if (url.len == 0) return null;
+    return url;
+}
+
 // ============================================
 // CEF Reference Counting
 // ============================================
@@ -681,17 +693,20 @@ fn handleBrowserInvoke(
     var data_buf: [8192]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
 
-    // Phase 2.5 — wire 레벨 `__window` (+ optional `__window_name`) 자동 주입.
+    // Phase 2.5 — wire 레벨 `__window` (+ optional `__window_name`, `__window_url`) 자동 주입.
     // 핸들러가 어느 창에서 호출됐는지 식별 가능하도록 sender browser → WM.id로 변환해 JSON에 merge.
     // 이미 __window가 박혀있는 요청(cross-hop)은 보존.
     var injected_buf: [8192]u8 = undefined;
+    var url_extract_buf: [2048]u8 = undefined;
     const data_to_backend: []const u8 = blk: {
         const br = browser orelse break :blk data;
         const native_handle: u64 = @intCast(br.get_identifier.?(br));
         const wm = window_mod.WindowManager.global orelse break :blk data;
         const win_id = wm.findByNativeHandle(native_handle) orelse break :blk data;
         const win_name: ?[]const u8 = if (wm.get(win_id)) |w| w.name else null;
-        break :blk window_ipc.injectWindowField(data, win_id, win_name, &injected_buf) orelse data;
+        // sender 창의 main frame URL. 읽기 실패는 non-fatal — null로 대체.
+        const win_url: ?[]const u8 = getMainFrameUrl(br, &url_extract_buf);
+        break :blk window_ipc.injectWindowField(data, win_id, win_name, win_url, &injected_buf) orelse data;
     };
 
     // 백엔드 호출

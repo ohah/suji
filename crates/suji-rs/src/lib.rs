@@ -41,10 +41,13 @@ pub struct InvokeEvent {
 pub struct Window {
     pub id: u32,
     pub name: Option<String>,
+    /// sender 창의 main frame URL (Electron `event.sender.url` 대응).
+    /// wire 레벨 `__window_url`에서 파생. 로드 전/빈 페이지면 None.
+    pub url: Option<String>,
 }
 
 impl InvokeEvent {
-    /// wire의 `__window` / `__window_name` 필드에서 파생.
+    /// wire의 `__window` / `__window_name` / `__window_url` 필드에서 파생.
     /// #[doc(hidden)] 루트 request JSON Value를 받아 구성 — proc macro가 자동 호출.
     #[doc(hidden)]
     pub fn from_request(parsed: &serde_json::Value) -> Self {
@@ -57,7 +60,11 @@ impl InvokeEvent {
             .get("__window_name")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        Self { window: Window { id, name } }
+        let url = parsed
+            .get("__window_url")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        Self { window: Window { id, name, url } }
     }
 }
 
@@ -220,6 +227,25 @@ mod tests {
         let ev = InvokeEvent::from_request(&v);
         assert_eq!(ev.window.id, 0);
         assert!(ev.window.name.is_none());
+    }
+
+    #[test]
+    fn invoke_event_parses_url_field() {
+        let v = serde_json::json!({
+            "__window": 2,
+            "__window_name": "main",
+            "__window_url": "http://localhost:5173/",
+        });
+        let ev = InvokeEvent::from_request(&v);
+        assert_eq!(ev.window.id, 2);
+        assert_eq!(ev.window.name.as_deref(), Some("main"));
+        assert_eq!(ev.window.url.as_deref(), Some("http://localhost:5173/"));
+    }
+
+    #[test]
+    fn invoke_event_url_is_none_when_missing() {
+        let ev = InvokeEvent::from_request(&serde_json::json!({ "__window": 3 }));
+        assert!(ev.window.url.is_none());
     }
 
     #[test]

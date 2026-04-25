@@ -7,19 +7,23 @@
 const std = @import("std");
 const window = @import("window");
 
-/// Phase 2.5 — 요청 JSON에 `__window: <id>` (+ optional `__window_name`) 자동 주입.
+/// Phase 2.5 — 요청 JSON에 `__window: <id>` (+ optional `__window_name`, `__window_url`) 자동 주입.
 ///   - 이미 `"__window"` 필드가 있으면 원본 반환 (cross-hop 요청 재태깅 방지).
 ///   - `{...}` 로 끝나지 않는 입력(배열/프리미티브/공백 끝)은 원본 반환.
 ///   - window_name이 non-null + JSON-safe면 `"__window_name":"..."`도 merge.
 ///     unsafe char(`"`, `\`, control < 0x20) 포함 시 **id만 주입하고 name은 생략** —
 ///     caller-provided raw interpolation으로 JSON이 깨지는 것 방지. WM 레벨에 아직
 ///     이름 검증기가 없어 defensive fallback을 injection 지점에서 수행.
-///   - out_buf 필요 크기: src.len + ~24 (no-name) 또는 src.len + name.len + ~44 (with name).
+///   - window_url이 non-null이면 JSON escape 처리 후 `"__window_url":"..."`로 주입.
+///     URL은 `/`, `:`, `?`, `=`, `&` 같은 문자를 포함하므로 isJsonSafeChars로는 부족 →
+///     window.escapeJsonChars가 `"`/`\\` 이스케이프 + control char drop.
+///   - out_buf 필요 크기: src.len + ~24 (no-name/url) 또는 + name.len + url.len*2 + ~80.
 ///     부족하면 null 반환 → caller는 원본 사용.
 pub fn injectWindowField(
     src: []const u8,
     window_id: u32,
     window_name: ?[]const u8,
+    window_url: ?[]const u8,
     out_buf: []u8,
 ) ?[]const u8 {
     // 이미 박혀있으면 no-op
@@ -41,11 +45,37 @@ pub fn injectWindowField(
     else
         null;
 
+    // URL은 따로 escape 처리 — `/`, `:`, `?` 등은 JSON-safe지만 `"`/`\\`는 이스케이프 필요.
+    // 실패(버퍼 부족)면 URL 필드 생략.
+    var url_buf: [2048]u8 = undefined;
+    const escaped_url: ?[]const u8 = blk: {
+        const raw = window_url orelse break :blk null;
+        const n = window.escapeJsonChars(raw, &url_buf);
+        if (n == 0 and raw.len > 0) break :blk null;
+        break :blk url_buf[0..n];
+    };
+
+    // 필드 조합: id / id+name / id+url / id+name+url. 네 가지 경우를 직접 가지치기하지 않고,
+    // bufPrint의 포맷 문자열을 케이스별로 분기 — 불필요한 separator를 내보내지 않아야 JSON 유효.
     if (safe_name) |n| {
+        if (escaped_url) |u| {
+            return std.fmt.bufPrint(
+                out_buf,
+                "{s}{s}\"__window\":{d},\"__window_name\":\"{s}\",\"__window_url\":\"{s}\"}}",
+                .{ body, sep, window_id, n, u },
+            ) catch null;
+        }
         return std.fmt.bufPrint(
             out_buf,
             "{s}{s}\"__window\":{d},\"__window_name\":\"{s}\"}}",
             .{ body, sep, window_id, n },
+        ) catch null;
+    }
+    if (escaped_url) |u| {
+        return std.fmt.bufPrint(
+            out_buf,
+            "{s}{s}\"__window\":{d},\"__window_url\":\"{s}\"}}",
+            .{ body, sep, window_id, u },
         ) catch null;
     }
     return std.fmt.bufPrint(

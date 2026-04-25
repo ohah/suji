@@ -32,6 +32,7 @@ type InvokeEvent struct {
 type Window struct {
 	ID   uint32 `json:"id"`
 	Name string `json:"name,omitempty"` // 익명 창은 빈 문자열
+	URL  string `json:"url,omitempty"`  // sender 창의 main frame URL (없으면 빈 문자열)
 }
 
 // invokeEventType — reflect 경로에서 타입 비교용 sentinel.
@@ -117,7 +118,7 @@ func callMethod(method reflect.Method, params map[string]any) any {
 	return results[0].Interface()
 }
 
-// buildInvokeEvent — wire의 __window / __window_name 에서 sender 컨텍스트 구성.
+// buildInvokeEvent — wire의 __window / __window_name / __window_url 에서 sender 컨텍스트 구성.
 // 필드 없음/타입 불일치는 모두 zero-value로 안전하게 폴백.
 func buildInvokeEvent(params map[string]any) *InvokeEvent {
 	ev := &InvokeEvent{}
@@ -129,6 +130,11 @@ func buildInvokeEvent(params map[string]any) *InvokeEvent {
 	if raw, ok := params["__window_name"]; ok {
 		if s, ok := raw.(string); ok {
 			ev.Window.Name = s
+		}
+	}
+	if raw, ok := params["__window_url"]; ok {
+		if s, ok := raw.(string); ok {
+			ev.Window.URL = s
 		}
 	}
 	return ev
