@@ -12,12 +12,6 @@
       "height": 768,
       "debug": true,
       "protocol": "suji"
-    },
-    {
-      "name": "settings",
-      "title": "Settings (선언적 두 번째 창)",
-      "width": 600,
-      "height": 400
     }
   ],
   "plugins": ["state"],

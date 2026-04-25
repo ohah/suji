@@ -59,6 +59,11 @@ pub const Config = struct {
         dist_dir: [:0]const u8 = "frontend/dist",
     };
 
+    /// 시작 시 자동 생성할 창의 최대 개수.
+    /// 사용자가 실수로 큰 배열을 넣어도 시작 hang/OOM 방지 (각 창은 NSWindow + GPU surface 생성).
+    /// 런타임에 추가 창이 필요하면 wm.create / create_window IPC로 만들 수 있음.
+    pub const MAX_STARTUP_WINDOWS: usize = 32;
+
     pub fn load(allocator: std.mem.Allocator) !Config {
         return loadJson(allocator);
     }
@@ -105,7 +110,14 @@ pub const Config = struct {
         if (root.get("windows")) |arr_val| {
             if (arr_val == .array) {
                 var list = std.ArrayList(Window).empty;
+                if (arr_val.array.items.len > MAX_STARTUP_WINDOWS) {
+                    std.debug.print(
+                        "[suji] warning: windows[] has {d} entries, capping at {d} (use create_window for more at runtime)\n",
+                        .{ arr_val.array.items.len, MAX_STARTUP_WINDOWS },
+                    );
+                }
                 for (arr_val.array.items) |item| {
+                    if (list.items.len >= MAX_STARTUP_WINDOWS) break;
                     if (item != .object) continue;
                     const w = item.object;
                     var win = Window{};

@@ -181,7 +181,6 @@ pub fn initialize(config: CefConfig) !void {
 
 var g_devtools_client: c.cef_client_t = undefined;
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
-var g_devtools_open: bool = false;
 
 /// 전역 CEF 핸들러 초기화 (idempotent). CefNative.init에서 호출.
 /// life_span_handler / keyboard_handler / devtools client — 모든 브라우저가 공유.
@@ -557,6 +556,12 @@ fn getMainFrameUrl(browser: *c.cef_browser_t, buf: []u8) ?[]const u8 {
     return url;
 }
 
+/// CEF cef_frame_t.is_main의 Zig friendly 래퍼 (C int → bool, vtable null-safe).
+fn frameIsMain(frame: *c.cef_frame_t) ?bool {
+    const fn_ptr = frame.is_main orelse return null;
+    return fn_ptr(frame) == 1;
+}
+
 // ============================================
 // CEF Reference Counting
 // ============================================
@@ -705,11 +710,7 @@ fn handleBrowserInvoke(
         const win_name: ?[]const u8 = if (wm.get(win_id)) |w| w.name else null;
         // sender 창의 main frame URL. 읽기 실패는 non-fatal — null로 대체.
         const win_url: ?[]const u8 = getMainFrameUrl(br, &url_extract_buf);
-        // sender frame이 main인지 — iframe 식별. CEF cef_frame_t.is_main 직접 호출.
-        const is_main: ?bool = if (frame) |f|
-            (if (f.is_main) |fn_ptr| (fn_ptr(f) == 1) else null)
-        else
-            null;
+        const is_main: ?bool = if (frame) |f| frameIsMain(f) else null;
         break :blk window_ipc.injectWindowField(data, .{
             .window_id = win_id,
             .window_name = win_name,

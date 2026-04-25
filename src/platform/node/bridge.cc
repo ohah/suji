@@ -263,53 +263,52 @@ static bool extract_string_field(const std::string& data, const std::string& key
     return true; // 종결 quote 못 찾았어도 부분값은 그대로 반환 (defensive)
 }
 
-// wire의 __window / __window_name / __window_url 에서 `{window: {id, name, url}}` 객체 구성.
-// JSON 파싱 없이 간단 파서 — compact wire 포맷 가정 (Suji 코어 주입 결과). 매칭 실패는 id=0/name=null/url=null.
+// "key":true|false 추출. 매칭 실패/잘못된 값은 false 반환 + *out 미변경.
+static bool extract_bool_field(const std::string& data, const std::string& key_with_colon, bool* out) {
+    size_t pos = data.find(key_with_colon);
+    if (pos == std::string::npos) return false;
+    size_t p = pos + key_with_colon.size();
+    while (p < data.size() && data[p] == ' ') p++;
+    if (p + 4 <= data.size() && data.compare(p, 4, "true") == 0) { *out = true; return true; }
+    if (p + 5 <= data.size() && data.compare(p, 5, "false") == 0) { *out = false; return true; }
+    return false;
+}
+
+// wire의 __window / __window_name / __window_url / __window_main_frame 에서 `{window: {...}}` 객체 구성.
+// JSON 파싱 없이 간단 파서 — compact wire 포맷 가정 (Suji 코어 주입 결과). 매칭 실패는 default(0/null).
 static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data) {
     Local<v8::Context> ctx = g_setup->context();
     Local<v8::Object> window = v8::Object::New(isolate);
-    uint32_t id = 0;
-    std::string name;
-    std::string url;
-    bool has_name = false;
-    bool has_url = false;
 
-    // "__window":<int>
+    // __window는 항상 가장 먼저 박힘 — 못 찾으면 나머지도 없으므로 early-return으로 3회 find 스킵.
+    uint32_t id = 0;
     {
         const std::string key = "\"__window\":";
         size_t pos = data.find(key);
-        if (pos != std::string::npos) {
-            size_t p = pos + key.size();
-            while (p < data.size() && data[p] == ' ') p++;
-            uint32_t n = 0;
-            bool any = false;
-            while (p < data.size() && data[p] >= '0' && data[p] <= '9') {
-                n = n * 10 + (data[p] - '0');
-                p++;
-                any = true;
-            }
-            if (any) id = n;
+        if (pos == std::string::npos) {
+            // 코어 미경유 또는 cross-hop 보존 케이스. id=0, 모든 필드 null로 emit.
+            window->Set(ctx, String::NewFromUtf8(isolate, "id").ToLocalChecked(),
+                        v8::Integer::NewFromUnsigned(isolate, 0)).Check();
+            window->Set(ctx, String::NewFromUtf8(isolate, "name").ToLocalChecked(), v8::Null(isolate)).Check();
+            window->Set(ctx, String::NewFromUtf8(isolate, "url").ToLocalChecked(), v8::Null(isolate)).Check();
+            window->Set(ctx, String::NewFromUtf8(isolate, "is_main_frame").ToLocalChecked(), v8::Null(isolate)).Check();
+            Local<v8::Object> event = v8::Object::New(isolate);
+            event->Set(ctx, String::NewFromUtf8(isolate, "window").ToLocalChecked(), window).Check();
+            return event;
+        }
+        size_t p = pos + key.size();
+        while (p < data.size() && data[p] == ' ') p++;
+        while (p < data.size() && data[p] >= '0' && data[p] <= '9') {
+            id = id * 10 + (data[p] - '0');
+            p++;
         }
     }
 
-    has_name = extract_string_field(data, "\"__window_name\":\"", &name);
-    has_url = extract_string_field(data, "\"__window_url\":\"", &url);
-
-    // "__window_main_frame":true|false
-    Local<Value> main_frame_val = v8::Null(isolate);
-    {
-        const std::string key = "\"__window_main_frame\":";
-        size_t pos = data.find(key);
-        if (pos != std::string::npos) {
-            size_t p = pos + key.size();
-            while (p < data.size() && data[p] == ' ') p++;
-            if (p + 4 <= data.size() && data.compare(p, 4, "true") == 0) {
-                main_frame_val = v8::Boolean::New(isolate, true);
-            } else if (p + 5 <= data.size() && data.compare(p, 5, "false") == 0) {
-                main_frame_val = v8::Boolean::New(isolate, false);
-            }
-        }
-    }
+    std::string name, url;
+    bool has_name = extract_string_field(data, "\"__window_name\":\"", &name);
+    bool has_url = extract_string_field(data, "\"__window_url\":\"", &url);
+    bool main_frame_b = false;
+    bool has_main_frame = extract_bool_field(data, "\"__window_main_frame\":", &main_frame_b);
 
     auto set_str_or_null = [&](const char* k, bool has, const std::string& v) {
         Local<Value> val = has
@@ -322,6 +321,9 @@ static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data
                 v8::Integer::NewFromUnsigned(isolate, id)).Check();
     set_str_or_null("name", has_name, name);
     set_str_or_null("url", has_url, url);
+    Local<Value> main_frame_val = has_main_frame
+        ? Local<Value>::Cast(v8::Boolean::New(isolate, main_frame_b))
+        : Local<Value>::Cast(v8::Null(isolate));
     window->Set(ctx, String::NewFromUtf8(isolate, "is_main_frame").ToLocalChecked(),
                 main_frame_val).Check();
 

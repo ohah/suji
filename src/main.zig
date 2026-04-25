@@ -827,17 +827,15 @@ fn openWindow(
     stack.init(allocator, runtime.io, cef_native.asNative(), event_bus);
     stack.setGlobal();
 
-    // config.windows의 모든 창 생성. 첫 창이 main, 나머지는 자동 추가.
-    // 첫 창의 url은 위에서 계산한 dev/dist URL 사용 (windows[0].url이 없으면).
-    // 추가 창은 명시적 url 사용 (없으면 첫 창과 같은 URL로 폴백).
+    // 첫 창의 default name="main" — 플러그인이 wm.fromName("main")으로 메인 창 식별 가능.
     for (config.windows, 0..) |w, i| {
         const win_name: ?[]const u8 = if (w.name) |n| std.mem.sliceTo(n, 0)
-        else if (i == 0) "main" // 첫 창은 default name="main"
+        else if (i == 0) "main"
         else null;
 
+        // 명시적 url이 있으면 그것, 없으면 dev/dist 기본 URL로 폴백 (i==0 분기 불필요 — 둘 다 같은 결과).
         const win_url: ?[]const u8 = if (w.url) |u| std.mem.sliceTo(u, 0)
-        else if (i == 0 and url != null) std.mem.sliceTo(url.?, 0)
-        else if (url) |u| std.mem.sliceTo(u, 0) // 폴백
+        else if (url) |u| std.mem.sliceTo(u, 0)
         else null;
 
         _ = stack.manager.create(.{
@@ -850,7 +848,8 @@ fn openWindow(
             },
         }) catch |err| {
             std.debug.print("[suji] window[{d}] create failed: {s}\n", .{ i, @errorName(err) });
-            if (i == 0) return err; // 첫 창 실패는 fatal
+            // 첫 창 실패는 fatal — 빈 앱 상태로 cef.run 진입하면 즉시 quit 돼버림.
+            if (i == 0) return err;
         };
     }
 
