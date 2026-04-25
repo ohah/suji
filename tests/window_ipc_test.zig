@@ -770,3 +770,60 @@ test "Phase 4-A 모든 핸들러: 작은 버퍼면 null" {
     try std.testing.expect(ipc.handleGetUrl(1, &tiny, &wm) == null);
     try std.testing.expect(ipc.handleIsLoading(1, &tiny, &wm) == null);
 }
+
+// ============================================
+// Phase 4-C: DevTools IPC 핸들러
+// ============================================
+
+test "handleOpenDevTools / handleCloseDevTools: native 호출 + ok:true 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    const r1 = ipc.handleOpenDevTools(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.open_dev_tools_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"open_dev_tools\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":true") != null);
+
+    const r2 = ipc.handleCloseDevTools(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.close_dev_tools_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"cmd\":\"close_dev_tools\"") != null);
+}
+
+test "handleToggleDevTools: 호출마다 native toggle + 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleToggleDevTools(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.toggle_dev_tools_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"toggle_dev_tools\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}
+
+test "handleIsDevToolsOpened: stub 값이 응답 opened 필드로" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r1 = ipc.handleIsDevToolsOpened(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"opened\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":true") != null);
+    native.stub_dev_tools_opened = true;
+    const r2 = ipc.handleIsDevToolsOpened(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"opened\":true") != null);
+}
+
+test "Phase 4-C 핸들러: 알 수 없는 id면 ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleOpenDevTools(999, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 0), native.open_dev_tools_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":false") != null);
+}

@@ -114,6 +114,10 @@ export interface IsLoadingResponse extends WindowOpResponse {
     cmd: "is_loading";
     loading: boolean;
 }
+export interface IsDevToolsOpenedResponse extends WindowOpResponse {
+    cmd: "is_dev_tools_opened";
+    opened: boolean;
+}
 export declare const windows: {
     /**
      * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
@@ -135,6 +139,14 @@ export declare const windows: {
     getURL(windowId: number): Promise<GetUrlResponse>;
     /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
     isLoading(windowId: number): Promise<IsLoadingResponse>;
+    /** DevTools 열기 — 이미 열려있으면 멱등 no-op */
+    openDevTools(windowId: number): Promise<WindowOpResponse>;
+    /** DevTools 닫기 — 이미 닫혀있으면 no-op */
+    closeDevTools(windowId: number): Promise<WindowOpResponse>;
+    /** DevTools 열려있는지 조회 (Electron `webContents.isDevToolsOpened`) */
+    isDevToolsOpened(windowId: number): Promise<IsDevToolsOpenedResponse>;
+    /** DevTools 토글 — F12 단축키와 동일 동작 */
+    toggleDevTools(windowId: number): Promise<WindowOpResponse>;
 };
 /**
  * 여러 백엔드에 동시 요청

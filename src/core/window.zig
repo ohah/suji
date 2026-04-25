@@ -152,6 +152,11 @@ pub const Native = struct {
         execute_javascript: *const fn (ctx: ?*anyopaque, handle: u64, code: []const u8) void,
         get_url: *const fn (ctx: ?*anyopaque, handle: u64) ?[]const u8,
         is_loading: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        // Phase 4-C: DevTools
+        open_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        close_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        is_dev_tools_opened: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        toggle_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
     };
 
     pub fn createWindow(self: Native, opts: *const CreateOptions) !u64 {
@@ -186,6 +191,18 @@ pub const Native = struct {
     }
     pub fn isLoading(self: Native, handle: u64) bool {
         return self.vtable.is_loading(self.ctx, handle);
+    }
+    pub fn openDevTools(self: Native, handle: u64) void {
+        self.vtable.open_dev_tools(self.ctx, handle);
+    }
+    pub fn closeDevTools(self: Native, handle: u64) void {
+        self.vtable.close_dev_tools(self.ctx, handle);
+    }
+    pub fn isDevToolsOpened(self: Native, handle: u64) bool {
+        return self.vtable.is_dev_tools_opened(self.ctx, handle);
+    }
+    pub fn toggleDevTools(self: Native, handle: u64) void {
+        self.vtable.toggle_dev_tools(self.ctx, handle);
     }
 };
 
@@ -711,5 +728,35 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.isLoading(win.native_handle);
+    }
+
+    // ==================== Phase 4-C: DevTools ====================
+
+    pub fn openDevTools(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.openDevTools(win.native_handle);
+    }
+
+    pub fn closeDevTools(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.closeDevTools(win.native_handle);
+    }
+
+    pub fn isDevToolsOpened(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.isDevToolsOpened(win.native_handle);
+    }
+
+    pub fn toggleDevTools(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.toggleDevTools(win.native_handle);
     }
 };

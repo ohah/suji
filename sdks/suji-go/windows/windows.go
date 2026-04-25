@@ -60,6 +60,21 @@ func IsLoading(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"is_loading","windowId":%d}`, windowID))
 }
 
+// ── Phase 4-C: DevTools ──
+
+func OpenDevTools(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"open_dev_tools","windowId":%d}`, windowID))
+}
+func CloseDevTools(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"close_dev_tools","windowId":%d}`, windowID))
+}
+func IsDevToolsOpened(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"is_dev_tools_opened","windowId":%d}`, windowID))
+}
+func ToggleDevTools(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"toggle_dev_tools","windowId":%d}`, windowID))
+}
+
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,

@@ -217,6 +217,21 @@ pub mod windows {
         invoke("__core__", &format!(r#"{{"cmd":"is_loading","windowId":{}}}"#, window_id))
     }
 
+    // ── Phase 4-C: DevTools ──
+
+    pub fn open_dev_tools(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"open_dev_tools","windowId":{}}}"#, window_id))
+    }
+    pub fn close_dev_tools(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"close_dev_tools","windowId":{}}}"#, window_id))
+    }
+    pub fn is_dev_tools_opened(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"is_dev_tools_opened","windowId":{}}}"#, window_id))
+    }
+    pub fn toggle_dev_tools(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"toggle_dev_tools","windowId":{}}}"#, window_id))
+    }
+
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,

@@ -34,6 +34,13 @@ pub const TestNative = struct {
     stub_url: ?[]const u8 = null,
     /// isLoading 반환값 (기본 false)
     stub_is_loading: bool = false,
+
+    // Phase 4-C: DevTools 캡처
+    open_dev_tools_calls: usize = 0,
+    close_dev_tools_calls: usize = 0,
+    toggle_dev_tools_calls: usize = 0,
+    /// is_dev_tools_opened 반환값. toggle/open/close가 자동 갱신.
+    stub_dev_tools_opened: bool = false,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
@@ -57,6 +64,10 @@ pub const TestNative = struct {
         .execute_javascript = executeJavascript,
         .get_url = getUrl,
         .is_loading = isLoading,
+        .open_dev_tools = openDevTools,
+        .close_dev_tools = closeDevTools,
+        .is_dev_tools_opened = isDevToolsOpened,
+        .toggle_dev_tools = toggleDevTools,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *TestNative {
@@ -133,5 +144,27 @@ pub const TestNative = struct {
 
     fn isLoading(ctx: ?*anyopaque, _: u64) bool {
         return fromCtx(ctx).stub_is_loading;
+    }
+
+    fn openDevTools(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.open_dev_tools_calls += 1;
+        self.stub_dev_tools_opened = true;
+    }
+
+    fn closeDevTools(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.close_dev_tools_calls += 1;
+        self.stub_dev_tools_opened = false;
+    }
+
+    fn isDevToolsOpened(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_dev_tools_opened;
+    }
+
+    fn toggleDevTools(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.toggle_dev_tools_calls += 1;
+        self.stub_dev_tools_opened = !self.stub_dev_tools_opened;
     }
 };

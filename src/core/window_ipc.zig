@@ -337,3 +337,42 @@ pub fn handleIsLoading(window_id: u32, response_buf: []u8, wm: *window.WindowMan
         .{ window_id, loading },
     ) catch null;
 }
+
+// ============================================
+// Phase 4-C: DevTools (open/close/is/toggle)
+// 응답: open/close/toggle은 windowOp 형식, is_dev_tools_opened는 추가 `opened` 필드.
+// ============================================
+
+pub fn handleOpenDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.openDevTools(window_id)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "open_dev_tools", window_id, ok);
+}
+
+pub fn handleCloseDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.closeDevTools(window_id)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "close_dev_tools", window_id, ok);
+}
+
+pub fn handleToggleDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.toggleDevTools(window_id)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "toggle_dev_tools", window_id, ok);
+}
+
+pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const opened = wm.isDevToolsOpened(window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"is_dev_tools_opened\",\"windowId\":{d},\"ok\":false,\"opened\":false}}",
+            .{window_id},
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"is_dev_tools_opened\",\"windowId\":{d},\"ok\":true,\"opened\":{}}}",
+        .{ window_id, opened },
+    ) catch null;
+}

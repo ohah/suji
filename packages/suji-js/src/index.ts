@@ -170,6 +170,11 @@ export interface IsLoadingResponse extends WindowOpResponse {
   loading: boolean;
 }
 
+export interface IsDevToolsOpenedResponse extends WindowOpResponse {
+  cmd: "is_dev_tools_opened";
+  opened: boolean;
+}
+
 async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
   const raw = await getBridge().core(JSON.stringify(request));
   return (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
@@ -220,6 +225,28 @@ export const windows = {
   /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
   isLoading(windowId: number): Promise<IsLoadingResponse> {
     return coreCall<IsLoadingResponse>({ cmd: "is_loading", windowId });
+  },
+
+  // ── Phase 4-C: DevTools (open/close/is/toggle) ──
+
+  /** DevTools 열기 — 이미 열려있으면 멱등 no-op */
+  openDevTools(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "open_dev_tools", windowId });
+  },
+
+  /** DevTools 닫기 — 이미 닫혀있으면 no-op */
+  closeDevTools(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "close_dev_tools", windowId });
+  },
+
+  /** DevTools 열려있는지 조회 (Electron `webContents.isDevToolsOpened`) */
+  isDevToolsOpened(windowId: number): Promise<IsDevToolsOpenedResponse> {
+    return coreCall<IsDevToolsOpenedResponse>({ cmd: "is_dev_tools_opened", windowId });
+  },
+
+  /** DevTools 토글 — F12 단축키와 동일 동작 */
+  toggleDevTools(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "toggle_dev_tools", windowId });
   },
 };
 

@@ -218,6 +218,66 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
 //    라우팅은 같은 cefHandleCore라 추가 e2e 불필요.
 // ============================================
 
+// ============================================
+// Phase 4-C: DevTools API (open / close / is / toggle)
+// ============================================
+
+describe("DevTools API (Phase 4-C)", () => {
+  test("open → is(true) → close → is(false) 라이프사이클", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "dev-tools-test", url: "about:blank" });
+    const id = created.windowId;
+    const evalCmd = (cmd: string, extra: object = {}): Promise<any> =>
+      page.evaluate((req) => (window as any).__suji__.core(JSON.stringify(req)), { cmd, windowId: id, ...extra });
+
+    const op = await evalCmd("open_dev_tools");
+    expect(op.cmd).toBe("open_dev_tools");
+    expect(op.ok).toBe(true);
+
+    // CEF가 DevTools 창을 띄우는 데 시간 필요. 짧게 대기.
+    await new Promise((r) => setTimeout(r, 500));
+
+    const isr = await evalCmd("is_dev_tools_opened");
+    expect(isr.opened).toBe(true);
+
+    const cl = await evalCmd("close_dev_tools");
+    expect(cl.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const isr2 = await evalCmd("is_dev_tools_opened");
+    expect(isr2.opened).toBe(false);
+  });
+
+  test("toggle: 현재 상태 반전 (idempotent open + idempotent close)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "toggle-dt", url: "about:blank" });
+    const id = created.windowId;
+    const evalCmd = (cmd: string): Promise<any> =>
+      page.evaluate((req) => (window as any).__suji__.core(JSON.stringify(req)), { cmd, windowId: id });
+
+    // toggle → opened
+    const t1 = await evalCmd("toggle_dev_tools");
+    expect(t1.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 500));
+    expect((await evalCmd("is_dev_tools_opened")).opened).toBe(true);
+
+    // 이미 열려있는데 다시 open 호출 — 멱등 (응답 ok=true).
+    const op = await evalCmd("open_dev_tools");
+    expect(op.ok).toBe(true);
+
+    // toggle → closed
+    const t2 = await evalCmd("toggle_dev_tools");
+    expect(t2.ok).toBe(true);
+    await new Promise((r) => setTimeout(r, 300));
+    expect((await evalCmd("is_dev_tools_opened")).opened).toBe(false);
+  });
+
+  test("알 수 없는 windowId — ok:false 반환", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "open_dev_tools", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe("Zig backend SDK windows.* round-trip", () => {
   test("zig handler가 suji.windows.isLoading 호출 → 코어 응답 회신", async () => {
     const r: any = await page.evaluate(() =>

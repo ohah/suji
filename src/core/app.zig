@@ -548,6 +548,28 @@ pub const windows = struct {
         return coreCmd("is_loading", fields);
     }
 
+    // ── Phase 4-C: DevTools ──
+
+    pub fn openDevTools(id: u32) ?[]const u8 {
+        return windowIdCmd("open_dev_tools", id);
+    }
+    pub fn closeDevTools(id: u32) ?[]const u8 {
+        return windowIdCmd("close_dev_tools", id);
+    }
+    pub fn isDevToolsOpened(id: u32) ?[]const u8 {
+        return windowIdCmd("is_dev_tools_opened", id);
+    }
+    pub fn toggleDevTools(id: u32) ?[]const u8 {
+        return windowIdCmd("toggle_dev_tools", id);
+    }
+
+    /// `windowId`만 들어가는 단순 cmd 헬퍼 — getURL/isLoading/openDevTools/... 공통.
+    fn windowIdCmd(cmd: []const u8, id: u32) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d}", .{id}) catch return null;
+        return coreCmd(cmd, fields);
+    }
+
     pub fn setTitle(id: u32, title: []const u8) ?[]const u8 {
         var t_buf: [512]u8 = undefined;
         const t_n = util.escapeJsonStr(title, &t_buf) orelse return null;

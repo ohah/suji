@@ -452,7 +452,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `get_url`(캐시), `is_loading` 6개. WM 메서드 + IPC 핸들러 + Frontend SDK
           (`windows.loadURL/reload/executeJavaScript/getURL/isLoading`) + 단위 17 + e2e 3.
     - [ ] Phase 4-B 줌 — `set_zoom_factor`, `get_zoom_factor`, `set_zoom_level`, `get_zoom_level`
-    - [ ] Phase 4-C DevTools 명시 API — `open_dev_tools`, `close_dev_tools`, `is_dev_tools_opened`, `toggle_dev_tools`
+    - [x] **Phase 4-C 핵심** — `open_dev_tools`, `close_dev_tools`, `is_dev_tools_opened`,
+          `toggle_dev_tools` 4개. WM 메서드 + IPC 핸들러 + 5 SDK (Frontend + Zig/Rust/Go/Node) +
+          단위 11 + e2e 3. open/close 멱등 — 이미 열림/닫힘이면 no-op. 기존 F12 단축키
+          토글 코드(`toggleDevTools` 헬퍼)를 분해해 4개 API로 노출.
     - [ ] Phase 4-D 인쇄/캡처 — `print_to_pdf`, `capture_page` (콜백 기반)
     - [ ] Phase 4-E 편집/검색/UA — `undo/redo/cut/copy/paste/select_all`, `find_in_page`, `set_user_agent`
     - [ ] DevTools "Reload" 버튼 → **DevTools가 attach된 메인 창도 같이 reload** (Electron 동작 호환).

@@ -711,6 +711,27 @@ test "windows.setTitle: title의 \" 이스케이프" {
     }.run);
 }
 
+// Phase 4-C: DevTools — windowId만 들어가는 단순 cmd 4종.
+test "windows.openDevTools / closeDevTools / isDevToolsOpened / toggleDevTools" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.openDevTools(3);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"open_dev_tools\",\"windowId\":3") != null);
+
+            _ = app_mod.windows.closeDevTools(3);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"close_dev_tools\",\"windowId\":3") != null);
+
+            _ = app_mod.windows.isDevToolsOpened(3);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"is_dev_tools_opened\",\"windowId\":3") != null);
+
+            _ = app_mod.windows.toggleDevTools(3);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"toggle_dev_tools\",\"windowId\":3") != null);
+
+            try std.testing.expectEqual(@as(usize, 4), InvokeSpy.call_count);
+        }
+    }.run);
+}
+
 test "suji.sendTo() forwards target id + channel + data to emit_to_fn" {
     SendToSpy.call_count = 0;
     const ExternSujiCore = app_mod.ExternSujiCore;

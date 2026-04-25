@@ -109,6 +109,23 @@ export const windows = {
     isLoading(windowId) {
         return coreCall({ cmd: "is_loading", windowId });
     },
+    // ── Phase 4-C: DevTools (open/close/is/toggle) ──
+    /** DevTools 열기 — 이미 열려있으면 멱등 no-op */
+    openDevTools(windowId) {
+        return coreCall({ cmd: "open_dev_tools", windowId });
+    },
+    /** DevTools 닫기 — 이미 닫혀있으면 no-op */
+    closeDevTools(windowId) {
+        return coreCall({ cmd: "close_dev_tools", windowId });
+    },
+    /** DevTools 열려있는지 조회 (Electron `webContents.isDevToolsOpened`) */
+    isDevToolsOpened(windowId) {
+        return coreCall({ cmd: "is_dev_tools_opened", windowId });
+    },
+    /** DevTools 토글 — F12 단축키와 동일 동작 */
+    toggleDevTools(windowId) {
+        return coreCall({ cmd: "toggle_dev_tools", windowId });
+    },
 };
 /**
  * 여러 백엔드에 동시 요청

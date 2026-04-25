@@ -272,6 +272,10 @@ pub const CefNative = struct {
         .execute_javascript = executeJavascript,
         .get_url = getUrl,
         .is_loading = isLoading,
+        .open_dev_tools = openDevToolsImpl,
+        .close_dev_tools = closeDevToolsImpl,
+        .is_dev_tools_opened = isDevToolsOpenedImpl,
+        .toggle_dev_tools = toggleDevToolsImpl,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
@@ -500,6 +504,35 @@ pub const CefNative = struct {
         const entry = self.browsers.get(handle) orelse return false;
         const fn_ptr = entry.browser.is_loading orelse return false;
         return fn_ptr(entry.browser) == 1;
+    }
+
+    // ==================== Phase 4-C: DevTools ====================
+
+    fn openDevToolsImpl(ctx: ?*anyopaque, handle: u64) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        openDevTools(entry.browser);
+    }
+
+    fn closeDevToolsImpl(ctx: ?*anyopaque, handle: u64) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        closeDevTools(entry.browser);
+    }
+
+    fn isDevToolsOpenedImpl(ctx: ?*anyopaque, handle: u64) bool {
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return false;
+        return hasDevTools(entry.browser);
+    }
+
+    fn toggleDevToolsImpl(ctx: ?*anyopaque, handle: u64) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        toggleDevTools(entry.browser);
     }
 };
 
@@ -1179,22 +1212,38 @@ fn onPreKeyEvent(
     return 0;
 }
 
+fn devtoolsHost(browser: *c.cef_browser_t) ?*c.cef_browser_host_t {
+    return asPtr(c.cef_browser_host_t, browser.get_host.?(browser));
+}
+
+fn hasDevTools(browser: *c.cef_browser_t) bool {
+    const host = devtoolsHost(browser) orelse return false;
+    return host.has_dev_tools.?(host) == 1;
+}
+
+fn openDevTools(browser: *c.cef_browser_t) void {
+    const host = devtoolsHost(browser) orelse return;
+    if (host.has_dev_tools.?(host) == 1) return; // 이미 열려있으면 멱등 no-op
+
+    var window_info: c.cef_window_info_t = undefined;
+    zeroCefStruct(c.cef_window_info_t, &window_info);
+    window_info.runtime_style = c.CEF_RUNTIME_STYLE_DEFAULT;
+
+    var settings: c.cef_browser_settings_t = undefined;
+    zeroCefStruct(c.cef_browser_settings_t, &settings);
+
+    var point: c.cef_point_t = .{ .x = 0, .y = 0 };
+    host.show_dev_tools.?(host, &window_info, &g_devtools_client, &settings, &point);
+}
+
+fn closeDevTools(browser: *c.cef_browser_t) void {
+    const host = devtoolsHost(browser) orelse return;
+    if (host.has_dev_tools.?(host) != 1) return; // 이미 닫혀있으면 no-op
+    host.close_dev_tools.?(host);
+}
+
 fn toggleDevTools(browser: *c.cef_browser_t) void {
-    const host = asPtr(c.cef_browser_host_t, browser.get_host.?(browser)) orelse return;
-
-    if (host.has_dev_tools.?(host) == 1) {
-        host.close_dev_tools.?(host);
-    } else {
-        var window_info: c.cef_window_info_t = undefined;
-        zeroCefStruct(c.cef_window_info_t, &window_info);
-        window_info.runtime_style = c.CEF_RUNTIME_STYLE_DEFAULT;
-
-        var settings: c.cef_browser_settings_t = undefined;
-        zeroCefStruct(c.cef_browser_settings_t, &settings);
-
-        var point: c.cef_point_t = .{ .x = 0, .y = 0 };
-        host.show_dev_tools.?(host, &window_info, &g_devtools_client, &settings, &point);
-    }
+    if (hasDevTools(browser)) closeDevTools(browser) else openDevTools(browser);
 }
 
 fn zoomChange(browser: *c.cef_browser_t, delta: f64) void {

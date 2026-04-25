@@ -1111,6 +1111,29 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return window_ipc.handleIsLoading(win_id, response_buf, wm);
     }
 
+    // ── Phase 4-C: DevTools (open/close/is/toggle) ──
+    // is_dev_tools_opened를 먼저 체크 — "open_dev_tools" substring이 그 안에도 매치되므로.
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"is_dev_tools_opened\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleIsDevToolsOpened(win_id, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"toggle_dev_tools\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleToggleDevTools(win_id, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"open_dev_tools\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleOpenDevTools(win_id, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"close_dev_tools\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleCloseDevTools(win_id, response_buf, wm);
+    }
+
     // quit 커맨드 — 프론트 `__suji__.quit()`가 라우팅됨
     if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"quit\"") != null) {
         cef.quit();

@@ -350,6 +350,11 @@ export interface IsLoadingResponse extends WindowOpResponse {
   loading: boolean;
 }
 
+export interface IsDevToolsOpenedResponse extends WindowOpResponse {
+  cmd: 'is_dev_tools_opened';
+  opened: boolean;
+}
+
 export interface SetBoundsArgs {
   x?: number;
   y?: number;
@@ -383,5 +388,19 @@ export const windows = {
   },
   setBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'set_bounds', windowId, ...bounds });
+  },
+
+  // ── Phase 4-C: DevTools ──
+  openDevTools(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'open_dev_tools', windowId });
+  },
+  closeDevTools(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'close_dev_tools', windowId });
+  },
+  isDevToolsOpened(windowId: number): Promise<IsDevToolsOpenedResponse> {
+    return invoke<IsDevToolsOpenedResponse>('__core__', { cmd: 'is_dev_tools_opened', windowId });
+  },
+  toggleDevTools(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'toggle_dev_tools', windowId });
   },
 };

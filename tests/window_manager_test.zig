@@ -2180,3 +2180,63 @@ test "Phase 4-A 메서드들: 알 수 없는 id에 호출 시 NotFound" {
     try std.testing.expectError(window.Error.WindowNotFound, wm.getUrl(999));
     try std.testing.expectError(window.Error.WindowNotFound, wm.isLoading(999));
 }
+
+// ============================================
+// Phase 4-C: DevTools (open/close/is/toggle)
+// ============================================
+
+test "openDevTools: native까지 호출 + state true" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.openDevTools(id);
+    try std.testing.expectEqual(@as(usize, 1), native.open_dev_tools_calls);
+    try std.testing.expect(try wm.isDevToolsOpened(id));
+}
+
+test "closeDevTools: state false로 전환" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    native.stub_dev_tools_opened = true;
+    try wm.closeDevTools(id);
+    try std.testing.expectEqual(@as(usize, 1), native.close_dev_tools_calls);
+    try std.testing.expect(!(try wm.isDevToolsOpened(id)));
+}
+
+test "toggleDevTools: 호출 시 state 반전" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try std.testing.expect(!(try wm.isDevToolsOpened(id)));
+    try wm.toggleDevTools(id);
+    try std.testing.expect(try wm.isDevToolsOpened(id));
+    try wm.toggleDevTools(id);
+    try std.testing.expect(!(try wm.isDevToolsOpened(id)));
+    try std.testing.expectEqual(@as(usize, 2), native.toggle_dev_tools_calls);
+}
+
+test "DevTools 메서드: destroyed 창에 호출 시 WindowDestroyed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.openDevTools(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.closeDevTools(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.toggleDevTools(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.isDevToolsOpened(id));
+}
+
+test "DevTools 메서드: 알 수 없는 id에 호출 시 WindowNotFound" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    try std.testing.expectError(window.Error.WindowNotFound, wm.openDevTools(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.closeDevTools(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.toggleDevTools(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.isDevToolsOpened(999));
+}
