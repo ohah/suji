@@ -224,9 +224,89 @@ window.__suji__.on('window:all-closed', () => {
 | `transparent: true` | NSWindow 투명 + clear background + 그림자 X. CEF browser background도 0. HTML body도 `background: transparent` 필요 | macOS |
 | `parent: "<name>"` | 시각 관계만 — 자식이 부모 위에 floating + 부모와 함께 이동/min. 부모 close해도 자식 유지 (재귀 close X) | macOS |
 
-**parent 순서 주의**: 부모는 windows[] 배열에서 자식보다 앞에 와야 함 (`wm.fromName` lookup 시점에 이미 생성돼 있어야).
+**parent 순서 주의**: 부모는 windows[] 배열에서 자식보다 앞에 와야 함 (`wm.fromName` lookup 시점에 이미 생성돼 있어야). 잘못된 이름이면 stderr에 warn 로그 + parent_id=null로 폴백 (자식은 정상 생성, 시각 관계만 빠짐).
 
 **Linux/Windows**: frame/transparent/parent 옵션은 현재 macOS만 지원. 다른 플랫폼은 무시 (no-op stub).
+
+### frameless 사용 시 — drag region (`-webkit-app-region`)
+
+타이틀바가 없으면 창 이동 불가. HTML 측에 drag region을 명시해야 함.
+Electron/Tauri와 동일한 표준 — Chromium의 `-webkit-app-region` CSS 속성.
+
+**기본 패턴**:
+
+```css
+/* 드래그 가능 영역 (마우스 down + 이동으로 창 이동) */
+.titlebar {
+  -webkit-app-region: drag;
+  app-region: drag; /* 표준 spec, 향후 호환 */
+}
+
+/* drag 영역 안의 버튼/입력은 클릭 가능하게 — drag 상속 차단 */
+.titlebar button,
+.titlebar input {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+```
+
+**커스텀 타이틀바 + 종료 버튼 풀 데모**:
+
+```html
+<div class="titlebar">
+  <div class="title">⌘ My Frameless App</div>
+  <div class="controls">
+    <button id="quit">×</button>
+  </div>
+</div>
+
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; }
+
+  .titlebar {
+    -webkit-app-region: drag;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 32px;
+    padding: 0 8px;
+    background: #2c2c2e;
+    border-bottom: 1px solid #3a3a3c;
+  }
+
+  .title { font-size: 12px; font-weight: 600; padding-left: 4px; color: #f5f5f7; }
+
+  .controls button {
+    -webkit-app-region: no-drag;
+    width: 24px; height: 22px;
+    border: none; border-radius: 3px;
+    background: #3a3a3c; color: #f5f5f7;
+    cursor: pointer; font-size: 13px;
+  }
+  .controls button:hover { background: #48484a; }
+</style>
+
+<script>
+  document.getElementById('quit').addEventListener('click', () => {
+    window.__suji__.quit();
+  });
+</script>
+```
+
+**주의**:
+- drag region은 **마우스 down 시점**의 hit-test 결과로 결정. 동적으로 z-index를 바꿔서
+  drag가 가려져도 OS는 원래 영역을 쓴다 → CSS 클래스 토글로 drag/no-drag 전환은 즉시 반영 안 될 수 있음.
+- `<input>`, `<select>`, `<a>`, `<button>`은 drag region 안에 있어도 자동으로 no-drag가 되지는 **않음** — 명시 필수.
+- macOS 신호등(min/max/close) 흉내가 필요하면 직접 SVG 그리거나 `traffic light` HTML 컴포넌트.
+
+**전체 동작 예제**: `examples/window-styles/` — 메인/frameless panel/transparent HUD 3창이 함께 떠 있는 데모. `cd examples/window-styles && suji dev`로 실행.
+
+### transparent 사용 시 — 주의
+
+- HTML `body { background: transparent }`로 받쳐야 OS 윈도우까지 비침. 안 그러면 흰 배경.
+- 컴포지터 비용 증가 — 큰 영역 투명은 GPU 사용량/배터리에 영향.
+- macOS에서 투명 영역 클릭은 OS가 hit-test 통과 → 뒤 창에 전달. 마우스 이벤트가 필요한 영역은 불투명 색이라도 채워야.
+- focus ring/그림자가 사라지므로 active/inactive 시각 피드백을 사용자가 직접 처리.
 
 ## 안전성 invariants
 

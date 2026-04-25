@@ -1,0 +1,10 @@
+.{
+    .name = .window_styles,
+    .version = "0.1.0",
+    .fingerprint = 0x50ec67072c63e919,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "app.zig",
+    },
+}

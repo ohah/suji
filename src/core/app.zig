@@ -215,8 +215,11 @@ pub const InvokeEvent = struct {
     /// wire JSON에서 `__window` / `__window_name` / `__window_url` / `__window_main_frame`
     /// 4개 필드를 파싱해 InvokeEvent를 구성. `__window` 누락 시 id=0 (legacy/direct 경로).
     /// 음수 `__window`는 0으로 clamp (방어적).
+    ///
+    /// 핫경로 (매 IPC invoke마다 호출) — `__window`가 없으면 나머지 3개 필드도 없음을 보장.
+    /// 코어가 주입할 때 항상 `__window`를 먼저 박기 때문. early-return으로 3회 indexOf 절약.
     pub fn fromWire(request_json: []const u8) InvokeEvent {
-        const id_raw = util.extractJsonInt(request_json, "__window") orelse 0;
+        const id_raw = util.extractJsonInt(request_json, "__window") orelse return .{ .window = .{ .id = 0 } };
         const id: u32 = if (id_raw >= 0) @intCast(id_raw) else 0;
         return .{ .window = .{
             .id = id,

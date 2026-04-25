@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Window Styles — Main</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 24px; background: #f5f5f7; color: #1d1d1f; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p { color: #6e6e73; margin: 0 0 20px; line-height: 1.4; }
+    button {
+      display: block; width: 100%; padding: 10px 14px; margin: 8px 0;
+      font-size: 13px; border: 1px solid #d1d1d6; border-radius: 6px;
+      background: white; cursor: pointer; text-align: left;
+    }
+    button:hover { background: #fafafa; }
+    pre { background: #1d1d1f; color: #f5f5f7; padding: 12px; border-radius: 6px; font-size: 11px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Suji Phase 3 — Window Styles 데모</h1>
+  <p>일반 프레임 메인 창. <strong>Frameless Panel</strong>과 <strong>Transparent HUD</strong>가 시작 시 함께 떠 있어야 합니다 (suji.json windows[]).</p>
+
+  <button id="whoami">whoami — 이 창의 InvokeEvent 정보</button>
+  <button id="toast">HUD에 toast 메시지 broadcast</button>
+
+  <pre id="out">로그가 여기에...</pre>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

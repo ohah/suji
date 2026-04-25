@@ -350,20 +350,27 @@ pub const CefNative = struct {
             return error.OutOfMemory;
         };
 
-        // parent_id가 지정됐으면 시각 관계 설정 (PLAN: 재귀 close X — 부모 close해도 자식 유지).
-        // macOS는 NSWindow.addChildWindow:ordered:로 자식이 부모 위에 floating + 따라 이동.
-        // browsers.put 다음에 처리 — put 실패 시 attach 스킵.
-        if (comptime is_macos) blk: {
-            const parent_id = opts.parent_id orelse break :blk;
-            const wm = window_mod.WindowManager.global orelse break :blk;
-            const parent_win = wm.get(parent_id) orelse break :blk;
-            const parent_entry = self.browsers.get(parent_win.native_handle) orelse break :blk;
-            const parent_ns = parent_entry.ns_window orelse break :blk;
-            const child_ns = ns_window orelse break :blk;
-            attachMacChildWindow(parent_ns, child_ns);
+        // 부모-자식 시각 관계 (PLAN: 재귀 close X). browsers.put 이후에 처리해 put 실패 시 attach 스킵.
+        if (comptime is_macos) {
+            if (opts.parent_id) |pid| {
+                if (resolveParentNSWindow(self, pid)) |parent_ns| {
+                    if (ns_window) |child_ns| attachMacChildWindow(parent_ns, child_ns);
+                } else {
+                    log.warn("createWindow: parent_id={d} 해석 실패 — attach 스킵", .{pid});
+                }
+            }
         }
 
         return handle;
+    }
+
+    /// parent_id → NSWindow* (4단 lookup: WM.global → wm.get → browsers.get → ns_window).
+    /// 어느 단계든 실패하면 null. createWindow의 attach 분기 가독성용.
+    fn resolveParentNSWindow(self: *CefNative, parent_id: u32) ?*anyopaque {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const parent_win = wm.get(parent_id) orelse return null;
+        const parent_entry = self.browsers.get(parent_win.native_handle) orelse return null;
+        return parent_entry.ns_window;
     }
 
     fn destroyWindow(ctx: ?*anyopaque, handle: u64) void {
@@ -2064,6 +2071,13 @@ fn msgSendVoid1(target: ?*anyopaque, sel_name: [:0]const u8, arg: ?*anyopaque) v
     func(target, @ptrCast(sel), arg);
 }
 
+/// BOOL 인자(u8 0/1) 버전 — setOpaque:/setHasShadow: 등 Objective-C BOOL setter용.
+fn msgSendVoidBool(target: ?*anyopaque, sel_name: [:0]const u8, arg: bool) void {
+    const sel = objc.sel_registerName(sel_name.ptr);
+    const func: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    func(target, @ptrCast(sel), if (arg) 1 else 0);
+}
+
 fn activateNSApp() void {
     const cls = getClass("NSApplication") orelse return;
     const app = msgSend(cls, "sharedApplication") orelse return;
@@ -2095,29 +2109,7 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
         .w = @floatFromInt(opts.width), .h = @floatFromInt(opts.height),
     }, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
 
-    // transparent: NSWindow.opaque=NO + backgroundColor=clearColor + hasShadow=NO.
-    // frame이 있을 때도 transparent를 적용 가능하지만 보통 frameless와 함께 씀.
-    if (opts.transparent) {
-        const setOpaqueSel = objc.sel_registerName("setOpaque:");
-        const setOpaqueFn: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-        setOpaqueFn(window, @ptrCast(setOpaqueSel), 0);
-
-        // [NSColor clearColor]
-        const NSColor = getClass("NSColor") orelse return .{ .content_view = null, .ns_window = window };
-        const clearSel = objc.sel_registerName("clearColor");
-        const clear_color = msgSend(NSColor, "clearColor");
-        _ = clearSel;
-        if (clear_color) |cc| {
-            const setBgSel = objc.sel_registerName("setBackgroundColor:");
-            const setBgFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-            setBgFn(window, @ptrCast(setBgSel), cc);
-        }
-
-        // hasShadow=NO — 투명 창은 그림자가 어색함
-        const setShadowSel = objc.sel_registerName("setHasShadow:");
-        const setShadowFn: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-        setShadowFn(window, @ptrCast(setShadowSel), 0);
-    }
+    if (opts.transparent) applyTransparency(window);
 
     // setTitle (frameless여도 NSWindow.title은 메뉴바/창 목록에 표시됨)
     const NSString = getClass("NSString") orelse return .{ .content_view = null, .ns_window = window };
@@ -2146,6 +2138,17 @@ fn attachMacChildWindow(parent: *anyopaque, child: *anyopaque) void {
     const sel = objc.sel_registerName("addChildWindow:ordered:");
     const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     fn_ptr(parent, @ptrCast(sel), child, 1); // NSWindowAbove = 1
+}
+
+/// macOS: 투명 창 설정 — opaque=NO + clearColor 배경 + 그림자 제거.
+/// 그림자를 제거하지 않으면 투명 영역 가장자리에 클리핑 자국이 남는다.
+fn applyTransparency(window: ?*anyopaque) void {
+    msgSendVoidBool(window, "setOpaque:", false);
+    const NSColor = getClass("NSColor") orelse return;
+    if (msgSend(NSColor, "clearColor")) |cc| {
+        msgSendVoid1(window, "setBackgroundColor:", cc);
+    }
+    msgSendVoidBool(window, "setHasShadow:", false);
 }
 
 /// macOS: NSWindow에 `close` 메시지 송신. NSBrowserView가 content view에서 떨어져

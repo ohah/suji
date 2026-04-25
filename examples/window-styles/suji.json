@@ -1,0 +1,34 @@
+{
+  "$schema": "../../suji.schema.json",
+  "app": { "name": "Suji Window Styles Demo", "version": "0.1.0" },
+  "windows": [
+    {
+      "name": "main",
+      "title": "Main (일반 프레임)",
+      "width": 720,
+      "height": 480,
+      "debug": true,
+      "url": "http://localhost:5173/"
+    },
+    {
+      "name": "panel",
+      "title": "Frameless Panel",
+      "width": 320,
+      "height": 420,
+      "frame": false,
+      "url": "http://localhost:5173/panel.html"
+    },
+    {
+      "name": "hud",
+      "title": "Transparent HUD",
+      "width": 280,
+      "height": 80,
+      "frame": false,
+      "transparent": true,
+      "parent": "main",
+      "url": "http://localhost:5173/overlay.html"
+    }
+  ],
+  "backend": { "lang": "zig", "entry": "." },
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+}
