@@ -148,3 +148,19 @@ SUJI_TRACE_IPC=1 suji dev
 
 CEF DevTools (`--remote-debugging-port=9222`)에서 `console.log(await suji.invoke(...))`로
 직접 확인 가능.
+
+## `__core__` 채널 — window 조작 cmd
+
+`__suji__.core(JSON.stringify({cmd, ...}))` 호출 시 코어가 직접 처리. 백엔드 SDK도
+`invoke("__core__", req)` 경유로 같은 cmd 사용 (`BackendRegistry.special_dispatch` →
+`cefHandleCore`). cmd 목록과 필드/응답 형식 통합 정리는 [SDK_PORTING.md §4.3](../docs/SDK_PORTING.md).
+
+| Phase | cmd |
+|-------|-----|
+| 4-A 네비/JS | `create_window` / `set_title` / `set_bounds` / `load_url` / `reload` / `execute_javascript` / `get_url` / `is_loading` |
+| 4-B 줌 | `set_zoom_level` / `set_zoom_factor` / `get_zoom_level` / `get_zoom_factor` |
+| 4-C DevTools | `open_dev_tools` / `close_dev_tools` / `is_dev_tools_opened` / `toggle_dev_tools` |
+| 4-E 편집/검색 | `undo` / `redo` / `cut` / `copy` / `paste` / `select_all` / `find_in_page` / `stop_find_in_page` |
+
+응답은 모두 `{ from: "zig-core", cmd, windowId, ok, ... }` 형태. cmd 매치는 정확 비교
+(이전 substring 매치는 commit 350f9d6에서 제거 — 가짜 cmd substring 회귀 차단).
