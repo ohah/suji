@@ -2328,6 +2328,71 @@ test "줌 메서드: destroyed/unknown 가드" {
     try std.testing.expectError(window.Error.WindowNotFound, wm.getZoomFactor(999));
 }
 
+// ============================================
+// Phase 4-E: 편집 (6 trivial) + 검색
+// ============================================
+
+test "편집 6 메서드: 각자 호출이 native 카운트만 증가시킴 (cross-call 없음)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try wm.undo(id);
+    try wm.redo(id);
+    try wm.cut(id);
+    try wm.copy(id);
+    try wm.paste(id);
+    try wm.selectAll(id);
+
+    // edit_calls = [undo, redo, cut, copy, paste, select_all] 순서 (TestNative 정의)
+    inline for (0..6) |i| {
+        try std.testing.expectEqual(@as(usize, 1), native.edit_calls[i]);
+    }
+}
+
+test "findInPage: text + forward/matchCase/findNext 플래그 전달" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try wm.findInPage(id, "hello", true, true, false);
+    try std.testing.expectEqual(@as(usize, 1), native.find_calls);
+    try std.testing.expectEqualStrings("hello", native.last_find_text.?);
+    try std.testing.expect(native.last_find_forward);
+    try std.testing.expect(native.last_find_match_case);
+    try std.testing.expect(!native.last_find_next);
+
+    // 두 번째 호출 — find_next true
+    try wm.findInPage(id, "hello", true, true, true);
+    try std.testing.expect(native.last_find_next);
+}
+
+test "stopFindInPage: clear_selection 플래그 전달" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.stopFindInPage(id, true);
+    try std.testing.expectEqual(@as(usize, 1), native.stop_find_calls);
+    try std.testing.expect(native.last_stop_find_clear);
+}
+
+test "Phase 4-E 메서드들: destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.undo(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.findInPage(id, "x", true, false, false));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.stopFindInPage(id, false));
+
+    try std.testing.expectError(window.Error.WindowNotFound, wm.copy(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.findInPage(999, "x", true, false, false));
+}
+
 test "회귀: 4-C cef.zig openDevTools/closeDevTools/toggleDevTools가 인자 browser 사용" {
     // 헬퍼 분해 후 sender browser(매개변수)를 사용함을 정적 검증 — 만약 실수로
     // g_browser/g_main_browser 같은 글로벌로 바꾸면 멀티 윈도우 회귀.

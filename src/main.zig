@@ -1154,6 +1154,38 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleGetZoomFactor(win_id, response_buf, wm);
     }
+    // Phase 4-E: 편집 (6 trivial) + 검색
+    inline for (.{
+        .{ "undo", &window_ipc.handleUndo },
+        .{ "redo", &window_ipc.handleRedo },
+        .{ "cut", &window_ipc.handleCut },
+        .{ "copy", &window_ipc.handleCopy },
+        .{ "paste", &window_ipc.handlePaste },
+        .{ "select_all", &window_ipc.handleSelectAll },
+    }) |entry| {
+        if (std.mem.eql(u8, cmd, entry[0])) {
+            const wm = window_mod.WindowManager.global orelse return null;
+            const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+            return entry[1](win_id, response_buf, wm);
+        }
+    }
+    if (std.mem.eql(u8, cmd, "find_in_page")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleFindInPage(.{
+            .window_id = win_id,
+            .text = util.extractJsonString(req_clean, "text") orelse "",
+            .forward = util.extractJsonBool(req_clean, "forward") orelse true,
+            .match_case = util.extractJsonBool(req_clean, "matchCase") orelse false,
+            .find_next = util.extractJsonBool(req_clean, "findNext") orelse false,
+        }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "stop_find_in_page")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const clear = util.extractJsonBool(req_clean, "clearSelection") orelse false;
+        return window_ipc.handleStopFindInPage(win_id, clear, response_buf, wm);
+    }
     if (std.mem.eql(u8, cmd, "quit")) {
         cef.quit();
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"quit\"}}", .{}) catch return null;

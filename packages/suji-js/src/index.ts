@@ -274,6 +274,47 @@ export const windows = {
   getZoomFactor(windowId: number): Promise<ZoomFactorResponse> {
     return coreCall<ZoomFactorResponse>({ cmd: "get_zoom_factor", windowId });
   },
+
+  // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
+  undo(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "undo", windowId });
+  },
+  redo(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "redo", windowId });
+  },
+  cut(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "cut", windowId });
+  },
+  copy(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "copy", windowId });
+  },
+  paste(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "paste", windowId });
+  },
+  selectAll(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "select_all", windowId });
+  },
+
+  /** 페이지 텍스트 검색. 첫 호출은 findNext=false, 이후 같은 단어 다음 매치는 true.
+   *  결과 보고는 cef_find_handler_t로 (현재 미노출 — 추후 이벤트). */
+  findInPage(
+    windowId: number,
+    text: string,
+    options?: { forward?: boolean; matchCase?: boolean; findNext?: boolean },
+  ): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({
+      cmd: "find_in_page",
+      windowId,
+      text,
+      forward: options?.forward ?? true,
+      matchCase: options?.matchCase ?? false,
+      findNext: options?.findNext ?? false,
+    });
+  },
+
+  stopFindInPage(windowId: number, clearSelection = false): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "stop_find_in_page", windowId, clearSelection });
+  },
 };
 
 /**

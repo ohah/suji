@@ -139,6 +139,40 @@ export const windows = {
     getZoomFactor(windowId) {
         return coreCall({ cmd: "get_zoom_factor", windowId });
     },
+    // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
+    undo(windowId) {
+        return coreCall({ cmd: "undo", windowId });
+    },
+    redo(windowId) {
+        return coreCall({ cmd: "redo", windowId });
+    },
+    cut(windowId) {
+        return coreCall({ cmd: "cut", windowId });
+    },
+    copy(windowId) {
+        return coreCall({ cmd: "copy", windowId });
+    },
+    paste(windowId) {
+        return coreCall({ cmd: "paste", windowId });
+    },
+    selectAll(windowId) {
+        return coreCall({ cmd: "select_all", windowId });
+    },
+    /** 페이지 텍스트 검색. 첫 호출은 findNext=false, 이후 같은 단어 다음 매치는 true.
+     *  결과 보고는 cef_find_handler_t로 (현재 미노출 — 추후 이벤트). */
+    findInPage(windowId, text, options) {
+        return coreCall({
+            cmd: "find_in_page",
+            windowId,
+            text,
+            forward: options?.forward ?? true,
+            matchCase: options?.matchCase ?? false,
+            findNext: options?.findNext ?? false,
+        });
+    },
+    stopFindInPage(windowId, clearSelection = false) {
+        return coreCall({ cmd: "stop_find_in_page", windowId, clearSelection });
+    },
 };
 /**
  * 여러 백엔드에 동시 요청

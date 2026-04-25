@@ -278,6 +278,14 @@ pub const CefNative = struct {
         .toggle_dev_tools = toggleDevToolsImpl,
         .set_zoom_level = setZoomLevelImpl,
         .get_zoom_level = getZoomLevelImpl,
+        .undo = makeFrameEditFn("undo"),
+        .redo = makeFrameEditFn("redo"),
+        .cut = makeFrameEditFn("cut"),
+        .copy = makeFrameEditFn("copy"),
+        .paste = makeFrameEditFn("paste"),
+        .select_all = makeFrameEditFn("select_all"),
+        .find_in_page = findInPageImpl,
+        .stop_find_in_page = stopFindInPageImpl,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
@@ -552,6 +560,45 @@ pub const CefNative = struct {
         const entry = self.browsers.get(handle) orelse return 0;
         const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return 0;
         return host.get_zoom_level.?(host);
+    }
+
+    // ==================== Phase 4-E: 편집 (frame 위임) + 검색 ====================
+
+    /// 6 trivial 편집 메서드 — 모두 main_frame.X() 호출. comptime으로 6 fn 생성.
+    fn makeFrameEditFn(comptime field: []const u8) *const fn (?*anyopaque, u64) void {
+        return struct {
+            fn call(ctx: ?*anyopaque, handle: u64) void {
+                assertUiThread();
+                const self = fromCtx(ctx);
+                const entry = self.browsers.get(handle) orelse return;
+                const frame = asPtr(c.cef_frame_t, entry.browser.get_main_frame.?(entry.browser)) orelse return;
+                const fn_ptr = @field(frame, field) orelse return;
+                fn_ptr(frame);
+            }
+        }.call;
+    }
+
+    fn findInPageImpl(ctx: ?*anyopaque, handle: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+
+        var text_buf: [1024]u8 = undefined;
+        const text_z = nullTerminateOrTruncate(text, &text_buf) orelse return;
+        var cef_text: c.cef_string_t = .{};
+        setCefString(&cef_text, text_z);
+        const find = host.find orelse return;
+        find(host, &cef_text, @intFromBool(forward), @intFromBool(match_case), @intFromBool(find_next));
+    }
+
+    fn stopFindInPageImpl(ctx: ?*anyopaque, handle: u64, clear_selection: bool) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+        const stop = host.stop_finding orelse return;
+        stop(host, @intFromBool(clear_selection));
     }
 };
 

@@ -574,6 +574,48 @@ pub const windows = struct {
         return windowIdCmd("get_zoom_factor", id);
     }
 
+    // Phase 4-E: 편집 (windowId만) + 검색
+    pub fn undo(id: u32) ?[]const u8 {
+        return windowIdCmd("undo", id);
+    }
+    pub fn redo(id: u32) ?[]const u8 {
+        return windowIdCmd("redo", id);
+    }
+    pub fn cut(id: u32) ?[]const u8 {
+        return windowIdCmd("cut", id);
+    }
+    pub fn copy(id: u32) ?[]const u8 {
+        return windowIdCmd("copy", id);
+    }
+    pub fn paste(id: u32) ?[]const u8 {
+        return windowIdCmd("paste", id);
+    }
+    pub fn selectAll(id: u32) ?[]const u8 {
+        return windowIdCmd("select_all", id);
+    }
+
+    pub const FindOptions = struct {
+        forward: bool = true,
+        match_case: bool = false,
+        find_next: bool = false,
+    };
+
+    pub fn findInPage(id: u32, text: []const u8, opts: FindOptions) ?[]const u8 {
+        var t_buf: [1024]u8 = undefined;
+        const t_n = util.escapeJsonStr(text, &t_buf) orelse return null;
+        var fields_buf: [1280]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"text\":\"{s}\",\"forward\":{},\"matchCase\":{},\"findNext\":{}", .{
+            id, t_buf[0..t_n], opts.forward, opts.match_case, opts.find_next,
+        }) catch return null;
+        return coreCmd("find_in_page", fields);
+    }
+
+    pub fn stopFindInPage(id: u32, clear_selection: bool) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"clearSelection\":{}", .{ id, clear_selection }) catch return null;
+        return coreCmd("stop_find_in_page", fields);
+    }
+
     /// `windowId`만 들어가는 단순 cmd 헬퍼 — getURL/isLoading/openDevTools/... 공통.
     fn windowIdCmd(cmd: []const u8, id: u32) ?[]const u8 {
         var fields_buf: [64]u8 = undefined;

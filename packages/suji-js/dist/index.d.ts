@@ -161,6 +161,20 @@ export declare const windows: {
     /** 줌 factor 변경. 1.0 = 100%, 1.5 = 150% (linear). 내부적으로 level = log(factor)/log(1.2) 변환 */
     setZoomFactor(windowId: number, factor: number): Promise<WindowOpResponse>;
     getZoomFactor(windowId: number): Promise<ZoomFactorResponse>;
+    undo(windowId: number): Promise<WindowOpResponse>;
+    redo(windowId: number): Promise<WindowOpResponse>;
+    cut(windowId: number): Promise<WindowOpResponse>;
+    copy(windowId: number): Promise<WindowOpResponse>;
+    paste(windowId: number): Promise<WindowOpResponse>;
+    selectAll(windowId: number): Promise<WindowOpResponse>;
+    /** 페이지 텍스트 검색. 첫 호출은 findNext=false, 이후 같은 단어 다음 매치는 true.
+     *  결과 보고는 cef_find_handler_t로 (현재 미노출 — 추후 이벤트). */
+    findInPage(windowId: number, text: string, options?: {
+        forward?: boolean;
+        matchCase?: boolean;
+        findNext?: boolean;
+    }): Promise<WindowOpResponse>;
+    stopFindInPage(windowId: number, clearSelection?: boolean): Promise<WindowOpResponse>;
 };
 /**
  * 여러 백엔드에 동시 요청

@@ -307,6 +307,62 @@ describe("에러 경로 — destroyed 창 메서드 호출", () => {
 });
 
 // ============================================
+// Phase 4-E: 편집 (6 trivial) + 검색
+// ============================================
+
+describe("Phase 4-E — 편집 / 검색", () => {
+  test("편집 6 cmd 모두 ok 응답 + cmd 정확", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "edit-test", url: "about:blank" });
+    const id = c.windowId;
+    const evalCmd = (cmd: string): Promise<any> =>
+      page.evaluate((req) => (window as any).__suji__.core(JSON.stringify(req)), { cmd, windowId: id });
+
+    for (const cmd of ["undo", "redo", "cut", "copy", "paste", "select_all"]) {
+      const r = await evalCmd(cmd);
+      expect(r.cmd).toBe(cmd);
+      expect(r.ok).toBe(true);
+    }
+  });
+
+  test("find_in_page + stop_find_in_page 응답 ok", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "find-test", url: "about:blank" });
+    const id = c.windowId;
+    const r1: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "find_in_page", windowId: id, text: "hello", forward: true, matchCase: false, findNext: false },
+    );
+    expect(r1.cmd).toBe("find_in_page");
+    expect(r1.ok).toBe(true);
+
+    const r2: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "stop_find_in_page", windowId: id, clearSelection: true },
+    );
+    expect(r2.cmd).toBe("stop_find_in_page");
+    expect(r2.ok).toBe(true);
+  });
+
+  test("알 수 없는 windowId — 모든 4-E cmd ok:false", async () => {
+    for (const cmd of ["undo", "copy", "paste", "select_all", "stop_find_in_page"]) {
+      const r: any = await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd, windowId: 99999 },
+      );
+      expect(r.ok).toBe(false);
+    }
+  });
+
+  test("find_in_page: 빈 text도 정상 (CEF가 검색 정지)", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "empty-find", url: "about:blank" });
+    const r: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "find_in_page", windowId: c.windowId, text: "" },
+    );
+    expect(r.ok).toBe(true);
+  });
+});
+
+// ============================================
 // Phase 4-B: 줌 (set/get level + factor)
 // ============================================
 

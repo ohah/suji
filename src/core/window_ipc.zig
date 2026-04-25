@@ -432,6 +432,53 @@ pub fn handleGetZoomFactor(window_id: u32, response_buf: []u8, wm: *window.Windo
     return handleZoomGet("get_zoom_factor", "factor", 1, &window.WindowManager.getZoomFactor, window_id, response_buf, wm);
 }
 
+// ============================================
+// Phase 4-E: 편집 (6 trivial) + 검색
+// 6 편집은 windowId만 받는 동일 패턴 — 4-C handleDevToolsOp와 같은 헬퍼 사용.
+// find_in_page는 text/forward/matchCase/findNext, stop_find_in_page는 clearSelection.
+// ============================================
+
+pub fn handleUndo(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("undo", &window.WindowManager.undo, window_id, response_buf, wm);
+}
+pub fn handleRedo(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("redo", &window.WindowManager.redo, window_id, response_buf, wm);
+}
+pub fn handleCut(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("cut", &window.WindowManager.cut, window_id, response_buf, wm);
+}
+pub fn handleCopy(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("copy", &window.WindowManager.copy, window_id, response_buf, wm);
+}
+pub fn handlePaste(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("paste", &window.WindowManager.paste, window_id, response_buf, wm);
+}
+pub fn handleSelectAll(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("select_all", &window.WindowManager.selectAll, window_id, response_buf, wm);
+}
+
+pub const FindInPageReq = struct {
+    window_id: u32,
+    text: []const u8,
+    /// 검색 방향 (default: 앞으로). 기본값 외에는 frontend에서 명시 필요.
+    forward: bool = true,
+    match_case: bool = false,
+    /// 첫 호출은 false, 이후 같은 검색어 다음 매치 찾을 때 true.
+    find_next: bool = false,
+};
+
+pub fn handleFindInPage(req: FindInPageReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.findInPage(req.window_id, req.text, req.forward, req.match_case, req.find_next)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "find_in_page", req.window_id, ok);
+}
+
+pub fn handleStopFindInPage(window_id: u32, clear_selection: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.stopFindInPage(window_id, clear_selection)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "stop_find_in_page", window_id, ok);
+}
+
 pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     const opened = wm.isDevToolsOpened(window_id) catch {

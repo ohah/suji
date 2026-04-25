@@ -732,6 +732,47 @@ test "windows.setZoomLevel / setZoomFactor / getZoomLevel / getZoomFactor" {
     }.run);
 }
 
+// Phase 4-E: 편집 6 + find/stop_find.
+test "windows.undo/redo/cut/copy/paste/selectAll: cmd JSON 형식" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            inline for (.{
+                .{ app_mod.windows.undo, "undo" },
+                .{ app_mod.windows.redo, "redo" },
+                .{ app_mod.windows.cut, "cut" },
+                .{ app_mod.windows.copy, "copy" },
+                .{ app_mod.windows.paste, "paste" },
+                .{ app_mod.windows.selectAll, "select_all" },
+            }) |entry| {
+                _ = entry[0](7);
+                try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"" ++ entry[1] ++ "\",\"windowId\":7") != null);
+            }
+            try std.testing.expectEqual(@as(usize, 6), InvokeSpy.call_count);
+        }
+    }.run);
+}
+
+test "windows.findInPage / stopFindInPage: 옵션 + escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.findInPage(2, "needle", .{ .forward = false, .match_case = true, .find_next = true });
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"find_in_page\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"text\":\"needle\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"forward\":false") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"matchCase\":true") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"findNext\":true") != null);
+
+            // escape edge — text에 " 들어가도 깨짐 없음
+            _ = app_mod.windows.findInPage(2, "a\"b", .{});
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"text\":\"a\\\"b\"") != null);
+
+            _ = app_mod.windows.stopFindInPage(2, true);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"clearSelection\":true") != null);
+        }
+    }.run);
+}
+
 // Phase 4-C: DevTools — windowId만 들어가는 단순 cmd 4종.
 test "windows.openDevTools / closeDevTools / isDevToolsOpened / toggleDevTools" {
     try withInvokeCore(struct {

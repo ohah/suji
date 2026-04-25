@@ -86,6 +86,45 @@ func GetZoomFactor(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_zoom_factor","windowId":%d}`, windowID))
 }
 
+func Undo(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"undo","windowId":%d}`, windowID))
+}
+func Redo(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"redo","windowId":%d}`, windowID))
+}
+func Cut(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"cut","windowId":%d}`, windowID))
+}
+func Copy(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"copy","windowId":%d}`, windowID))
+}
+func Paste(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"paste","windowId":%d}`, windowID))
+}
+func SelectAll(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"select_all","windowId":%d}`, windowID))
+}
+
+type FindOptions struct {
+	Forward   bool
+	MatchCase bool
+	FindNext  bool
+}
+
+func FindInPage(windowID uint32, text string, opts FindOptions) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"find_in_page","windowId":%d,"text":"%s","forward":%t,"matchCase":%t,"findNext":%t}`,
+		windowID, escapeJSON(text), opts.Forward, opts.MatchCase, opts.FindNext,
+	))
+}
+
+func StopFindInPage(windowID uint32, clearSelection bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"stop_find_in_page","windowId":%d,"clearSelection":%t}`,
+		windowID, clearSelection,
+	))
+}
+
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,

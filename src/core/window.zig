@@ -161,6 +161,15 @@ pub const Native = struct {
         // (Electron 호환 — `setZoomFactor(1.5)` ≈ `setZoomLevel(2.22)`).
         set_zoom_level: *const fn (ctx: ?*anyopaque, handle: u64, level: f64) void,
         get_zoom_level: *const fn (ctx: ?*anyopaque, handle: u64) f64,
+        // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
+        undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        cut: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        copy: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        paste: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        select_all: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        find_in_page: *const fn (ctx: ?*anyopaque, handle: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void,
+        stop_find_in_page: *const fn (ctx: ?*anyopaque, handle: u64, clear_selection: bool) void,
     };
 
     pub fn createWindow(self: Native, opts: *const CreateOptions) !u64 {
@@ -213,6 +222,30 @@ pub const Native = struct {
     }
     pub fn getZoomLevel(self: Native, handle: u64) f64 {
         return self.vtable.get_zoom_level(self.ctx, handle);
+    }
+    pub fn undo(self: Native, handle: u64) void {
+        self.vtable.undo(self.ctx, handle);
+    }
+    pub fn redo(self: Native, handle: u64) void {
+        self.vtable.redo(self.ctx, handle);
+    }
+    pub fn cut(self: Native, handle: u64) void {
+        self.vtable.cut(self.ctx, handle);
+    }
+    pub fn copy(self: Native, handle: u64) void {
+        self.vtable.copy(self.ctx, handle);
+    }
+    pub fn paste(self: Native, handle: u64) void {
+        self.vtable.paste(self.ctx, handle);
+    }
+    pub fn selectAll(self: Native, handle: u64) void {
+        self.vtable.select_all(self.ctx, handle);
+    }
+    pub fn findInPage(self: Native, handle: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {
+        self.vtable.find_in_page(self.ctx, handle, text, forward, match_case, find_next);
+    }
+    pub fn stopFindInPage(self: Native, handle: u64, clear_selection: bool) void {
+        self.vtable.stop_find_in_page(self.ctx, handle, clear_selection);
     }
 };
 
@@ -800,5 +833,60 @@ pub const WindowManager = struct {
     pub fn getZoomFactor(self: *WindowManager, id: u32) Error!f64 {
         const level = try self.getZoomLevel(id);
         return std.math.pow(f64, ZOOM_BASE, level);
+    }
+
+    // ==================== Phase 4-E: 편집 / 검색 ====================
+    // CEF는 frame 메서드 — view_source/del/paste_and_match_style은 일단 비제공
+    // (Electron API에 없거나 잘 안 쓰임). 필요시 추가.
+
+    pub fn undo(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.undo(win.native_handle);
+    }
+    pub fn redo(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.redo(win.native_handle);
+    }
+    pub fn cut(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.cut(win.native_handle);
+    }
+    pub fn copy(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.copy(win.native_handle);
+    }
+    pub fn paste(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.paste(win.native_handle);
+    }
+    pub fn selectAll(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.selectAll(win.native_handle);
+    }
+
+    pub fn findInPage(self: *WindowManager, id: u32, text: []const u8, forward: bool, match_case: bool, find_next: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.findInPage(win.native_handle, text, forward, match_case, find_next);
+    }
+
+    pub fn stopFindInPage(self: *WindowManager, id: u32, clear_selection: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.stopFindInPage(win.native_handle, clear_selection);
     }
 };

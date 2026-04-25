@@ -925,6 +925,75 @@ test "handleGetZoomFactor: pow(1.2, level)로 변환 응답" {
     try std.testing.expect(std.mem.indexOf(u8, r, "\"factor\":1.2") != null);
 }
 
+// ============================================
+// Phase 4-E: 편집 + 검색 IPC 핸들러
+// ============================================
+
+test "편집 6 핸들러: 자기 cmd 이름과 wm 메서드만 호출" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    const handlers = .{
+        .{ "undo", &ipc.handleUndo, 0 },
+        .{ "redo", &ipc.handleRedo, 1 },
+        .{ "cut", &ipc.handleCut, 2 },
+        .{ "copy", &ipc.handleCopy, 3 },
+        .{ "paste", &ipc.handlePaste, 4 },
+        .{ "select_all", &ipc.handleSelectAll, 5 },
+    };
+    inline for (handlers) |h| {
+        const r = h[1](1, &buf, &wm).?;
+        try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"" ++ h[0] ++ "\"") != null);
+        try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+        try std.testing.expectEqual(@as(usize, 1), native.edit_calls[h[2]]);
+    }
+}
+
+test "handleFindInPage: text + 3 플래그가 native까지 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleFindInPage(.{
+        .window_id = 1,
+        .text = "needle",
+        .forward = false,
+        .match_case = true,
+        .find_next = true,
+    }, &buf, &wm).?;
+    try std.testing.expectEqualStrings("needle", native.last_find_text.?);
+    try std.testing.expect(!native.last_find_forward);
+    try std.testing.expect(native.last_find_match_case);
+    try std.testing.expect(native.last_find_next);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"find_in_page\"") != null);
+}
+
+test "handleStopFindInPage: clearSelection 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleStopFindInPage(1, true, &buf, &wm).?;
+    try std.testing.expect(native.last_stop_find_clear);
+    try std.testing.expectEqual(@as(usize, 1), native.stop_find_calls);
+}
+
+test "Phase 4-E 핸들러: 알 수 없는 id면 ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const r1 = ipc.handleUndo(999, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":false") != null);
+    const r2 = ipc.handleFindInPage(.{ .window_id = 999, .text = "x" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":false") != null);
+}
+
 test "줌 핸들러: 알 수 없는 id면 ok:false" {
     var native = TestNative{};
     var wm = newWm(&native);

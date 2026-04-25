@@ -460,7 +460,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           단위 11 + e2e 3. open/close 멱등 — 이미 열림/닫힘이면 no-op. 기존 F12 단축키
           토글 코드(`toggleDevTools` 헬퍼)를 분해해 4개 API로 노출.
     - [ ] Phase 4-D 인쇄/캡처 — `print_to_pdf`, `capture_page` (콜백 기반)
-    - [ ] Phase 4-E 편집/검색/UA — `undo/redo/cut/copy/paste/select_all`, `find_in_page`, `set_user_agent`
+    - [x] **Phase 4-E 편집/검색** — `undo/redo/cut/copy/paste/select_all` (frame 위임 6) +
+          `find_in_page(text, forward, matchCase, findNext)` + `stop_find_in_page(clearSelection)`.
+          5 SDK + 단위 12 + e2e 4. user_agent dynamic은 CEF 미지원(창 settings 한 번만) — Phase 7
+          보안과 함께 백로그.
     - [ ] DevTools "Reload" 버튼 → **DevTools가 attach된 메인 창도 같이 reload** (Electron 동작 호환).
           현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
           reload 명령을 캐치 → host.get_browser().reload() 호출 또는 ReloadIgnoreCache.

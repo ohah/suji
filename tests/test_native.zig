@@ -45,6 +45,16 @@ pub const TestNative = struct {
     // Phase 4-B: 줌 — set 호출이 stub_zoom_level 갱신 (get은 그 값 반환).
     set_zoom_level_calls: usize = 0,
     stub_zoom_level: f64 = 0,
+
+    // Phase 4-E: 편집/검색 캡처
+    edit_calls: [6]usize = [_]usize{0} ** 6, // undo, redo, cut, copy, paste, select_all 순서
+    find_calls: usize = 0,
+    stop_find_calls: usize = 0,
+    last_find_text: ?[]const u8 = null,
+    last_find_forward: bool = true,
+    last_find_match_case: bool = false,
+    last_find_next: bool = false,
+    last_stop_find_clear: bool = false,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
@@ -74,7 +84,23 @@ pub const TestNative = struct {
         .toggle_dev_tools = toggleDevTools,
         .set_zoom_level = setZoomLevel,
         .get_zoom_level = getZoomLevel,
+        .undo = makeEditFn(0),
+        .redo = makeEditFn(1),
+        .cut = makeEditFn(2),
+        .copy = makeEditFn(3),
+        .paste = makeEditFn(4),
+        .select_all = makeEditFn(5),
+        .find_in_page = findInPage,
+        .stop_find_in_page = stopFindInPage,
     };
+
+    fn makeEditFn(comptime idx: usize) *const fn (?*anyopaque, u64) void {
+        return struct {
+            fn call(ctx: ?*anyopaque, _: u64) void {
+                fromCtx(ctx).edit_calls[idx] += 1;
+            }
+        }.call;
+    }
 
     fn fromCtx(ctx: ?*anyopaque) *TestNative {
         return @ptrCast(@alignCast(ctx.?));
@@ -182,5 +208,20 @@ pub const TestNative = struct {
 
     fn getZoomLevel(ctx: ?*anyopaque, _: u64) f64 {
         return fromCtx(ctx).stub_zoom_level;
+    }
+
+    fn findInPage(ctx: ?*anyopaque, _: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {
+        const self = fromCtx(ctx);
+        self.find_calls += 1;
+        self.last_find_text = text;
+        self.last_find_forward = forward;
+        self.last_find_match_case = match_case;
+        self.last_find_next = find_next;
+    }
+
+    fn stopFindInPage(ctx: ?*anyopaque, _: u64, clear_selection: bool) void {
+        const self = fromCtx(ctx);
+        self.stop_find_calls += 1;
+        self.last_stop_find_clear = clear_selection;
     }
 };

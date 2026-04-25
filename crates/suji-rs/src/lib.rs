@@ -243,6 +243,46 @@ pub mod windows {
         invoke("__core__", &format!(r#"{{"cmd":"get_zoom_factor","windowId":{}}}"#, window_id))
     }
 
+    pub fn undo(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"undo","windowId":{}}}"#, window_id))
+    }
+    pub fn redo(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"redo","windowId":{}}}"#, window_id))
+    }
+    pub fn cut(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"cut","windowId":{}}}"#, window_id))
+    }
+    pub fn copy(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"copy","windowId":{}}}"#, window_id))
+    }
+    pub fn paste(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"paste","windowId":{}}}"#, window_id))
+    }
+    pub fn select_all(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"select_all","windowId":{}}}"#, window_id))
+    }
+
+    #[derive(Default, Clone, Copy)]
+    pub struct FindOptions {
+        pub forward: bool,
+        pub match_case: bool,
+        pub find_next: bool,
+    }
+
+    pub fn find_in_page(window_id: u32, text: &str, opts: FindOptions) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"find_in_page","windowId":{},"text":"{}","forward":{},"matchCase":{},"findNext":{}}}"#,
+            window_id, escape_json(text), opts.forward, opts.match_case, opts.find_next,
+        ))
+    }
+
+    pub fn stop_find_in_page(window_id: u32, clear_selection: bool) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"stop_find_in_page","windowId":{},"clearSelection":{}}}"#,
+            window_id, clear_selection,
+        ))
+    }
+
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,

@@ -425,4 +425,42 @@ export const windows = {
   getZoomFactor(windowId: number): Promise<ZoomFactorResponse> {
     return invoke<ZoomFactorResponse>('__core__', { cmd: 'get_zoom_factor', windowId });
   },
+
+  undo(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'undo', windowId });
+  },
+  redo(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'redo', windowId });
+  },
+  cut(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'cut', windowId });
+  },
+  copy(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'copy', windowId });
+  },
+  paste(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'paste', windowId });
+  },
+  selectAll(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'select_all', windowId });
+  },
+
+  findInPage(
+    windowId: number,
+    text: string,
+    options?: { forward?: boolean; matchCase?: boolean; findNext?: boolean },
+  ): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', {
+      cmd: 'find_in_page',
+      windowId,
+      text,
+      forward: options?.forward ?? true,
+      matchCase: options?.matchCase ?? false,
+      findNext: options?.findNext ?? false,
+    });
+  },
+
+  stopFindInPage(windowId: number, clearSelection = false): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'stop_find_in_page', windowId, clearSelection });
+  },
 };
