@@ -466,6 +466,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           contentView wrapper에서 mouseDown 시 영역 안이면 `[window performWindowDragWithEvent:]`).
           Linux GTK는 `gtk_window_begin_move_drag`, Windows는 `WM_NCHITTEST` HTCAPTION 반환.
           현재 임시 한계 — frameless 창 이동 불가. (examples/window-styles README에 명시.)
+    - [ ] **Phase 4 끝나고 정리: `cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화** (기술 부채).
+          현재 두 경로가 같은 `cefHandleCore/Fanout/Chain` 핸들러를 호출하지만 응답 버퍼/래핑
+          포맷이 달라 dispatcher가 2벌 (CEF는 wrapped `{__core,request}`, backend는 raw cmd JSON).
+          `SPECIAL_DISPATCHERS` 테이블은 공유 중. 통합 시: cefHandleCore의 두 입력 형식 분기를
+          제거하고 backend 경유로 단일화 (CEF에서도 동일 wrapping/raw 결정 후 호출). 작업 비용
+          중간이라 4-B/C/D/E 끝난 뒤 모듈이 안정될 때 진행.
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
