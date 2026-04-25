@@ -843,12 +843,27 @@ fn openWindow(
             .title = util.cstr(w.title),
             .url = win_url,
             .bounds = .{
+                .x = @intCast(w.x),
+                .y = @intCast(w.y),
                 .width = @intCast(w.width),
                 .height = @intCast(w.height),
             },
             .frame = w.frame,
             .transparent = w.transparent,
             .parent_id = parent_id,
+            .always_on_top = w.always_on_top,
+            .resizable = w.resizable,
+            .min_width = @intCast(w.min_width),
+            .min_height = @intCast(w.min_height),
+            .max_width = @intCast(w.max_width),
+            .max_height = @intCast(w.max_height),
+            .fullscreen = w.fullscreen,
+            .background_color = util.cstrOpt(w.background_color),
+            .title_bar_style = switch (w.title_bar_style) {
+                .default => .default,
+                .hidden => .hidden,
+                .hidden_inset => .hidden_inset,
+            },
         }) catch |err| {
             std.debug.print("[suji] window[{d}] create failed: {s}\n", .{ i, @errorName(err) });
             // 첫 창 실패는 fatal — 빈 앱 상태로 cef.run 진입하면 즉시 quit 돼버림.

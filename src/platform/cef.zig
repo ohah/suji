@@ -315,8 +315,19 @@ pub const CefNative = struct {
             .title = title_z,
             .width = @intCast(opts.bounds.width),
             .height = @intCast(opts.bounds.height),
+            .x = opts.bounds.x,
+            .y = opts.bounds.y,
             .frame = opts.frame,
             .transparent = opts.transparent,
+            .always_on_top = opts.always_on_top,
+            .resizable = opts.resizable,
+            .min_width = opts.min_width,
+            .min_height = opts.min_height,
+            .max_width = opts.max_width,
+            .max_height = opts.max_height,
+            .fullscreen = opts.fullscreen,
+            .background_color = opts.background_color,
+            .title_bar_style = opts.title_bar_style,
         });
         setCefString(&window_info.window_name, title_z);
 
@@ -1811,10 +1822,28 @@ pub const WindowInitOpts = struct {
     title: [:0]const u8,
     width: i32,
     height: i32,
+    /// 0이면 cascade 자동 배치 (`cascadeTopLeftFromPoint:`).
+    x: i32 = 0,
+    y: i32 = 0,
     /// false면 frameless (NSWindowStyleMaskBorderless).
     frame: bool = true,
     /// true면 NSWindow.opaque=false + clear background color.
     transparent: bool = false,
+    /// true면 NSFloatingWindowLevel — 모든 일반 창 위.
+    always_on_top: bool = false,
+    /// false면 NSWindowStyleMaskResizable 비트 제외 (frame=false일 땐 무관).
+    resizable: bool = true,
+    /// contentMinSize / contentMaxSize. 0이면 제한 없음.
+    min_width: u32 = 0,
+    min_height: u32 = 0,
+    max_width: u32 = 0,
+    max_height: u32 = 0,
+    /// true면 시작 후 toggleFullScreen.
+    fullscreen: bool = false,
+    /// `#RRGGBB` 또는 `#RRGGBBAA`. transparent와 함께 쓰면 transparent 우선.
+    background_color: ?[]const u8 = null,
+    /// 타이틀바 스타일 — Electron 호환. macOS만 의미 있음.
+    title_bar_style: window_mod.TitleBarStyle = .default,
 };
 
 /// 플랫폼별 윈도우 초기화. 반환값: macOS에서만 NSWindow 포인터 (이후 close 트리거용).
@@ -2108,22 +2137,29 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u64, u64, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     // NSWindowStyleMask: titled(1)+closable(2)+miniaturizable(4)+resizable(8). frame=false면 borderless(0).
     // borderless는 별도 키보드/마우스 처리 + drag region을 사용자가 직접 만들어야 함.
-    const style: u64 = if (opts.frame) (1 | 2 | 4 | 8) else 0;
-    const window = initFn(window_alloc, @ptrCast(initSel), .{
-        .x = 200, .y = 200,
-        .w = @floatFromInt(opts.width), .h = @floatFromInt(opts.height),
-    }, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
+    var style: u64 = if (opts.frame) (1 | 2 | 4) else 0;
+    if (opts.frame and opts.resizable) style |= 8;
+    // x/y가 명시됐으면 그 위치 사용 (둘 다 0이면 cascade로 자동 배치).
+    const initial: NSRect = .{
+        .x = if (opts.x != 0 or opts.y != 0) @floatFromInt(opts.x) else 200,
+        .y = if (opts.x != 0 or opts.y != 0) @floatFromInt(opts.y) else 200,
+        .w = @floatFromInt(opts.width),
+        .h = @floatFromInt(opts.height),
+    };
+    const window = initFn(window_alloc, @ptrCast(initSel), initial, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
 
-    // 다중 창 cascade — 매 호출마다 OS가 18px씩 offset. 첫 창은 (200, 200) 그대로, 다음부터
-    // 우/하로 자동 분산 → 새 창이 이전 창에 완전히 겹쳐 안 보이는 문제 방지.
-    // [NSWindow cascadeTopLeftFromPoint:] 반환은 다음 호출에 넘길 새 origin.
-    {
+    // x/y 미지정 시에만 cascade — 명시 위치는 사용자 의도 그대로 보존.
+    if (opts.x == 0 and opts.y == 0) {
         const sel = objc.sel_registerName("cascadeTopLeftFromPoint:");
         const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, NSPoint) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
         g_cascade_point = fn_ptr(window, @ptrCast(sel), g_cascade_point);
     }
 
     if (opts.transparent) applyTransparency(window);
+    if (opts.always_on_top) setAlwaysOnTop(window);
+    if (opts.background_color) |hex| applyBackgroundColor(window, hex);
+    setMacContentSizeLimits(window, opts.min_width, opts.min_height, opts.max_width, opts.max_height);
+    if (opts.title_bar_style != .default) applyTitleBarStyle(window, opts.title_bar_style);
 
     // **알려진 한계**: frameless 창의 `-webkit-app-region: drag`는 CEF Alloy 런타임에서
     // 자동 라우팅되지 않는다 (CEF view가 NSWindow의 마우스 이벤트를 swallow). 정식 해결은
@@ -2149,6 +2185,9 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const makeKeyFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     makeKeyFn(window, @ptrCast(makeKeySel), null);
 
+    // toggleFullScreen은 창이 화면에 떠 있어야 의미 있음 → makeKeyAndOrderFront 이후.
+    if (opts.fullscreen) toggleMacFullScreen(window);
+
     return .{ .content_view = contentView, .ns_window = window };
 }
 
@@ -2169,6 +2208,81 @@ fn applyTransparency(window: ?*anyopaque) void {
         msgSendVoid1(window, "setBackgroundColor:", cc);
     }
     msgSendVoidBool(window, "setHasShadow:", false);
+}
+
+/// macOS: NSWindow.level = NSFloatingWindowLevel(3) — 일반 창 위에 항상 떠 있음.
+fn setAlwaysOnTop(window: ?*anyopaque) void {
+    const sel = objc.sel_registerName("setLevel:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    fn_ptr(window, @ptrCast(sel), 3); // NSFloatingWindowLevel
+}
+
+/// macOS: NSWindow.contentMinSize / contentMaxSize. 0이면 기본값 (해당 한계 없음).
+/// CGFloat.greatestFiniteMagnitude를 max=0의 의미로 사용 — Cocoa 표준 "제한 없음".
+fn setMacContentSizeLimits(window: ?*anyopaque, min_w: u32, min_h: u32, max_w: u32, max_h: u32) void {
+    const NSSize = extern struct { w: f64, h: f64 };
+    const SetSizeFn = *const fn (?*anyopaque, ?*anyopaque, NSSize) callconv(.c) void;
+
+    if (min_w > 0 or min_h > 0) {
+        const sel = objc.sel_registerName("setContentMinSize:");
+        const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
+        fn_ptr(window, @ptrCast(sel), .{ .w = @floatFromInt(min_w), .h = @floatFromInt(min_h) });
+    }
+    if (max_w > 0 or max_h > 0) {
+        const huge: f64 = std.math.floatMax(f64);
+        const sel = objc.sel_registerName("setContentMaxSize:");
+        const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
+        fn_ptr(window, @ptrCast(sel), .{
+            .w = if (max_w > 0) @floatFromInt(max_w) else huge,
+            .h = if (max_h > 0) @floatFromInt(max_h) else huge,
+        });
+    }
+}
+
+/// macOS: `#RRGGBB` 또는 `#RRGGBBAA` 16진수 → NSColor.colorWithRed:green:blue:alpha:.
+/// 파싱 실패 시 무시 (기본 배경 유지).
+fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {
+    if (hex.len < 7 or hex[0] != '#') return;
+    const r = std.fmt.parseInt(u8, hex[1..3], 16) catch return;
+    const g = std.fmt.parseInt(u8, hex[3..5], 16) catch return;
+    const b = std.fmt.parseInt(u8, hex[5..7], 16) catch return;
+    const a: u8 = if (hex.len >= 9)
+        (std.fmt.parseInt(u8, hex[7..9], 16) catch 255)
+    else
+        255;
+
+    const NSColor = getClass("NSColor") orelse return;
+    const sel = objc.sel_registerName("colorWithRed:green:blue:alpha:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, f64, f64, f64, f64) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const color = fn_ptr(NSColor, @ptrCast(sel),
+        @as(f64, @floatFromInt(r)) / 255.0,
+        @as(f64, @floatFromInt(g)) / 255.0,
+        @as(f64, @floatFromInt(b)) / 255.0,
+        @as(f64, @floatFromInt(a)) / 255.0,
+    ) orelse return;
+    msgSendVoid1(window, "setBackgroundColor:", color);
+}
+
+/// macOS: NSWindow.toggleFullScreen:. order(create) 직후 호출하면 전체화면 진입 애니메이션.
+fn toggleMacFullScreen(window: ?*anyopaque) void {
+    msgSendVoid1(window, "toggleFullScreen:", null);
+}
+
+/// macOS: titleBarStyle. NSWindow.titlebarAppearsTransparent:YES + style mask에
+/// NSWindowStyleMaskFullSizeContentView(0x8000) 추가 → titlebar 영역에 content view까지 확장.
+/// traffic light(close/min/max)는 그대로 보임. hidden_inset도 같은 매스크 (toolbar 도입 시 분리).
+fn applyTitleBarStyle(window: ?*anyopaque, style: window_mod.TitleBarStyle) void {
+    if (style == .default) return;
+    msgSendVoidBool(window, "setTitlebarAppearsTransparent:", true);
+
+    // 기존 styleMask에 NSWindowStyleMaskFullSizeContentView (= 1 << 15) OR.
+    const getMaskSel = objc.sel_registerName("styleMask");
+    const getMaskFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
+    const current_mask = getMaskFn(window, @ptrCast(getMaskSel));
+
+    const setMaskSel = objc.sel_registerName("setStyleMask:");
+    const setMaskFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setMaskFn(window, @ptrCast(setMaskSel), current_mask | (1 << 15));
 }
 
 /// macOS: NSWindow에 `close` 메시지 송신. NSBrowserView가 content view에서 떨어져

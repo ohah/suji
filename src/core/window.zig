@@ -55,7 +55,28 @@ pub const CreateOptions = struct {
     /// true면 투명 배경 — NSWindow.opaque=false + clear color, CEF backgroundColor=0 (Electron `transparent: true`).
     /// HTML 측에서도 body { background: transparent }로 받쳐야 의미.
     transparent: bool = false,
+    /// true면 항상 다른 창 위에 떠 있음 (NSFloatingWindowLevel). 위젯/툴 팔레트.
+    always_on_top: bool = false,
+    /// false면 크기 조절 불가 (NSWindowStyleMaskResizable 비트 제외). frame=false면 무관 (스타일 0).
+    resizable: bool = true,
+    /// 최소/최대 콘텐츠 크기 (0이면 제한 없음). NSWindow.contentMinSize/contentMaxSize.
+    min_width: u32 = 0,
+    min_height: u32 = 0,
+    max_width: u32 = 0,
+    max_height: u32 = 0,
+    /// true면 시작 시 전체화면 (NSWindow.toggleFullScreen).
+    fullscreen: bool = false,
+    /// 16진수 RGB 또는 RGBA (`#FFFFFF` / `#FFFFFFFF`). transparent=true와 함께 쓰면 transparent 우선.
+    /// null이면 기본값 (white / system default).
+    background_color: ?[]const u8 = null,
+    /// 타이틀바 스타일 (Electron 호환).
+    /// - `.default`: OS 기본
+    /// - `.hidden`: 타이틀바 영역 hidden + traffic light 표시 + content view가 전체 차지
+    /// - `.hidden_inset`: hidden과 동일 (currently 별 차이 없음 — toolbar 도입 시 분리)
+    title_bar_style: TitleBarStyle = .default,
 };
+
+pub const TitleBarStyle = enum { default, hidden, hidden_inset };
 
 pub const Window = struct {
     id: u32,

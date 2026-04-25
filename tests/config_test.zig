@@ -239,6 +239,47 @@ test "Window struct default — frame/transparent/parent" {
     try std.testing.expectEqual(@as(?[:0]const u8, null), w.parent);
 }
 
+test "Window struct default — Phase 3-D/E (외형 옵션)" {
+    const w = config.Config.Window{};
+    try std.testing.expectEqual(@as(i64, 0), w.x);
+    try std.testing.expectEqual(@as(i64, 0), w.y);
+    try std.testing.expectEqual(false, w.always_on_top);
+    try std.testing.expectEqual(true, w.resizable);
+    try std.testing.expectEqual(@as(i64, 0), w.min_width);
+    try std.testing.expectEqual(@as(i64, 0), w.min_height);
+    try std.testing.expectEqual(@as(i64, 0), w.max_width);
+    try std.testing.expectEqual(@as(i64, 0), w.max_height);
+    try std.testing.expectEqual(false, w.fullscreen);
+    try std.testing.expectEqual(@as(?[:0]const u8, null), w.background_color);
+    try std.testing.expectEqual(config.Config.TitleBarStyle.default, w.title_bar_style);
+}
+
+test "JSON window with Phase 3-D 옵션들 모두 파싱" {
+    const parsed = try parseRoot(
+        \\{ "windows": [{
+        \\  "name": "panel",
+        \\  "x": 100, "y": 200,
+        \\  "alwaysOnTop": true,
+        \\  "resizable": false,
+        \\  "minWidth": 320, "minHeight": 200,
+        \\  "maxWidth": 1280, "maxHeight": 720,
+        \\  "fullscreen": false,
+        \\  "backgroundColor": "#1d1d1f",
+        \\  "titleBarStyle": "hidden"
+        \\}] }
+    );
+    defer parsed.deinit();
+    const w = firstWindow(parsed.value.object);
+    try std.testing.expectEqual(@as(i64, 100), w.get("x").?.integer);
+    try std.testing.expectEqual(@as(i64, 200), w.get("y").?.integer);
+    try std.testing.expect(w.get("alwaysOnTop").?.bool);
+    try std.testing.expect(!w.get("resizable").?.bool);
+    try std.testing.expectEqual(@as(i64, 320), w.get("minWidth").?.integer);
+    try std.testing.expectEqual(@as(i64, 1280), w.get("maxWidth").?.integer);
+    try std.testing.expectEqualStrings("#1d1d1f", w.get("backgroundColor").?.string);
+    try std.testing.expectEqualStrings("hidden", w.get("titleBarStyle").?.string);
+}
+
 // Phase 2 마무리: 다중 창 선언 — Tauri 호환
 test "JSON multiple windows parsing" {
     const json_content =

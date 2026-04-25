@@ -197,6 +197,59 @@ test "CreateOptions defaults — frame=true, transparent=false, parent_id=null" 
     try std.testing.expectEqual(@as(?u32, null), opts.parent_id);
 }
 
+test "CreateOptions Phase 3-D 외형 옵션 defaults" {
+    const opts = window.CreateOptions{};
+    try std.testing.expectEqual(false, opts.always_on_top);
+    try std.testing.expectEqual(true, opts.resizable);
+    try std.testing.expectEqual(@as(u32, 0), opts.min_width);
+    try std.testing.expectEqual(@as(u32, 0), opts.min_height);
+    try std.testing.expectEqual(@as(u32, 0), opts.max_width);
+    try std.testing.expectEqual(@as(u32, 0), opts.max_height);
+    try std.testing.expectEqual(false, opts.fullscreen);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.background_color);
+    try std.testing.expectEqual(window.TitleBarStyle.default, opts.title_bar_style);
+}
+
+test "TitleBarStyle enum has 3 variants" {
+    const a: window.TitleBarStyle = .default;
+    const b: window.TitleBarStyle = .hidden;
+    const c: window.TitleBarStyle = .hidden_inset;
+    try std.testing.expect(a != b);
+    try std.testing.expect(b != c);
+    try std.testing.expect(a != c);
+}
+
+test "create accepts all Phase 3-D options together (smoke test)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{
+        .always_on_top = true,
+        .resizable = false,
+        .min_width = 320,
+        .min_height = 200,
+        .max_width = 1920,
+        .max_height = 1080,
+        .fullscreen = false,
+        .background_color = "#1d1d1f",
+        .title_bar_style = .hidden,
+    });
+    try std.testing.expect(id >= 1);
+}
+
+test "create with parent destroy — child position 옵션 보존" {
+    // 부모 close → 자식의 parent_id는 그대로 (orphan으로 남아있어도 메타정보 유지).
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const parent_id = try wm.create(.{ .name = "p" });
+    const child_id = try wm.create(.{ .parent_id = parent_id });
+    try wm.destroy(parent_id);
+    const child = wm.get(child_id) orelse return error.MissingChild;
+    try std.testing.expect(!child.destroyed);
+    try std.testing.expectEqual(@as(?u32, parent_id), child.parent_id);
+}
+
 test "create accepts frame=false (frameless) without error" {
     var native = TestNative{};
     var wm = newManager(&native);

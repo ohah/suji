@@ -33,6 +33,9 @@ pub const Config = struct {
         title: [:0]const u8 = "Suji App",
         width: i64 = 1024,
         height: i64 = 768,
+        /// 초기 위치 (px). 0이면 OS cascade 자동 배치.
+        x: i64 = 0,
+        y: i64 = 0,
         debug: bool = false,
         protocol: Protocol = .file,
         /// 시작 시 자동 로드할 URL. null이면 frontend dev_url/dist 자동 선택 (첫 창에만 적용).
@@ -47,7 +50,24 @@ pub const Config = struct {
         /// 부모 창 이름. wm.fromName으로 lookup → CreateOptions.parent_id 세팅.
         /// 부모가 없거나 자기 자신이면 무시. 자식은 부모 위에 floating + 따라 이동 (시각만, 수명 독립).
         parent: ?[:0]const u8 = null,
+        /// true면 항상 다른 창 위 (위젯/툴 팔레트).
+        always_on_top: bool = false,
+        /// false면 크기 조절 불가.
+        resizable: bool = true,
+        /// 최소/최대 콘텐츠 크기 (0이면 제한 없음).
+        min_width: i64 = 0,
+        min_height: i64 = 0,
+        max_width: i64 = 0,
+        max_height: i64 = 0,
+        /// true면 시작 시 전체화면.
+        fullscreen: bool = false,
+        /// 16진수 RGB(A) — `#1d1d1f` / `#1d1d1fff`. transparent와 함께 쓰면 transparent 우선.
+        background_color: ?[:0]const u8 = null,
+        /// 타이틀바 스타일 (Electron 호환). suji.json에선 "default" | "hidden" | "hiddenInset".
+        title_bar_style: TitleBarStyle = .default,
     };
+
+    pub const TitleBarStyle = enum { default, hidden, hidden_inset };
 
     pub const SingleBackend = struct {
         lang: [:0]const u8 = "zig",
@@ -132,12 +152,27 @@ pub const Config = struct {
                     if (w.get("title")) |v| if (v == .string) { win.title = dupeStr(a, v.string); };
                     if (w.get("width")) |v| if (v == .integer) { win.width = v.integer; };
                     if (w.get("height")) |v| if (v == .integer) { win.height = v.integer; };
+                    if (w.get("x")) |v| if (v == .integer) { win.x = v.integer; };
+                    if (w.get("y")) |v| if (v == .integer) { win.y = v.integer; };
                     if (w.get("debug")) |v| if (v == .bool) { win.debug = v.bool; };
                     if (w.get("url")) |v| if (v == .string) { win.url = dupeStr(a, v.string); };
                     if (w.get("visible")) |v| if (v == .bool) { win.visible = v.bool; };
                     if (w.get("frame")) |v| if (v == .bool) { win.frame = v.bool; };
                     if (w.get("transparent")) |v| if (v == .bool) { win.transparent = v.bool; };
                     if (w.get("parent")) |v| if (v == .string) { win.parent = dupeStr(a, v.string); };
+                    if (w.get("alwaysOnTop")) |v| if (v == .bool) { win.always_on_top = v.bool; };
+                    if (w.get("resizable")) |v| if (v == .bool) { win.resizable = v.bool; };
+                    if (w.get("minWidth")) |v| if (v == .integer) { win.min_width = v.integer; };
+                    if (w.get("minHeight")) |v| if (v == .integer) { win.min_height = v.integer; };
+                    if (w.get("maxWidth")) |v| if (v == .integer) { win.max_width = v.integer; };
+                    if (w.get("maxHeight")) |v| if (v == .integer) { win.max_height = v.integer; };
+                    if (w.get("fullscreen")) |v| if (v == .bool) { win.fullscreen = v.bool; };
+                    if (w.get("backgroundColor")) |v| if (v == .string) { win.background_color = dupeStr(a, v.string); };
+                    if (w.get("titleBarStyle")) |v| if (v == .string) {
+                        if (std.mem.eql(u8, v.string, "hidden")) win.title_bar_style = .hidden
+                        else if (std.mem.eql(u8, v.string, "hiddenInset")) win.title_bar_style = .hidden_inset
+                        else win.title_bar_style = .default;
+                    };
                     if (w.get("protocol")) |v| if (v == .string) {
                         if (std.mem.eql(u8, v.string, "file")) {
                             win.protocol = .file;

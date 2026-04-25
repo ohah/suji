@@ -433,12 +433,20 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [ ] `SujiCore.get_window_api` — 플러그인이 BrowserWindow 조작 가능 (Phase 3+)
     - [x] 생명주기 이벤트 payload `{windowId, name?}` 표준화 — created/close/closed 모두 일관.
           name은 destroy 전 캡처해서 closed에도 포함 → 플러그인이 wm 조회 없이 분기.
-  - [x] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식)
+  - [x] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식, 추가 외형 옵션)
     - [x] `windows[].frame: false` — NSWindowStyleMaskBorderless. macOS 완료, Linux/Windows는 추후.
     - [x] `windows[].transparent: true` — NSWindow.opaque=NO + clearColor + hasShadow=NO + CEF browser background_color=0.
-    - [x] `windows[].parent: "<name>"` — NSWindow.addChildWindow:ordered:NSWindowAbove로 시각 관계만 (PLAN 449: 재귀 close X).
+    - [x] `windows[].parent: "<name>"` — NSWindow.addChildWindow:ordered:NSWindowAbove로 시각 관계만 (PLAN 재귀 close X).
           parent name lookup은 main.zig의 wm.fromName으로 처리 — 따라서 부모는 windows[] 배열 순서상 더 앞에 와야.
+    - [x] `windows[].x / y` — 명시 위치. 0이면 OS cascade 자동 (cascadeTopLeftFromPoint:).
+    - [x] `windows[].alwaysOnTop` — NSFloatingWindowLevel(3).
+    - [x] `windows[].resizable: false` — NSWindowStyleMaskResizable 비트 제외.
+    - [x] `windows[].minWidth/minHeight/maxWidth/maxHeight` — NSWindow.contentMinSize/contentMaxSize.
+    - [x] `windows[].fullscreen: true` — toggleFullScreen: (makeKeyAndOrderFront 이후).
+    - [x] `windows[].backgroundColor: "#RRGGBB(AA)"` — NSColor.colorWithRed:green:blue:alpha:.
+    - [x] `windows[].titleBarStyle: "hidden" | "hiddenInset"` — titlebarAppearsTransparent + NSWindowStyleMaskFullSizeContentView.
     - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만. 실수요 발견 시 SujiCore.get_window_api로 도입.
+    - **알려진 한계**: frameless의 `-webkit-app-region: drag` 미동작 (Phase 4 백로그 참조).
   - [ ] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
     - [ ] DevTools "Reload" 버튼 → **DevTools가 attach된 메인 창도 같이 reload** (Electron 동작 호환).
           현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
