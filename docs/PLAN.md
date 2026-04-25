@@ -459,7 +459,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `toggle_dev_tools` 4개. WM 메서드 + IPC 핸들러 + 5 SDK (Frontend + Zig/Rust/Go/Node) +
           단위 11 + e2e 3. open/close 멱등 — 이미 열림/닫힘이면 no-op. 기존 F12 단축키
           토글 코드(`toggleDevTools` 헬퍼)를 분해해 4개 API로 노출.
-    - [ ] Phase 4-D 인쇄/캡처 — `print_to_pdf`, `capture_page` (콜백 기반)
+    - [~] Phase 4-D 인쇄/캡처
+      - [x] **`print_to_pdf`** — `cef_browser_host_t.print_to_pdf` + `cef_pdf_print_callback_t`
+            (글로벌 stateless callback). 즉시 ok 응답 + 완료 시 `window:pdf-print-finished` 이벤트
+            (`{path, success}`) 발화. SDK가 path 매칭으로 Promise resolve (Frontend/Node).
+            Native vtable + WM + IPC + 5 SDK + 단위 4 + e2e 2 (실 PDF 파일 생성 검증).
+            Linux는 `cef_print_handler_t::GetPdfPaperSize` 구현 필요 — macOS만 검증.
+      - [ ] **`capture_page`** — CEF 직접 미지원. CDP `Page.captureScreenshot` 또는
+            off-screen rendering으로 우회 필요. Phase 4-D 후속 백로그.
     - [x] **Phase 4-E 편집/검색** — `undo/redo/cut/copy/paste/select_all` (frame 위임 6) +
           `find_in_page(text, forward, matchCase, findNext)` + `stop_find_in_page(clearSelection)`.
           5 SDK + 단위 12 + e2e 4. user_agent dynamic은 CEF 미지원(창 settings 한 번만) — Phase 7

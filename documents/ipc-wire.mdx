@@ -161,6 +161,7 @@ CEF DevTools (`--remote-debugging-port=9222`)에서 `console.log(await suji.invo
 | 4-B 줌 | `set_zoom_level` / `set_zoom_factor` / `get_zoom_level` / `get_zoom_factor` |
 | 4-C DevTools | `open_dev_tools` / `close_dev_tools` / `is_dev_tools_opened` / `toggle_dev_tools` |
 | 4-E 편집/검색 | `undo` / `redo` / `cut` / `copy` / `paste` / `select_all` / `find_in_page` / `stop_find_in_page` |
+| 4-D 인쇄 | `print_to_pdf` (콜백 async — 결과는 `window:pdf-print-finished` 이벤트) |
 
 응답은 모두 `{ from: "zig-core", cmd, windowId, ok, ... }` 형태. cmd 매치는 정확 비교
 (이전 substring 매치는 commit 350f9d6에서 제거 — 가짜 cmd substring 회귀 차단).

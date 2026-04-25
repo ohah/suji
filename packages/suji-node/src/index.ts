@@ -463,4 +463,19 @@ export const windows = {
   stopFindInPage(windowId: number, clearSelection = false): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'stop_find_in_page', windowId, clearSelection });
   },
+
+  /** PDF 인쇄. CEF는 콜백 async — 코어가 즉시 ok 응답 + 완료 시
+   *  `window:pdf-print-finished` 이벤트({path, success}) 발화. SDK가 path 매칭으로 Promise resolve. */
+  printToPDF(windowId: number, path: string): Promise<{ success: boolean }> {
+    return new Promise((resolve) => {
+      const off = on("window:pdf-print-finished", (data) => {
+        const d = data as { path?: string; success?: boolean };
+        if (d.path === path) {
+          off();
+          resolve({ success: d.success === true });
+        }
+      });
+      invoke<WindowOpResponse>('__core__', { cmd: 'print_to_pdf', windowId, path });
+    });
+  },
 };

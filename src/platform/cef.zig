@@ -286,6 +286,7 @@ pub const CefNative = struct {
         .select_all = makeFrameEditFn("select_all"),
         .find_in_page = findInPageImpl,
         .stop_find_in_page = stopFindInPageImpl,
+        .print_to_pdf = printToPDFImpl,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
@@ -609,7 +610,66 @@ pub const CefNative = struct {
         const stop = host.stop_finding orelse return;
         stop(host, @intFromBool(clear_selection));
     }
+
+    // ==================== Phase 4-D: 인쇄 (printToPDF) ====================
+
+    fn printToPDFImpl(ctx: ?*anyopaque, handle: u64, path: []const u8) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+
+        var path_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
+        const path_z = nullTerminateOrTruncate(path, &path_buf) orelse {
+            log.warn("print_to_pdf: path {d} bytes > {d} stack buf — dropped", .{ path.len, PDF_PATH_STACK_BUF });
+            return;
+        };
+
+        var cef_path: c.cef_string_t = .{};
+        setCefString(&cef_path, path_z);
+
+        var settings: c.cef_pdf_print_settings_t = undefined;
+        zeroCefStruct(c.cef_pdf_print_settings_t, &settings);
+
+        ensurePdfCallback();
+        const print = host.print_to_pdf orelse return;
+        print(host, &cef_path, &settings, &g_pdf_callback);
+    }
 };
+
+const PDF_PATH_STACK_BUF: usize = 2048;
+
+/// 글로벌 cef_pdf_print_callback_t — 매 print 마다 alloc하면 ref-counted 수명 추적
+/// 부담. 콜백 자체는 stateless (path/success를 인자로 받음) → 글로벌 단일로 안전.
+/// 동시 print 여러 개 호출 시 EventBus emit이 각자 독립으로 발화 (path가 인자에 포함).
+var g_pdf_callback: c.cef_pdf_print_callback_t = undefined;
+var g_pdf_callback_initialized: bool = false;
+fn ensurePdfCallback() void {
+    if (g_pdf_callback_initialized) return;
+    zeroCefStruct(c.cef_pdf_print_callback_t, &g_pdf_callback);
+    initBaseRefCounted(&g_pdf_callback.base);
+    g_pdf_callback.on_pdf_print_finished = &onPdfPrintFinished;
+    g_pdf_callback_initialized = true;
+}
+
+/// CEF print_to_pdf 완료 콜백 — `window:pdf-print-finished` 이벤트로 emit.
+/// payload: `{"path": "<utf8>", "success": true|false}`. main이 inject한
+/// g_emit_callback 활용 (cef.zig는 backends/loader에 dep 하지 않도록).
+fn onPdfPrintFinished(_: [*c]c.cef_pdf_print_callback_t, path: [*c]const c.cef_string_t, ok: c_int) callconv(.c) void {
+    const emit = g_emit_callback orelse return;
+
+    var path_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
+    const path_str: []const u8 = if (path) |p| cefStringToUtf8(p, &path_buf) else "";
+
+    var escaped_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
+    const escaped_n = window_mod.escapeJsonChars(path_str, &escaped_buf);
+
+    var payload_buf: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&payload_buf);
+    w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ escaped_buf[0..escaped_n], ok != 0 }) catch return;
+
+    emit(null, "window:pdf-print-finished", w.buffered());
+}
 
 const URL_BUF_SIZE: usize = 2048;
 /// executeJavascript의 fast-path stack 버퍼. 4KB 미만 코드는 alloc 없이.

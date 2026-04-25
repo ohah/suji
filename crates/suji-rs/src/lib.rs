@@ -283,6 +283,14 @@ pub mod windows {
         ))
     }
 
+    /// PDF 인쇄 (콜백 async — 결과는 `window:pdf-print-finished` 이벤트).
+    pub fn print_to_pdf(window_id: u32, path: &str) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"print_to_pdf","windowId":{},"path":"{}"}}"#,
+            window_id, escape_json(path),
+        ))
+    }
+
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,

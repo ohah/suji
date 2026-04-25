@@ -616,6 +616,17 @@ pub const windows = struct {
         return coreCmd("stop_find_in_page", fields);
     }
 
+    /// PDF 인쇄 요청. CEF가 콜백 기반 async라 코어는 즉시 ok 응답하고
+    /// 완료는 `window:pdf-print-finished` 이벤트(`{path, success}`)로 발화.
+    /// caller가 `suji.app().on("window:pdf-print-finished", ...)`로 listen.
+    pub fn printToPDF(id: u32, path: []const u8) ?[]const u8 {
+        var p_buf: [2048]u8 = undefined;
+        const p_n = util.escapeJsonStr(path, &p_buf) orelse return null;
+        var fields_buf: [2400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"path\":\"{s}\"", .{ id, p_buf[0..p_n] }) catch return null;
+        return coreCmd("print_to_pdf", fields);
+    }
+
     /// `windowId`만 들어가는 단순 cmd 헬퍼 — getURL/isLoading/openDevTools/... 공통.
     fn windowIdCmd(cmd: []const u8, id: u32) ?[]const u8 {
         var fields_buf: [64]u8 = undefined;

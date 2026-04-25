@@ -150,6 +150,20 @@ interface InvokeEvent {
 | `find_in_page` | `windowId, text, forward, matchCase, findNext` | `{..., ok}` (결과 보고는 추후 이벤트) |
 | `stop_find_in_page` | `windowId, clearSelection` | `{..., ok}` |
 
+#### Phase 4-D 인쇄 (콜백 기반 async)
+
+| cmd | 필드 | 응답 |
+|-----|------|------|
+| `print_to_pdf` | `windowId, path` | 즉시 `{..., ok}` (요청 접수만) |
+
+완료 결과는 별도 이벤트로:
+- 이벤트: `window:pdf-print-finished`
+- payload: `{path: string, success: boolean}`
+- SDK는 path 매칭으로 listener → Promise 변환 (Frontend/Node SDK가 이미 구현. Zig/Rust/Go는 caller가 `on()`으로 직접 listen).
+- 동시 같은 path 호출은 첫 완료에 둘 다 resolve — 보통 사용자 시나리오 X.
+
+`capture_page`는 CEF 직접 미지원 — 백로그(CDP 또는 off-screen 우회).
+
 새 SDK는 위 cmd를 모두 typed wrapper로 노출한다. **JSON-safe escape는 SDK 책임** — 사용자가 raw `"`, `\\`, control char 들어간 문자열을 넘겨도 wire JSON이 깨지지 않아야 한다 (구현 패턴: `escape_json` 헬퍼 — `"` → `\"`, `\\` → `\\\\`, `< 0x20` drop).
 
 ### 4.4 명명 규칙

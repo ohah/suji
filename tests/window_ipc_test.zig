@@ -994,6 +994,32 @@ test "Phase 4-E 핸들러: 알 수 없는 id면 ok:false" {
     try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":false") != null);
 }
 
+// ============================================
+// Phase 4-D: printToPDF IPC 핸들러
+// ============================================
+
+test "handlePrintToPDF: path가 native까지 전달 + ok 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r = ipc.handlePrintToPDF(.{ .window_id = 1, .path = "/tmp/report.pdf" }, &buf, &wm).?;
+    try std.testing.expectEqualStrings("/tmp/report.pdf", native.last_print_path.?);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"print_to_pdf\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}
+
+test "handlePrintToPDF: 알 수 없는 id면 ok:false (native 미호출)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const r = ipc.handlePrintToPDF(.{ .window_id = 999, .path = "/tmp/x.pdf" }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 0), native.print_to_pdf_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":false") != null);
+}
+
 test "줌 핸들러: 알 수 없는 id면 ok:false" {
     var native = TestNative{};
     var wm = newWm(&native);

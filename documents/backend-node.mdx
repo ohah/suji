@@ -194,6 +194,9 @@ await windows.undo(2);
 await windows.copy(2);
 await windows.findInPage(2, 'hello', { forward: true, matchCase: false, findNext: false });
 await windows.stopFindInPage(2, /* clearSelection */ true);
+
+// Phase 4-D PDF 인쇄 — SDK가 `window:pdf-print-finished` 이벤트 path 매칭으로 Promise resolve
+const { success } = await windows.printToPDF(2, '/tmp/report.pdf');
 ```
 
 핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).

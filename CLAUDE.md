@@ -61,6 +61,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.setZoomLevel(id, 1.5) / setZoomFactor(id, 1.2)  — 줌 (Phase 4-B)
 // suji.windows.openDevTools(id) / toggleDevTools(id)  — DevTools (Phase 4-C)
 // suji.windows.copy(id) / paste(id) / findInPage(id, "x", .{})  — 편집/검색 (Phase 4-E)
+// suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -76,6 +77,7 @@ suji::export_handlers!(ping);
 // suji::on("channel", cb, arg) — 이벤트 수신
 // suji::windows::load_url(id, url) / reload(id, false) / execute_javascript(id, code)  (Phase 4-A)
 // suji::windows::set_zoom_factor(id, 1.2) / open_dev_tools(id) / copy(id) / find_in_page(id, "x", ..)
+// suji::windows::print_to_pdf(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -92,6 +94,7 @@ var _ = suji.Bind(&App{})
 // import "github.com/ohah/suji-go/windows"
 // windows.LoadURL(id, url) / Reload(id, false) / ExecuteJavaScript(id, code)  (Phase 4-A)
 // windows.SetZoomFactor(id, 1.2) / OpenDevTools(id) / Copy(id) / FindInPage(id, "x", ..)
+// windows.PrintToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -112,6 +115,7 @@ suji.platform                                                // "macos" | "linux
 // await windows.setZoomFactor(id, 1.2) / setZoomLevel(id, 1.5)  (Phase 4-B)
 // await windows.openDevTools(id) / toggleDevTools(id) / isDevToolsOpened(id)  (Phase 4-C)
 // await windows.undo(id) / copy(id) / paste(id) / findInPage(id, "x", {})  (Phase 4-E)
+// const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
 ```
 
 ## suji.json 설정

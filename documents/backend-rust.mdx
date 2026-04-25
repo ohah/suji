@@ -143,6 +143,9 @@ let _ = windows::undo(2);
 let _ = windows::copy(2);
 let _ = windows::find_in_page(2, "hello", windows::FindOptions { forward: true, match_case: false, find_next: false });
 let _ = windows::stop_find_in_page(2, /* clear_selection */ true);
+
+// Phase 4-D PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
+let _ = windows::print_to_pdf(2, "/tmp/report.pdf");
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.

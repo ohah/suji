@@ -63,6 +63,10 @@ pub const TestNative = struct {
     last_find_match_case: bool = false,
     last_find_next: bool = false,
     last_stop_find_clear: bool = false,
+
+    // Phase 4-D: 인쇄
+    print_to_pdf_calls: usize = 0,
+    last_print_path: ?[]const u8 = null,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
@@ -100,6 +104,7 @@ pub const TestNative = struct {
         .select_all = makeEditFn("select_all"),
         .find_in_page = findInPage,
         .stop_find_in_page = stopFindInPage,
+        .print_to_pdf = printToPDF,
     };
 
     /// edit_calls의 named 필드 카운트 증가. 잘못된 필드명은 컴파일 에러.
@@ -232,5 +237,11 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.stop_find_calls += 1;
         self.last_stop_find_clear = clear_selection;
+    }
+
+    fn printToPDF(ctx: ?*anyopaque, _: u64, path: []const u8) void {
+        const self = fromCtx(ctx);
+        self.print_to_pdf_calls += 1;
+        self.last_print_path = path;
     }
 };

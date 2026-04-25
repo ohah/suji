@@ -169,6 +169,9 @@ _ = suji.windows.undo(2);
 _ = suji.windows.copy(2);
 _ = suji.windows.findInPage(2, "hello", .{ .forward = true, .match_case = false, .find_next = false });
 _ = suji.windows.stopFindInPage(2, /* clear_selection */ true);
+
+// Phase 4-D PDF 인쇄 (콜백 async — 결과는 `window:pdf-print-finished` 이벤트)
+_ = suji.windows.printToPDF(2, "/tmp/report.pdf");
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape (`"` `\\` 이스케이프 + control char drop).

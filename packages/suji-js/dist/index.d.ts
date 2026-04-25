@@ -175,6 +175,15 @@ export declare const windows: {
         findNext?: boolean;
     }): Promise<WindowOpResponse>;
     stopFindInPage(windowId: number, clearSelection?: boolean): Promise<WindowOpResponse>;
+    /** PDF로 인쇄. CEF는 콜백 기반 async — 코어가 즉시 ok 응답 + 완료 시
+     *  `window:pdf-print-finished` 이벤트({path, success}) 발화. 이 SDK는
+     *  내부적으로 listener를 path로 매칭해 Promise<{success}> 반환.
+     *
+     *  주의: 같은 path로 동시 인쇄 시 첫 번째 완료 이벤트가 둘 다 resolve. 보통
+     *  사용자 시나리오에서 동시 호출 드물어 OK. */
+    printToPDF(windowId: number, path: string): Promise<{
+        success: boolean;
+    }>;
 };
 /**
  * 여러 백엔드에 동시 요청

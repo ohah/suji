@@ -2393,6 +2393,31 @@ test "Phase 4-E 메서드들: destroyed/unknown 가드" {
     try std.testing.expectError(window.Error.WindowNotFound, wm.findInPage(999, "x", true, false, false));
 }
 
+// ============================================
+// Phase 4-D: 인쇄 (printToPDF — 콜백 async)
+// ============================================
+
+test "printToPDF: native에 path 전달" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.printToPDF(id, "/tmp/out.pdf");
+    try std.testing.expectEqual(@as(usize, 1), native.print_to_pdf_calls);
+    try std.testing.expectEqualStrings("/tmp/out.pdf", native.last_print_path.?);
+}
+
+test "printToPDF: destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.printToPDF(id, "/tmp/x.pdf"));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.printToPDF(999, "/tmp/x.pdf"));
+    try std.testing.expectEqual(@as(usize, 0), native.print_to_pdf_calls);
+}
+
 test "회귀: 4-C cef.zig openDevTools/closeDevTools/toggleDevTools가 인자 browser 사용" {
     // 헬퍼 분해 후 sender browser(매개변수)를 사용함을 정적 검증 — 만약 실수로
     // g_browser/g_main_browser 같은 글로벌로 바꾸면 멀티 윈도우 회귀.

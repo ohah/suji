@@ -1186,6 +1186,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const clear = util.extractJsonBool(req_clean, "clearSelection") orelse false;
         return window_ipc.handleStopFindInPage(win_id, clear, response_buf, wm);
     }
+    // Phase 4-D: 인쇄 — 결과는 `window:pdf-print-finished` 이벤트로 분리.
+    if (std.mem.eql(u8, cmd, "print_to_pdf")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handlePrintToPDF(.{
+            .window_id = win_id,
+            .path = util.extractJsonString(req_clean, "path") orelse "",
+        }, response_buf, wm);
+    }
     if (std.mem.eql(u8, cmd, "quit")) {
         cef.quit();
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"quit\"}}", .{}) catch return null;

@@ -752,6 +752,20 @@ test "windows.undo/redo/cut/copy/paste/selectAll: cmd JSON 형식" {
     }.run);
 }
 
+test "windows.printToPDF: cmd JSON + path escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.printToPDF(2, "/tmp/out.pdf");
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"print_to_pdf\",\"windowId\":2,\"path\":\"/tmp/out.pdf\"") != null);
+
+            // path에 " 들어가도 escape
+            _ = app_mod.windows.printToPDF(2, "/tmp/has\"quote.pdf");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\\\"quote") != null);
+        }
+    }.run);
+}
+
 test "windows.findInPage / stopFindInPage: 옵션 + escape" {
     try withInvokeCore(struct {
         fn run() !void {

@@ -125,6 +125,14 @@ func StopFindInPage(windowID uint32, clearSelection bool) string {
 	))
 }
 
+// PrintToPDF는 콜백 async — 결과는 `window:pdf-print-finished` 이벤트.
+func PrintToPDF(windowID uint32, path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"print_to_pdf","windowId":%d,"path":"%s"}`,
+		windowID, escapeJSON(path),
+	))
+}
+
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,

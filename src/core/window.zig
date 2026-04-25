@@ -170,6 +170,8 @@ pub const Native = struct {
         select_all: *const fn (ctx: ?*anyopaque, handle: u64) void,
         find_in_page: *const fn (ctx: ?*anyopaque, handle: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void,
         stop_find_in_page: *const fn (ctx: ?*anyopaque, handle: u64, clear_selection: bool) void,
+        // Phase 4-D: 인쇄 — fire-and-forget. 결과는 cef.zig가 EventBus로 emit.
+        print_to_pdf: *const fn (ctx: ?*anyopaque, handle: u64, path: []const u8) void,
     };
 
     pub fn createWindow(self: Native, opts: *const CreateOptions) !u64 {
@@ -246,6 +248,9 @@ pub const Native = struct {
     }
     pub fn stopFindInPage(self: Native, handle: u64, clear_selection: bool) void {
         self.vtable.stop_find_in_page(self.ctx, handle, clear_selection);
+    }
+    pub fn printToPDF(self: Native, handle: u64, path: []const u8) void {
+        self.vtable.print_to_pdf(self.ctx, handle, path);
     }
 };
 
@@ -888,5 +893,16 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         self.native.stopFindInPage(win.native_handle, clear_selection);
+    }
+
+    // ==================== Phase 4-D: 인쇄 ====================
+    // PDF 저장은 비동기 — 호출 직후 ok 응답, 결과는 `window:pdf-print-finished`
+    // 이벤트(`{windowId, path, success}`)로 분리. caller는 listener로 매핑.
+
+    pub fn printToPDF(self: *WindowManager, id: u32, path: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.printToPDF(win.native_handle, path);
     }
 };

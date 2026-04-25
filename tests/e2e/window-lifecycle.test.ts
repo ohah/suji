@@ -363,6 +363,55 @@ describe("Phase 4-E — 편집 / 검색", () => {
 });
 
 // ============================================
+// Phase 4-D: PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트로 결과)
+// ============================================
+
+describe("Phase 4-D — printToPDF", () => {
+  test("print_to_pdf: 즉시 ok 응답 + 완료 이벤트로 success/path 회신 + 실 파일 생성", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "pdf-test", url: "about:blank" });
+    const id = c.windowId;
+    const path = `/tmp/suji-e2e-${Date.now()}.pdf`;
+
+    // 이벤트 listener 등록 후 cmd 호출 — Promise로 wait.
+    const finished = page.evaluate((p) =>
+      new Promise<{ path?: string; success?: boolean }>((resolve) => {
+        const off = (window as any).__suji__.on("window:pdf-print-finished", (data: any) => {
+          if (data.path === p) {
+            off();
+            resolve({ path: data.path, success: data.success });
+          }
+        });
+      }), path) as Promise<{ path?: string; success?: boolean }>;
+
+    const ack: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "print_to_pdf", windowId: id, path },
+    );
+    expect(ack.cmd).toBe("print_to_pdf");
+    expect(ack.ok).toBe(true);
+
+    const result = await Promise.race([
+      finished,
+      new Promise((r) => setTimeout(() => r({ path: undefined, success: undefined }), 5000)),
+    ]) as { path?: string; success?: boolean };
+    expect(result.path).toBe(path);
+    expect(result.success).toBe(true);
+
+    // 실 파일 존재 확인 + cleanup
+    const { existsSync, unlinkSync } = await import("node:fs");
+    expect(existsSync(path)).toBe(true);
+    unlinkSync(path);
+  });
+
+  test("print_to_pdf: 알 수 없는 windowId — ok:false (이벤트 발화 안 됨)", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "print_to_pdf", windowId: 99999, path: "/tmp/x.pdf" })),
+    );
+    expect(r.ok).toBe(false);
+  });
+});
+
+// ============================================
 // Phase 4-B: 줌 (set/get level + factor)
 // ============================================
 

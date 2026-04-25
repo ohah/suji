@@ -220,6 +220,34 @@ _ = suji.windows.findInPage(2, "hello", .{ .forward = true });
 
 **미노출**: `set_user_agent` 동적 변경은 CEF가 창 settings에 한 번만 노출 → Phase 7 보안과 함께 백로그.
 
+## 인쇄 (Phase 4-D)
+
+Electron `webContents.printToPDF` 대응. CEF는 콜백 기반 async — 코어가 즉시 ok 응답하고 완료 시 `window:pdf-print-finished` 이벤트({path, success}) 발화. SDK가 path 매칭으로 Promise resolve.
+
+```ts
+import { windows } from '@suji/api';
+const { success } = await windows.printToPDF(2, '/tmp/report.pdf');
+if (success) console.log('saved');
+```
+
+```zig
+// Zig — fire-and-forget 후 listener
+_ = suji.windows.printToPDF(2, "/tmp/report.pdf");
+// 별도 핸들러에서 `on("window:pdf-print-finished", ...)` 등록
+```
+
+```rust
+let _ = suji::windows::print_to_pdf(2, "/tmp/report.pdf");
+```
+
+```go
+windows.PrintToPDF(2, "/tmp/report.pdf")
+```
+
+**capturePage**는 CEF 직접 미노출 → Phase 4 백로그 (CDP `Page.captureScreenshot` 또는 off-screen rendering 우회 필요).
+
+**Linux 주의**: PDF 인쇄는 `cef_print_handler_t::GetPdfPaperSize` 구현이 필요 (CEF 요구). 현재 macOS에서만 검증.
+
 ## 어느 창에서 호출됐는지 식별 — `__window` wire 자동 태깅
 
 프론트엔드가 `__suji__.invoke('save', data)`를 호출하면 수신 코어가 sender browser를

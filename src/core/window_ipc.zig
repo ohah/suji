@@ -479,6 +479,24 @@ pub fn handleStopFindInPage(window_id: u32, clear_selection: bool, response_buf:
     return respondWindowOp(response_buf, "stop_find_in_page", window_id, ok);
 }
 
+// ============================================
+// Phase 4-D: 인쇄 (printToPDF — 콜백 기반 async)
+// 즉시 ok 응답 → 결과는 `window:pdf-print-finished` 이벤트(`{path, success}`)로
+// 발화. SDK 측에서 listener + Promise로 매핑 (path 매칭).
+// capturePage는 CEF 직접 미지원 → Phase 4 백로그 (CDP 또는 off-screen 우회).
+// ============================================
+
+pub const PrintToPDFReq = struct {
+    window_id: u32,
+    path: []const u8,
+};
+
+pub fn handlePrintToPDF(req: PrintToPDFReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.printToPDF(req.window_id, req.path)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "print_to_pdf", req.window_id, ok);
+}
+
 pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     const opened = wm.isDevToolsOpened(window_id) catch {
