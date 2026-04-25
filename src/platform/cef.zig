@@ -1274,17 +1274,24 @@ fn onPreKeyEvent(
         return 1;
     }
 
-    if (!cmd) return 0;
-
-    // Cmd+R — Reload
-    if (key == 'R' and !shift) {
-        br.reload.?(br);
+    // F5 / Shift+F5 — Reload (Electron 호환, DevTools 안에서 누르면 inspectee reload).
+    // macOS는 F5 키가 흔치 않지만 외부 키보드/Linux/Windows 호환.
+    if (key == 116) {
+        reloadInspecteeOrSelf(br, shift);
         return 1;
     }
 
-    // Cmd+Shift+R — Hard Reload
+    if (!cmd) return 0;
+
+    // Cmd+R — Reload (DevTools 안이면 inspectee reload — Electron 호환).
+    if (key == 'R' and !shift) {
+        reloadInspecteeOrSelf(br, false);
+        return 1;
+    }
+
+    // Cmd+Shift+R — Hard Reload (cache 무시).
     if (key == 'R' and shift) {
-        br.reload_ignore_cache.?(br);
+        reloadInspecteeOrSelf(br, true);
         return 1;
     }
 
@@ -1357,10 +1364,43 @@ fn devtoolsHost(browser: *c.cef_browser_t) ?*c.cef_browser_host_t {
     return asPtr(c.cef_browser_host_t, browser.get_host.?(browser));
 }
 
+/// reload 키(F5/Cmd+R)는 sender browser를 reload하는 게 기본인데, sender가 DevTools
+/// front-end면 self-reload되어 inspectee(개발자가 진짜 reload하고 싶은 페이지)는
+/// 변동 없음. 이 함수가 sender가 BrowserEntry에 등록된(= 사용자 창)인지 보고:
+///   - 등록됨: sender 그대로 reload (일반 동작)
+///   - 미등록(DevTools 추정) + g_devtools_inspectee 있음: inspectee reload (Electron 호환)
+///   - 미등록 + 매핑 없음: sender reload (fallback — silent fail X)
+fn reloadInspecteeOrSelf(sender: *c.cef_browser_t, ignore_cache: bool) void {
+    const target = blk: {
+        if (g_cef_native) |native| {
+            const sender_id: u64 = @intCast(sender.get_identifier.?(sender));
+            if (native.browsers.get(sender_id) != null) break :blk sender;
+            // sender가 BrowserEntry에 없음 → DevTools 가정.
+            if (g_devtools_inspectee) |inspectee_id| {
+                if (native.browsers.get(inspectee_id)) |entry| break :blk entry.browser;
+            }
+        }
+        break :blk sender;
+    };
+    if (ignore_cache) {
+        const fn_ptr = target.reload_ignore_cache orelse return;
+        fn_ptr(target);
+    } else {
+        const fn_ptr = target.reload orelse return;
+        fn_ptr(target);
+    }
+}
+
 fn hasDevTools(browser: *c.cef_browser_t) bool {
     const host = devtoolsHost(browser) orelse return false;
     return host.has_dev_tools.?(host) == 1;
 }
+
+/// 가장 최근 openDevTools 호출의 inspectee browser id. DevTools front-end에서
+/// reload 키(F5/Cmd+R) 누르면 sender = DevTools browser라 self-reload되는데,
+/// 그 시점에 이 값으로 매핑된 inspectee를 reload (Electron 호환 동작).
+/// 한계: 멀티 윈도우 동시 DevTools면 마지막 open만 매핑. 멀티 매핑은 백로그.
+var g_devtools_inspectee: ?u64 = null;
 
 fn openDevTools(browser: *c.cef_browser_t) void {
     const host = devtoolsHost(browser) orelse return;
@@ -1374,12 +1414,18 @@ fn openDevTools(browser: *c.cef_browser_t) void {
     zeroCefStruct(c.cef_browser_settings_t, &settings);
 
     var point: c.cef_point_t = .{ .x = 0, .y = 0 };
+    g_devtools_inspectee = @intCast(browser.get_identifier.?(browser));
     host.show_dev_tools.?(host, &window_info, &g_devtools_client, &settings, &point);
 }
 
 fn closeDevTools(browser: *c.cef_browser_t) void {
     const host = devtoolsHost(browser) orelse return;
     if (host.has_dev_tools.?(host) != 1) return; // 이미 닫혀있으면 no-op
+    // inspectee 추적 해제 — DevTools 닫혔으므로 reload sync 필요 없음.
+    const id: u64 = @intCast(browser.get_identifier.?(browser));
+    if (g_devtools_inspectee != null and g_devtools_inspectee.? == id) {
+        g_devtools_inspectee = null;
+    }
     host.close_dev_tools.?(host);
 }
 

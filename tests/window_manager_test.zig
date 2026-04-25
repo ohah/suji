@@ -2249,6 +2249,55 @@ test "DevTools 메서드: 알 수 없는 id에 호출 시 WindowNotFound" {
 // `br`(sender)을 받아야지, 모듈-레벨 g_browser 같은 싱글 참조면 fail.
 // ============================================
 
+test "회귀: DevTools reload sync — Cmd+R/F5가 reloadInspecteeOrSelf 경유" {
+    // OnPreKeyEvent의 reload 분기가 br.reload()를 직접 호출하면 DevTools 안에서
+    // self-reload만 됨. reloadInspecteeOrSelf 헬퍼가 sender 등록 여부 + g_devtools_inspectee
+    // 매핑으로 inspectee를 reload 해야 함 (Electron 호환).
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // 헬퍼 정의 + g_devtools_inspectee 글로벌 존재
+    try std.testing.expect(std.mem.indexOf(u8, source, "fn reloadInspecteeOrSelf(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "g_devtools_inspectee") != null);
+
+    // OnPreKeyEvent body에서 br.reload 직접 호출 X — 모든 reload 키가 헬퍼 경유.
+    const fn_marker = "fn onPreKeyEvent(";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.OnPreKeyEventNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+    try std.testing.expect(std.mem.indexOf(u8, body, "reloadInspecteeOrSelf(br") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "br.reload.?(br)") == null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "br.reload_ignore_cache.?(br)") == null);
+
+    // F5(116) 키 처리 추가 — Windows/Linux 호환.
+    try std.testing.expect(std.mem.indexOf(u8, body, "key == 116") != null);
+}
+
+test "회귀: openDevTools가 g_devtools_inspectee에 sender id 기록" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "fn openDevTools(browser: *c.cef_browser_t)";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.OpenDevToolsNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // show_dev_tools 호출 전에 g_devtools_inspectee 세팅
+    const set_pos = std.mem.indexOf(u8, body, "g_devtools_inspectee = @intCast(") orelse return error.InspecteeSetMissing;
+    const show_pos = std.mem.indexOf(u8, body, "show_dev_tools.?(") orelse return error.ShowMissing;
+    try std.testing.expect(set_pos < show_pos);
+}
+
 test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

@@ -483,10 +483,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           (examples/window-styles README 명시). 사용자 만족도 직격.
     - [ ] **`capture_page`** — CEF 직접 미지원. CDP `Page.captureScreenshot` 또는 off-screen
           rendering 우회 필요. Electron 호환 위해 추후 구현. (4-D 후속.)
-    - [ ] **DevTools "Reload" 버튼 → 메인 창 reload** (Electron 동작 호환).
-          현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
-          reload 명령을 캐치 → host.get_browser().reload(). 확인 위치: cef.zig DevTools client
-          (g_devtools_client) 또는 OnPreKeyEvent에 추가 핸들링. (Task #72.)
+    - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
+          OnPreKeyEvent의 reload 키(F5/Cmd+R/Cmd+Shift+R) 분기를 `reloadInspecteeOrSelf`
+          헬퍼 경유로 변경 — sender가 BrowserEntry 미등록(DevTools 추정)이면 g_devtools_inspectee
+          매핑으로 inspectee browser reload. openDevTools 시점에 inspectee id 기록.
+          F5 키도 추가 (Windows/Linux 호환). 한계: 멀티 윈도우 동시 DevTools면 마지막
+          open만 매핑 (백로그).
     - [ ] **`find_in_page` 결과 보고 이벤트** — `cef_find_handler_t.OnFindResult`로 매치 수,
           현재 인덱스, 셀렉션 영역 받음 → `window:find-result` 이벤트로 발화. 현재는 ok 응답만.
 

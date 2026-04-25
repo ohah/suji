@@ -196,6 +196,10 @@ _ = suji.windows.toggleDevTools(2);
 
 **F12 / Cmd+Shift+I 단축키**: 누른 창의 DevTools만 토글 (멀티 윈도우 sender 식별).
 
+**DevTools 안에서 reload 키** (F5 / Cmd+R / Cmd+Shift+R): inspectee(원래 창)을 reload.
+Electron 호환 — DevTools front-end self-reload 대신 개발자가 진짜 reload하고 싶은 페이지
+대상으로. 한계: 멀티 윈도우 동시 DevTools면 마지막 open만 매핑.
+
 ## 편집 / 검색 (Phase 4-E)
 
 Electron `webContents.{undo, redo, cut, copy, paste, selectAll, findInPage, stopFindInPage}` 대응. 편집 6은 main frame에 위임, find는 `cef_browser_host_t`.
