@@ -2407,6 +2407,32 @@ test "printToPDF: native에 path 전달" {
     try std.testing.expectEqualStrings("/tmp/out.pdf", native.last_print_path.?);
 }
 
+test "회귀: cef.zig가 EVENT_PDF_PRINT_FINISHED const 사용 (이벤트 이름 하드코드 차단)" {
+    // cef.zig에서 onPdfPrintFinished가 const를 거치지 않고 string literal 직접 쓰면
+    // 5 SDK + 문서와 sync 깨질 위험. 한 곳에 const + 사용처에서 const 참조 보장.
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // const 정의 존재
+    try std.testing.expect(std.mem.indexOf(u8, source, "EVENT_PDF_PRINT_FINISHED") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "\"window:pdf-print-finished\"") != null);
+
+    // emit이 const 사용 — string literal 직접 사용은 1번(const 자체 정의)만 OK.
+    var literal_count: usize = 0;
+    var pos: usize = 0;
+    const needle = "\"window:pdf-print-finished\"";
+    while (std.mem.indexOfPos(u8, source, pos, needle)) |i| {
+        literal_count += 1;
+        pos = i + 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), literal_count);
+}
+
 test "printToPDF: destroyed/unknown 가드" {
     var native = TestNative{};
     var wm = newManager(&native);

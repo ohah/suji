@@ -637,8 +637,6 @@ pub const CefNative = struct {
     }
 };
 
-const PDF_PATH_STACK_BUF: usize = 2048;
-
 /// 글로벌 cef_pdf_print_callback_t — 매 print 마다 alloc하면 ref-counted 수명 추적
 /// 부담. 콜백 자체는 stateless (path/success를 인자로 받음) → 글로벌 단일로 안전.
 /// 동시 print 여러 개 호출 시 EventBus emit이 각자 독립으로 발화 (path가 인자에 포함).
@@ -668,14 +666,20 @@ fn onPdfPrintFinished(_: [*c]c.cef_pdf_print_callback_t, path: [*c]const c.cef_s
     var w = std.Io.Writer.fixed(&payload_buf);
     w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ escaped_buf[0..escaped_n], ok != 0 }) catch return;
 
-    emit(null, "window:pdf-print-finished", w.buffered());
+    emit(null, EVENT_PDF_PRINT_FINISHED, w.buffered());
 }
 
 const URL_BUF_SIZE: usize = 2048;
+/// PDF 인쇄 path stack 버퍼 — URL과 동일 크기 (둘 다 일반 file path / URL).
+const PDF_PATH_STACK_BUF: usize = URL_BUF_SIZE;
 /// executeJavascript의 fast-path stack 버퍼. 4KB 미만 코드는 alloc 없이.
 const JS_STACK_BUF_SIZE: usize = 4096;
 /// find_in_page text stack 버퍼. 검색어 1KB 초과면 log.warn + drop.
 const FIND_TEXT_STACK_BUF: usize = 1024;
+
+/// PDF 인쇄 완료 이벤트 — caller(SDK)가 listener로 path 매칭. 이름 변경 시 5 SDK
+/// + 문서 모두 동시 변경 필요 (SDK_PORTING.md §4.3 cmd 표 참조).
+pub const EVENT_PDF_PRINT_FINISHED: []const u8 = "window:pdf-print-finished";
 
 /// `[]const u8` → null-terminated `[:0]const u8` 복사. buf 부족 시 null 반환.
 /// CEF API(load_url/execute_java_script)에 전달하기 전에 필요.

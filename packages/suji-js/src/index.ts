@@ -316,9 +316,11 @@ export const windows = {
     return coreCall<WindowOpResponse>({ cmd: "stop_find_in_page", windowId, clearSelection });
   },
 
-  /** PDF로 인쇄. CEF는 콜백 기반 async — 코어가 즉시 ok 응답 + 완료 시
-   *  `window:pdf-print-finished` 이벤트({path, success}) 발화. 이 SDK는
-   *  내부적으로 listener를 path로 매칭해 Promise<{success}> 반환.
+  /** PDF로 인쇄. CEF는 콜백 기반 async라 두 단계 신호:
+   *  1. 코어 IPC 응답 — 요청 접수만 (CEF에 큐잉됨, 파일 아직 X).
+   *  2. `window:pdf-print-finished` 이벤트({path, success}) — 실 PDF 작성 완료.
+   *  이 SDK는 listener를 path로 매칭해 Promise<{success}>로 단일화 — 사용자는
+   *  await 한 번만. 반환된 success가 false면 PDF 작성 실패 (디스크 권한 등).
    *
    *  주의: 같은 path로 동시 인쇄 시 첫 번째 완료 이벤트가 둘 다 resolve. 보통
    *  사용자 시나리오에서 동시 호출 드물어 OK. */

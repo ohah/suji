@@ -471,23 +471,37 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `find_in_page(text, forward, matchCase, findNext)` + `stop_find_in_page(clearSelection)`.
           5 SDK + 단위 12 + e2e 4. user_agent dynamic은 CEF 미지원(창 settings 한 번만) — Phase 7
           보안과 함께 백로그.
-    - [ ] DevTools "Reload" 버튼 → **DevTools가 attach된 메인 창도 같이 reload** (Electron 동작 호환).
-          현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
-          reload 명령을 캐치 → host.get_browser().reload() 호출 또는 ReloadIgnoreCache.
-          확인 위치: cef.zig DevTools client (g_devtools_client) 또는 OnPreKeyEvent에 추가 핸들링.
+    #### Phase 4 백로그 (Phase 5 진입 전 또는 그 이후 처리)
+
+    A 사용자 가시 기능 (가치 높음 / 작업 큼):
     - [ ] **frameless drag region (`-webkit-app-region: drag`) — CEF Alloy 라우팅**.
-          현재는 HTML에 drag region을 지정해도 CEF view가 마우스 이벤트를 swallow해서 동작 X.
-          정식: `cef_drag_handler_t` vtable + `on_draggable_regions_changed` 콜백 등록 →
-          받은 `cef_draggable_region_t` 배열을 macOS `NSView` hit-test로 라우팅 (custom
-          contentView wrapper에서 mouseDown 시 영역 안이면 `[window performWindowDragWithEvent:]`).
-          Linux GTK는 `gtk_window_begin_move_drag`, Windows는 `WM_NCHITTEST` HTCAPTION 반환.
-          현재 임시 한계 — frameless 창 이동 불가. (examples/window-styles README에 명시.)
-    - [ ] **Phase 4 끝나고 정리: `cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화** (기술 부채).
-          현재 두 경로가 같은 `cefHandleCore/Fanout/Chain` 핸들러를 호출하지만 응답 버퍼/래핑
-          포맷이 달라 dispatcher가 2벌 (CEF는 wrapped `{__core,request}`, backend는 raw cmd JSON).
+          현재 HTML drag region 지정해도 CEF view가 마우스 이벤트를 swallow → 동작 X.
+          정식: `cef_drag_handler_t` vtable + `on_draggable_regions_changed` 콜백 → `cef_draggable_region_t`
+          배열을 macOS `NSView` hit-test로 라우팅 (custom contentView wrapper에서 mouseDown 시
+          영역 안이면 `[window performWindowDragWithEvent:]`). Linux GTK는 `gtk_window_begin_move_drag`,
+          Windows는 `WM_NCHITTEST` HTCAPTION 반환. 현재 frameless 창 이동 불가
+          (examples/window-styles README 명시). 사용자 만족도 직격.
+    - [ ] **`capture_page`** — CEF 직접 미지원. CDP `Page.captureScreenshot` 또는 off-screen
+          rendering 우회 필요. Electron 호환 위해 추후 구현. (4-D 후속.)
+    - [ ] **DevTools "Reload" 버튼 → 메인 창 reload** (Electron 동작 호환).
+          현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
+          reload 명령을 캐치 → host.get_browser().reload(). 확인 위치: cef.zig DevTools client
+          (g_devtools_client) 또는 OnPreKeyEvent에 추가 핸들링. (Task #72.)
+    - [ ] **`find_in_page` 결과 보고 이벤트** — `cef_find_handler_t.OnFindResult`로 매치 수,
+          현재 인덱스, 셀렉션 영역 받음 → `window:find-result` 이벤트로 발화. 현재는 ok 응답만.
+
+    B 플랫폼/엣지 (가치 중간):
+    - [ ] **Linux PDF 인쇄** — `cef_print_handler_t::GetPdfPaperSize` 구현 필요 (CEF 요구).
+          현재 macOS만 검증. (4-D 후속.)
+    - [ ] **`set_user_agent` / `get_user_agent` dynamic** — CEF는 창 settings에 한 번만 노출
+          (per-browser 동적 변경 미지원). Phase 7 보안과 함께 처리.
+
+    C 기술 부채 (가치 낮음 / 코드 정리):
+    - [ ] **`cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화**.
+          두 경로가 같은 `cefHandleCore/Fanout/Chain` 핸들러를 호출하지만 응답 버퍼/래핑 포맷이
+          달라 dispatcher 2벌 (CEF는 wrapped `{__core,request}`, backend는 raw cmd JSON).
           `SPECIAL_DISPATCHERS` 테이블은 공유 중. 통합 시: cefHandleCore의 두 입력 형식 분기를
-          제거하고 backend 경유로 단일화 (CEF에서도 동일 wrapping/raw 결정 후 호출). 작업 비용
-          중간이라 4-B/C/D/E 끝난 뒤 모듈이 안정될 때 진행.
+          제거하고 backend 경유로 단일화. Phase 4 완전히 끝난 뒤 진행 (모듈 안정화).
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
