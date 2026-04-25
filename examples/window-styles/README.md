@@ -60,3 +60,22 @@ html, body { background: transparent; }
 ## 플랫폼
 
 현재 frame/transparent/parent는 **macOS만 지원** (NSWindow API). Linux/Windows에서는 옵션이 무시되고 일반 창으로 뜸.
+
+## DevTools Reload Sync 수동 검증 (Phase 4-C)
+
+Electron 호환 — DevTools front-end 안에서 `Cmd+R` / `F5` / `Cmd+Shift+R` 누르면 inspectee(원래 창)을 reload (DevTools 자체가 self-reload 안 됨). 멀티 윈도우 동시 DevTools면 각 DevTools가 **자기 inspectee만** 매핑.
+
+### 검증 순서
+
+1. `cd examples/window-styles && bun install && suji dev` — Main + Panel + HUD 3창 시작.
+2. **Main 창 클릭 → `Cmd+Shift+I`** → Main의 DevTools 창 열림.
+3. **Panel 창 클릭 → `Cmd+Shift+I`** → Panel의 별 DevTools 창 열림 (총 5개 윈도우 = 3 사용자 + 2 DevTools).
+4. **Main의 DevTools에서 `Cmd+R`** → Main만 reload, Panel 변동 X.
+5. **Panel의 DevTools에서 `Cmd+R`** → Panel만 reload, Main 변동 X.
+6. `Cmd+Shift+R` (cache 무시 hard reload), `F5` (외부 키보드)도 동일 패턴.
+
+### 동작 원리
+
+`openDevTools` 호출 시 `pending_devtools_inspectee = sender_id` 임시 기록 → CEF가 새 DevTools browser 생성 후 `onAfterCreated` 콜백에서 그 새 browser id를 inspectee와 매핑(`devtools_to_inspectee: AutoHashMap(u64, u64)`). 사용자가 DevTools 안에서 reload 키 누르면 `OnPreKeyEvent`의 sender id로 map 조회 → 있으면 inspectee를 대신 reload. CEF는 single UI thread라 race-free. `onBeforeClose`에서 stale 매핑 정리.
+
+여러 DevTools 동시 열린 상태에서도 각 DevTools 매핑이 독립이라 정확히 자기 inspectee만 reload. `cef.zig` 정적 회귀 테스트로 패턴 보장 (`tests/window_manager_test.zig`).

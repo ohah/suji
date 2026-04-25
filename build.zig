@@ -253,11 +253,7 @@ pub fn build(b: *std.Build) void {
     test_loader.addImport("runtime", runtime_module);
     loader_test_mod.addImport("loader", test_loader);
     const loader_test = b.addTest(.{ .root_module = loader_test_mod });
-    {
-        const r = b.addRunArtifact(loader_test);
-        r.setCwd(b.path("."));
-        test_step.dependOn(&r.step);
-    }
+    dependOnTestWithProjectCwd(b, test_step, loader_test);
 
     // Config tests
     const config_test_mod = b.createModule(.{
@@ -353,11 +349,7 @@ pub fn build(b: *std.Build) void {
     window_test_mod.addImport("window", window_module);
     window_test_mod.addImport("test_native", test_native_module);
     const window_test = b.addTest(.{ .root_module = window_test_mod });
-    {
-        const r = b.addRunArtifact(window_test);
-        r.setCwd(b.path("."));
-        test_step.dependOn(&r.step);
-    }
+    dependOnTestWithProjectCwd(b, test_step, window_test);
 
     // EventBusSink 어댑터 단위 테스트
     const event_sink_test_mod = b.createModule(.{
@@ -531,11 +523,7 @@ pub fn build(b: *std.Build) void {
     node_module.addIncludePath(b.path("src/platform/node"));
     node_test_mod.addImport("node", node_module);
     const node_test = b.addTest(.{ .root_module = node_test_mod });
-    {
-        const r = b.addRunArtifact(node_test);
-        r.setCwd(b.path("."));
-        test_step.dependOn(&r.step);
-    }
+    dependOnTestWithProjectCwd(b, test_step, node_test);
 
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{
@@ -545,4 +533,12 @@ pub fn build(b: *std.Build) void {
     });
     const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
+}
+
+/// 정적 검증 테스트(`std.Io.Dir.cwd().readFileAlloc`)는 cwd가 build root여야
+/// 동작. zig 0.16 zig build test는 cwd를 .zig-cache 등으로 띄울 수 있어 명시 필요.
+fn dependOnTestWithProjectCwd(b: *std.Build, test_step: *std.Build.Step, t: *std.Build.Step.Compile) void {
+    const r = b.addRunArtifact(t);
+    r.setCwd(b.path("."));
+    test_step.dependOn(&r.step);
 }
