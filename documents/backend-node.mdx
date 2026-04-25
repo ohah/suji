@@ -177,6 +177,23 @@ await windows.setBounds(2, { x: 100, y: 100, width: 1200, height: 800 });
 // 상태 조회
 const u = await windows.getURL(2);     // { ok, url } 또는 { ok:false, url:null }
 const l = await windows.isLoading(2);  // { ok, loading }
+
+// Phase 4-B 줌
+await windows.setZoomLevel(2, 1.5);
+await windows.setZoomFactor(2, 1.2);
+await windows.getZoomLevel(2);   // { ok, level }
+await windows.getZoomFactor(2);  // { ok, factor }
+
+// Phase 4-C DevTools
+await windows.openDevTools(2);
+await windows.toggleDevTools(2);
+await windows.isDevToolsOpened(2);   // { ok, opened }
+
+// Phase 4-E 편집/검색
+await windows.undo(2);
+await windows.copy(2);
+await windows.findInPage(2, 'hello', { forward: true, matchCase: false, findNext: false });
+await windows.stopFindInPage(2, /* clearSelection */ true);
 ```
 
 핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).

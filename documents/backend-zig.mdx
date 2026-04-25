@@ -152,6 +152,23 @@ _ = suji.windows.setBounds(2, .{ .x = 100, .y = 100, .width = 1200, .height = 80
 // 상태 조회
 _ = suji.windows.getURL(2);     // {ok, url} 또는 {ok:false, url:null}
 _ = suji.windows.isLoading(2);  // {ok, loading}
+
+// Phase 4-B 줌
+_ = suji.windows.setZoomLevel(2, 1.5);   // logarithmic
+_ = suji.windows.setZoomFactor(2, 1.2);  // linear (factor=pow(1.2, level))
+_ = suji.windows.getZoomLevel(2);
+_ = suji.windows.getZoomFactor(2);
+
+// Phase 4-C DevTools
+_ = suji.windows.openDevTools(2);
+_ = suji.windows.toggleDevTools(2);
+_ = suji.windows.isDevToolsOpened(2);
+
+// Phase 4-E 편집/검색
+_ = suji.windows.undo(2);
+_ = suji.windows.copy(2);
+_ = suji.windows.findInPage(2, "hello", .{ .forward = true, .match_case = false, .find_next = false });
+_ = suji.windows.stopFindInPage(2, /* clear_selection */ true);
 ```
 
-`title`/`url`/`code` 등 문자열 필드는 SDK가 자동 escape (`"` `\\` 이스케이프 + control char drop).
+`title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape (`"` `\\` 이스케이프 + control char drop).

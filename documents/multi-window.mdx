@@ -160,6 +160,66 @@ await windows.executeJavaScript(2, "console.log('hi')");
 
 **Cross-platform**: 모두 macOS만 동작 (Linux/Windows는 CEF 자체 창 핸들이라 추후 구현). 미지원 플랫폼에선 silent no-op.
 
+## 줌 (Phase 4-B)
+
+Electron `webContents.{setZoomLevel, getZoomLevel, setZoomFactor, getZoomFactor}` 대응. CEF는 `zoom_level`만 노출 — `factor`는 코어가 `pow(1.2, level)` 변환 (Electron 호환).
+
+```ts
+import { windows } from '@suji/api';
+await windows.setZoomLevel(2, 1.5);             // logarithmic — 0=100%, 1=120%, -1=1/1.2
+await windows.setZoomFactor(2, 1.2);            // linear — 1.0=100%, 1.5=150%
+const r = await windows.getZoomLevel(2);        // { ok, level }
+const f = await windows.getZoomFactor(2);       // { ok, factor }
+```
+
+```zig
+_ = suji.windows.setZoomFactor(2, 1.5);
+_ = suji.windows.getZoomLevel(2);
+```
+
+**참고**: CEF `set_zoom_level`은 navigation 시점에 적용 deferred — 즉시 호출한 `getZoomLevel`이 cache된 0 반환 가능. round-trip 정확 검증은 단위 테스트가 담당, e2e는 응답 형식만.
+
+## DevTools (Phase 4-C)
+
+Electron `webContents.{openDevTools, closeDevTools, isDevToolsOpened, toggleDevTools}` 대응.
+
+```ts
+await windows.openDevTools(2);                  // 이미 열려있으면 멱등 no-op
+await windows.closeDevTools(2);
+const r = await windows.isDevToolsOpened(2);    // { ok, opened }
+await windows.toggleDevTools(2);                // F12 단축키와 동일
+```
+
+```zig
+_ = suji.windows.toggleDevTools(2);
+```
+
+**F12 / Cmd+Shift+I 단축키**: 누른 창의 DevTools만 토글 (멀티 윈도우 sender 식별).
+
+## 편집 / 검색 (Phase 4-E)
+
+Electron `webContents.{undo, redo, cut, copy, paste, selectAll, findInPage, stopFindInPage}` 대응. 편집 6은 main frame에 위임, find는 `cef_browser_host_t`.
+
+```ts
+await windows.undo(2);
+await windows.copy(2);
+await windows.paste(2);
+await windows.selectAll(2);
+
+// 텍스트 검색 — 첫 호출은 findNext=false, 이후 같은 단어는 true.
+await windows.findInPage(2, 'hello', { forward: true, matchCase: false, findNext: false });
+await windows.stopFindInPage(2, /* clearSelection */ true);
+```
+
+```zig
+_ = suji.windows.copy(2);
+_ = suji.windows.findInPage(2, "hello", .{ .forward = true });
+```
+
+**find 결과 보고**: `cef_find_handler_t.OnFindResult`는 현재 미노출 — 추후 `windows:find-result` 이벤트로 추가 예정. 지금은 ok 응답만.
+
+**미노출**: `set_user_agent` 동적 변경은 CEF가 창 settings에 한 번만 노출 → Phase 7 보안과 함께 백로그.
+
 ## 어느 창에서 호출됐는지 식별 — `__window` wire 자동 태깅
 
 프론트엔드가 `__suji__.invoke('save', data)`를 호출하면 수신 코어가 sender browser를

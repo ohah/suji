@@ -107,9 +107,11 @@ interface InvokeEvent {
 - **Python (예정):** `inspect.signature` 파라미터 수
 - **Ruby (예정):** `Method#arity`
 
-### 4.3 windows API (Phase 4-A)
+### 4.3 windows API (Phase 4-A/B/C/E)
 
 **모든 SDK가 동일한 cmd JSON을 `invoke("__core__", ...)`로 전송** — 코어의 `cefHandleCore`가 dispatch한다 (`src/main.zig:1014`).
+
+#### Phase 4-A 네비/JS
 
 | 기능 | cmd | 필드 | 응답 형식 |
 |------|-----|------|----------|
@@ -122,7 +124,33 @@ interface InvokeEvent {
 | URL 조회 | `get_url` | `windowId` | `{from, cmd, windowId, ok, url}` (캐시 미스 시 url=null) |
 | 로딩 중인지 | `is_loading` | `windowId` | `{from, cmd, windowId, ok, loading}` |
 
-새 SDK는 위 cmd 8개를 모두 typed wrapper로 노출한다. **JSON-safe escape는 SDK 책임** — 사용자가 raw `"`, `\\`, control char 들어간 문자열을 넘겨도 wire JSON이 깨지지 않아야 한다 (구현 패턴: `escape_json` 헬퍼 — `"` → `\"`, `\\` → `\\\\`, `< 0x20` drop).
+#### Phase 4-B 줌 (Electron 호환 — factor=pow(1.2, level))
+
+| cmd | 필드 | 응답 |
+|-----|------|------|
+| `set_zoom_level` | `windowId, level` | `{..., ok}` |
+| `set_zoom_factor` | `windowId, factor` | `{..., ok}` |
+| `get_zoom_level` | `windowId` | `{..., ok, level}` |
+| `get_zoom_factor` | `windowId` | `{..., ok, factor}` |
+
+#### Phase 4-C DevTools
+
+| cmd | 필드 | 응답 |
+|-----|------|------|
+| `open_dev_tools` | `windowId` | `{..., ok}` (이미 열림이면 멱등 no-op) |
+| `close_dev_tools` | `windowId` | `{..., ok}` |
+| `is_dev_tools_opened` | `windowId` | `{..., ok, opened}` |
+| `toggle_dev_tools` | `windowId` | `{..., ok}` |
+
+#### Phase 4-E 편집/검색
+
+| cmd | 필드 | 응답 |
+|-----|------|------|
+| `undo` / `redo` / `cut` / `copy` / `paste` / `select_all` | `windowId` | `{..., ok}` (frame 위임) |
+| `find_in_page` | `windowId, text, forward, matchCase, findNext` | `{..., ok}` (결과 보고는 추후 이벤트) |
+| `stop_find_in_page` | `windowId, clearSelection` | `{..., ok}` |
+
+새 SDK는 위 cmd를 모두 typed wrapper로 노출한다. **JSON-safe escape는 SDK 책임** — 사용자가 raw `"`, `\\`, control char 들어간 문자열을 넘겨도 wire JSON이 깨지지 않아야 한다 (구현 패턴: `escape_json` 헬퍼 — `"` → `\"`, `\\` → `\\\\`, `< 0x20` drop).
 
 ### 4.4 명명 규칙
 

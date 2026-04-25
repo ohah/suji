@@ -126,6 +126,23 @@ let _ = windows::set_bounds(2, windows::SetBoundsArgs {
 // 상태 조회
 let _ = windows::get_url(2);     // {ok, url} 또는 {ok:false, url:null}
 let _ = windows::is_loading(2);  // {ok, loading}
+
+// Phase 4-B 줌
+let _ = windows::set_zoom_level(2, 1.5);
+let _ = windows::set_zoom_factor(2, 1.2);
+let _ = windows::get_zoom_level(2);
+let _ = windows::get_zoom_factor(2);
+
+// Phase 4-C DevTools
+let _ = windows::open_dev_tools(2);
+let _ = windows::toggle_dev_tools(2);
+let _ = windows::is_dev_tools_opened(2);
+
+// Phase 4-E 편집/검색
+let _ = windows::undo(2);
+let _ = windows::copy(2);
+let _ = windows::find_in_page(2, "hello", windows::FindOptions { forward: true, match_case: false, find_next: false });
+let _ = windows::stop_find_in_page(2, /* clear_selection */ true);
 ```
 
-`title`/`url`/`code` 등 문자열 필드는 SDK가 자동 escape.
+`title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.

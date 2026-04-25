@@ -132,6 +132,23 @@ windows.SetBounds(2, windows.SetBoundsArgs{
 // 상태 조회
 windows.GetURL(2)     // {ok, url} 또는 {ok:false, url:null}
 windows.IsLoading(2)  // {ok, loading}
+
+// Phase 4-B 줌
+windows.SetZoomLevel(2, 1.5)
+windows.SetZoomFactor(2, 1.2)
+windows.GetZoomLevel(2)
+windows.GetZoomFactor(2)
+
+// Phase 4-C DevTools
+windows.OpenDevTools(2)
+windows.ToggleDevTools(2)
+windows.IsDevToolsOpened(2)
+
+// Phase 4-E 편집/검색
+windows.Undo(2)
+windows.Copy(2)
+windows.FindInPage(2, "hello", windows.FindOptions{Forward: true, MatchCase: false, FindNext: false})
+windows.StopFindInPage(2, /* clearSelection */ true)
 ```
 
-`title`/`url`/`code` 등 문자열 필드는 SDK가 자동 escape.
+`title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.
