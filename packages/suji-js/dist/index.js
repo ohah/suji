@@ -87,6 +87,28 @@ export const windows = {
     setBounds(windowId, bounds) {
         return coreCall({ cmd: "set_bounds", windowId, ...bounds });
     },
+    // ── Phase 4-A: webContents 네비/JS ──
+    /** 창에 새 URL 로드 (Electron `webContents.loadURL`) */
+    loadURL(windowId, url) {
+        return coreCall({ cmd: "load_url", windowId, url });
+    },
+    /** 현재 페이지 reload. ignoreCache=true면 disk 캐시 무시 */
+    reload(windowId, ignoreCache = false) {
+        return coreCall({ cmd: "reload", windowId, ignoreCache });
+    },
+    /** 렌더러에서 임의 JS 실행 (Electron `webContents.executeJavaScript`).
+     *  결과 회신은 미지원 — fire-and-forget. 결과가 필요하면 JS 측에서 `suji.send`로 회신. */
+    executeJavaScript(windowId, code) {
+        return coreCall({ cmd: "execute_javascript", windowId, code });
+    },
+    /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
+    getURL(windowId) {
+        return coreCall({ cmd: "get_url", windowId });
+    },
+    /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
+    isLoading(windowId) {
+        return coreCall({ cmd: "is_loading", windowId });
+    },
 };
 /**
  * 여러 백엔드에 동시 요청

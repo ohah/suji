@@ -254,3 +254,93 @@ pub fn handleSetBounds(
         .{ req.window_id, ok },
     ) catch null;
 }
+
+// ============================================
+// Phase 4-A: webContents (네비 / JS)
+// 모든 핸들러는 windowId 기반. 응답은 set_title/set_bounds와 동일 패턴
+// `{from, cmd, windowId, ok}`. get_url / is_loading은 추가 필드 포함.
+// ============================================
+
+pub const LoadUrlReq = struct {
+    window_id: u32,
+    url: []const u8,
+};
+
+pub fn handleLoadUrl(req: LoadUrlReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.loadUrl(req.window_id, req.url)) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"load_url\",\"windowId\":{d},\"ok\":{}}}",
+        .{ req.window_id, ok },
+    ) catch null;
+}
+
+pub const ReloadReq = struct {
+    window_id: u32,
+    ignore_cache: bool = false,
+};
+
+pub fn handleReload(req: ReloadReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.reload(req.window_id, req.ignore_cache)) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"reload\",\"windowId\":{d},\"ok\":{}}}",
+        .{ req.window_id, ok },
+    ) catch null;
+}
+
+pub const ExecuteJavascriptReq = struct {
+    window_id: u32,
+    code: []const u8,
+};
+
+pub fn handleExecuteJavascript(req: ExecuteJavascriptReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.executeJavascript(req.window_id, req.code)) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"execute_javascript\",\"windowId\":{d},\"ok\":{}}}",
+        .{ req.window_id, ok },
+    ) catch null;
+}
+
+/// get_url 응답 — JSON-safe하지 않은 URL(`"`, `\\`, control char)은 escape 처리.
+/// URL이 없으면 `"url":null`.
+pub fn handleGetUrl(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const url_opt = wm.getUrl(window_id) catch null;
+    if (url_opt) |u| {
+        var url_buf: [2048]u8 = undefined;
+        const n = window.escapeJsonChars(u, &url_buf);
+        // escape 결과가 빈 문자열인데 원본도 빈 게 아니면 버퍼 부족 — null 처리.
+        const escaped: ?[]const u8 = if (n == 0 and u.len > 0) null else url_buf[0..n];
+        if (escaped) |e| {
+            return std.fmt.bufPrint(
+                response_buf,
+                "{{\"from\":\"zig-core\",\"cmd\":\"get_url\",\"windowId\":{d},\"ok\":true,\"url\":\"{s}\"}}",
+                .{ window_id, e },
+            ) catch null;
+        }
+    }
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_url\",\"windowId\":{d},\"ok\":{},\"url\":null}}",
+        .{ window_id, url_opt != null },
+    ) catch null;
+}
+
+pub fn handleIsLoading(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const result = wm.isLoading(window_id) catch return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"is_loading\",\"windowId\":{d},\"ok\":false,\"loading\":false}}",
+        .{window_id},
+    ) catch null;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"is_loading\",\"windowId\":{d},\"ok\":true,\"loading\":{}}}",
+        .{ window_id, result },
+    ) catch null;
+}

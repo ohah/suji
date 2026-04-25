@@ -146,6 +146,12 @@ pub const Native = struct {
         set_bounds: *const fn (ctx: ?*anyopaque, handle: u64, bounds: Bounds) void,
         set_visible: *const fn (ctx: ?*anyopaque, handle: u64, visible: bool) void,
         focus: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        // Phase 4-A: webContents 네비/JS
+        load_url: *const fn (ctx: ?*anyopaque, handle: u64, url: []const u8) void,
+        reload: *const fn (ctx: ?*anyopaque, handle: u64, ignore_cache: bool) void,
+        execute_javascript: *const fn (ctx: ?*anyopaque, handle: u64, code: []const u8) void,
+        get_url: *const fn (ctx: ?*anyopaque, handle: u64) ?[]const u8,
+        is_loading: *const fn (ctx: ?*anyopaque, handle: u64) bool,
     };
 
     pub fn createWindow(self: Native, opts: *const CreateOptions) !u64 {
@@ -165,6 +171,21 @@ pub const Native = struct {
     }
     pub fn focus(self: Native, handle: u64) void {
         self.vtable.focus(self.ctx, handle);
+    }
+    pub fn loadUrl(self: Native, handle: u64, url: []const u8) void {
+        self.vtable.load_url(self.ctx, handle, url);
+    }
+    pub fn reload(self: Native, handle: u64, ignore_cache: bool) void {
+        self.vtable.reload(self.ctx, handle, ignore_cache);
+    }
+    pub fn executeJavascript(self: Native, handle: u64, code: []const u8) void {
+        self.vtable.execute_javascript(self.ctx, handle, code);
+    }
+    pub fn getUrl(self: Native, handle: u64) ?[]const u8 {
+        return self.vtable.get_url(self.ctx, handle);
+    }
+    pub fn isLoading(self: Native, handle: u64) bool {
+        return self.vtable.is_loading(self.ctx, handle);
     }
 };
 
@@ -651,5 +672,44 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         self.native.focus(win.native_handle);
+    }
+
+    // ==================== Phase 4-A: webContents (네비 / JS) ====================
+
+    pub fn loadUrl(self: *WindowManager, id: u32, url: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.loadUrl(win.native_handle, url);
+    }
+
+    pub fn reload(self: *WindowManager, id: u32, ignore_cache: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.reload(win.native_handle, ignore_cache);
+    }
+
+    pub fn executeJavascript(self: *WindowManager, id: u32, code: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.executeJavascript(win.native_handle, code);
+    }
+
+    /// 현재 main frame URL을 반환. 캐시되어 있지 않으면 null.
+    /// 반환 슬라이스의 수명은 native가 보장 (CEF는 BrowserEntry.url_cache에 보관).
+    pub fn getUrl(self: *WindowManager, id: u32) Error!?[]const u8 {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.getUrl(win.native_handle);
+    }
+
+    pub fn isLoading(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.isLoading(win.native_handle);
     }
 };

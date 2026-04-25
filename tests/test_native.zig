@@ -22,6 +22,18 @@ pub const TestNative = struct {
     last_constraints: ?window.Constraints = null,
     last_parent_id: ?u32 = null,
     last_create_bounds: ?window.Bounds = null,
+
+    // Phase 4-A: webContents 캡처
+    load_url_calls: usize = 0,
+    reload_calls: usize = 0,
+    execute_js_calls: usize = 0,
+    last_loaded_url: ?[]const u8 = null,
+    last_reload_ignore_cache: ?bool = null,
+    last_executed_js: ?[]const u8 = null,
+    /// getUrl가 반환할 값 (테스트가 미리 세팅; 기본 null)
+    stub_url: ?[]const u8 = null,
+    /// isLoading 반환값 (기본 false)
+    stub_is_loading: bool = false,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
@@ -40,6 +52,11 @@ pub const TestNative = struct {
         .set_bounds = setBounds,
         .set_visible = setVisible,
         .focus = focus,
+        .load_url = loadUrl,
+        .reload = reload,
+        .execute_javascript = executeJavascript,
+        .get_url = getUrl,
+        .is_loading = isLoading,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *TestNative {
@@ -90,5 +107,31 @@ pub const TestNative = struct {
 
     fn focus(ctx: ?*anyopaque, _: u64) void {
         fromCtx(ctx).focus_calls += 1;
+    }
+
+    fn loadUrl(ctx: ?*anyopaque, _: u64, url: []const u8) void {
+        const self = fromCtx(ctx);
+        self.load_url_calls += 1;
+        self.last_loaded_url = url;
+    }
+
+    fn reload(ctx: ?*anyopaque, _: u64, ignore_cache: bool) void {
+        const self = fromCtx(ctx);
+        self.reload_calls += 1;
+        self.last_reload_ignore_cache = ignore_cache;
+    }
+
+    fn executeJavascript(ctx: ?*anyopaque, _: u64, code: []const u8) void {
+        const self = fromCtx(ctx);
+        self.execute_js_calls += 1;
+        self.last_executed_js = code;
+    }
+
+    fn getUrl(ctx: ?*anyopaque, _: u64) ?[]const u8 {
+        return fromCtx(ctx).stub_url;
+    }
+
+    fn isLoading(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_is_loading;
     }
 };

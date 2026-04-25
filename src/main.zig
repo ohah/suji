@@ -1050,6 +1050,42 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         }, response_buf, wm);
     }
 
+    // ── Phase 4-A: webContents (네비/JS) ──
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"load_url\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleLoadUrl(.{
+            .window_id = win_id,
+            .url = util.extractJsonString(req_clean, "url") orelse "",
+        }, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"reload\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleReload(.{
+            .window_id = win_id,
+            .ignore_cache = util.extractJsonBool(req_clean, "ignoreCache") orelse false,
+        }, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"execute_javascript\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleExecuteJavascript(.{
+            .window_id = win_id,
+            .code = util.extractJsonString(req_clean, "code") orelse "",
+        }, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"get_url\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleGetUrl(win_id, response_buf, wm);
+    }
+    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"is_loading\"") != null) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleIsLoading(win_id, response_buf, wm);
+    }
+
     // quit 커맨드 — 프론트 `__suji__.quit()`가 라우팅됨
     if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"quit\"") != null) {
         cef.quit();

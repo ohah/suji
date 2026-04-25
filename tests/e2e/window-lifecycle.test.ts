@@ -210,7 +210,76 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
 });
 
 // ============================================
-// 4. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
+// 4. Phase 4-A: webContents (네비/JS) IPC
+// ============================================
+
+describe("webContents 네비/JS (Phase 4-A)", () => {
+  test("load_url + reload + execute_javascript + get_url + is_loading 응답 정상", async () => {
+    const created = await coreCall({
+      cmd: "create_window",
+      title: "phase4-a",
+      url: "about:blank",
+    });
+    const id = created.windowId;
+
+    const lr: any = await page.evaluate(
+      (i) => (window as any).__suji__.core(JSON.stringify({ cmd: "load_url", windowId: i, url: "about:blank" })),
+      id,
+    );
+    expect(lr.cmd).toBe("load_url");
+    expect(lr.ok).toBe(true);
+
+    const rr: any = await page.evaluate(
+      (i) => (window as any).__suji__.core(JSON.stringify({ cmd: "reload", windowId: i, ignoreCache: true })),
+      id,
+    );
+    expect(rr.cmd).toBe("reload");
+    expect(rr.ok).toBe(true);
+
+    const er: any = await page.evaluate(
+      (i) => (window as any).__suji__.core(JSON.stringify({ cmd: "execute_javascript", windowId: i, code: "1+1" })),
+      id,
+    );
+    expect(er.cmd).toBe("execute_javascript");
+    expect(er.ok).toBe(true);
+
+    const il: any = await page.evaluate(
+      (i) => (window as any).__suji__.core(JSON.stringify({ cmd: "is_loading", windowId: i })),
+      id,
+    );
+    expect(il.cmd).toBe("is_loading");
+    expect(il.ok).toBe(true);
+    expect(typeof il.loading).toBe("boolean");
+
+    const ur: any = await page.evaluate(
+      (i) => (window as any).__suji__.core(JSON.stringify({ cmd: "get_url", windowId: i })),
+      id,
+    );
+    expect(ur.cmd).toBe("get_url");
+    // url은 캐시 갱신 타이밍에 따라 null 또는 string. ok도 그에 맞춰 변동 — 형식만 검증.
+    expect(typeof ur.ok).toBe("boolean");
+  });
+
+  test("알 수 없는 windowId — load_url ok:false, native 미호출 회귀", async () => {
+    const r: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "load_url", windowId: 99999, url: "about:blank" })),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  test("execute_javascript fire-and-forget — 응답은 ok만, 결과 회신 없음", async () => {
+    const r: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "execute_javascript", windowId: 1, code: "console.log('e2e')" })),
+    );
+    expect(r.cmd).toBe("execute_javascript");
+    expect(r.ok).toBe(true);
+    // 결과(eval value)는 응답에 없음 — 이게 의도된 fire-and-forget 정책
+    expect(r.result).toBeUndefined();
+  });
+});
+
+// ============================================
+// 5. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
 // ============================================
 
 describe("log file output", () => {

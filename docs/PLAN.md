@@ -447,7 +447,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `windows[].titleBarStyle: "hidden" | "hiddenInset"` — titlebarAppearsTransparent + NSWindowStyleMaskFullSizeContentView.
     - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만. 실수요 발견 시 SujiCore.get_window_api로 도입.
     - **알려진 한계**: frameless의 `-webkit-app-region: drag` 미동작 (Phase 4 백로그 참조).
-  - [ ] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
+  - [~] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
+    - [x] **Phase 4-A 네비/JS** — `load_url`, `reload`(`ignoreCache`), `execute_javascript`,
+          `get_url`(캐시), `is_loading` 6개. WM 메서드 + IPC 핸들러 + Frontend SDK
+          (`windows.loadURL/reload/executeJavaScript/getURL/isLoading`) + 단위 17 + e2e 3.
+    - [ ] Phase 4-B 줌 — `set_zoom_factor`, `get_zoom_factor`, `set_zoom_level`, `get_zoom_level`
+    - [ ] Phase 4-C DevTools 명시 API — `open_dev_tools`, `close_dev_tools`, `is_dev_tools_opened`, `toggle_dev_tools`
+    - [ ] Phase 4-D 인쇄/캡처 — `print_to_pdf`, `capture_page` (콜백 기반)
+    - [ ] Phase 4-E 편집/검색/UA — `undo/redo/cut/copy/paste/select_all`, `find_in_page`, `set_user_agent`
     - [ ] DevTools "Reload" 버튼 → **DevTools가 attach된 메인 창도 같이 reload** (Electron 동작 호환).
           현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
           reload 명령을 캐치 → host.get_browser().reload() 호출 또는 ReloadIgnoreCache.

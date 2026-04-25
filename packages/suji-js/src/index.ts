@@ -160,6 +160,16 @@ export interface SetBoundsArgs {
   height?: number;
 }
 
+export interface GetUrlResponse extends WindowOpResponse {
+  cmd: "get_url";
+  url: string | null;
+}
+
+export interface IsLoadingResponse extends WindowOpResponse {
+  cmd: "is_loading";
+  loading: boolean;
+}
+
 async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
   const raw = await getBridge().core(JSON.stringify(request));
   return (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
@@ -182,6 +192,34 @@ export const windows = {
   /** 창 크기/위치 변경. width/height=0이면 현재 유지 */
   setBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "set_bounds", windowId, ...bounds });
+  },
+
+  // ── Phase 4-A: webContents 네비/JS ──
+
+  /** 창에 새 URL 로드 (Electron `webContents.loadURL`) */
+  loadURL(windowId: number, url: string): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "load_url", windowId, url });
+  },
+
+  /** 현재 페이지 reload. ignoreCache=true면 disk 캐시 무시 */
+  reload(windowId: number, ignoreCache = false): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "reload", windowId, ignoreCache });
+  },
+
+  /** 렌더러에서 임의 JS 실행 (Electron `webContents.executeJavaScript`).
+   *  결과 회신은 미지원 — fire-and-forget. 결과가 필요하면 JS 측에서 `suji.send`로 회신. */
+  executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "execute_javascript", windowId, code });
+  },
+
+  /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
+  getURL(windowId: number): Promise<GetUrlResponse> {
+    return coreCall<GetUrlResponse>({ cmd: "get_url", windowId });
+  },
+
+  /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
+  isLoading(windowId: number): Promise<IsLoadingResponse> {
+    return coreCall<IsLoadingResponse>({ cmd: "is_loading", windowId });
   },
 };
 

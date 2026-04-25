@@ -267,6 +267,11 @@ pub const CefNative = struct {
         .set_bounds = setBounds,
         .set_visible = setVisible,
         .focus = focus,
+        .load_url = loadUrl,
+        .reload = reload,
+        .execute_javascript = executeJavascript,
+        .get_url = getUrl,
+        .is_loading = isLoading,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
@@ -429,7 +434,73 @@ pub const CefNative = struct {
         const ns_window = entry.ns_window orelse return;
         setMacWindowBounds(ns_window, bounds);
     }
+
+    // ==================== Phase 4-A: webContents (네비/JS) ====================
+
+    fn loadUrl(ctx: ?*anyopaque, handle: u64, url: []const u8) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const frame = asPtr(c.cef_frame_t, entry.browser.get_main_frame.?(entry.browser)) orelse return;
+        var url_buf: [URL_BUF_SIZE]u8 = undefined;
+        const url_z = nullTerminateOrTruncate(url, &url_buf) orelse return;
+        var cef_url: c.cef_string_t = .{};
+        setCefString(&cef_url, url_z);
+        const load_url = frame.load_url orelse return;
+        load_url(frame, &cef_url);
+    }
+
+    fn reload(ctx: ?*anyopaque, handle: u64, ignore_cache: bool) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const br = entry.browser;
+        if (ignore_cache) {
+            const fn_ptr = br.reload_ignore_cache orelse return;
+            fn_ptr(br);
+        } else {
+            const fn_ptr = br.reload orelse return;
+            fn_ptr(br);
+        }
+    }
+
+    fn executeJavascript(ctx: ?*anyopaque, handle: u64, code: []const u8) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        var code_buf: [JS_BUF_SIZE]u8 = undefined;
+        const code_z = nullTerminateOrTruncate(code, &code_buf) orelse return;
+        evalJsOnBrowser(entry.browser, code_z);
+    }
+
+    /// url_cache(OnAddressChange가 갱신)에 캐시된 URL 반환. 비어있으면 null.
+    /// 폴백 alloc은 안 함 — 호출자가 동기 응답을 기대하므로 캐시 미스는 그대로 노출.
+    fn getUrl(ctx: ?*anyopaque, handle: u64) ?[]const u8 {
+        const self = fromCtx(ctx);
+        const entry = self.browsers.getPtr(handle) orelse return null;
+        if (entry.url_cache_len == 0) return null;
+        return entry.url_cache_buf[0..entry.url_cache_len];
+    }
+
+    fn isLoading(ctx: ?*anyopaque, handle: u64) bool {
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return false;
+        const fn_ptr = entry.browser.is_loading orelse return false;
+        return fn_ptr(entry.browser) == 1;
+    }
 };
+
+const URL_BUF_SIZE: usize = 2048;
+const JS_BUF_SIZE: usize = 16 * 1024;
+
+/// `[]const u8` → null-terminated `[:0]const u8` 복사. buf 부족 시 null 반환.
+/// CEF API(load_url/execute_java_script)에 전달하기 전에 필요.
+fn nullTerminateOrTruncate(src: []const u8, buf: []u8) ?[:0]const u8 {
+    if (src.len >= buf.len) return null;
+    @memcpy(buf[0..src.len], src);
+    buf[src.len] = 0;
+    return buf[0..src.len :0];
+}
 
 /// 런타임 URL 네비게이션
 pub fn navigate(url: [:0]const u8) void {

@@ -647,3 +647,126 @@ test "handleCreateWindow: parent_name 미존재면 parent_id null (silent)" {
 
     try std.testing.expectEqual(@as(?u32, null), native.last_parent_id);
 }
+
+// ============================================
+// Phase 4-A: webContents IPC 핸들러
+// ============================================
+
+test "handleLoadUrl: native까지 URL 전달 + ok:true 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleLoadUrl(.{ .window_id = 1, .url = "http://x/" }, &buf, &wm).?;
+    try std.testing.expectEqualStrings("http://x/", native.last_loaded_url.?);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"cmd\":\"load_url\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":true") != null);
+}
+
+test "handleLoadUrl: 알 수 없는 id면 ok:false (native 미호출)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleLoadUrl(.{ .window_id = 999, .url = "x" }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 0), native.load_url_calls);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":false") != null);
+}
+
+test "handleReload: ignore_cache 플래그가 native까지 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleReload(.{ .window_id = 1, .ignore_cache = true }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(?bool, true), native.last_reload_ignore_cache);
+}
+
+test "handleExecuteJavascript: code가 native까지 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleExecuteJavascript(.{ .window_id = 1, .code = "alert(1)" }, &buf, &wm).?;
+    try std.testing.expectEqualStrings("alert(1)", native.last_executed_js.?);
+}
+
+test "handleGetUrl: stub URL이 응답에 escape돼서 포함" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    native.stub_url = "http://localhost/path?q=a&b=c";
+    var buf: [512]u8 = undefined;
+    const resp = ipc.handleGetUrl(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"url\":\"http://localhost/path?q=a&b=c\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":true") != null);
+}
+
+test "handleGetUrl: stub_url null이면 url:null + ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const resp = ipc.handleGetUrl(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"url\":null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":false") != null);
+}
+
+test "handleGetUrl: URL에 \\\" 있으면 escape 처리" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    native.stub_url = "http://x/\"a\\b";
+    var buf: [512]u8 = undefined;
+    const resp = ipc.handleGetUrl(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\\\"a\\\\b") != null);
+}
+
+test "handleIsLoading: stub 값이 응답 loading 필드로" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r1 = ipc.handleIsLoading(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"loading\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":true") != null);
+    native.stub_is_loading = true;
+    const r2 = ipc.handleIsLoading(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"loading\":true") != null);
+}
+
+test "Phase 4-A 응답들 valid JSON (parsable)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    var buf: [512]u8 = undefined;
+    const r = ipc.handleLoadUrl(.{ .window_id = 1, .url = "http://x/" }, &buf, &wm).?;
+    const Parsed = struct { from: []const u8, cmd: []const u8, windowId: u32, ok: bool };
+    const parsed = try std.json.parseFromSlice(Parsed, std.testing.allocator, r, .{ .ignore_unknown_fields = true });
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("zig-core", parsed.value.from);
+    try std.testing.expectEqualStrings("load_url", parsed.value.cmd);
+    try std.testing.expect(parsed.value.ok);
+}
+
+test "Phase 4-A 모든 핸들러: 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var tiny: [3]u8 = undefined;
+    try std.testing.expect(ipc.handleLoadUrl(.{ .window_id = 1, .url = "x" }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleReload(.{ .window_id = 1 }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleExecuteJavascript(.{ .window_id = 1, .code = "x" }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleGetUrl(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleIsLoading(1, &tiny, &wm) == null);
+}

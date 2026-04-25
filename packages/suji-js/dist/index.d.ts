@@ -106,6 +106,14 @@ export interface SetBoundsArgs {
     width?: number;
     height?: number;
 }
+export interface GetUrlResponse extends WindowOpResponse {
+    cmd: "get_url";
+    url: string | null;
+}
+export interface IsLoadingResponse extends WindowOpResponse {
+    cmd: "is_loading";
+    loading: boolean;
+}
 export declare const windows: {
     /**
      * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
@@ -116,6 +124,17 @@ export declare const windows: {
     setTitle(windowId: number, title: string): Promise<WindowOpResponse>;
     /** 창 크기/위치 변경. width/height=0이면 현재 유지 */
     setBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse>;
+    /** 창에 새 URL 로드 (Electron `webContents.loadURL`) */
+    loadURL(windowId: number, url: string): Promise<WindowOpResponse>;
+    /** 현재 페이지 reload. ignoreCache=true면 disk 캐시 무시 */
+    reload(windowId: number, ignoreCache?: boolean): Promise<WindowOpResponse>;
+    /** 렌더러에서 임의 JS 실행 (Electron `webContents.executeJavaScript`).
+     *  결과 회신은 미지원 — fire-and-forget. 결과가 필요하면 JS 측에서 `suji.send`로 회신. */
+    executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse>;
+    /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
+    getURL(windowId: number): Promise<GetUrlResponse>;
+    /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
+    isLoading(windowId: number): Promise<IsLoadingResponse>;
 };
 /**
  * 여러 백엔드에 동시 요청
