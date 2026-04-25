@@ -266,6 +266,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    config_module.addImport("window", window_module);
     // config_module.addImport("toml", toml_dep.module("toml"));
     config_test_mod.addImport("config", config_module);
     // Events tests

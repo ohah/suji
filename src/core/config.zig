@@ -1,5 +1,6 @@
 const std = @import("std");
 const runtime = @import("runtime");
+const window_mod = @import("window");
 
 /// Suji 프로젝트 설정
 /// suji.json에서 로드
@@ -64,10 +65,11 @@ pub const Config = struct {
         /// 16진수 RGB(A) — `#1d1d1f` / `#1d1d1fff`. transparent와 함께 쓰면 transparent 우선.
         background_color: ?[:0]const u8 = null,
         /// 타이틀바 스타일 (Electron 호환). suji.json에선 "default" | "hidden" | "hiddenInset".
+        /// window.TitleBarStyle을 alias — config/CreateOptions/cef 모두 동일 enum 공유 (mapping 불필요).
         title_bar_style: TitleBarStyle = .default,
     };
 
-    pub const TitleBarStyle = enum { default, hidden, hidden_inset };
+    pub const TitleBarStyle = window_mod.TitleBarStyle;
 
     pub const SingleBackend = struct {
         lang: [:0]const u8 = "zig",

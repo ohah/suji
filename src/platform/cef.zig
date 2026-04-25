@@ -2123,16 +2123,22 @@ pub const MacWindowHandles = struct {
     ns_window: ?*anyopaque,
 };
 
+// macOS Foundation/AppKit 기본 geometry 타입. ARM64 ABI는 4×f64 NSRect를 d0~d3 float
+// 레지스터로 전달 — extern struct 그대로 두면 Zig가 올바른 calling convention 선택.
+// 모든 macOS 헬퍼가 동일 정의 공유 (이전엔 createMacWindow / setMacWindowBounds /
+// setMacContentSizeLimits 각각 별도 정의 → 필드명 불일치).
+pub const NSPoint = extern struct { x: f64, y: f64 };
+pub const NSSize = extern struct { width: f64, height: f64 };
+pub const NSRect = extern struct { x: f64, y: f64, width: f64, height: f64 };
+
 /// NSWindow 다중 cascade origin — 첫 호출은 (0, 0)으로 시작 (NSWindow가 화면에 적당히 배치),
 /// 이후 매 호출마다 cascadeTopLeftFromPoint: 반환값으로 갱신 → 18px 우/하 offset 자동.
-const NSPoint = extern struct { x: f64, y: f64 };
 var g_cascade_point: NSPoint = .{ .x = 0, .y = 0 };
 
 fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const NSWindow = getClass("NSWindow") orelse return .{ .content_view = null, .ns_window = null };
     const window_alloc = msgSend(NSWindow, "alloc") orelse return .{ .content_view = null, .ns_window = null };
 
-    const NSRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
     const initSel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
     const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u64, u64, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     // NSWindowStyleMask: titled(1)+closable(2)+miniaturizable(4)+resizable(8). frame=false면 borderless(0).
@@ -2143,8 +2149,8 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const initial: NSRect = .{
         .x = if (opts.x != 0 or opts.y != 0) @floatFromInt(opts.x) else 200,
         .y = if (opts.x != 0 or opts.y != 0) @floatFromInt(opts.y) else 200,
-        .w = @floatFromInt(opts.width),
-        .h = @floatFromInt(opts.height),
+        .width = @floatFromInt(opts.width),
+        .height = @floatFromInt(opts.height),
     };
     const window = initFn(window_alloc, @ptrCast(initSel), initial, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
 
@@ -2220,33 +2226,38 @@ fn setAlwaysOnTop(window: ?*anyopaque) void {
 /// macOS: NSWindow.contentMinSize / contentMaxSize. 0이면 기본값 (해당 한계 없음).
 /// CGFloat.greatestFiniteMagnitude를 max=0의 의미로 사용 — Cocoa 표준 "제한 없음".
 fn setMacContentSizeLimits(window: ?*anyopaque, min_w: u32, min_h: u32, max_w: u32, max_h: u32) void {
-    const NSSize = extern struct { w: f64, h: f64 };
     const SetSizeFn = *const fn (?*anyopaque, ?*anyopaque, NSSize) callconv(.c) void;
 
     if (min_w > 0 or min_h > 0) {
         const sel = objc.sel_registerName("setContentMinSize:");
         const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
-        fn_ptr(window, @ptrCast(sel), .{ .w = @floatFromInt(min_w), .h = @floatFromInt(min_h) });
+        fn_ptr(window, @ptrCast(sel), .{ .width = @floatFromInt(min_w), .height = @floatFromInt(min_h) });
     }
     if (max_w > 0 or max_h > 0) {
         const huge: f64 = std.math.floatMax(f64);
         const sel = objc.sel_registerName("setContentMaxSize:");
         const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
         fn_ptr(window, @ptrCast(sel), .{
-            .w = if (max_w > 0) @floatFromInt(max_w) else huge,
-            .h = if (max_h > 0) @floatFromInt(max_h) else huge,
+            .width = if (max_w > 0) @floatFromInt(max_w) else huge,
+            .height = if (max_h > 0) @floatFromInt(max_h) else huge,
         });
     }
 }
 
 /// macOS: `#RRGGBB` 또는 `#RRGGBBAA` 16진수 → NSColor.colorWithRed:green:blue:alpha:.
-/// 파싱 실패 시 무시 (기본 배경 유지).
+/// 파싱 실패 시 warn 로그 + 기본 배경 유지. CSS short hex(`#RGB`)는 미지원 (Electron과 동일).
 fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {
-    if (hex.len < 7 or hex[0] != '#') return;
-    const r = std.fmt.parseInt(u8, hex[1..3], 16) catch return;
+    if (hex.len < 7 or hex[0] != '#' or (hex.len != 7 and hex.len != 9)) {
+        log.warn("backgroundColor: invalid format '{s}' (expected #RRGGBB or #RRGGBBAA)", .{hex});
+        return;
+    }
+    const r = std.fmt.parseInt(u8, hex[1..3], 16) catch {
+        log.warn("backgroundColor: hex parse failed '{s}'", .{hex});
+        return;
+    };
     const g = std.fmt.parseInt(u8, hex[3..5], 16) catch return;
     const b = std.fmt.parseInt(u8, hex[5..7], 16) catch return;
-    const a: u8 = if (hex.len >= 9)
+    const a: u8 = if (hex.len == 9)
         (std.fmt.parseInt(u8, hex[7..9], 16) catch 255)
     else
         255;
@@ -2316,13 +2327,6 @@ fn setMacWindowTitle(ns_window: *anyopaque, title: []const u8) void {
 /// ARM64 ABI: NSRect (4x f64)는 float 레지스터(d0-d3)로 전달. extern fn 시그니처에
 /// NSRect를 그대로 두면 Zig 컴파일러가 올바른 calling convention을 선택.
 fn setMacWindowBounds(ns_window: *anyopaque, bounds: window_mod.Bounds) void {
-    const NSRect = extern struct {
-        origin_x: f64,
-        origin_y: f64,
-        width: f64,
-        height: f64,
-    };
-
     const w_f: f64 = @floatFromInt(bounds.width);
     const h_f: f64 = @floatFromInt(bounds.height);
     const x_f: f64 = @floatFromInt(bounds.x);
@@ -2339,7 +2343,7 @@ fn setMacWindowBounds(ns_window: *anyopaque, bounds: window_mod.Bounds) void {
         break :blk screen_frame.height - top_y_f - h_f;
     };
 
-    const rect: NSRect = .{ .origin_x = x_f, .origin_y = cocoa_y, .width = w_f, .height = h_f };
+    const rect: NSRect = .{ .x = x_f, .y = cocoa_y, .width = w_f, .height = h_f };
 
     const setFrameSel = objc.sel_registerName("setFrame:display:");
     const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);

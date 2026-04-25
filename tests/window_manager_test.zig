@@ -237,6 +237,16 @@ test "create accepts all Phase 3-D options together (smoke test)" {
     try std.testing.expect(id >= 1);
 }
 
+test "create with min_width=u32 max value — overflow 없이 받아들임" {
+    // CreateOptions.min_width는 u32 — config(i64)에서 main.zig의 clamp.nonneg가 처리.
+    // WM 자체는 u32 max를 그대로 받아 errata 없이 native에 전달.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{ .min_width = std.math.maxInt(u32), .min_height = 0 });
+    try std.testing.expect(id >= 1);
+}
+
 test "create with parent destroy — child position 옵션 보존" {
     // 부모 close → 자식의 parent_id는 그대로 (orphan으로 남아있어도 메타정보 유지).
     var native = TestNative{};

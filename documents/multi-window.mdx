@@ -225,7 +225,7 @@ window.__suji__.on('window:all-closed', () => {
 | `parent: "<name>"` | 시각 관계만 — 자식이 부모 위에 floating + 부모와 함께 이동/min. 부모 close해도 자식 유지 (재귀 close X) | macOS |
 | `x: <number>` / `y: <number>` | 명시 위치. 둘 다 0이면 OS cascade 자동 분산 (`cascadeTopLeftFromPoint:`) | macOS |
 | `alwaysOnTop: true` | 항상 다른 일반 창 위 (NSFloatingWindowLevel). 위젯/툴 팔레트용 | macOS |
-| `resizable: false` | 사용자가 창 크기 조절 불가. 고정 크기 다이얼로그/팔레트 | macOS |
+| `resizable: false` | 사용자가 창 크기 조절 불가. 고정 크기 다이얼로그/팔레트. **`frame: false`일 때는 무시** (frameless는 이미 리사이즈 핸들 없음) | macOS |
 | `minWidth` / `minHeight` / `maxWidth` / `maxHeight` | 콘텐츠 영역 크기 제한 (0이면 제한 없음) | macOS |
 | `fullscreen: true` | 시작 시 전체화면 진입 (`toggleFullScreen:`) | macOS |
 | `backgroundColor: "#RRGGBB"` 또는 `"#RRGGBBAA"` | 16진수 색. transparent와 함께 쓰면 transparent 우선 | macOS |
