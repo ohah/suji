@@ -38,6 +38,33 @@ pub const events = struct {
     pub const all_closed = "window:all-closed";
 };
 
+/// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".
+pub const Appearance = struct {
+    /// false면 frameless — 타이틀바/리사이즈 핸들/시스템 보더 모두 제거 (Electron `frame: false`).
+    frame: bool = true,
+    /// true면 투명 배경 — NSWindow.opaque=false + clear color + 그림자 X. HTML body도 transparent여야 의미.
+    transparent: bool = false,
+    /// 16진수 RGB(A) (`#FFFFFF` / `#FFFFFFFF`). transparent=true와 함께 쓰면 transparent 우선.
+    background_color: ?[]const u8 = null,
+    /// Electron 호환: `.default` / `.hidden` / `.hidden_inset`.
+    title_bar_style: TitleBarStyle = .default,
+};
+
+/// 제약 (창 크기/리사이즈/항상위/전체화면).
+pub const Constraints = struct {
+    /// false면 사용자 리사이즈 불가 (frame=true일 때만 의미; frameless는 이미 핸들 없음).
+    resizable: bool = true,
+    /// true면 NSFloatingWindowLevel — 일반 창 위.
+    always_on_top: bool = false,
+    /// 최소/최대 콘텐츠 크기 (0이면 제한 없음).
+    min_width: u32 = 0,
+    min_height: u32 = 0,
+    max_width: u32 = 0,
+    max_height: u32 = 0,
+    /// 시작 시 전체화면.
+    fullscreen: bool = false,
+};
+
 pub const CreateOptions = struct {
     name: ?[]const u8 = null,
     title: []const u8 = "Suji",
@@ -49,31 +76,10 @@ pub const CreateOptions = struct {
     parent_id: ?u32 = null,
     /// name 중복 시: false면 기존 id 반환(싱글턴), true면 새 창 생성
     force_new: bool = false,
-    /// false면 frameless — 타이틀바/리사이즈 핸들/시스템 보더 모두 제거 (Electron `frame: false`).
-    /// 사용자 코드가 커스텀 타이틀바 + drag region 직접 구현 필요.
-    frame: bool = true,
-    /// true면 투명 배경 — NSWindow.opaque=false + clear color, CEF backgroundColor=0 (Electron `transparent: true`).
-    /// HTML 측에서도 body { background: transparent }로 받쳐야 의미.
-    transparent: bool = false,
-    /// true면 항상 다른 창 위에 떠 있음 (NSFloatingWindowLevel). 위젯/툴 팔레트.
-    always_on_top: bool = false,
-    /// false면 크기 조절 불가 (NSWindowStyleMaskResizable 비트 제외). frame=false면 무관 (스타일 0).
-    resizable: bool = true,
-    /// 최소/최대 콘텐츠 크기 (0이면 제한 없음). NSWindow.contentMinSize/contentMaxSize.
-    min_width: u32 = 0,
-    min_height: u32 = 0,
-    max_width: u32 = 0,
-    max_height: u32 = 0,
-    /// true면 시작 시 전체화면 (NSWindow.toggleFullScreen).
-    fullscreen: bool = false,
-    /// 16진수 RGB 또는 RGBA (`#FFFFFF` / `#FFFFFFFF`). transparent=true와 함께 쓰면 transparent 우선.
-    /// null이면 기본값 (white / system default).
-    background_color: ?[]const u8 = null,
-    /// 타이틀바 스타일 (Electron 호환).
-    /// - `.default`: OS 기본
-    /// - `.hidden`: 타이틀바 영역 hidden + traffic light 표시 + content view가 전체 차지
-    /// - `.hidden_inset`: hidden과 동일 (currently 별 차이 없음 — toolbar 도입 시 분리)
-    title_bar_style: TitleBarStyle = .default,
+    /// 외형 옵션 묶음 (frame / transparent / background / title_bar_style).
+    appearance: Appearance = .{},
+    /// 크기/위치 제약 묶음 (resizable / min·max / always_on_top / fullscreen).
+    constraints: Constraints = .{},
 };
 
 pub const TitleBarStyle = enum { default, hidden, hidden_inset };

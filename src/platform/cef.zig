@@ -317,17 +317,8 @@ pub const CefNative = struct {
             .height = @intCast(opts.bounds.height),
             .x = opts.bounds.x,
             .y = opts.bounds.y,
-            .frame = opts.frame,
-            .transparent = opts.transparent,
-            .always_on_top = opts.always_on_top,
-            .resizable = opts.resizable,
-            .min_width = opts.min_width,
-            .min_height = opts.min_height,
-            .max_width = opts.max_width,
-            .max_height = opts.max_height,
-            .fullscreen = opts.fullscreen,
-            .background_color = opts.background_color,
-            .title_bar_style = opts.title_bar_style,
+            .appearance = opts.appearance,
+            .constraints = opts.constraints,
         });
         setCefString(&window_info.window_name, title_z);
 
@@ -338,7 +329,7 @@ pub const CefNative = struct {
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
         // transparent면 CEF browser의 기본 배경을 0(완전 투명)로 → HTML body가 투명하면
         // OS 윈도우까지 그대로 비침. 0xFF000000 alpha 마스크는 0 = transparent.
-        if (opts.transparent) browser_settings.background_color = 0;
+        if (opts.appearance.transparent) browser_settings.background_color = 0;
 
         const browser = c.cef_browser_host_create_browser_sync(
             &window_info,
@@ -1817,7 +1808,8 @@ fn mimeTypeForPath(path: []const u8) [:0]const u8 {
     return "application/octet-stream";
 }
 
-/// 플랫폼별 윈도우 초기화 옵션. CefConfig(process-level)와 분리 — frame/transparent 같은 per-window 속성.
+/// 플랫폼별 윈도우 초기화 옵션. CefConfig(process-level)와 분리 — per-window 속성.
+/// Appearance / Constraints는 window 모듈 sub-struct를 그대로 재사용 (3중 정의 회피).
 pub const WindowInitOpts = struct {
     title: [:0]const u8,
     width: i32,
@@ -1825,25 +1817,8 @@ pub const WindowInitOpts = struct {
     /// 0이면 cascade 자동 배치 (`cascadeTopLeftFromPoint:`).
     x: i32 = 0,
     y: i32 = 0,
-    /// false면 frameless (NSWindowStyleMaskBorderless).
-    frame: bool = true,
-    /// true면 NSWindow.opaque=false + clear background color.
-    transparent: bool = false,
-    /// true면 NSFloatingWindowLevel — 모든 일반 창 위.
-    always_on_top: bool = false,
-    /// false면 NSWindowStyleMaskResizable 비트 제외 (frame=false일 땐 무관).
-    resizable: bool = true,
-    /// contentMinSize / contentMaxSize. 0이면 제한 없음.
-    min_width: u32 = 0,
-    min_height: u32 = 0,
-    max_width: u32 = 0,
-    max_height: u32 = 0,
-    /// true면 시작 후 toggleFullScreen.
-    fullscreen: bool = false,
-    /// `#RRGGBB` 또는 `#RRGGBBAA`. transparent와 함께 쓰면 transparent 우선.
-    background_color: ?[]const u8 = null,
-    /// 타이틀바 스타일 — Electron 호환. macOS만 의미 있음.
-    title_bar_style: window_mod.TitleBarStyle = .default,
+    appearance: window_mod.Appearance = .{},
+    constraints: window_mod.Constraints = .{},
 };
 
 /// 플랫폼별 윈도우 초기화. 반환값: macOS에서만 NSWindow 포인터 (이후 close 트리거용).
@@ -2136,65 +2111,81 @@ pub const NSRect = extern struct { x: f64, y: f64, width: f64, height: f64 };
 var g_cascade_point: NSPoint = .{ .x = 0, .y = 0 };
 
 fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
-    const NSWindow = getClass("NSWindow") orelse return .{ .content_view = null, .ns_window = null };
-    const window_alloc = msgSend(NSWindow, "alloc") orelse return .{ .content_view = null, .ns_window = null };
-
-    const initSel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u64, u64, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    // NSWindowStyleMask: titled(1)+closable(2)+miniaturizable(4)+resizable(8). frame=false면 borderless(0).
-    // borderless는 별도 키보드/마우스 처리 + drag region을 사용자가 직접 만들어야 함.
-    var style: u64 = if (opts.frame) (1 | 2 | 4) else 0;
-    if (opts.frame and opts.resizable) style |= 8;
-    // x/y가 명시됐으면 그 위치 사용 (둘 다 0이면 cascade로 자동 배치).
-    const initial: NSRect = .{
-        .x = if (opts.x != 0 or opts.y != 0) @floatFromInt(opts.x) else 200,
-        .y = if (opts.x != 0 or opts.y != 0) @floatFromInt(opts.y) else 200,
-        .width = @floatFromInt(opts.width),
-        .height = @floatFromInt(opts.height),
-    };
-    const window = initFn(window_alloc, @ptrCast(initSel), initial, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
-
-    // x/y 미지정 시에만 cascade — 명시 위치는 사용자 의도 그대로 보존.
-    if (opts.x == 0 and opts.y == 0) {
-        const sel = objc.sel_registerName("cascadeTopLeftFromPoint:");
-        const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, NSPoint) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
-        g_cascade_point = fn_ptr(window, @ptrCast(sel), g_cascade_point);
-    }
-
-    if (opts.transparent) applyTransparency(window);
-    if (opts.always_on_top) setAlwaysOnTop(window);
-    if (opts.background_color) |hex| applyBackgroundColor(window, hex);
-    setMacContentSizeLimits(window, opts.min_width, opts.min_height, opts.max_width, opts.max_height);
-    if (opts.title_bar_style != .default) applyTitleBarStyle(window, opts.title_bar_style);
-
-    // **알려진 한계**: frameless 창의 `-webkit-app-region: drag`는 CEF Alloy 런타임에서
-    // 자동 라우팅되지 않는다 (CEF view가 NSWindow의 마우스 이벤트를 swallow). 정식 해결은
-    // cef_drag_handler_t.OnDraggableRegionsChanged 콜백을 등록 + 받은 NSRect 영역에서
-    // [NSWindow performWindowDragWithEvent:]를 호출하는 custom NSView wrapper. Phase 4 백로그.
-    // 임시: NSWindow.setMovableByWindowBackground도 contentView가 CEF view라 효과 없음.
-
-    // setTitle (frameless여도 NSWindow.title은 메뉴바/창 목록에 표시됨)
-    const NSString = getClass("NSString") orelse return .{ .content_view = null, .ns_window = window };
-    const strSel = objc.sel_registerName("stringWithUTF8String:");
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const ns_title = strFn(NSString, @ptrCast(strSel), opts.title.ptr);
-    const setTitleSel = objc.sel_registerName("setTitle:");
-    const setTitleFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    setTitleFn(window, @ptrCast(setTitleSel), ns_title);
-
+    // 단계 분리:
+    //   1) alloc + style mask + initial frame으로 NSWindow 생성
+    //   2) x/y 미지정 시 cascade 다음 위치 갱신
+    //   3) post-create options 적용 (transparent / shadow / level / size limits / titlebar)
+    //   4) title 설정 + makeKeyAndOrderFront
+    //   5) fullscreen 토글 (화면에 떠야 의미 있어 마지막)
+    const window = allocMacWindow(opts) orelse return .{ .content_view = null, .ns_window = null };
+    if (opts.x == 0 and opts.y == 0) advanceCascade(window);
+    applyMacWindowOptions(window, opts);
+    setMacWindowTitleZ(window, opts.title);
     const contentView = msgSend(window, "contentView");
     // NSWindow는 releasedWhenClosed=YES(기본값) + NSApp window list 보관으로 수명 관리.
     // 추가 retain 없이 자연스럽게 close 시 dealloc.
-
-    // makeKeyAndOrderFront
-    const makeKeySel = objc.sel_registerName("makeKeyAndOrderFront:");
-    const makeKeyFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    makeKeyFn(window, @ptrCast(makeKeySel), null);
-
-    // toggleFullScreen은 창이 화면에 떠 있어야 의미 있음 → makeKeyAndOrderFront 이후.
-    if (opts.fullscreen) toggleMacFullScreen(window);
-
+    msgSendVoid1(window, "makeKeyAndOrderFront:", null);
+    if (opts.constraints.fullscreen) toggleMacFullScreen(window);
     return .{ .content_view = contentView, .ns_window = window };
+}
+
+/// NSWindow.alloc + initWithContentRect:styleMask:backing:defer:.
+/// frame=false면 borderless(0). frame=true면 titled+closable+miniaturizable[+resizable].
+/// borderless는 별도 키보드/마우스 처리 + drag region을 사용자가 직접 만들어야 함 (Phase 4 백로그).
+fn allocMacWindow(opts: WindowInitOpts) ?*anyopaque {
+    const NSWindow = getClass("NSWindow") orelse return null;
+    const window_alloc = msgSend(NSWindow, "alloc") orelse return null;
+    const initSel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u64, u64, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    return initFn(window_alloc, @ptrCast(initSel), resolveInitialFrame(opts), computeStyleMask(opts), 2, 0);
+}
+
+/// NSWindowStyleMask: titled(1)+closable(2)+miniaturizable(4)+resizable(8).
+fn computeStyleMask(opts: WindowInitOpts) u64 {
+    if (!opts.appearance.frame) return 0;
+    var mask: u64 = 1 | 2 | 4;
+    if (opts.constraints.resizable) mask |= 8;
+    return mask;
+}
+
+/// x/y가 명시됐으면 그 위치, 아니면 (200,200) 시작 — 그 다음 cascade에서 OS가 갱신.
+fn resolveInitialFrame(opts: WindowInitOpts) NSRect {
+    const explicit = opts.x != 0 or opts.y != 0;
+    return .{
+        .x = if (explicit) @floatFromInt(opts.x) else 200,
+        .y = if (explicit) @floatFromInt(opts.y) else 200,
+        .width = @floatFromInt(opts.width),
+        .height = @floatFromInt(opts.height),
+    };
+}
+
+/// [NSWindow cascadeTopLeftFromPoint:] — 매 호출마다 18px offset된 새 origin 반환.
+/// 모듈 전역 g_cascade_point을 갱신해 다음 창이 그 자리부터 시작.
+fn advanceCascade(window: *anyopaque) void {
+    const sel = objc.sel_registerName("cascadeTopLeftFromPoint:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, NSPoint) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
+    g_cascade_point = fn_ptr(window, @ptrCast(sel), g_cascade_point);
+}
+
+/// post-create options — frame/style은 alloc 시점에 결정되고, 나머지는 setter들.
+fn applyMacWindowOptions(window: *anyopaque, opts: WindowInitOpts) void {
+    const ap = opts.appearance;
+    const cs = opts.constraints;
+    if (ap.transparent) applyTransparency(window);
+    if (cs.always_on_top) setAlwaysOnTop(window);
+    if (ap.background_color) |hex| applyBackgroundColor(window, hex);
+    setMacContentSizeLimits(window, cs.min_width, cs.min_height, cs.max_width, cs.max_height);
+    if (ap.title_bar_style != .default) applyTitleBarStyle(window, ap.title_bar_style);
+}
+
+/// 0-terminated [:0]const u8 → NSString → NSWindow.setTitle:.
+/// (createMacWindow 전용 — setMacWindowTitle은 임의 slice를 받음.)
+fn setMacWindowTitleZ(window: *anyopaque, title: [:0]const u8) void {
+    const NSString = getClass("NSString") orelse return;
+    const strSel = objc.sel_registerName("stringWithUTF8String:");
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(strSel), title.ptr) orelse return;
+    msgSendVoid1(window, "setTitle:", ns_title);
 }
 
 /// macOS: 자식 창을 부모 위에 attach. NSWindow.addChildWindow:ordered:NSWindowAbove(1).

@@ -192,22 +192,22 @@ test "create with empty name is treated as anonymous (no InvalidName)" {
 
 test "CreateOptions defaults — frame=true, transparent=false, parent_id=null" {
     const opts = window.CreateOptions{};
-    try std.testing.expectEqual(true, opts.frame);
-    try std.testing.expectEqual(false, opts.transparent);
+    try std.testing.expectEqual(true, opts.appearance.frame);
+    try std.testing.expectEqual(false, opts.appearance.transparent);
     try std.testing.expectEqual(@as(?u32, null), opts.parent_id);
 }
 
 test "CreateOptions Phase 3-D 외형 옵션 defaults" {
     const opts = window.CreateOptions{};
-    try std.testing.expectEqual(false, opts.always_on_top);
-    try std.testing.expectEqual(true, opts.resizable);
-    try std.testing.expectEqual(@as(u32, 0), opts.min_width);
-    try std.testing.expectEqual(@as(u32, 0), opts.min_height);
-    try std.testing.expectEqual(@as(u32, 0), opts.max_width);
-    try std.testing.expectEqual(@as(u32, 0), opts.max_height);
-    try std.testing.expectEqual(false, opts.fullscreen);
-    try std.testing.expectEqual(@as(?[]const u8, null), opts.background_color);
-    try std.testing.expectEqual(window.TitleBarStyle.default, opts.title_bar_style);
+    try std.testing.expectEqual(false, opts.constraints.always_on_top);
+    try std.testing.expectEqual(true, opts.constraints.resizable);
+    try std.testing.expectEqual(@as(u32, 0), opts.constraints.min_width);
+    try std.testing.expectEqual(@as(u32, 0), opts.constraints.min_height);
+    try std.testing.expectEqual(@as(u32, 0), opts.constraints.max_width);
+    try std.testing.expectEqual(@as(u32, 0), opts.constraints.max_height);
+    try std.testing.expectEqual(false, opts.constraints.fullscreen);
+    try std.testing.expectEqual(@as(?[]const u8, null), opts.appearance.background_color);
+    try std.testing.expectEqual(window.TitleBarStyle.default, opts.appearance.title_bar_style);
 }
 
 test "TitleBarStyle enum has 3 variants" {
@@ -224,26 +224,25 @@ test "create accepts all Phase 3-D options together (smoke test)" {
     var wm = newManager(&native);
     defer wm.deinit();
     const id = try wm.create(.{
-        .always_on_top = true,
-        .resizable = false,
-        .min_width = 320,
-        .min_height = 200,
-        .max_width = 1920,
-        .max_height = 1080,
-        .fullscreen = false,
-        .background_color = "#1d1d1f",
-        .title_bar_style = .hidden,
+        .appearance = .{ .background_color = "#1d1d1f", .title_bar_style = .hidden },
+        .constraints = .{
+            .always_on_top = true,
+            .resizable = false,
+            .min_width = 320,
+            .min_height = 200,
+            .max_width = 1920,
+            .max_height = 1080,
+            .fullscreen = false,
+        },
     });
     try std.testing.expect(id >= 1);
 }
 
 test "create with min_width=u32 max value — overflow 없이 받아들임" {
-    // CreateOptions.min_width는 u32 — config(i64)에서 main.zig의 clamp.nonneg가 처리.
-    // WM 자체는 u32 max를 그대로 받아 errata 없이 native에 전달.
     var native = TestNative{};
     var wm = newManager(&native);
     defer wm.deinit();
-    const id = try wm.create(.{ .min_width = std.math.maxInt(u32), .min_height = 0 });
+    const id = try wm.create(.{ .constraints = .{ .min_width = std.math.maxInt(u32) } });
     try std.testing.expect(id >= 1);
 }
 
@@ -264,9 +263,8 @@ test "create accepts frame=false (frameless) without error" {
     var native = TestNative{};
     var wm = newManager(&native);
     defer wm.deinit();
-    const id = try wm.create(.{ .frame = false });
+    const id = try wm.create(.{ .appearance = .{ .frame = false } });
     try std.testing.expect(id >= 1);
-    // 옵션은 native vtable로 전달되며 WM 자체는 frame 상태를 보관하지 않음 (네이티브가 소유).
     try std.testing.expectEqual(@as(usize, 1), native.create_calls);
 }
 
@@ -274,7 +272,7 @@ test "create accepts transparent=true without error" {
     var native = TestNative{};
     var wm = newManager(&native);
     defer wm.deinit();
-    const id = try wm.create(.{ .transparent = true });
+    const id = try wm.create(.{ .appearance = .{ .transparent = true } });
     try std.testing.expect(id >= 1);
 }
 

@@ -838,11 +838,10 @@ fn openWindow(
         else
             null;
 
-        // 음수 → 0 clamp (사용자가 suji.json에 잘못된 값 넣었을 때 crash 방지).
-        // x/y는 i32라 음수 허용 (화면 왼쪽 밖 배치 가능).
-        const clamp = struct {
-            fn nonneg(v: i64) u32 { return if (v < 0) 0 else @intCast(v); }
-        };
+        // 음수 → 0 clamp. width/height/min·max는 config.nonNegU32에서 이미 처리됐고,
+        // 여기서는 width/height (i64 → u32)만 음수 한 번 더 가드. x/y는 i32라 음수 허용.
+        const w_px: u32 = if (w.width < 0) 0 else @intCast(w.width);
+        const h_px: u32 = if (w.height < 0) 0 else @intCast(w.height);
         _ = stack.manager.create(.{
             .name = win_name,
             .title = util.cstr(w.title),
@@ -850,21 +849,25 @@ fn openWindow(
             .bounds = .{
                 .x = @intCast(w.x),
                 .y = @intCast(w.y),
-                .width = clamp.nonneg(w.width),
-                .height = clamp.nonneg(w.height),
+                .width = w_px,
+                .height = h_px,
             },
-            .frame = w.frame,
-            .transparent = w.transparent,
             .parent_id = parent_id,
-            .always_on_top = w.always_on_top,
-            .resizable = w.resizable,
-            .min_width = clamp.nonneg(w.min_width),
-            .min_height = clamp.nonneg(w.min_height),
-            .max_width = clamp.nonneg(w.max_width),
-            .max_height = clamp.nonneg(w.max_height),
-            .fullscreen = w.fullscreen,
-            .background_color = util.cstrOpt(w.background_color),
-            .title_bar_style = w.title_bar_style,
+            .appearance = .{
+                .frame = w.frame,
+                .transparent = w.transparent,
+                .background_color = util.cstrOpt(w.background_color),
+                .title_bar_style = w.title_bar_style,
+            },
+            .constraints = .{
+                .resizable = w.resizable,
+                .always_on_top = w.always_on_top,
+                .min_width = w.min_width,
+                .min_height = w.min_height,
+                .max_width = w.max_width,
+                .max_height = w.max_height,
+                .fullscreen = w.fullscreen,
+            },
         }) catch |err| {
             std.debug.print("[suji] window[{d}] create failed: {s}\n", .{ i, @errorName(err) });
             // 첫 창 실패는 fatal — 빈 앱 상태로 cef.run 진입하면 즉시 quit 돼버림.

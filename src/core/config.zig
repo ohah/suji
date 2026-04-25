@@ -40,33 +40,24 @@ pub const Config = struct {
         debug: bool = false,
         protocol: Protocol = .file,
         /// 시작 시 자동 로드할 URL. null이면 frontend dev_url/dist 자동 선택 (첫 창에만 적용).
-        /// 두 번째 창부터는 명시 권장.
         url: ?[:0]const u8 = null,
         /// false면 hidden 상태로 생성 (Phase 3+에서 setVisible과 연동 예정).
         visible: bool = true,
-        /// false면 frameless (Electron `frame: false`). 타이틀바/리사이즈 핸들 제거.
-        frame: bool = true,
-        /// true면 투명 배경 (Electron `transparent: true`). HTML body도 투명해야 의미 있음.
-        transparent: bool = false,
         /// 부모 창 이름. wm.fromName으로 lookup → CreateOptions.parent_id 세팅.
-        /// 부모가 없거나 자기 자신이면 무시. 자식은 부모 위에 floating + 따라 이동 (시각만, 수명 독립).
         parent: ?[:0]const u8 = null,
-        /// true면 항상 다른 창 위 (위젯/툴 팔레트).
-        always_on_top: bool = false,
-        /// false면 크기 조절 불가.
-        resizable: bool = true,
-        /// 최소/최대 콘텐츠 크기 (0이면 제한 없음).
-        min_width: i64 = 0,
-        min_height: i64 = 0,
-        max_width: i64 = 0,
-        max_height: i64 = 0,
-        /// true면 시작 시 전체화면.
-        fullscreen: bool = false,
-        /// 16진수 RGB(A) — `#1d1d1f` / `#1d1d1fff`. transparent와 함께 쓰면 transparent 우선.
+        // ── 외형 (window.Appearance와 동일 의미; 단 background_color는 arena가 소유한 [:0]). ──
+        frame: bool = true,
+        transparent: bool = false,
         background_color: ?[:0]const u8 = null,
-        /// 타이틀바 스타일 (Electron 호환). suji.json에선 "default" | "hidden" | "hiddenInset".
-        /// window.TitleBarStyle을 alias — config/CreateOptions/cef 모두 동일 enum 공유 (mapping 불필요).
         title_bar_style: TitleBarStyle = .default,
+        // ── 제약 (window.Constraints와 동일). ──
+        resizable: bool = true,
+        always_on_top: bool = false,
+        min_width: u32 = 0,
+        min_height: u32 = 0,
+        max_width: u32 = 0,
+        max_height: u32 = 0,
+        fullscreen: bool = false,
     };
 
     pub const TitleBarStyle = window_mod.TitleBarStyle;
@@ -110,6 +101,33 @@ pub const Config = struct {
         return a.dupeZ(u8, s) catch @ptrCast(s);
     }
 
+    // ============================================
+    // JSON ObjectMap 필드 추출 헬퍼 — 16+ 회 반복되는 `if (m.get("X")) |v| if (v == .Y)` 패턴 단축.
+    // 매 필드마다 (1) key 존재 (2) 타입 일치 두 가드를 하나로 묶음.
+    // ============================================
+
+    fn getStr(m: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+        const v = m.get(key) orelse return null;
+        return if (v == .string) v.string else null;
+    }
+
+    fn getInt(m: std.json.ObjectMap, key: []const u8) ?i64 {
+        const v = m.get(key) orelse return null;
+        return if (v == .integer) v.integer else null;
+    }
+
+    fn getBool(m: std.json.ObjectMap, key: []const u8) ?bool {
+        const v = m.get(key) orelse return null;
+        return if (v == .bool) v.bool else null;
+    }
+
+    /// i64 → u32 변환 (음수는 0). suji.json에 잘못된 음수가 들어와도 panic 회피.
+    fn nonNegU32(v: i64) u32 {
+        if (v < 0) return 0;
+        if (v > std.math.maxInt(u32)) return std.math.maxInt(u32);
+        return @intCast(v);
+    }
+
     fn loadJson(allocator: std.mem.Allocator) !Config {
         const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
 
@@ -131,8 +149,8 @@ pub const Config = struct {
         if (root.get("app")) |app_val| {
             if (app_val == .object) {
                 const app = app_val.object;
-                if (app.get("name")) |v| if (v == .string) { config.app.name = dupeStr(a, v.string); };
-                if (app.get("version")) |v| if (v == .string) { config.app.version = dupeStr(a, v.string); };
+                if (getStr(app, "name")) |s| config.app.name = dupeStr(a, s);
+                if (getStr(app, "version")) |s| config.app.version = dupeStr(a, s);
             }
         }
 
@@ -150,31 +168,33 @@ pub const Config = struct {
                     if (item != .object) continue;
                     const w = item.object;
                     var win = Window{};
-                    if (w.get("name")) |v| if (v == .string) { win.name = dupeStr(a, v.string); };
-                    if (w.get("title")) |v| if (v == .string) { win.title = dupeStr(a, v.string); };
-                    if (w.get("width")) |v| if (v == .integer) { win.width = v.integer; };
-                    if (w.get("height")) |v| if (v == .integer) { win.height = v.integer; };
-                    if (w.get("x")) |v| if (v == .integer) { win.x = v.integer; };
-                    if (w.get("y")) |v| if (v == .integer) { win.y = v.integer; };
-                    if (w.get("debug")) |v| if (v == .bool) { win.debug = v.bool; };
-                    if (w.get("url")) |v| if (v == .string) { win.url = dupeStr(a, v.string); };
-                    if (w.get("visible")) |v| if (v == .bool) { win.visible = v.bool; };
-                    if (w.get("frame")) |v| if (v == .bool) { win.frame = v.bool; };
-                    if (w.get("transparent")) |v| if (v == .bool) { win.transparent = v.bool; };
-                    if (w.get("parent")) |v| if (v == .string) { win.parent = dupeStr(a, v.string); };
-                    if (w.get("alwaysOnTop")) |v| if (v == .bool) { win.always_on_top = v.bool; };
-                    if (w.get("resizable")) |v| if (v == .bool) { win.resizable = v.bool; };
-                    if (w.get("minWidth")) |v| if (v == .integer) { win.min_width = v.integer; };
-                    if (w.get("minHeight")) |v| if (v == .integer) { win.min_height = v.integer; };
-                    if (w.get("maxWidth")) |v| if (v == .integer) { win.max_width = v.integer; };
-                    if (w.get("maxHeight")) |v| if (v == .integer) { win.max_height = v.integer; };
-                    if (w.get("fullscreen")) |v| if (v == .bool) { win.fullscreen = v.bool; };
-                    if (w.get("backgroundColor")) |v| if (v == .string) { win.background_color = dupeStr(a, v.string); };
-                    if (w.get("titleBarStyle")) |v| if (v == .string) {
-                        if (std.mem.eql(u8, v.string, "hidden")) win.title_bar_style = .hidden
-                        else if (std.mem.eql(u8, v.string, "hiddenInset")) win.title_bar_style = .hidden_inset
+                    if (getStr(w, "name")) |s| win.name = dupeStr(a, s);
+                    if (getStr(w, "title")) |s| win.title = dupeStr(a, s);
+                    if (getInt(w, "width")) |n| win.width = n;
+                    if (getInt(w, "height")) |n| win.height = n;
+                    if (getInt(w, "x")) |n| win.x = n;
+                    if (getInt(w, "y")) |n| win.y = n;
+                    if (getBool(w, "debug")) |b| win.debug = b;
+                    if (getStr(w, "url")) |s| win.url = dupeStr(a, s);
+                    if (getBool(w, "visible")) |b| win.visible = b;
+                    if (getStr(w, "parent")) |s| win.parent = dupeStr(a, s);
+                    // 외형
+                    if (getBool(w, "frame")) |b| win.frame = b;
+                    if (getBool(w, "transparent")) |b| win.transparent = b;
+                    if (getStr(w, "backgroundColor")) |s| win.background_color = dupeStr(a, s);
+                    if (getStr(w, "titleBarStyle")) |s| {
+                        if (std.mem.eql(u8, s, "hidden")) win.title_bar_style = .hidden
+                        else if (std.mem.eql(u8, s, "hiddenInset")) win.title_bar_style = .hidden_inset
                         else win.title_bar_style = .default;
-                    };
+                    }
+                    // 제약 — i64 → u32 음수 clamp는 nonNegU32에서.
+                    if (getBool(w, "alwaysOnTop")) |b| win.always_on_top = b;
+                    if (getBool(w, "resizable")) |b| win.resizable = b;
+                    if (getInt(w, "minWidth")) |n| win.min_width = nonNegU32(n);
+                    if (getInt(w, "minHeight")) |n| win.min_height = nonNegU32(n);
+                    if (getInt(w, "maxWidth")) |n| win.max_width = nonNegU32(n);
+                    if (getInt(w, "maxHeight")) |n| win.max_height = nonNegU32(n);
+                    if (getBool(w, "fullscreen")) |b| win.fullscreen = b;
                     if (w.get("protocol")) |v| if (v == .string) {
                         if (std.mem.eql(u8, v.string, "file")) {
                             win.protocol = .file;
@@ -196,8 +216,8 @@ pub const Config = struct {
             if (be_val == .object) {
                 const be = be_val.object;
                 config.backend = SingleBackend{
-                    .lang = if (be.get("lang")) |v| if (v == .string) dupeStr(a, v.string) else "zig" else "zig",
-                    .entry = if (be.get("entry")) |v| if (v == .string) dupeStr(a, v.string) else "src/main.zig" else "src/main.zig",
+                    .lang = if (getStr(be, "lang")) |s| dupeStr(a, s) else "zig",
+                    .entry = if (getStr(be, "entry")) |s| dupeStr(a, s) else "src/main.zig",
                 };
             }
         }
@@ -206,21 +226,22 @@ pub const Config = struct {
             if (bs_val == .array) {
                 var list = std.ArrayList(MultiBackend).empty;
                 for (bs_val.array.items) |item| {
-                    if (item == .object) {
-                        const obj = item.object;
-                        const name = if (obj.get("name")) |v| if (v == .string) dupeStr(a, v.string) else continue else continue;
-                        const lang = if (obj.get("lang")) |v| if (v == .string) dupeStr(a, v.string) else continue else continue;
-                        const entry = if (obj.get("entry")) |v| if (v == .string) dupeStr(a, v.string) else continue else continue;
-                        list.append(a, .{ .name = name, .lang = lang, .entry = entry }) catch continue;
-                    }
+                    if (item != .object) continue;
+                    const obj = item.object;
+                    const name = getStr(obj, "name") orelse continue;
+                    const lang = getStr(obj, "lang") orelse continue;
+                    const entry = getStr(obj, "entry") orelse continue;
+                    list.append(a, .{
+                        .name = dupeStr(a, name),
+                        .lang = dupeStr(a, lang),
+                        .entry = dupeStr(a, entry),
+                    }) catch continue;
                 }
                 config.backends = list.toOwnedSlice(a) catch null;
             }
         }
 
-        if (root.get("asset_dir")) |v| {
-            if (v == .string) config.asset_dir = dupeStr(a, v.string);
-        }
+        if (getStr(root, "asset_dir")) |s| config.asset_dir = dupeStr(a, s);
 
         if (root.get("plugins")) |pl_val| {
             if (pl_val == .array) {
@@ -237,9 +258,9 @@ pub const Config = struct {
         if (root.get("frontend")) |fe_val| {
             if (fe_val == .object) {
                 const fe = fe_val.object;
-                if (fe.get("dir")) |v| if (v == .string) { config.frontend.dir = dupeStr(a, v.string); };
-                if (fe.get("dev_url")) |v| if (v == .string) { config.frontend.dev_url = dupeStr(a, v.string); };
-                if (fe.get("dist_dir")) |v| if (v == .string) { config.frontend.dist_dir = dupeStr(a, v.string); };
+                if (getStr(fe, "dir")) |s| config.frontend.dir = dupeStr(a, s);
+                if (getStr(fe, "dev_url")) |s| config.frontend.dev_url = dupeStr(a, s);
+                if (getStr(fe, "dist_dir")) |s| config.frontend.dist_dir = dupeStr(a, s);
             }
         }
 
