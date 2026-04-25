@@ -205,11 +205,19 @@ fn ensureGlobalHandlers() void {
 // - 잘못된 스레드 호출은 debug에서 crash, release에서 CEF CHECK abort
 
 pub const CefNative = struct {
+    /// sender 창 URL 캐시 사이즈. 일반적인 URL은 < 200 byte, query string 포함해도 256이면 충분.
+    /// 초과 시 캐시는 비워두고 invoke 핫경로에서 frame.get_url로 폴백.
+    pub const URL_CACHE_LEN: usize = 256;
+
     pub const BrowserEntry = struct {
         browser: *c.cef_browser_t,
         /// macOS: NSWindow 포인터 (destroyWindow에서 close 메시지 송신용).
         /// Linux/Windows: null (CEF가 자체 창 관리).
         ns_window: ?*anyopaque,
+        /// 캐시된 main frame URL (OnAddressChange 콜백에서만 갱신).
+        /// 매 invoke마다 frame.get_url alloc/free를 피하기 위함. len=0이면 미캐싱(폴백).
+        url_cache_buf: [URL_CACHE_LEN]u8 = undefined,
+        url_cache_len: usize = 0,
     };
 
     allocator: std.mem.Allocator,
@@ -546,7 +554,19 @@ fn cefUserfreeToUtf8(userfree: c.cef_string_userfree_t, buf: []u8) []const u8 {
 
 /// 브라우저의 main frame URL 추출 — Phase 2.5 `event.window.url` 원천.
 /// 실패(프레임 없음/URL 빈 문자열)는 null → 호출자가 wire 필드 생략.
+/// **캐시 우선** — OnAddressChange가 갱신한 BrowserEntry.url_cache를 먼저 보고,
+/// 없을 때만 frame.get_url(alloc + UTF8 변환 + free)로 폴백. 매 invoke마다 호출되는 핫경로.
 fn getMainFrameUrl(browser: *c.cef_browser_t, buf: []u8) ?[]const u8 {
+    // 1) 캐시 시도
+    if (g_cef_native) |native| {
+        const handle: u64 = @intCast(browser.get_identifier.?(browser));
+        if (native.browsers.getPtr(handle)) |entry| {
+            if (entry.url_cache_len > 0) {
+                return entry.url_cache_buf[0..entry.url_cache_len];
+            }
+        }
+    }
+    // 2) 폴백 — 캐시 미스 (초기 로드 전 / URL 길이 초과 / native 미등록)
     const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return null;
     const get_url = frame.get_url orelse return null;
     const userfree = get_url(frame);
@@ -649,6 +669,7 @@ fn initClient(client_ptr: *c.cef_client_t) void {
     initBaseRefCounted(&client_ptr.base);
     client_ptr.get_life_span_handler = &getLifeSpanHandler;
     client_ptr.get_keyboard_handler = &getKeyboardHandler;
+    client_ptr.get_display_handler = &getDisplayHandler;
     client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
 }
 
@@ -658,6 +679,50 @@ fn getKeyboardHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_keyboard_handl
 
 fn getLifeSpanHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_life_span_handler_t {
     return &g_life_span_handler;
+}
+
+// ============================================
+// CEF Display Handler — URL 변경 콜백 (캐싱용)
+// ============================================
+
+var g_display_handler: c.cef_display_handler_t = undefined;
+var g_display_handler_initialized: bool = false;
+
+fn ensureDisplayHandler() void {
+    if (g_display_handler_initialized) return;
+    zeroCefStruct(c.cef_display_handler_t, &g_display_handler);
+    initBaseRefCounted(&g_display_handler.base);
+    g_display_handler.on_address_change = &onAddressChange;
+    g_display_handler_initialized = true;
+}
+
+fn getDisplayHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_display_handler_t {
+    ensureDisplayHandler();
+    return &g_display_handler;
+}
+
+/// main frame URL이 바뀔 때 BrowserEntry.url_cache 갱신.
+/// invoke 핫경로의 frame.get_url alloc/free 1회를 절약. iframe 변경은 무시 (main만 캐싱).
+fn onAddressChange(
+    _: ?*c._cef_display_handler_t,
+    browser: ?*c._cef_browser_t,
+    frame: ?*c._cef_frame_t,
+    url: [*c]const c.cef_string_t,
+) callconv(.c) void {
+    const br = browser orelse return;
+    const f = frame orelse return;
+    const u = url orelse return;
+    // main frame만 캐싱 — iframe URL은 sender 식별과 무관.
+    const is_main = if (f.is_main) |fn_ptr| fn_ptr(f) == 1 else false;
+    if (!is_main) return;
+
+    const native = g_cef_native orelse return;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+    const entry = native.browsers.getPtr(handle) orelse return;
+
+    const utf8_len = cefStringToUtf8(u, &entry.url_cache_buf).len;
+    // 256 byte 초과 URL은 캐시 무효화 → 폴백 (frame.get_url) 사용.
+    entry.url_cache_len = if (utf8_len > 0 and utf8_len < entry.url_cache_buf.len) utf8_len else 0;
 }
 
 /// 메인 프로세스: 렌더러에서 온 메시지 처리

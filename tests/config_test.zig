@@ -88,6 +88,20 @@ test "Config getBackendCount single" {
 // JSON 파싱 검증
 // ============================================
 
+// 테스트 헬퍼: parseFromSlice + root.object 추출. caller가 std.json.Parsed를 deinit.
+// 사용 패턴:
+//   const parsed = try parseRoot(json_content);
+//   defer parsed.deinit();
+//   const root = parsed.value.object;
+fn parseRoot(json: []const u8) !std.json.Parsed(std.json.Value) {
+    return std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+}
+
+// windows 배열 첫 항목 빠른 접근 — protocol/partial 테스트들이 반복 사용.
+fn firstWindow(root: std.json.ObjectMap) std.json.ObjectMap {
+    return root.get("windows").?.array.items[0].object;
+}
+
 test "JSON single backend parsing" {
     const json_content =
         \\{
@@ -98,7 +112,7 @@ test "JSON single backend parsing" {
         \\}
     ;
 
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot(json_content);
     defer parsed.deinit();
     const root = parsed.value.object;
 
@@ -139,7 +153,7 @@ test "JSON multi-backend parsing" {
         \\}
     ;
 
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot(json_content);
     defer parsed.deinit();
     const root = parsed.value.object;
 
@@ -157,7 +171,7 @@ test "JSON multi-backend parsing" {
 
 test "JSON minimal config" {
     const json_content = "{}";
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot(json_content);
     defer parsed.deinit();
 
     // 빈 JSON도 파싱 성공 (기본값 사용)
@@ -169,7 +183,7 @@ test "JSON partial config" {
     const json_content =
         \\{ "windows": [{ "width": 1920 }] }
     ;
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot(json_content);
     defer parsed.deinit();
     const root = parsed.value.object;
 
@@ -181,36 +195,21 @@ test "JSON partial config" {
 }
 
 test "JSON protocol suji parsing" {
-    const json_content =
-        \\{ "windows": [{ "protocol": "suji" }] }
-    ;
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot("{ \"windows\": [{ \"protocol\": \"suji\" }] }");
     defer parsed.deinit();
-    const root = parsed.value.object;
-    const win = root.get("windows").?.array.items[0].object;
-    try std.testing.expectEqualStrings("suji", win.get("protocol").?.string);
+    try std.testing.expectEqualStrings("suji", firstWindow(parsed.value.object).get("protocol").?.string);
 }
 
 test "JSON protocol file parsing" {
-    const json_content =
-        \\{ "windows": [{ "protocol": "file" }] }
-    ;
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot("{ \"windows\": [{ \"protocol\": \"file\" }] }");
     defer parsed.deinit();
-    const root = parsed.value.object;
-    const win = root.get("windows").?.array.items[0].object;
-    try std.testing.expectEqualStrings("file", win.get("protocol").?.string);
+    try std.testing.expectEqualStrings("file", firstWindow(parsed.value.object).get("protocol").?.string);
 }
 
 test "JSON protocol absent defaults to file" {
-    const json_content =
-        \\{ "windows": [{ "title": "Test" }] }
-    ;
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot("{ \"windows\": [{ \"title\": \"Test\" }] }");
     defer parsed.deinit();
-    const root = parsed.value.object;
-    const win = root.get("windows").?.array.items[0].object;
-    try std.testing.expect(win.get("protocol") == null);
+    try std.testing.expect(firstWindow(parsed.value.object).get("protocol") == null);
 }
 
 // Phase 2 마무리: 다중 창 선언 — Tauri 호환
@@ -223,7 +222,7 @@ test "JSON multiple windows parsing" {
         \\  ]
         \\}
     ;
-    const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json_content, .{});
+    const parsed = try parseRoot(json_content);
     defer parsed.deinit();
     const root = parsed.value.object;
     const wins = root.get("windows").?.array;

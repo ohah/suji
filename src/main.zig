@@ -829,18 +829,12 @@ fn openWindow(
 
     // 첫 창의 default name="main" — 플러그인이 wm.fromName("main")으로 메인 창 식별 가능.
     for (config.windows, 0..) |w, i| {
-        const win_name: ?[]const u8 = if (w.name) |n| std.mem.sliceTo(n, 0)
-        else if (i == 0) "main"
-        else null;
-
-        // 명시적 url이 있으면 그것, 없으면 dev/dist 기본 URL로 폴백 (i==0 분기 불필요 — 둘 다 같은 결과).
-        const win_url: ?[]const u8 = if (w.url) |u| std.mem.sliceTo(u, 0)
-        else if (url) |u| std.mem.sliceTo(u, 0)
-        else null;
+        const win_name: ?[]const u8 = util.cstrOpt(w.name) orelse (if (i == 0) "main" else null);
+        const win_url: ?[]const u8 = util.cstrOpt(w.url) orelse util.cstrOpt(url);
 
         _ = stack.manager.create(.{
             .name = win_name,
-            .title = std.mem.sliceTo(w.title, 0),
+            .title = util.cstr(w.title),
             .url = win_url,
             .bounds = .{
                 .width = @intCast(w.width),

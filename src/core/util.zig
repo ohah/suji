@@ -17,6 +17,17 @@ pub fn copyToBuf(src: []const u8, dst: []u8) []const u8 {
     return dst[0..len];
 }
 
+/// `[:0]const u8` (sentinel-aware) → `[]const u8` (sentinel 제거).
+/// `std.mem.sliceTo(s, 0)`을 wrapping — config 같은 곳에서 자주 반복되는 패턴 단축.
+pub fn cstr(s: [:0]const u8) []const u8 {
+    return std.mem.sliceTo(s, 0);
+}
+
+/// optional 버전. null이면 null 그대로.
+pub fn cstrOpt(s: ?[:0]const u8) ?[]const u8 {
+    return if (s) |v| std.mem.sliceTo(v, 0) else null;
+}
+
 /// IPC 버퍼 크기 상수
 pub const MAX_CHANNEL_NAME = 256;
 pub const MAX_REQUEST = 8192;

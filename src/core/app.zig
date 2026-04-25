@@ -91,22 +91,8 @@ pub const App = struct {
 
         for (self.handlers[0..self.handler_count]) |h| {
             if (std.mem.eql(u8, h.channel, channel)) {
-                const req = Request{
-                    .raw = request_json,
-                    .arena = allocator,
-                };
-                const win_id_raw = extractIntField(request_json, "__window") orelse 0;
-                const win_id: u32 = if (win_id_raw >= 0) @intCast(win_id_raw) else 0;
-                const win_name = extractStringField(request_json, "__window_name");
-                const win_url = extractStringField(request_json, "__window_url");
-                const win_main_frame = util.extractJsonBool(request_json, "__window_main_frame");
-                const event = InvokeEvent{ .window = .{
-                    .id = win_id,
-                    .name = win_name,
-                    .url = win_url,
-                    .is_main_frame = win_main_frame,
-                } };
-                const resp = h.func(req, event);
+                const req = Request{ .raw = request_json, .arena = allocator };
+                const resp = h.func(req, InvokeEvent.fromWire(request_json));
                 return resp.data;
             }
         }
@@ -225,6 +211,20 @@ pub const InvokeEvent = struct {
         /// CEF cef_frame_t.is_main에서 파생. wire에서 주입 안 됐으면 null.
         is_main_frame: ?bool = null,
     };
+
+    /// wire JSON에서 `__window` / `__window_name` / `__window_url` / `__window_main_frame`
+    /// 4개 필드를 파싱해 InvokeEvent를 구성. `__window` 누락 시 id=0 (legacy/direct 경로).
+    /// 음수 `__window`는 0으로 clamp (방어적).
+    pub fn fromWire(request_json: []const u8) InvokeEvent {
+        const id_raw = util.extractJsonInt(request_json, "__window") orelse 0;
+        const id: u32 = if (id_raw >= 0) @intCast(id_raw) else 0;
+        return .{ .window = .{
+            .id = id,
+            .name = util.extractJsonString(request_json, "__window_name"),
+            .url = util.extractJsonString(request_json, "__window_url"),
+            .is_main_frame = util.extractJsonBool(request_json, "__window_main_frame"),
+        } };
+    }
 };
 
 /// 이벤트 발신 — 모든 창으로 브로드캐스트 (Electron 브로드캐스트 패턴).
