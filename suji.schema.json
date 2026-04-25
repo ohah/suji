@@ -28,18 +28,13 @@
     },
     "windows": {
       "type": "array",
-      "description": "윈도우 설정 목록. 첫 번째 항목 또는 name='main'이 메인 윈도우.",
+      "description": "윈도우 설정 목록. 첫 번째 항목이 메인 윈도우 (CEF 초기화 시 사이즈/타이틀 사용).",
       "items": {
         "type": "object",
         "properties": {
           "name": {
             "type": "string",
-            "description": "윈도우 고유 식별자. 'main'이면 메인 윈도우."
-          },
-          "create": {
-            "type": "boolean",
-            "default": true,
-            "description": "앱 시작 시 자동 생성 여부. false면 설정만 등록 (런타임에 이름으로 생성)."
+            "description": "WM 등록 이름 (singleton 키). 첫 창의 기본값은 'main'. 동일 이름은 기존 창 id 반환."
           },
           "title": {
             "type": "string",
@@ -48,286 +43,109 @@
           },
           "width": {
             "type": "integer",
-            "default": 800,
-            "minimum": 100,
-            "description": "윈도우 너비 (px)"
+            "default": 1024,
+            "minimum": 0,
+            "description": "윈도우 너비 (px). 음수는 0으로 clamp."
           },
           "height": {
             "type": "integer",
-            "default": 600,
-            "minimum": 100,
-            "description": "윈도우 높이 (px)"
+            "default": 768,
+            "minimum": 0,
+            "description": "윈도우 높이 (px). 음수는 0으로 clamp."
           },
           "x": {
-            "type": ["integer", "null"],
-            "default": null,
-            "description": "윈도우 x 좌표 (null이면 OS 기본)"
+            "type": "integer",
+            "default": 0,
+            "description": "초기 x 좌표 (px). 0이면 OS cascade 자동 배치."
           },
           "y": {
-            "type": ["integer", "null"],
-            "default": null,
-            "description": "윈도우 y 좌표 (null이면 OS 기본)"
-          },
-          "center": {
-            "type": "boolean",
-            "default": true,
-            "description": "화면 중앙 배치"
-          },
-          "minWidth": {
             "type": "integer",
             "default": 0,
-            "description": "최소 너비"
-          },
-          "minHeight": {
-            "type": "integer",
-            "default": 0,
-            "description": "최소 높이"
-          },
-          "maxWidth": {
-            "type": "integer",
-            "default": 0,
-            "description": "최대 너비 (0 = 제한 없음)"
-          },
-          "maxHeight": {
-            "type": "integer",
-            "default": 0,
-            "description": "최대 높이 (0 = 제한 없음)"
-          },
-          "resizable": {
-            "type": "boolean",
-            "default": true,
-            "description": "크기 조절 가능"
-          },
-          "movable": {
-            "type": "boolean",
-            "default": true,
-            "description": "이동 가능"
-          },
-          "minimizable": {
-            "type": "boolean",
-            "default": true,
-            "description": "최소화 가능"
-          },
-          "maximizable": {
-            "type": "boolean",
-            "default": true,
-            "description": "최대화 가능"
-          },
-          "closable": {
-            "type": "boolean",
-            "default": true,
-            "description": "닫기 가능"
-          },
-          "focusable": {
-            "type": "boolean",
-            "default": true,
-            "description": "포커스 가능"
-          },
-          "alwaysOnTop": {
-            "type": "boolean",
-            "default": false,
-            "description": "항상 위에 표시"
-          },
-          "fullscreen": {
-            "type": "boolean",
-            "default": false,
-            "description": "전체화면"
-          },
-          "fullscreenable": {
-            "type": "boolean",
-            "default": true,
-            "description": "전체화면 전환 가능"
-          },
-          "skipTaskbar": {
-            "type": "boolean",
-            "default": false,
-            "description": "작업표시줄에서 숨김"
-          },
-          "kiosk": {
-            "type": "boolean",
-            "default": false,
-            "description": "키오스크 모드"
-          },
-          "show": {
-            "type": "boolean",
-            "default": true,
-            "description": "생성 시 즉시 표시 (false면 show() 호출 필요)"
-          },
-          "icon": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "윈도우 아이콘 경로"
+            "description": "초기 y 좌표 (px). 0이면 OS cascade 자동 배치."
           },
           "frame": {
             "type": "boolean",
             "default": true,
-            "description": "OS 윈도우 프레임 표시 (false = 프레임리스)"
+            "description": "OS 윈도우 프레임 표시. false면 frameless (타이틀바/리사이즈 핸들 제거)."
           },
           "transparent": {
             "type": "boolean",
             "default": false,
-            "description": "투명 배경"
-          },
-          "opacity": {
-            "type": "number",
-            "default": 1.0,
-            "minimum": 0.0,
-            "maximum": 1.0,
-            "description": "윈도우 불투명도"
+            "description": "투명 NSWindow + clear background. HTML body도 transparent여야 의미 있음. macOS만."
           },
           "backgroundColor": {
             "type": "string",
-            "default": "#FFFFFF",
-            "description": "배경색 (hex)"
-          },
-          "hasShadow": {
-            "type": "boolean",
-            "default": true,
-            "description": "윈도우 그림자"
+            "pattern": "^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$",
+            "description": "배경색 (#RRGGBB 또는 #RRGGBBAA). transparent와 함께면 transparent 우선. macOS만."
           },
           "titleBarStyle": {
             "type": "string",
-            "enum": ["default", "hidden", "hiddenInset", "customButtonsOnHover"],
+            "enum": ["default", "hidden", "hiddenInset"],
             "default": "default",
-            "description": "타이틀바 스타일 (macOS)"
+            "description": "타이틀바 스타일 (macOS). hidden/hiddenInset은 traffic light 유지 + content view 확장."
           },
-          "titleBarOverlay": {
-            "type": ["object", "boolean", "null"],
-            "default": null,
-            "description": "Windows 컨트롤 오버레이 설정"
+          "resizable": {
+            "type": "boolean",
+            "default": true,
+            "description": "사용자 리사이즈 허용. frame=false일 때는 무시."
           },
-          "trafficLightPosition": {
-            "type": ["object", "null"],
-            "default": null,
-            "description": "macOS 신호등 버튼 위치 { x, y }"
+          "alwaysOnTop": {
+            "type": "boolean",
+            "default": false,
+            "description": "NSFloatingWindowLevel — 일반 창 위 항상 표시. macOS만."
           },
-          "vibrancy": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "macOS vibrancy 효과"
+          "minWidth": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "최소 콘텐츠 너비 (0 = 제한 없음)"
           },
-          "backgroundMaterial": {
-            "type": "string",
-            "enum": ["none", "acrylic", "mica", "tabbed"],
-            "default": "none",
-            "description": "Windows 11 배경 재질"
+          "minHeight": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "최소 콘텐츠 높이 (0 = 제한 없음)"
+          },
+          "maxWidth": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "최대 콘텐츠 너비 (0 = 제한 없음)"
+          },
+          "maxHeight": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "최대 콘텐츠 높이 (0 = 제한 없음)"
+          },
+          "fullscreen": {
+            "type": "boolean",
+            "default": false,
+            "description": "시작 시 전체화면 전환. macOS만."
           },
           "parent": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "부모 윈도우 name"
-          },
-          "modal": {
-            "type": "boolean",
-            "default": false,
-            "description": "모달 윈도우 (parent 필수)"
-          },
-          "devTools": {
-            "type": "boolean",
-            "default": true,
-            "description": "DevTools 허용 여부"
-          },
-          "contextIsolation": {
-            "type": "boolean",
-            "default": false,
-            "description": "JS 컨텍스트 격리. true면 웹페이지가 suji bridge를 변조할 수 없음."
-          },
-          "incognito": {
-            "type": "boolean",
-            "default": false,
-            "description": "시크릿 모드. 세션/쿠키/캐시를 메모리에만 저장."
-          },
-          "backgroundThrottling": {
-            "type": "boolean",
-            "default": true,
-            "description": "백그라운드 시 타이머/애니메이션 쓰로틀링"
-          },
-          "autoHideMenuBar": {
-            "type": "boolean",
-            "default": false,
-            "description": "메뉴바 자동 숨김 (Alt 키로 토글)"
-          },
-          "userAgent": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "커스텀 User-Agent 문자열"
-          },
-          "darkTheme": {
-            "type": "boolean",
-            "default": false,
-            "description": "다크 테마 강제"
-          },
-          "acceptFirstMouse": {
-            "type": "boolean",
-            "default": false,
-            "description": "비활성 윈도우의 첫 클릭 허용 (macOS)"
-          },
-          "type": {
             "type": "string",
-            "enum": ["normal", "desktop", "dock", "toolbar", "splash", "notification"],
-            "default": "normal",
-            "description": "윈도우 타입"
-          },
-          "roundedCorners": {
-            "type": "boolean",
-            "default": true,
-            "description": "둥근 모서리 (macOS)"
-          },
-          "thickFrame": {
-            "type": "boolean",
-            "default": true,
-            "description": "두꺼운 프레임 스타일 (Windows)"
-          },
-          "tabbingIdentifier": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "네이티브 탭 그룹 식별자 (macOS)"
-          },
-          "hiddenInMissionControl": {
-            "type": "boolean",
-            "default": false,
-            "description": "Mission Control에서 숨김 (macOS)"
-          },
-          "accessibleTitle": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "스크린 리더용 대체 타이틀"
-          },
-          "proxyUrl": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "윈도우별 프록시 URL"
-          },
-          "dataDirectory": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "웹뷰 데이터 디렉토리 (세션 분리용)"
+            "description": "부모 창 이름. addChildWindow로 attach (시각 관계만 — 부모 close해도 자식은 유지). macOS만."
           },
           "url": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "로드할 URL"
+            "type": "string",
+            "description": "초기 로드 URL. 생략 시 frontend dev_url/dist 자동 선택 (첫 창에만 적용)."
           },
-          "file": {
-            "type": ["string", "null"],
-            "default": null,
-            "description": "로드할 로컬 파일 경로"
+          "visible": {
+            "type": "boolean",
+            "default": true,
+            "description": "초기 표시 여부. false면 hidden 상태로 생성."
           },
           "debug": {
             "type": "boolean",
             "default": false,
-            "description": "DevTools 자동 오픈 (개발 시)"
+            "description": "시작 시 DevTools 자동 오픈 (개발용)"
           },
           "protocol": {
             "type": "string",
             "enum": ["file", "suji"],
             "default": "file",
-            "description": "이 윈도우의 프론트엔드 로딩 프로토콜 (메인 윈도우만 의미 있음)"
-          },
-          "visible": {
-            "type": "boolean",
-            "default": true,
-            "description": "초기 표시 여부"
+            "description": "프론트엔드 로딩 프로토콜. 'suji'는 suji:// 커스텀 프로토콜 (CORS/fetch/Cookie/SW 정상 동작)."
           }
         },
         "additionalProperties": false
@@ -406,12 +224,6 @@
           "type": "string",
           "default": "frontend/dist",
           "description": "프로덕션 빌드 출력 디렉토리"
-        },
-        "protocol": {
-          "type": "string",
-          "enum": ["file", "suji"],
-          "default": "file",
-          "description": "프론트엔드 로딩 프로토콜. 'suji': suji:// 커스텀 프로토콜 (CORS/fetch/Cookie/SW 정상 동작). 전역 설정 — 모든 윈도우에 동일 적용."
         }
       },
       "additionalProperties": false

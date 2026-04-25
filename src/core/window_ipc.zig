@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const window = @import("window");
+const util = @import("util");
 
 /// Phase 2.5 — 요청 JSON에 sender 컨텍스트 자동 주입.
 ///   - `__window`: 항상 (sender 창의 WM id)
@@ -80,14 +81,74 @@ pub fn injectWindowField(
 
 // wire 안전성 guard는 window.isJsonSafeChars 사용 (동일 정의).
 
+/// 프론트엔드/백엔드가 `__core__:create_window`로 보내는 요청.
+/// suji.json 시작 창과 동일한 Phase 3 옵션 셋을 평면(flat) 키로 받는다.
+/// JSON 키는 schema.json과 동일한 camelCase (`alwaysOnTop`, `minWidth` 등).
 pub const CreateWindowReq = struct {
     title: []const u8 = "New Window",
     url: ?[]const u8 = null,
-    width: u32 = 800,
-    height: u32 = 600,
     /// name 지정 시 WM singleton 정책 (중복 이름이면 기존 id 반환).
     name: ?[]const u8 = null,
+    width: u32 = 800,
+    height: u32 = 600,
+    /// 초기 위치 (px). 0이면 OS cascade 자동 배치 (config 시작 창과 동일 정책).
+    x: i32 = 0,
+    y: i32 = 0,
+    /// 부모 창 id 직접 지정. parent_name보다 우선.
+    parent_id: ?u32 = null,
+    /// 부모 창 이름. handleCreateWindow에서 wm.fromName으로 resolve.
+    parent_name: ?[]const u8 = null,
+    // ── 외형 (Appearance) ──
+    frame: bool = true,
+    transparent: bool = false,
+    background_color: ?[]const u8 = null,
+    title_bar_style: window.TitleBarStyle = .default,
+    // ── 제약 (Constraints) ──
+    resizable: bool = true,
+    always_on_top: bool = false,
+    min_width: u32 = 0,
+    min_height: u32 = 0,
+    max_width: u32 = 0,
+    max_height: u32 = 0,
+    fullscreen: bool = false,
 };
+
+/// 평면 JSON에서 CreateWindowReq를 복원. config.zig는 std.json(nested object)
+/// 사용하지만 IPC는 평면 키만 받으므로 경량 util.extractJson* 으로 충분.
+/// 반환 슬라이스는 src JSON 버퍼를 가리키므로 호출자가 src 수명 보장 필요.
+pub fn parseCreateWindowFromJson(json: []const u8) CreateWindowReq {
+    var req = CreateWindowReq{};
+    if (util.extractJsonString(json, "title")) |s| req.title = s;
+    if (util.extractJsonString(json, "url")) |s| req.url = s;
+    if (util.extractJsonString(json, "name")) |s| req.name = s;
+    if (util.extractJsonInt(json, "width")) |n| req.width = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "height")) |n| req.height = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "x")) |n| req.x = util.clampI32(n);
+    if (util.extractJsonInt(json, "y")) |n| req.y = util.clampI32(n);
+    if (util.extractJsonInt(json, "parentId")) |n| if (n >= 0) {
+        req.parent_id = util.nonNegU32(n);
+    };
+    if (util.extractJsonString(json, "parent")) |s| req.parent_name = s;
+    if (util.extractJsonBool(json, "frame")) |b| req.frame = b;
+    if (util.extractJsonBool(json, "transparent")) |b| req.transparent = b;
+    if (util.extractJsonString(json, "backgroundColor")) |s| req.background_color = s;
+    if (util.extractJsonString(json, "titleBarStyle")) |s| {
+        if (std.mem.eql(u8, s, "hidden")) {
+            req.title_bar_style = .hidden;
+        } else if (std.mem.eql(u8, s, "hiddenInset")) {
+            req.title_bar_style = .hidden_inset;
+        }
+        // 미인식은 .default 유지 (warning은 caller에서 — 모듈은 silent)
+    }
+    if (util.extractJsonBool(json, "resizable")) |b| req.resizable = b;
+    if (util.extractJsonBool(json, "alwaysOnTop")) |b| req.always_on_top = b;
+    if (util.extractJsonInt(json, "minWidth")) |n| req.min_width = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "minHeight")) |n| req.min_height = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "maxWidth")) |n| req.max_width = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "maxHeight")) |n| req.max_height = util.nonNegU32(n);
+    if (util.extractJsonBool(json, "fullscreen")) |b| req.fullscreen = b;
+    return req;
+}
 
 /// 응답 고정 템플릿 + u32 max (10자리) 합이 62자. 64바이트면 항상 여유.
 const RESPONSE_MIN_LEN = 64;
@@ -103,11 +164,41 @@ pub fn handleCreateWindow(
     wm: *window.WindowManager,
 ) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
+
+    // parent_name → parent_id resolve. parent_id가 명시되어 있으면 그게 우선.
+    var resolved_parent: ?u32 = req.parent_id;
+    if (resolved_parent == null) {
+        if (req.parent_name) |pn| {
+            if (wm.fromName(pn)) |pid| resolved_parent = pid;
+        }
+    }
+
     const id = wm.create(.{
         .name = req.name,
         .title = req.title,
         .url = req.url,
-        .bounds = .{ .width = req.width, .height = req.height },
+        .bounds = .{
+            .x = req.x,
+            .y = req.y,
+            .width = req.width,
+            .height = req.height,
+        },
+        .parent_id = resolved_parent,
+        .appearance = .{
+            .frame = req.frame,
+            .transparent = req.transparent,
+            .background_color = req.background_color,
+            .title_bar_style = req.title_bar_style,
+        },
+        .constraints = .{
+            .resizable = req.resizable,
+            .always_on_top = req.always_on_top,
+            .min_width = req.min_width,
+            .min_height = req.min_height,
+            .max_width = req.max_width,
+            .max_height = req.max_height,
+            .fullscreen = req.fullscreen,
+        },
     }) catch |e| switch (e) {
         window.Error.InvalidName => return std.fmt.bufPrint(
             response_buf,

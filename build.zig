@@ -73,6 +73,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     window_ipc_module.addImport("window", window_module);
+    window_ipc_module.addImport("util", util_module);
     const logger_module = b.createModule(.{
         .root_source_file = b.path("src/core/logger.zig"),
         .target = target,

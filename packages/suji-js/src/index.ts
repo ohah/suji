@@ -97,6 +97,94 @@ export function off(event: string): void {
   if (bridge?.off) bridge.off(event);
 }
 
+// ============================================
+// windows — 런타임 창 생성/조작 (Phase 3 옵션 풀 지원)
+// 내부적으로 `__suji__.core(JSON.stringify({...}))`로 라우팅된다.
+// suji.json startup 창과 동일한 옵션 셋을 노출 (camelCase).
+// ============================================
+
+export type TitleBarStyle = "default" | "hidden" | "hiddenInset";
+
+export interface WindowOptions {
+  /** 창 타이틀 */
+  title?: string;
+  /** 초기 로드 URL. 생략 시 frontend dev_url/dist 자동 선택 */
+  url?: string;
+  /** WM 등록 이름 (singleton 키). 동일 name이 이미 있으면 기존 창 id 반환 */
+  name?: string;
+  width?: number;
+  height?: number;
+  /** 초기 위치 (px). 0/생략 시 OS cascade 자동 배치 */
+  x?: number;
+  y?: number;
+  /** 부모 창 id 직접 지정 (parent보다 우선) */
+  parentId?: number;
+  /** 부모 창 이름 — 코어가 이름→id 변환 */
+  parent?: string;
+  /** false면 frameless (타이틀바/리사이즈 핸들 제거) */
+  frame?: boolean;
+  /** true면 투명 NSWindow + clear background (HTML body도 transparent여야 의미) */
+  transparent?: boolean;
+  /** 16진수 RGB(A) (`#FFFFFF` / `#FFFFFFFF`). transparent와 함께면 transparent 우선 */
+  backgroundColor?: string;
+  titleBarStyle?: TitleBarStyle;
+  /** 사용자 리사이즈 허용 (frame=false일 땐 무시) */
+  resizable?: boolean;
+  /** NSFloatingWindowLevel — 일반 창 위 항상 표시 */
+  alwaysOnTop?: boolean;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  /** 시작 시 전체화면 */
+  fullscreen?: boolean;
+}
+
+export interface CreateWindowResponse {
+  cmd: "create_window";
+  from: "zig-core";
+  windowId: number;
+}
+
+export interface WindowOpResponse {
+  cmd: string;
+  from: "zig-core";
+  windowId: number;
+  ok: boolean;
+}
+
+export interface SetBoundsArgs {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
+  const raw = await getBridge().core(JSON.stringify(request));
+  return (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
+}
+
+export const windows = {
+  /**
+   * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
+   * @returns `{ windowId }` — 후속 setTitle/setBounds 및 `send(_, { to: windowId })`에 사용
+   */
+  create(opts: WindowOptions = {}): Promise<CreateWindowResponse> {
+    return coreCall<CreateWindowResponse>({ cmd: "create_window", ...opts });
+  },
+
+  /** 창 타이틀 변경 */
+  setTitle(windowId: number, title: string): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_title", windowId, title });
+  },
+
+  /** 창 크기/위치 변경. width/height=0이면 현재 유지 */
+  setBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_bounds", windowId, ...bounds });
+  },
+};
+
 /**
  * 여러 백엔드에 동시 요청
  */

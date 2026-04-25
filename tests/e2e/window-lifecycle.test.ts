@@ -123,7 +123,94 @@ describe("window:created event propagation", () => {
 });
 
 // ============================================
-// 3. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
+// 3. Phase 3 옵션 풀 셋 — IPC 파서/정규화/매핑 회귀
+// ============================================
+
+describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)", () => {
+  test("frameless + transparent 창도 정상 응답", async () => {
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "frameless-transparent",
+      url: "about:blank",
+      width: 320,
+      height: 200,
+      frame: false,
+      transparent: true,
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("backgroundColor + titleBarStyle hiddenInset 옵션 수락", async () => {
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "bg+titlebar",
+      url: "about:blank",
+      backgroundColor: "#202020",
+      titleBarStyle: "hiddenInset",
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("invalid backgroundColor (#ZZZZZZ) — 응답 OK + warn 로그만", async () => {
+    // applyBackgroundColor가 silent fail (로그만)이라 IPC는 success.
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "bad-bg",
+      url: "about:blank",
+      backgroundColor: "#ZZZZZZ",
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("min > max — wm가 정규화하므로 에러 없이 생성", async () => {
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "min-gt-max",
+      url: "about:blank",
+      minWidth: 800,
+      maxWidth: 400,
+      minHeight: 600,
+      maxHeight: 200,
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("parent name으로 부모 창 attach (silent fail-safe — 미존재면 무시)", async () => {
+    // ghost 부모는 wm.fromName에서 null → cef는 attach 안 함, 자식 창은 정상 생성.
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "orphan-with-ghost-parent",
+      url: "about:blank",
+      parent: "this-name-does-not-exist",
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("alwaysOnTop + fullscreen + resizable=false 동시 set", async () => {
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "always-top",
+      url: "about:blank",
+      alwaysOnTop: true,
+      resizable: false,
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("x/y 음수 (화면 왼쪽 밖 배치) 수락", async () => {
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "off-screen",
+      url: "about:blank",
+      x: -50,
+      y: -10,
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+  });
+});
+
+// ============================================
+// 4. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
 // ============================================
 
 describe("log file output", () => {

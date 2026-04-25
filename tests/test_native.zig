@@ -16,6 +16,12 @@ pub const TestNative = struct {
     focus_calls: usize = 0,
     last_title: ?[]const u8 = null,
     last_bounds: ?window.Bounds = null,
+    /// 마지막 createWindow에 전달된 옵션의 sub-struct/parent_id 캡처 (Phase 3 매핑 검증용).
+    /// 슬라이스 멤버(title/url/background_color)는 얕은 복사 — caller가 src 수명 보장.
+    last_appearance: ?window.Appearance = null,
+    last_constraints: ?window.Constraints = null,
+    last_parent_id: ?u32 = null,
+    last_create_bounds: ?window.Bounds = null,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
@@ -40,13 +46,17 @@ pub const TestNative = struct {
         return @ptrCast(@alignCast(ctx.?));
     }
 
-    fn createWindow(ctx: ?*anyopaque, _: *const window.CreateOptions) anyerror!u64 {
+    fn createWindow(ctx: ?*anyopaque, opts: *const window.CreateOptions) anyerror!u64 {
         const self = fromCtx(ctx);
         if (self.fail_next_create) {
             self.fail_next_create = false;
             return error.NativeFailure;
         }
         self.create_calls += 1;
+        self.last_appearance = opts.appearance;
+        self.last_constraints = opts.constraints;
+        self.last_parent_id = opts.parent_id;
+        self.last_create_bounds = opts.bounds;
         const handle = self.next_handle;
         self.next_handle += 1;
         return handle;

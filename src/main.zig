@@ -1017,16 +1017,14 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     var req_buf: [4096]u8 = undefined;
     const req_clean = unescapeJson(request_str, &req_buf);
 
-    // create_window 커맨드 — WM 경유
+    // create_window 커맨드 — WM 경유. Phase 3 옵션 풀 셋은 window_ipc에서 파싱.
     if (std.mem.indexOf(u8, req_clean, "create_window") != null) {
         const wm = window_mod.WindowManager.global orelse return null;
-        return window_ipc.handleCreateWindow(.{
-            .title = util.extractJsonString(req_clean, "title") orelse "New Window",
-            .url = util.extractJsonString(req_clean, "url"),
-            .name = util.extractJsonString(req_clean, "name"),
-            .width = 600,
-            .height = 400,
-        }, response_buf, wm);
+        return window_ipc.handleCreateWindow(
+            window_ipc.parseCreateWindowFromJson(req_clean),
+            response_buf,
+            wm,
+        );
     }
 
     // set_title 커맨드

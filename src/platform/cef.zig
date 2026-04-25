@@ -1832,10 +1832,33 @@ const initWindowInfo = if (is_macos) struct {
         return handles.ns_window;
     }
 }.call else struct {
-    fn call(_: *c.cef_window_info_t, _: WindowInitOpts) ?*anyopaque {
+    fn call(_: *c.cef_window_info_t, opts: WindowInitOpts) ?*anyopaque {
+        warnUnsupportedOptionsOnce(opts);
         return null;
     }
 }.call;
+
+/// Phase 3 옵션 중 macOS-only가 set되어 있으면 process당 한 번만 stderr에 안내.
+/// silent no-op이면 사용자가 "왜 안 되지?" 디버그하게 됨 → 명시적 warn.
+var g_warned_unsupported_options: bool = false;
+fn warnUnsupportedOptionsOnce(opts: WindowInitOpts) void {
+    if (g_warned_unsupported_options) return;
+    const ap = opts.appearance;
+    const cs = opts.constraints;
+    const has_mac_only =
+        !ap.frame or ap.transparent or
+        ap.background_color != null or ap.title_bar_style != .default or
+        cs.always_on_top or cs.fullscreen or
+        cs.min_width != 0 or cs.min_height != 0 or
+        cs.max_width != 0 or cs.max_height != 0 or
+        opts.parent_id != null;
+    if (!has_mac_only) return;
+    g_warned_unsupported_options = true;
+    std.debug.print(
+        "[suji] warning: window appearance/constraints (frame/transparent/parent/always_on_top/title_bar_style/min·max/fullscreen/background_color) are macOS-only and were ignored on this platform\n",
+        .{},
+    );
+}
 
 // ============================================
 // macOS Objective-C Helpers

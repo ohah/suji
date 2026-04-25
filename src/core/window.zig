@@ -65,6 +65,26 @@ pub const Constraints = struct {
     fullscreen: bool = false,
 };
 
+/// min > max (max > 0인 경우만)면 max를 0(제한 없음)으로 reset.
+/// Cocoa의 setContentMaxSize: 동작이 모호한 잘못된 입력을 정상화.
+/// 사용자에게 한 번 안내해 silent fix를 자각시킴.
+pub fn normalizeConstraints(c: *Constraints) void {
+    if (c.max_width > 0 and c.min_width > c.max_width) {
+        std.debug.print(
+            "[suji] warning: min_width({d}) > max_width({d}) — clearing max_width\n",
+            .{ c.min_width, c.max_width },
+        );
+        c.max_width = 0;
+    }
+    if (c.max_height > 0 and c.min_height > c.max_height) {
+        std.debug.print(
+            "[suji] warning: min_height({d}) > max_height({d}) — clearing max_height\n",
+            .{ c.min_height, c.max_height },
+        );
+        c.max_height = 0;
+    }
+}
+
 pub const CreateOptions = struct {
     name: ?[]const u8 = null,
     title: []const u8 = "Suji",
@@ -276,7 +296,10 @@ pub const WindowManager = struct {
     /// - 빈 문자열("")은 name=null로 취급 (by_name 등록 X)
     /// - forceNew=true면 기존 name 소유자를 빼앗지 않음. 새 창은 **익명**(Window.name=null)
     ///   으로 생성. fromName(n)은 계속 첫 창을 가리킴.
-    pub fn create(self: *WindowManager, opts: CreateOptions) Error!u32 {
+    pub fn create(self: *WindowManager, opts_in: CreateOptions) Error!u32 {
+        var opts = opts_in;
+        normalizeConstraints(&opts.constraints);
+
         // 빈 문자열 name 정규화
         const requested_name: ?[]const u8 = if (opts.name) |n|
             (if (n.len == 0) null else n)

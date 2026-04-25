@@ -36,6 +36,14 @@ pub fn nonNegU32(v: i64) u32 {
     return @intCast(v);
 }
 
+/// i64 → i32 변환 (i32 범위 밖은 양/음 한쪽으로 clamp).
+/// 창 좌표(x/y)에 사용 — 음수 허용 (화면 왼쪽 밖 배치 가능).
+pub fn clampI32(v: i64) i32 {
+    if (v > std.math.maxInt(i32)) return std.math.maxInt(i32);
+    if (v < std.math.minInt(i32)) return std.math.minInt(i32);
+    return @intCast(v);
+}
+
 /// IPC 버퍼 크기 상수
 pub const MAX_CHANNEL_NAME = 256;
 pub const MAX_REQUEST = 8192;

@@ -2023,3 +2023,71 @@ test "escapeJsonChars: 이스케이프 + control drop 혼합" {
     // \n drop, " → \", \ → \\
     try std.testing.expectEqualStrings("a\\\"bc\\\\d", buf[0..n]);
 }
+
+// ============================================
+// Phase 3 — normalizeConstraints (에러 케이스 정규화)
+// ============================================
+
+test "normalizeConstraints: min_width > max_width → max_width 0으로 reset" {
+    var c = window.Constraints{ .min_width = 800, .max_width = 400 };
+    window.normalizeConstraints(&c);
+    try std.testing.expectEqual(@as(u32, 800), c.min_width);
+    try std.testing.expectEqual(@as(u32, 0), c.max_width);
+}
+
+test "normalizeConstraints: min_height > max_height → max_height 0으로 reset" {
+    var c = window.Constraints{ .min_height = 600, .max_height = 200 };
+    window.normalizeConstraints(&c);
+    try std.testing.expectEqual(@as(u32, 600), c.min_height);
+    try std.testing.expectEqual(@as(u32, 0), c.max_height);
+}
+
+test "normalizeConstraints: max=0 (제한 없음)이면 min과 무관하게 그대로" {
+    var c = window.Constraints{ .min_width = 1000, .min_height = 800 };
+    window.normalizeConstraints(&c);
+    try std.testing.expectEqual(@as(u32, 0), c.max_width);
+    try std.testing.expectEqual(@as(u32, 0), c.max_height);
+}
+
+test "normalizeConstraints: min == max는 정상 (변경 없음)" {
+    var c = window.Constraints{ .min_width = 500, .max_width = 500 };
+    window.normalizeConstraints(&c);
+    try std.testing.expectEqual(@as(u32, 500), c.min_width);
+    try std.testing.expectEqual(@as(u32, 500), c.max_width);
+}
+
+test "normalizeConstraints: 다른 필드(resizable, always_on_top, fullscreen)는 건드리지 않음" {
+    var c = window.Constraints{
+        .resizable = false,
+        .always_on_top = true,
+        .fullscreen = true,
+        .min_width = 100,
+        .max_width = 50,
+    };
+    window.normalizeConstraints(&c);
+    try std.testing.expect(!c.resizable);
+    try std.testing.expect(c.always_on_top);
+    try std.testing.expect(c.fullscreen);
+}
+
+test "create: min > max는 wm.create가 정규화 적용" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{ .constraints = .{ .min_width = 800, .max_width = 400 } });
+    // last_constraints는 native.createWindow에 전달된 (정규화된) 값
+    const co = native.last_constraints.?;
+    try std.testing.expectEqual(@as(u32, 800), co.min_width);
+    try std.testing.expectEqual(@as(u32, 0), co.max_width);
+}
+
+test "create: parent_id가 미존재라도 wm 단에서 거부 안 함 (silent — cef가 fail-safe)" {
+    // wm은 parent의 존재 여부를 검증하지 않는다. 정책: 자식 창은 그대로 생성, parent attach만 silent fail.
+    // 이 동작은 변경하지 않음을 회귀 테스트로 고정.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{ .parent_id = 999 });
+    try std.testing.expect(id >= 1);
+    try std.testing.expectEqual(@as(?u32, 999), native.last_parent_id);
+}

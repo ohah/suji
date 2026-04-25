@@ -451,3 +451,199 @@ test "injectWindowField: 모든 필드 동시 주입 순서 (id, name, url, main
         out,
     );
 }
+
+// ============================================
+// Phase 3 — parseCreateWindowFromJson (평면 JSON → CreateWindowReq)
+// ============================================
+
+test "parseCreateWindowFromJson: 기본값 (모든 필드 누락)" {
+    const req = ipc.parseCreateWindowFromJson("{}");
+    try std.testing.expectEqualStrings("New Window", req.title);
+    try std.testing.expectEqual(@as(?[]const u8, null), req.url);
+    try std.testing.expectEqual(@as(u32, 800), req.width);
+    try std.testing.expectEqual(@as(u32, 600), req.height);
+    try std.testing.expectEqual(@as(i32, 0), req.x);
+    try std.testing.expectEqual(@as(i32, 0), req.y);
+    try std.testing.expect(req.frame);
+    try std.testing.expect(!req.transparent);
+    try std.testing.expect(req.resizable);
+    try std.testing.expect(!req.always_on_top);
+    try std.testing.expect(!req.fullscreen);
+    try std.testing.expectEqual(window.TitleBarStyle.default, req.title_bar_style);
+}
+
+test "parseCreateWindowFromJson: title/url/name/width/height" {
+    const req = ipc.parseCreateWindowFromJson(
+        "{\"cmd\":\"create_window\",\"title\":\"Hi\",\"url\":\"http://x/\",\"name\":\"main\",\"width\":1024,\"height\":768}",
+    );
+    try std.testing.expectEqualStrings("Hi", req.title);
+    try std.testing.expectEqualStrings("http://x/", req.url.?);
+    try std.testing.expectEqualStrings("main", req.name.?);
+    try std.testing.expectEqual(@as(u32, 1024), req.width);
+    try std.testing.expectEqual(@as(u32, 768), req.height);
+}
+
+test "parseCreateWindowFromJson: x/y 음수 (화면 왼쪽 밖 배치 허용)" {
+    const req = ipc.parseCreateWindowFromJson("{\"x\":-100,\"y\":-50}");
+    try std.testing.expectEqual(@as(i32, -100), req.x);
+    try std.testing.expectEqual(@as(i32, -50), req.y);
+}
+
+test "parseCreateWindowFromJson: width 음수 → 0 clamp (panic 방지)" {
+    const req = ipc.parseCreateWindowFromJson("{\"width\":-50,\"height\":-1}");
+    try std.testing.expectEqual(@as(u32, 0), req.width);
+    try std.testing.expectEqual(@as(u32, 0), req.height);
+}
+
+test "parseCreateWindowFromJson: appearance — frame/transparent/backgroundColor" {
+    const req = ipc.parseCreateWindowFromJson(
+        "{\"frame\":false,\"transparent\":true,\"backgroundColor\":\"#FF00FF\"}",
+    );
+    try std.testing.expect(!req.frame);
+    try std.testing.expect(req.transparent);
+    try std.testing.expectEqualStrings("#FF00FF", req.background_color.?);
+}
+
+test "parseCreateWindowFromJson: titleBarStyle hidden / hiddenInset / 미인식" {
+    try std.testing.expectEqual(
+        window.TitleBarStyle.hidden,
+        ipc.parseCreateWindowFromJson("{\"titleBarStyle\":\"hidden\"}").title_bar_style,
+    );
+    try std.testing.expectEqual(
+        window.TitleBarStyle.hidden_inset,
+        ipc.parseCreateWindowFromJson("{\"titleBarStyle\":\"hiddenInset\"}").title_bar_style,
+    );
+    // 미인식은 default 유지 (silent)
+    try std.testing.expectEqual(
+        window.TitleBarStyle.default,
+        ipc.parseCreateWindowFromJson("{\"titleBarStyle\":\"bogus\"}").title_bar_style,
+    );
+}
+
+test "parseCreateWindowFromJson: constraints — resizable/alwaysOnTop/min·max/fullscreen" {
+    const req = ipc.parseCreateWindowFromJson(
+        "{\"resizable\":false,\"alwaysOnTop\":true,\"minWidth\":200,\"minHeight\":150,\"maxWidth\":1000,\"maxHeight\":900,\"fullscreen\":true}",
+    );
+    try std.testing.expect(!req.resizable);
+    try std.testing.expect(req.always_on_top);
+    try std.testing.expectEqual(@as(u32, 200), req.min_width);
+    try std.testing.expectEqual(@as(u32, 150), req.min_height);
+    try std.testing.expectEqual(@as(u32, 1000), req.max_width);
+    try std.testing.expectEqual(@as(u32, 900), req.max_height);
+    try std.testing.expect(req.fullscreen);
+}
+
+test "parseCreateWindowFromJson: parentId / parent name 둘 다 노출" {
+    const req1 = ipc.parseCreateWindowFromJson("{\"parentId\":42}");
+    try std.testing.expectEqual(@as(?u32, 42), req1.parent_id);
+    try std.testing.expectEqual(@as(?[]const u8, null), req1.parent_name);
+
+    const req2 = ipc.parseCreateWindowFromJson("{\"parent\":\"main\"}");
+    try std.testing.expectEqual(@as(?u32, null), req2.parent_id);
+    try std.testing.expectEqualStrings("main", req2.parent_name.?);
+}
+
+test "parseCreateWindowFromJson: parentId 음수는 무시" {
+    const req = ipc.parseCreateWindowFromJson("{\"parentId\":-1}");
+    try std.testing.expectEqual(@as(?u32, null), req.parent_id);
+}
+
+// ============================================
+// Phase 3 — handleCreateWindow가 sub-struct 매핑까지 전달하는지
+// ============================================
+
+test "handleCreateWindow: appearance/constraints가 native.createWindow까지 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleCreateWindow(.{
+        .title = "x",
+        .frame = false,
+        .transparent = true,
+        .background_color = "#000000",
+        .title_bar_style = .hidden_inset,
+        .resizable = false,
+        .always_on_top = true,
+        .min_width = 100,
+        .max_width = 2000,
+        .fullscreen = true,
+        .x = -10,
+        .y = 20,
+        .width = 500,
+        .height = 400,
+    }, &buf, &wm).?;
+
+    const ap = native.last_appearance.?;
+    try std.testing.expect(!ap.frame);
+    try std.testing.expect(ap.transparent);
+    try std.testing.expectEqualStrings("#000000", ap.background_color.?);
+    try std.testing.expectEqual(window.TitleBarStyle.hidden_inset, ap.title_bar_style);
+
+    const co = native.last_constraints.?;
+    try std.testing.expect(!co.resizable);
+    try std.testing.expect(co.always_on_top);
+    try std.testing.expectEqual(@as(u32, 100), co.min_width);
+    try std.testing.expectEqual(@as(u32, 2000), co.max_width);
+    try std.testing.expect(co.fullscreen);
+
+    const bd = native.last_create_bounds.?;
+    try std.testing.expectEqual(@as(i32, -10), bd.x);
+    try std.testing.expectEqual(@as(i32, 20), bd.y);
+    try std.testing.expectEqual(@as(u32, 500), bd.width);
+    try std.testing.expectEqual(@as(u32, 400), bd.height);
+}
+
+test "handleCreateWindow: parent_id 직접 지정 → CreateOptions.parent_id 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    // parent 후보 창 먼저 생성
+    const parent_id = try wm.create(.{ .name = "parent-win" });
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleCreateWindow(.{ .parent_id = parent_id }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(?u32, parent_id), native.last_parent_id);
+}
+
+test "handleCreateWindow: parent_name → wm.fromName으로 resolve" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    const parent_id = try wm.create(.{ .name = "shell" });
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleCreateWindow(.{ .parent_name = "shell" }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(?u32, parent_id), native.last_parent_id);
+}
+
+test "handleCreateWindow: parent_id가 parent_name보다 우선" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    const a = try wm.create(.{ .name = "a" });
+    _ = try wm.create(.{ .name = "b" });
+
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleCreateWindow(.{
+        .parent_id = a,
+        .parent_name = "b", // 무시되어야 함
+    }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(?u32, a), native.last_parent_id);
+}
+
+test "handleCreateWindow: parent_name 미존재면 parent_id null (silent)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleCreateWindow(.{ .parent_name = "ghost" }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(?u32, null), native.last_parent_id);
+}

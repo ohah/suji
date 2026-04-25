@@ -52,10 +52,12 @@ export function once(event, callback) {
     return cancel;
 }
 /**
- * 이벤트 발신 (Electron: ipcRenderer.send)
+ * 이벤트 발신 (Electron: ipcRenderer.send / webContents.send)
+ *
+ * @param options.to - 특정 창 id 지정 시 해당 창에만. 생략 시 모든 창으로 브로드캐스트.
  */
-export function send(event, data) {
-    getBridge().emit(event, JSON.stringify(data ?? {}));
+export function send(event, data, options) {
+    getBridge().emit(event, JSON.stringify(data ?? {}), options?.to);
 }
 /**
  * 채널의 모든 리스너 해제 (Electron: ipcRenderer.removeAllListeners)
@@ -65,6 +67,27 @@ export function off(event) {
     if (bridge?.off)
         bridge.off(event);
 }
+async function coreCall(request) {
+    const raw = await getBridge().core(JSON.stringify(request));
+    return (typeof raw === "string" ? JSON.parse(raw) : raw);
+}
+export const windows = {
+    /**
+     * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
+     * @returns `{ windowId }` — 후속 setTitle/setBounds 및 `send(_, { to: windowId })`에 사용
+     */
+    create(opts = {}) {
+        return coreCall({ cmd: "create_window", ...opts });
+    },
+    /** 창 타이틀 변경 */
+    setTitle(windowId, title) {
+        return coreCall({ cmd: "set_title", windowId, title });
+    },
+    /** 창 크기/위치 변경. width/height=0이면 현재 유지 */
+    setBounds(windowId, bounds) {
+        return coreCall({ cmd: "set_bounds", windowId, ...bounds });
+    },
+};
 /**
  * 여러 백엔드에 동시 요청
  */
