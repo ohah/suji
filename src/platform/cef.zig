@@ -2094,6 +2094,11 @@ pub const MacWindowHandles = struct {
     ns_window: ?*anyopaque,
 };
 
+/// NSWindow 다중 cascade origin — 첫 호출은 (0, 0)으로 시작 (NSWindow가 화면에 적당히 배치),
+/// 이후 매 호출마다 cascadeTopLeftFromPoint: 반환값으로 갱신 → 18px 우/하 offset 자동.
+const NSPoint = extern struct { x: f64, y: f64 };
+var g_cascade_point: NSPoint = .{ .x = 0, .y = 0 };
+
 fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const NSWindow = getClass("NSWindow") orelse return .{ .content_view = null, .ns_window = null };
     const window_alloc = msgSend(NSWindow, "alloc") orelse return .{ .content_view = null, .ns_window = null };
@@ -2109,7 +2114,22 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
         .w = @floatFromInt(opts.width), .h = @floatFromInt(opts.height),
     }, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
 
+    // 다중 창 cascade — 매 호출마다 OS가 18px씩 offset. 첫 창은 (200, 200) 그대로, 다음부터
+    // 우/하로 자동 분산 → 새 창이 이전 창에 완전히 겹쳐 안 보이는 문제 방지.
+    // [NSWindow cascadeTopLeftFromPoint:] 반환은 다음 호출에 넘길 새 origin.
+    {
+        const sel = objc.sel_registerName("cascadeTopLeftFromPoint:");
+        const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, NSPoint) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
+        g_cascade_point = fn_ptr(window, @ptrCast(sel), g_cascade_point);
+    }
+
     if (opts.transparent) applyTransparency(window);
+
+    // **알려진 한계**: frameless 창의 `-webkit-app-region: drag`는 CEF Alloy 런타임에서
+    // 자동 라우팅되지 않는다 (CEF view가 NSWindow의 마우스 이벤트를 swallow). 정식 해결은
+    // cef_drag_handler_t.OnDraggableRegionsChanged 콜백을 등록 + 받은 NSRect 영역에서
+    // [NSWindow performWindowDragWithEvent:]를 호출하는 custom NSView wrapper. Phase 4 백로그.
+    // 임시: NSWindow.setMovableByWindowBackground도 contentView가 CEF view라 효과 없음.
 
     // setTitle (frameless여도 NSWindow.title은 메뉴바/창 목록에 표시됨)
     const NSString = getClass("NSString") orelse return .{ .content_view = null, .ns_window = window };

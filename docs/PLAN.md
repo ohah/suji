@@ -444,6 +444,13 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           현재는 DevTools 자체만 reload되고 main frame은 변동 없음. CEF DevTools front-end의
           reload 명령을 캐치 → host.get_browser().reload() 호출 또는 ReloadIgnoreCache.
           확인 위치: cef.zig DevTools client (g_devtools_client) 또는 OnPreKeyEvent에 추가 핸들링.
+    - [ ] **frameless drag region (`-webkit-app-region: drag`) — CEF Alloy 라우팅**.
+          현재는 HTML에 drag region을 지정해도 CEF view가 마우스 이벤트를 swallow해서 동작 X.
+          정식: `cef_drag_handler_t` vtable + `on_draggable_regions_changed` 콜백 등록 →
+          받은 `cef_draggable_region_t` 배열을 macOS `NSView` hit-test로 라우팅 (custom
+          contentView wrapper에서 mouseDown 시 영역 안이면 `[window performWindowDragWithEvent:]`).
+          Linux GTK는 `gtk_window_begin_move_drag`, Windows는 `WM_NCHITTEST` HTCAPTION 반환.
+          현재 임시 한계 — frameless 창 이동 불가. (examples/window-styles README에 명시.)
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)

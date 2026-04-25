@@ -38,3 +38,7 @@ fn hudToast(req: suji.Request, event: suji.InvokeEvent) suji.Response {
 fn onWindowAllClosed(_: suji.Event) void {
     if (!std.mem.eql(u8, suji.platform(), suji.PLATFORM_MACOS)) suji.quit();
 }
+
+comptime {
+    _ = suji.exportApp(app);
+}

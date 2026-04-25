@@ -51,6 +51,12 @@ html, body { background: transparent; }
 
 메인 창에서 "HUD에 toast" 버튼 → Zig backend의 `hud-toast` 핸들러 → `suji.send('hud:toast', ...)` broadcast → HUD만 `on('hud:toast')` 구독해서 표시.
 
+## 알려진 한계
+
+**frameless 드래그 미동작**: `-webkit-app-region: drag` CSS는 HTML에 들어있지만 CEF Alloy 런타임에서 자동 라우팅되지 않아 **현재 frameless 창은 이동 불가**. 정식 해결은 CEF의 `cef_drag_handler_t.on_draggable_regions_changed` 콜백 + custom NSView hit-test wrapper — Phase 4 백로그 (PLAN.md 참조).
+
+지금은 데모로 frame/transparent/parent 시각 효과만 확인 가능. 실제 앱에서 frameless 창이 필요하면 백로그 처리 후 사용 권장.
+
 ## 플랫폼
 
 현재 frame/transparent/parent는 **macOS만 지원** (NSWindow API). Linux/Windows에서는 옵션이 무시되고 일반 창으로 뜸.
