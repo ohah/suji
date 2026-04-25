@@ -311,10 +311,12 @@ pub const CefNative = struct {
             .width = @intCast(opts.bounds.width),
             .height = @intCast(opts.bounds.height),
         };
-        const ns_window = initWindowInfo(&window_info, .{
+        const ns_window = initWindowInfo(&window_info, WindowInitOpts{
             .title = title_z,
             .width = @intCast(opts.bounds.width),
             .height = @intCast(opts.bounds.height),
+            .frame = opts.frame,
+            .transparent = opts.transparent,
         });
         setCefString(&window_info.window_name, title_z);
 
@@ -323,6 +325,9 @@ pub const CefNative = struct {
 
         var browser_settings: c.cef_browser_settings_t = undefined;
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
+        // transparent면 CEF browser의 기본 배경을 0(완전 투명)로 → HTML body가 투명하면
+        // OS 윈도우까지 그대로 비침. 0xFF000000 alpha 마스크는 0 = transparent.
+        if (opts.transparent) browser_settings.background_color = 0;
 
         const browser = c.cef_browser_host_create_browser_sync(
             &window_info,
@@ -344,6 +349,20 @@ pub const CefNative = struct {
             if (host) |h| h.close_browser.?(h, 1);
             return error.OutOfMemory;
         };
+
+        // parent_id가 지정됐으면 시각 관계 설정 (PLAN: 재귀 close X — 부모 close해도 자식 유지).
+        // macOS는 NSWindow.addChildWindow:ordered:로 자식이 부모 위에 floating + 따라 이동.
+        // browsers.put 다음에 처리 — put 실패 시 attach 스킵.
+        if (comptime is_macos) blk: {
+            const parent_id = opts.parent_id orelse break :blk;
+            const wm = window_mod.WindowManager.global orelse break :blk;
+            const parent_win = wm.get(parent_id) orelse break :blk;
+            const parent_entry = self.browsers.get(parent_win.native_handle) orelse break :blk;
+            const parent_ns = parent_entry.ns_window orelse break :blk;
+            const child_ns = ns_window orelse break :blk;
+            attachMacChildWindow(parent_ns, child_ns);
+        }
+
         return handle;
     }
 
@@ -1780,18 +1799,29 @@ fn mimeTypeForPath(path: []const u8) [:0]const u8 {
     return "application/octet-stream";
 }
 
+/// 플랫폼별 윈도우 초기화 옵션. CefConfig(process-level)와 분리 — frame/transparent 같은 per-window 속성.
+pub const WindowInitOpts = struct {
+    title: [:0]const u8,
+    width: i32,
+    height: i32,
+    /// false면 frameless (NSWindowStyleMaskBorderless).
+    frame: bool = true,
+    /// true면 NSWindow.opaque=false + clear background color.
+    transparent: bool = false,
+};
+
 /// 플랫폼별 윈도우 초기화. 반환값: macOS에서만 NSWindow 포인터 (이후 close 트리거용).
 /// Linux/Windows는 CEF가 자체 창을 만들므로 null.
 const initWindowInfo = if (is_macos) struct {
-    fn call(window_info: *c.cef_window_info_t, config: CefConfig) ?*anyopaque {
-        const handles = createMacWindow(config.title, config.width, config.height);
+    fn call(window_info: *c.cef_window_info_t, opts: WindowInitOpts) ?*anyopaque {
+        const handles = createMacWindow(opts);
         if (handles.content_view) |cv| {
             window_info.parent_view = cv;
         }
         return handles.ns_window;
     }
 }.call else struct {
-    fn call(_: *c.cef_window_info_t, _: CefConfig) ?*anyopaque {
+    fn call(_: *c.cef_window_info_t, _: WindowInitOpts) ?*anyopaque {
         return null;
     }
 }.call;
@@ -2050,24 +2080,50 @@ pub const MacWindowHandles = struct {
     ns_window: ?*anyopaque,
 };
 
-fn createMacWindow(title: [:0]const u8, width: i32, height: i32) MacWindowHandles {
+fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const NSWindow = getClass("NSWindow") orelse return .{ .content_view = null, .ns_window = null };
     const window_alloc = msgSend(NSWindow, "alloc") orelse return .{ .content_view = null, .ns_window = null };
 
     const NSRect = extern struct { x: f64, y: f64, w: f64, h: f64 };
     const initSel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
     const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u64, u64, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const style: u64 = 1 | 2 | 4 | 8; // titled|closable|miniaturizable|resizable
+    // NSWindowStyleMask: titled(1)+closable(2)+miniaturizable(4)+resizable(8). frame=false면 borderless(0).
+    // borderless는 별도 키보드/마우스 처리 + drag region을 사용자가 직접 만들어야 함.
+    const style: u64 = if (opts.frame) (1 | 2 | 4 | 8) else 0;
     const window = initFn(window_alloc, @ptrCast(initSel), .{
         .x = 200, .y = 200,
-        .w = @floatFromInt(width), .h = @floatFromInt(height),
+        .w = @floatFromInt(opts.width), .h = @floatFromInt(opts.height),
     }, style, 2, 0) orelse return .{ .content_view = null, .ns_window = null };
 
-    // setTitle
+    // transparent: NSWindow.opaque=NO + backgroundColor=clearColor + hasShadow=NO.
+    // frame이 있을 때도 transparent를 적용 가능하지만 보통 frameless와 함께 씀.
+    if (opts.transparent) {
+        const setOpaqueSel = objc.sel_registerName("setOpaque:");
+        const setOpaqueFn: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+        setOpaqueFn(window, @ptrCast(setOpaqueSel), 0);
+
+        // [NSColor clearColor]
+        const NSColor = getClass("NSColor") orelse return .{ .content_view = null, .ns_window = window };
+        const clearSel = objc.sel_registerName("clearColor");
+        const clear_color = msgSend(NSColor, "clearColor");
+        _ = clearSel;
+        if (clear_color) |cc| {
+            const setBgSel = objc.sel_registerName("setBackgroundColor:");
+            const setBgFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+            setBgFn(window, @ptrCast(setBgSel), cc);
+        }
+
+        // hasShadow=NO — 투명 창은 그림자가 어색함
+        const setShadowSel = objc.sel_registerName("setHasShadow:");
+        const setShadowFn: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+        setShadowFn(window, @ptrCast(setShadowSel), 0);
+    }
+
+    // setTitle (frameless여도 NSWindow.title은 메뉴바/창 목록에 표시됨)
     const NSString = getClass("NSString") orelse return .{ .content_view = null, .ns_window = window };
     const strSel = objc.sel_registerName("stringWithUTF8String:");
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const ns_title = strFn(NSString, @ptrCast(strSel), title.ptr);
+    const ns_title = strFn(NSString, @ptrCast(strSel), opts.title.ptr);
     const setTitleSel = objc.sel_registerName("setTitle:");
     const setTitleFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     setTitleFn(window, @ptrCast(setTitleSel), ns_title);
@@ -2082,6 +2138,14 @@ fn createMacWindow(title: [:0]const u8, width: i32, height: i32) MacWindowHandle
     makeKeyFn(window, @ptrCast(makeKeySel), null);
 
     return .{ .content_view = contentView, .ns_window = window };
+}
+
+/// macOS: 자식 창을 부모 위에 attach. NSWindow.addChildWindow:ordered:NSWindowAbove(1).
+/// 시각 관계만 — 자식은 부모와 함께 이동/min/order 변경되지만 수명은 독립 (PLAN 재귀 close X).
+fn attachMacChildWindow(parent: *anyopaque, child: *anyopaque) void {
+    const sel = objc.sel_registerName("addChildWindow:ordered:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    fn_ptr(parent, @ptrCast(sel), child, 1); // NSWindowAbove = 1
 }
 
 /// macOS: NSWindow에 `close` 메시지 송신. NSBrowserView가 content view에서 떨어져

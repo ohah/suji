@@ -35,6 +35,9 @@ beforeAll(async () => {
   browser = await puppeteer.connect({
     browserURL: "http://localhost:9222",
     protocolTimeout: 10000,
+    // CEF 실제 창 크기를 그대로 사용. 명시 안 하면 puppeteer가 800x600으로 viewport를
+    // 강제 emulation해서 window.innerWidth / page.screenshot 결과가 실제 NSWindow와 달라짐.
+    defaultViewport: null,
   });
   const pages = await browser.pages();
   expect(pages.length).toBeGreaterThan(0);

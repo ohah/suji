@@ -187,6 +187,103 @@ test "create with empty name is treated as anonymous (no InvalidName)" {
 }
 
 // ============================================
+// Phase 3: frame / transparent / parent_id (외형 옵션)
+// ============================================
+
+test "CreateOptions defaults — frame=true, transparent=false, parent_id=null" {
+    const opts = window.CreateOptions{};
+    try std.testing.expectEqual(true, opts.frame);
+    try std.testing.expectEqual(false, opts.transparent);
+    try std.testing.expectEqual(@as(?u32, null), opts.parent_id);
+}
+
+test "create accepts frame=false (frameless) without error" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{ .frame = false });
+    try std.testing.expect(id >= 1);
+    // 옵션은 native vtable로 전달되며 WM 자체는 frame 상태를 보관하지 않음 (네이티브가 소유).
+    try std.testing.expectEqual(@as(usize, 1), native.create_calls);
+}
+
+test "create accepts transparent=true without error" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{ .transparent = true });
+    try std.testing.expect(id >= 1);
+}
+
+test "create with parent_id: 부모 close해도 자식은 살아있음 (재귀 close X)" {
+    // PLAN 핵심 결정: 부모-자식은 시각 관계만, 재귀 close 없음.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const parent_id = try wm.create(.{ .name = "parent" });
+    const child_id = try wm.create(.{ .name = "child", .parent_id = parent_id });
+    try std.testing.expect(parent_id != child_id);
+
+    // 부모만 destroy
+    try wm.destroy(parent_id);
+
+    // 자식은 여전히 살아있어야
+    const child = wm.get(child_id) orelse return error.ChildVanished;
+    try std.testing.expect(!child.destroyed);
+    try std.testing.expectEqual(parent_id, child.parent_id.?);
+}
+
+test "create with parent_id pointing to nonexistent window — 그대로 옵션 보존" {
+    // WM은 parent_id 유효성 검증 안 함 (native vtable의 책임).
+    // 잘못된 id를 받아도 child window 자체 생성은 성공해야.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{ .parent_id = 999 });
+    try std.testing.expect(id >= 1);
+    try std.testing.expectEqual(@as(?u32, 999), wm.get(id).?.parent_id);
+}
+
+test "create with parent_id + force_new=true — singleton 우회 시에도 parent_id 보존" {
+    // 같은 name이지만 force_new=true → 새 익명 창 생성. parent_id가 옵션이므로 무시되지 않아야.
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const parent_id = try wm.create(.{ .name = "parent" });
+    _ = try wm.create(.{ .name = "child", .parent_id = parent_id });
+    const child2_id = try wm.create(.{ .name = "child", .parent_id = parent_id, .force_new = true });
+
+    const child2 = wm.get(child2_id) orelse return error.MissingChild2;
+    // forceNew=true는 by_name 등록 안 함 (name 탈취 방지) — Window.name=null이지만 parent_id는 유지.
+    try std.testing.expectEqual(@as(?[]const u8, null), child2.name);
+    try std.testing.expectEqual(@as(?u32, parent_id), child2.parent_id);
+}
+
+test "create child + child destroy — 부모는 영향 없음" {
+    // 자식 close → 부모는 그대로. all-closed도 발화 안 됨 (부모가 살아있음).
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const parent_id = try wm.create(.{ .name = "parent" });
+    const child_id = try wm.create(.{ .parent_id = parent_id });
+    sink.reset();
+
+    try wm.destroy(child_id);
+
+    // 부모는 살아있고 destroyed=false
+    const parent = wm.get(parent_id) orelse return error.ParentVanished;
+    try std.testing.expect(!parent.destroyed);
+    // child only — closed 1회. all-closed는 발화 X (parent 살아있음).
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.all_closed));
+}
+
+// ============================================
 // destroy / destroyed 창 동작
 // ============================================
 

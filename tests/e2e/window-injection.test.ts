@@ -95,6 +95,8 @@ beforeAll(async () => {
   browser = await puppeteer.connect({
     browserURL: "http://localhost:9222",
     protocolTimeout: 10000,
+    // CEF 실제 창 크기를 그대로 사용 (puppeteer 기본 800x600 emulation 비활성).
+    defaultViewport: null,
   });
   const pages = await browser.pages();
   const main = pages.find((p) => p.url().startsWith("http://localhost"));

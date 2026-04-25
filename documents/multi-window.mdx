@@ -197,8 +197,40 @@ window.__suji__.on('window:all-closed', () => {
 });
 ```
 
+## Phase 3: 외형 / 속성
+
+선언적 옵션 (시작 시점 결정, 런타임 변경 X):
+
+```json
+{
+  "windows": [
+    { "name": "main", "title": "App", "width": 1024, "height": 768 },
+    {
+      "name": "panel",
+      "title": "Floating Panel",
+      "width": 320,
+      "height": 480,
+      "frame": false,
+      "transparent": true,
+      "parent": "main"
+    }
+  ]
+}
+```
+
+| 옵션 | 의미 | 플랫폼 |
+|---|---|---|
+| `frame: false` | 타이틀바/리사이즈 핸들 없음 (Electron `frame: false`). 사용자가 커스텀 타이틀바 구현 필요 | macOS |
+| `transparent: true` | NSWindow 투명 + clear background + 그림자 X. CEF browser background도 0. HTML body도 `background: transparent` 필요 | macOS |
+| `parent: "<name>"` | 시각 관계만 — 자식이 부모 위에 floating + 부모와 함께 이동/min. 부모 close해도 자식 유지 (재귀 close X) | macOS |
+
+**parent 순서 주의**: 부모는 windows[] 배열에서 자식보다 앞에 와야 함 (`wm.fromName` lookup 시점에 이미 생성돼 있어야).
+
+**Linux/Windows**: frame/transparent/parent 옵션은 현재 macOS만 지원. 다른 플랫폼은 무시 (no-op stub).
+
 ## 안전성 invariants
 
 - **id는 monotonic + non-reusing** — 창을 닫아도 id 재사용 안 됨
 - **JSON-unsafe name은 wire 주입 skip** — `"`, `\`, control char 포함된 name은 `__window_name`이 생략됨 (id만 주입). JSON 파서 깨짐 방지
 - **Cross-hop 보존** — 이미 `"__window"` 있는 request는 재주입 안 함 (백엔드-백엔드 호출 시 원 sender 정보 유지)
+- **부모-자식 재귀 close X** — 부모 close해도 자식은 살아있음. orphan 정리는 destroyAll만 (PLAN 핵심결정사항)

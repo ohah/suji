@@ -40,6 +40,13 @@ pub const Config = struct {
         url: ?[:0]const u8 = null,
         /// false면 hidden 상태로 생성 (Phase 3+에서 setVisible과 연동 예정).
         visible: bool = true,
+        /// false면 frameless (Electron `frame: false`). 타이틀바/리사이즈 핸들 제거.
+        frame: bool = true,
+        /// true면 투명 배경 (Electron `transparent: true`). HTML body도 투명해야 의미 있음.
+        transparent: bool = false,
+        /// 부모 창 이름. wm.fromName으로 lookup → CreateOptions.parent_id 세팅.
+        /// 부모가 없거나 자기 자신이면 무시. 자식은 부모 위에 floating + 따라 이동 (시각만, 수명 독립).
+        parent: ?[:0]const u8 = null,
     };
 
     pub const SingleBackend = struct {
@@ -128,6 +135,9 @@ pub const Config = struct {
                     if (w.get("debug")) |v| if (v == .bool) { win.debug = v.bool; };
                     if (w.get("url")) |v| if (v == .string) { win.url = dupeStr(a, v.string); };
                     if (w.get("visible")) |v| if (v == .bool) { win.visible = v.bool; };
+                    if (w.get("frame")) |v| if (v == .bool) { win.frame = v.bool; };
+                    if (w.get("transparent")) |v| if (v == .bool) { win.transparent = v.bool; };
+                    if (w.get("parent")) |v| if (v == .string) { win.parent = dupeStr(a, v.string); };
                     if (w.get("protocol")) |v| if (v == .string) {
                         if (std.mem.eql(u8, v.string, "file")) {
                             win.protocol = .file;

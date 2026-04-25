@@ -19,6 +19,10 @@ test "Config default values" {
     try std.testing.expect(cfg.windows[0].name == null);
     try std.testing.expect(cfg.windows[0].url == null);
     try std.testing.expect(cfg.windows[0].visible);
+    // Phase 3 신규 필드 default
+    try std.testing.expect(cfg.windows[0].frame);
+    try std.testing.expect(!cfg.windows[0].transparent);
+    try std.testing.expect(cfg.windows[0].parent == null);
     try std.testing.expect(cfg.backend == null);
     try std.testing.expect(cfg.backends == null);
     try std.testing.expectEqualStrings("frontend", cfg.frontend.dir);
@@ -210,6 +214,29 @@ test "JSON protocol absent defaults to file" {
     const parsed = try parseRoot("{ \"windows\": [{ \"title\": \"Test\" }] }");
     defer parsed.deinit();
     try std.testing.expect(firstWindow(parsed.value.object).get("protocol") == null);
+}
+
+// Phase 3: frame / transparent / parent
+test "JSON window with frame=false / transparent=true / parent" {
+    const parsed = try parseRoot(
+        \\{ "windows": [
+        \\  { "name": "main" },
+        \\  { "name": "panel", "frame": false, "transparent": true, "parent": "main" }
+        \\] }
+    );
+    defer parsed.deinit();
+    const wins = parsed.value.object.get("windows").?.array;
+    const panel = wins.items[1].object;
+    try std.testing.expect(!panel.get("frame").?.bool);
+    try std.testing.expect(panel.get("transparent").?.bool);
+    try std.testing.expectEqualStrings("main", panel.get("parent").?.string);
+}
+
+test "Window struct default — frame/transparent/parent" {
+    const w = config.Config.Window{};
+    try std.testing.expect(w.frame);
+    try std.testing.expect(!w.transparent);
+    try std.testing.expectEqual(@as(?[:0]const u8, null), w.parent);
 }
 
 // Phase 2 마무리: 다중 창 선언 — Tauri 호환

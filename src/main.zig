@@ -831,6 +831,12 @@ fn openWindow(
     for (config.windows, 0..) |w, i| {
         const win_name: ?[]const u8 = util.cstrOpt(w.name) orelse (if (i == 0) "main" else null);
         const win_url: ?[]const u8 = util.cstrOpt(w.url) orelse util.cstrOpt(url);
+        // 부모 이름이 명시됐으면 wm에서 id 조회 (이미 만들어진 창만 — 따라서 parent는 windows[]
+        // 배열 순서상 더 앞에 있어야 함). 없으면 무시.
+        const parent_id: ?u32 = if (w.parent) |p_name|
+            stack.manager.fromName(util.cstr(p_name))
+        else
+            null;
 
         _ = stack.manager.create(.{
             .name = win_name,
@@ -840,6 +846,9 @@ fn openWindow(
                 .width = @intCast(w.width),
                 .height = @intCast(w.height),
             },
+            .frame = w.frame,
+            .transparent = w.transparent,
+            .parent_id = parent_id,
         }) catch |err| {
             std.debug.print("[suji] window[{d}] create failed: {s}\n", .{ i, @errorName(err) });
             // 첫 창 실패는 fatal — 빈 앱 상태로 cef.run 진입하면 즉시 quit 돼버림.

@@ -44,9 +44,17 @@ pub const CreateOptions = struct {
     /// 초기 로드 URL. null이면 Native 구현이 default URL 사용.
     url: ?[]const u8 = null,
     bounds: Bounds = .{},
+    /// 부모 창 id. 비-null이면 시각 관계만 설정 (자식은 부모 위에 떠다니고 부모 이동 시 따라감).
+    /// 재귀 close X — 부모 close해도 자식은 유지 (PLAN 핵심결정사항: orphan은 destroyAll만).
     parent_id: ?u32 = null,
     /// name 중복 시: false면 기존 id 반환(싱글턴), true면 새 창 생성
     force_new: bool = false,
+    /// false면 frameless — 타이틀바/리사이즈 핸들/시스템 보더 모두 제거 (Electron `frame: false`).
+    /// 사용자 코드가 커스텀 타이틀바 + drag region 직접 구현 필요.
+    frame: bool = true,
+    /// true면 투명 배경 — NSWindow.opaque=false + clear color, CEF backgroundColor=0 (Electron `transparent: true`).
+    /// HTML 측에서도 body { background: transparent }로 받쳐야 의미.
+    transparent: bool = false,
 };
 
 pub const Window = struct {
