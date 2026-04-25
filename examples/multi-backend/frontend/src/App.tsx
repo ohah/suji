@@ -47,6 +47,50 @@ function App() {
         <p className="subtitle">Zig + Rust + Go + Node.js — Electron-style API</p>
 
         <section>
+          <h3>0. 멀티 윈도우 (DevTools 검증용)</h3>
+          <p>각 창에서 <kbd>F12</kbd> 또는 <kbd>Cmd+Shift+I</kbd> 눌러 독립적으로 DevTools가 뜨는지 확인.</p>
+          <div className="buttons">
+            <button
+              className="zig"
+              onClick={() => call(
+                () => suji.core(JSON.stringify({
+                  cmd: "create_window",
+                  title: "Window 2",
+                  url: "http://localhost:5173",
+                  name: "second",
+                })),
+                "create-window-2",
+              )}
+            >
+              두 번째 창 띄우기
+            </button>
+            <button
+              className="zig"
+              onClick={() => call(
+                () => suji.core(JSON.stringify({
+                  cmd: "create_window",
+                  title: "Window 3",
+                  url: "http://localhost:5173",
+                  name: "third",
+                })),
+                "create-window-3",
+              )}
+            >
+              세 번째 창 띄우기
+            </button>
+            <button
+              className="zig"
+              onClick={() => call(
+                () => suji.invoke("zig-whoami", {}, { target: "zig" }),
+                "whoami",
+              )}
+            >
+              whoami (현재 창 정보)
+            </button>
+          </div>
+        </section>
+
+        <section>
           <h3>1. Auto-routing vs Target</h3>
           <p>고유 채널은 자동, 중복 채널은 에러 → target 필수</p>
           <div className="buttons">
