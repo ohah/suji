@@ -473,6 +473,120 @@ pub fn io() std.Io {
     return ptr.*;
 }
 
+// ============================================
+// windows API — 백엔드 SDK
+//
+// dlopen된 백엔드 dylib에서는 in-process WindowManager.global 접근이 불가하므로
+// (각 모듈 인스턴스는 자기 BSS만 봄) 모든 호출이 `callBackend("__core__", ...)`로
+// IPC를 거친다. Frontend `@suji/api`의 windows.* 와 같은 cmd JSON 형식.
+//
+// 응답은 `{from, cmd, windowId, ok, ...}` 형태 — caller가 std.json으로 파싱.
+// ============================================
+
+pub const windows = struct {
+    pub const SetBoundsArgs = struct { x: i32 = 0, y: i32 = 0, width: u32 = 0, height: u32 = 0 };
+
+    /// 새 창 생성. `opts_json`은 cmd 객체 안에 들어갈 필드 셋
+    /// (예: `"title":"x","frame":false,"width":400`). caller가 JSON-safe 보장.
+    /// 옵션 풀 셋은 documents/multi-window.mdx 참조. 단순 경우는 createSimple() 권장.
+    pub fn create(opts_json: []const u8) ?[]const u8 {
+        return coreCmd("create_window", opts_json);
+    }
+
+    /// 단축: title + url만 지정해 익명 창 생성.
+    pub fn createSimple(title: []const u8, url: []const u8) ?[]const u8 {
+        var t_buf: [256]u8 = undefined;
+        var u_buf: [512]u8 = undefined;
+        const t_n = escapeJsonStrInto(title, &t_buf) orelse return null;
+        const u_n = escapeJsonStrInto(url, &u_buf) orelse return null;
+        var opts_buf: [1024]u8 = undefined;
+        const opts = std.fmt.bufPrint(&opts_buf, "\"title\":\"{s}\",\"url\":\"{s}\"", .{ t_buf[0..t_n], u_buf[0..u_n] }) catch return null;
+        return create(opts);
+    }
+
+    pub fn loadURL(id: u32, url: []const u8) ?[]const u8 {
+        var u_buf: [2048]u8 = undefined;
+        const u_n = escapeJsonStrInto(url, &u_buf) orelse return null;
+        var fields_buf: [2400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"url\":\"{s}\"", .{ id, u_buf[0..u_n] }) catch return null;
+        return coreCmd("load_url", fields);
+    }
+
+    pub fn reload(id: u32, ignore_cache: bool) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"ignoreCache\":{}", .{ id, ignore_cache }) catch return null;
+        return coreCmd("reload", fields);
+    }
+
+    /// 렌더러에 임의 JS 실행. fire-and-forget — 결과 회신 없음.
+    /// 결과가 필요하면 JS에서 `suji.send(channel, value)`로 회신.
+    pub fn executeJavaScript(id: u32, code: []const u8) ?[]const u8 {
+        var c_buf: [16 * 1024]u8 = undefined;
+        const c_n = escapeJsonStrInto(code, &c_buf) orelse return null;
+        var fields_buf: [16 * 1024 + 128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"code\":\"{s}\"", .{ id, c_buf[0..c_n] }) catch return null;
+        return coreCmd("execute_javascript", fields);
+    }
+
+    pub fn getURL(id: u32) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d}", .{id}) catch return null;
+        return coreCmd("get_url", fields);
+    }
+
+    pub fn isLoading(id: u32) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d}", .{id}) catch return null;
+        return coreCmd("is_loading", fields);
+    }
+
+    pub fn setTitle(id: u32, title: []const u8) ?[]const u8 {
+        var t_buf: [512]u8 = undefined;
+        const t_n = escapeJsonStrInto(title, &t_buf) orelse return null;
+        var fields_buf: [640]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"title\":\"{s}\"", .{ id, t_buf[0..t_n] }) catch return null;
+        return coreCmd("set_title", fields);
+    }
+
+    pub fn setBounds(id: u32, bounds: SetBoundsArgs) ?[]const u8 {
+        var fields_buf: [256]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"windowId\":{d},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}",
+            .{ id, bounds.x, bounds.y, bounds.width, bounds.height },
+        ) catch return null;
+        return coreCmd("set_bounds", fields);
+    }
+
+    /// 내부: cmd + payload fields → "__core__" 채널로 invoke.
+    fn coreCmd(cmd: []const u8, fields_json: []const u8) ?[]const u8 {
+        var buf: [16 * 1024 + 256]u8 = undefined;
+        const sep: []const u8 = if (fields_json.len > 0) "," else "";
+        const req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"{s}\"{s}{s}}}", .{ cmd, sep, fields_json }) catch return null;
+        return callBackend("__core__", req);
+    }
+};
+
+/// JSON 문자열 escape — `"` `\\` 이스케이프 + control char drop. dst 부족 시 null.
+/// 백엔드 SDK windows API의 typed wrapper 내부에서 사용.
+fn escapeJsonStrInto(src: []const u8, dst: []u8) ?usize {
+    var w: usize = 0;
+    for (src) |b| {
+        if (b < 0x20) continue;
+        if (b == '"' or b == '\\') {
+            if (w + 2 > dst.len) return null;
+            dst[w] = '\\';
+            dst[w + 1] = b;
+            w += 2;
+        } else {
+            if (w + 1 > dst.len) return null;
+            dst[w] = b;
+            w += 1;
+        }
+    }
+    return w;
+}
+
 /// 다른 백엔드 호출 (invoke)
 pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
     const core = _global_core orelse return null;

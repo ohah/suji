@@ -152,6 +152,131 @@ pub fn quit() {
     }
 }
 
+// ============================================
+// windows API — Phase 4-A 백엔드 SDK
+// dlopen 환경에선 in-process 코어 접근 불가 → 모두 invoke("__core__", ...) 경유.
+// Frontend `@suji/api` windows.* 와 동일한 cmd JSON 형식.
+// ============================================
+
+pub mod windows {
+    use super::invoke;
+
+    /// 새 창 생성. `opts_json`은 cmd 객체 안에 들어갈 필드 (예: `r#""title":"x","frame":false"#`).
+    /// caller가 JSON-safe 보장. 단순 경우는 `create_simple()` 사용.
+    pub fn create(opts_json: &str) -> Option<String> {
+        let req = if opts_json.is_empty() {
+            r#"{"cmd":"create_window"}"#.to_string()
+        } else {
+            format!(r#"{{"cmd":"create_window",{}}}"#, opts_json)
+        };
+        invoke("__core__", &req)
+    }
+
+    /// 단축: title + url만으로 익명 창 생성.
+    pub fn create_simple(title: &str, url: &str) -> Option<String> {
+        let opts = format!(
+            r#""title":"{}","url":"{}""#,
+            escape_json(title),
+            escape_json(url),
+        );
+        create(&opts)
+    }
+
+    pub fn load_url(window_id: u32, url: &str) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"load_url","windowId":{},"url":"{}"}}"#,
+            window_id,
+            escape_json(url),
+        );
+        invoke("__core__", &req)
+    }
+
+    pub fn reload(window_id: u32, ignore_cache: bool) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"reload","windowId":{},"ignoreCache":{}}}"#,
+            window_id, ignore_cache,
+        );
+        invoke("__core__", &req)
+    }
+
+    /// 렌더러에 임의 JS 실행. fire-and-forget — 결과 회신 없음.
+    pub fn execute_javascript(window_id: u32, code: &str) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"execute_javascript","windowId":{},"code":"{}"}}"#,
+            window_id,
+            escape_json(code),
+        );
+        invoke("__core__", &req)
+    }
+
+    pub fn get_url(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"get_url","windowId":{}}}"#, window_id))
+    }
+
+    pub fn is_loading(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"is_loading","windowId":{}}}"#, window_id))
+    }
+
+    pub fn set_title(window_id: u32, title: &str) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,
+            window_id,
+            escape_json(title),
+        );
+        invoke("__core__", &req)
+    }
+
+    #[derive(Default, Clone, Copy)]
+    pub struct SetBoundsArgs {
+        pub x: i32,
+        pub y: i32,
+        pub width: u32,
+        pub height: u32,
+    }
+
+    pub fn set_bounds(window_id: u32, b: SetBoundsArgs) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"set_bounds","windowId":{},"x":{},"y":{},"width":{},"height":{}}}"#,
+            window_id, b.x, b.y, b.width, b.height,
+        );
+        invoke("__core__", &req)
+    }
+
+    /// JSON 문자열 escape — `"` `\\` 이스케이프 + control char drop.
+    fn escape_json(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        for ch in s.chars() {
+            match ch {
+                '"' => out.push_str("\\\""),
+                '\\' => out.push_str("\\\\"),
+                c if (c as u32) < 0x20 => continue,
+                c => out.push(c),
+            }
+        }
+        out
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::escape_json;
+
+        #[test]
+        fn escape_quote_and_backslash() {
+            assert_eq!(escape_json("a\"b\\c"), "a\\\"b\\\\c");
+        }
+
+        #[test]
+        fn drop_control_chars() {
+            assert_eq!(escape_json("a\nb\tc"), "abc");
+        }
+
+        #[test]
+        fn passthrough_normal() {
+            assert_eq!(escape_json("hello world!"), "hello world!");
+        }
+    }
+}
+
 /// 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
 /// Electron `process.platform` 대응 (단 Suji는 `"darwin"` 대신 `"macos"`).
 pub fn platform() -> &'static str {

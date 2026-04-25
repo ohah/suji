@@ -553,6 +553,164 @@ const SendToSpy = struct {
     }
 };
 
+// ============================================
+// Phase 4-A — windows.* SDK가 callBackend("__core__", ...)로 cmd JSON 전송
+// ============================================
+
+const InvokeSpy = struct {
+    var call_count: usize = 0;
+    var last_backend: [256]u8 = undefined;
+    var last_backend_len: usize = 0;
+    var last_request: [4096]u8 = undefined;
+    var last_request_len: usize = 0;
+    /// invoke_fn은 응답 포인터를 반환해야 함 (null이면 windows.* null 반환).
+    var stub_response: [256:0]u8 = undefined;
+    var stub_response_len: usize = 0;
+
+    fn onInvoke(backend: [*c]const u8, request: [*c]const u8) callconv(.c) [*c]const u8 {
+        call_count += 1;
+        const b_span = std.mem.span(@as([*:0]const u8, @ptrCast(backend)));
+        last_backend_len = @min(b_span.len, last_backend.len);
+        @memcpy(last_backend[0..last_backend_len], b_span[0..last_backend_len]);
+        const r_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
+        last_request_len = @min(r_span.len, last_request.len);
+        @memcpy(last_request[0..last_request_len], r_span[0..last_request_len]);
+        if (stub_response_len == 0) return null;
+        return @ptrCast(&stub_response);
+    }
+
+    fn reset() void {
+        call_count = 0;
+        last_backend_len = 0;
+        last_request_len = 0;
+        stub_response_len = 0;
+        stub_response[0] = 0;
+    }
+
+    fn setStub(body: []const u8) void {
+        const n = @min(body.len, stub_response.len - 1);
+        @memcpy(stub_response[0..n], body[0..n]);
+        stub_response[n] = 0;
+        stub_response_len = n;
+    }
+
+    fn lastBackend() []const u8 {
+        return last_backend[0..last_backend_len];
+    }
+    fn lastRequest() []const u8 {
+        return last_request[0..last_request_len];
+    }
+};
+
+fn withInvokeCore(body: anytype) !void {
+    InvokeSpy.reset();
+    InvokeSpy.setStub("{\"ok\":true}");
+    var core = app_mod.ExternSujiCore{
+        .invoke_fn = &InvokeSpy.onInvoke,
+        .free_fn = null,
+        .emit = null,
+        .on_fn = null,
+        .off_fn = null,
+        .register_fn = null,
+        .get_io = null,
+        .emit_to_fn = null,
+    };
+    app_mod.setGlobalCore(&core);
+    defer app_mod.setGlobalCore(null);
+    try body();
+}
+
+test "windows.loadURL: __core__ + load_url + windowId/url 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.loadURL(7, "http://example.com/");
+            try std.testing.expectEqual(@as(usize, 1), InvokeSpy.call_count);
+            try std.testing.expectEqualStrings("__core__", InvokeSpy.lastBackend());
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"load_url\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"windowId\":7") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"url\":\"http://example.com/\"") != null);
+        }
+    }.run);
+}
+
+test "windows.reload: ignoreCache 플래그가 JSON에 그대로" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.reload(3, true);
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"reload\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"windowId\":3") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"ignoreCache\":true") != null);
+        }
+    }.run);
+}
+
+test "windows.executeJavaScript: code의 \" \\ control char escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.executeJavaScript(1, "alert(\"hi\\n\");");
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"execute_javascript\"") != null);
+            // raw `\n` 컨트롤 문자는 drop, `"`/`\` 는 escape.
+            try std.testing.expect(std.mem.indexOf(u8, r, "alert(\\\"hi\\\\n\\\");") != null);
+        }
+    }.run);
+}
+
+test "windows.setTitle / setBounds 필드" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.setTitle(2, "New Title");
+            const t_req = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, t_req, "\"cmd\":\"set_title\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, t_req, "\"title\":\"New Title\"") != null);
+
+            _ = app_mod.windows.setBounds(2, .{ .x = 10, .y = 20, .width = 800, .height = 600 });
+            const b_req = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, b_req, "\"cmd\":\"set_bounds\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, b_req, "\"x\":10,\"y\":20,\"width\":800,\"height\":600") != null);
+        }
+    }.run);
+}
+
+test "windows.getURL / isLoading: windowId만 들어감" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.getURL(5);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"get_url\",\"windowId\":5") != null);
+            _ = app_mod.windows.isLoading(5);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"is_loading\",\"windowId\":5") != null);
+        }
+    }.run);
+}
+
+test "windows.create / createSimple: cmd + opts" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.create("\"title\":\"X\",\"frame\":false");
+            const r1 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"create_window\",\"title\":\"X\",\"frame\":false") != null);
+
+            _ = app_mod.windows.createSimple("Win", "http://x/");
+            const r2 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"cmd\":\"create_window\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"title\":\"Win\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"url\":\"http://x/\"") != null);
+        }
+    }.run);
+}
+
+test "windows.setTitle: title의 \" 이스케이프" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.setTitle(1, "a\"b");
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"title\":\"a\\\"b\"") != null);
+        }
+    }.run);
+}
+
 test "suji.sendTo() forwards target id + channel + data to emit_to_fn" {
     SendToSpy.call_count = 0;
     const ExternSujiCore = app_mod.ExternSujiCore;

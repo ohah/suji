@@ -21,8 +21,9 @@ cd examples/rust-backend && suji dev    # Rust 단독
 cd examples/go-backend && suji dev      # Go 단독
 cd examples/node-backend && suji dev    # Node.js 단독
 
-# E2E 테스트 (puppeteer + bun)
+# E2E 테스트 (puppeteer + bun) — 각 스크립트는 fresh suji dev 띄워 단독 실행
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
+bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
 ```
 
 E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어

@@ -292,3 +292,96 @@ export function platform(): string {
 export const PLATFORM_MACOS = 'macos';
 export const PLATFORM_LINUX = 'linux';
 export const PLATFORM_WINDOWS = 'windows';
+
+// ============================================
+// windows API — Phase 4-A 백엔드 SDK
+// Frontend `@suji/api` windows.* 와 동일한 cmd JSON 형식. invoke('__core__', ...) 경유.
+// 핸들러 밖에서는 await windows.X(); 핸들러 안에서는 sync 필요 시 invokeSync('__core__', {cmd:..., ...}) 직접 사용.
+// ============================================
+
+export type TitleBarStyle = 'default' | 'hidden' | 'hiddenInset';
+
+export interface WindowOptions {
+  title?: string;
+  url?: string;
+  /** WM 등록 이름 (singleton 키). 동일 name이 이미 있으면 기존 창 id 반환. */
+  name?: string;
+  width?: number;
+  height?: number;
+  /** 초기 위치 (px). 0/생략 시 OS cascade 자동 배치. */
+  x?: number;
+  y?: number;
+  /** 부모 창 id 직접 지정 (parent보다 우선). */
+  parentId?: number;
+  parent?: string;
+  frame?: boolean;
+  transparent?: boolean;
+  backgroundColor?: string;
+  titleBarStyle?: TitleBarStyle;
+  resizable?: boolean;
+  alwaysOnTop?: boolean;
+  minWidth?: number;
+  minHeight?: number;
+  maxWidth?: number;
+  maxHeight?: number;
+  fullscreen?: boolean;
+}
+
+export interface CreateWindowResponse {
+  cmd: 'create_window';
+  from: 'zig-core';
+  windowId: number;
+}
+
+export interface WindowOpResponse {
+  cmd: string;
+  from: 'zig-core';
+  windowId: number;
+  ok: boolean;
+}
+
+export interface GetUrlResponse extends WindowOpResponse {
+  cmd: 'get_url';
+  url: string | null;
+}
+
+export interface IsLoadingResponse extends WindowOpResponse {
+  cmd: 'is_loading';
+  loading: boolean;
+}
+
+export interface SetBoundsArgs {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+}
+
+export const windows = {
+  /** suji.json `windows[]`와 동일한 옵션 셋 — frame/transparent/parent/x/y/etc. 모두 런타임 지정 가능. */
+  create(opts: WindowOptions = {}): Promise<CreateWindowResponse> {
+    return invoke<CreateWindowResponse>('__core__', { cmd: 'create_window', ...opts });
+  },
+  loadURL(windowId: number, url: string): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'load_url', windowId, url });
+  },
+  reload(windowId: number, ignoreCache = false): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'reload', windowId, ignoreCache });
+  },
+  /** fire-and-forget — 결과 회신 없음. 결과 필요 시 JS에서 `suji.send`로 회신. */
+  executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'execute_javascript', windowId, code });
+  },
+  getURL(windowId: number): Promise<GetUrlResponse> {
+    return invoke<GetUrlResponse>('__core__', { cmd: 'get_url', windowId });
+  },
+  isLoading(windowId: number): Promise<IsLoadingResponse> {
+    return invoke<IsLoadingResponse>('__core__', { cmd: 'is_loading', windowId });
+  },
+  setTitle(windowId: number, title: string): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_title', windowId, title });
+  },
+  setBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_bounds', windowId, ...bounds });
+  },
+};
