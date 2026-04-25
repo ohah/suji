@@ -170,7 +170,7 @@ test "Logger writes to file + stderr" {
     defer tmp.cleanup();
 
     var file = try tmp.dir.createFile(io, "test.log", .{});
-    var lg = logger.Logger.init(io, .{ .level = .debug, .file = file });
+    var lg = logger.Logger.init(io, .{ .level = .debug, .file = file, .console_output = false });
 
     lg.write(.info, "test", "hello {d}", .{42});
     lg.write(.err, "test", "oops", .{});
@@ -211,7 +211,7 @@ test "module().info() writes via global logger" {
     defer tmp.cleanup();
 
     var file = try tmp.dir.createFile(io, "m.log", .{});
-    var lg = logger.Logger.init(io, .{ .level = .trace, .file = file });
+    var lg = logger.Logger.init(io, .{ .level = .trace, .file = file, .console_output = false });
 
     const saved = logger.global;
     logger.global = &lg;
@@ -235,7 +235,7 @@ test "module().debug() filters out below warn level" {
     defer tmp.cleanup();
 
     var file = try tmp.dir.createFile(io, "f.log", .{});
-    var lg = logger.Logger.init(io, .{ .level = .warn, .file = file });
+    var lg = logger.Logger.init(io, .{ .level = .warn, .file = file, .console_output = false });
 
     const saved = logger.global;
     logger.global = &lg;

@@ -58,12 +58,16 @@ pub const Config = struct {
     /// caller가 이미 연 파일 (null이면 stderr만 사용).
     /// deinit에서 자동 close되지 않으므로 caller가 수명 관리.
     file: ?std.Io.File = null,
+    /// false면 stderr 출력 생략 — file에만. 테스트에서 zig test runner의
+    /// `--listen=-` IPC 모드가 stderr 노이즈로 가짜 fail 표시하는 회귀 회피.
+    console_output: bool = true,
 };
 
 pub const Logger = struct {
     io: std.Io,
     level: Level,
     file: ?std.Io.File,
+    console_output: bool,
     mutex: std.Io.Mutex = .init,
 
     pub fn init(io: std.Io, config: Config) Logger {
@@ -71,6 +75,7 @@ pub const Logger = struct {
             .io = io,
             .level = config.level,
             .file = config.file,
+            .console_output = config.console_output,
         };
     }
 
@@ -98,7 +103,9 @@ pub const Logger = struct {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
-        std.Io.File.stderr().writeStreamingAll(self.io, line) catch {};
+        if (self.console_output) {
+            std.Io.File.stderr().writeStreamingAll(self.io, line) catch {};
+        }
         if (self.file) |f| {
             f.writeStreamingAll(self.io, line) catch {};
         }
