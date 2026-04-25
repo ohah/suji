@@ -110,6 +110,21 @@ pub const Error = error{
 /// JSON payload 루트에 `__window_name` 으로 주입되는 값이므로 과도한 길이는 거부.
 pub const MAX_NAME_LEN: usize = 128;
 
+/// `buildIdPayload`가 emit하는 lifecycle 이벤트 payload의 최대 크기 + 안전 마진.
+///
+/// 계산: `{"windowId":` (12) + u32 max (10) + `,"name":"` (9) + name (≤ MAX_NAME_LEN) + `"}` (2) = 161.
+/// 256으로 잡아 미래에 한두 필드(짧은 것) 추가될 여유를 둔다 — 큰 값(URL 등)을 추가하려면
+/// 이 상수도 함께 늘려야 함. 늘리지 않으면 호출부의 `*[PAYLOAD_BUF_SIZE]u8` 시그니처가
+/// 컴파일러 단계에서 강제하여 회귀를 차단.
+pub const PAYLOAD_BUF_SIZE: usize = 256;
+comptime {
+    // payload 포맷이 안전하게 들어갈 최소 크기 검증 (회귀 시 빌드 실패).
+    const min_required = 12 + 10 + 9 + MAX_NAME_LEN + 2;
+    if (PAYLOAD_BUF_SIZE < min_required) {
+        @compileError("PAYLOAD_BUF_SIZE too small for current MAX_NAME_LEN");
+    }
+}
+
 /// wire(JSON) 리터럴 bare 삽입에 안전한 문자열 (`"`, `\`, control char 없음).
 /// window_ipc의 __window_name 주입에서 guard로도 사용.
 pub fn isJsonSafeChars(s: []const u8) bool {
@@ -296,7 +311,7 @@ pub const WindowManager = struct {
         // Phase 2: 이벤트 발화 (lock 밖 — listener가 다른 WindowManager 메서드 호출해도 deadlock 없음)
         if (result.is_new) {
             if (self.sink) |s| {
-                var buf: [256]u8 = undefined;
+                var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
                 // 새로 만든 창의 name (singleton 분기 없이 effective_name 그대로 — created는 항상 신규).
                 const payload = buildIdPayload(&buf, result.id, effective_name);
                 s.emit(events.created, payload);
@@ -308,7 +323,11 @@ pub const WindowManager = struct {
     /// `{"windowId":N}` 또는 `{"windowId":N,"name":"..."}` payload.
     /// created/close/closed 공용. 표준화: name이 있고 JSON-safe면 함께 emit, 아니면 id만.
     /// 리스너는 항상 `windowId`를 받고, name은 optional로 처리.
-    fn buildIdPayload(buf: []u8, id: u32, name: ?[]const u8) []const u8 {
+    ///
+    /// 시그니처: `*[N]u8` 고정 크기 array pointer로 받아 buf 크기를 컴파일타임에 검증.
+    /// `MAX_NAME_LEN` 또는 추가 필드 도입으로 PAYLOAD_BUF_SIZE 미달 시 호출부에서 빌드 실패 →
+    /// 잘린 invalid JSON이 emit되는 회귀를 정적 단계에서 차단.
+    fn buildIdPayload(buf: *[PAYLOAD_BUF_SIZE]u8, id: u32, name: ?[]const u8) []const u8 {
         var w = std.Io.Writer.fixed(buf);
         const safe_name: ?[]const u8 = if (name) |n|
             (if (n.len > 0 and isJsonSafeChars(n)) n else null)
@@ -370,7 +389,7 @@ pub const WindowManager = struct {
         // Phase 2: 취소 가능 이벤트 (lock 밖). name은 destroy 전에 캡처해서 close/closed 동일 사용.
         const name_snapshot: ?[]const u8 = if (self.windows.get(id)) |w| w.name else null;
         if (self.sink) |s| {
-            var buf: [512]u8 = undefined;
+            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const payload = buildIdPayload(&buf, id, name_snapshot);
             var ev: SujiEvent = .{};
             s.emitCancelable(events.close, payload, &ev);
@@ -389,7 +408,7 @@ pub const WindowManager = struct {
 
         // Phase 4: 단방향 이벤트 (lock 밖)
         if (self.sink) |s| {
-            var buf: [512]u8 = undefined;
+            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const payload = buildIdPayload(&buf, id, name_snapshot);
             s.emit(events.closed, payload);
         }
@@ -426,7 +445,7 @@ pub const WindowManager = struct {
         // Phase 2: 이벤트 발화 (lock 밖)
         if (self.sink) |s| {
             for (closed.items) |c| {
-                var buf: [512]u8 = undefined;
+                var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
                 const payload = buildIdPayload(&buf, c.id, c.name);
                 s.emit(events.closed, payload);
             }
@@ -465,7 +484,7 @@ pub const WindowManager = struct {
             _ = try self.getLiveLocked(id);
         }
         if (self.sink) |s| {
-            var buf: [512]u8 = undefined;
+            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const name_snapshot: ?[]const u8 = if (self.windows.get(id)) |w| w.name else null;
             const payload = buildIdPayload(&buf, id, name_snapshot);
             var ev: SujiEvent = .{};
@@ -494,7 +513,7 @@ pub const WindowManager = struct {
             live_after = self.liveCountLocked();
         }
         if (self.sink) |s| {
-            var buf: [512]u8 = undefined;
+            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const payload = buildIdPayload(&buf, id, name_snapshot);
             s.emit(events.closed, payload);
         }
