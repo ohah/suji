@@ -295,6 +295,22 @@ static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data
     has_name = extract_string_field(data, "\"__window_name\":\"", &name);
     has_url = extract_string_field(data, "\"__window_url\":\"", &url);
 
+    // "__window_main_frame":true|false
+    Local<Value> main_frame_val = v8::Null(isolate);
+    {
+        const std::string key = "\"__window_main_frame\":";
+        size_t pos = data.find(key);
+        if (pos != std::string::npos) {
+            size_t p = pos + key.size();
+            while (p < data.size() && data[p] == ' ') p++;
+            if (p + 4 <= data.size() && data.compare(p, 4, "true") == 0) {
+                main_frame_val = v8::Boolean::New(isolate, true);
+            } else if (p + 5 <= data.size() && data.compare(p, 5, "false") == 0) {
+                main_frame_val = v8::Boolean::New(isolate, false);
+            }
+        }
+    }
+
     auto set_str_or_null = [&](const char* k, bool has, const std::string& v) {
         Local<Value> val = has
             ? Local<Value>::Cast(String::NewFromUtf8(isolate, v.c_str()).ToLocalChecked())
@@ -306,6 +322,8 @@ static Local<Value> build_invoke_event(Isolate* isolate, const std::string& data
                 v8::Integer::NewFromUnsigned(isolate, id)).Check();
     set_str_or_null("name", has_name, name);
     set_str_or_null("url", has_url, url);
+    window->Set(ctx, String::NewFromUtf8(isolate, "is_main_frame").ToLocalChecked(),
+                main_frame_val).Check();
 
     Local<v8::Object> event = v8::Object::New(isolate);
     event->Set(ctx, String::NewFromUtf8(isolate, "window").ToLocalChecked(), window).Check();

@@ -252,45 +252,45 @@ test "handleSetTitle response is valid JSON (parsable)" {
 
 test "injectWindowField: inserts into simple object" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 3, null, null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", .{ .window_id = 3, .window_name = null, .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"ping\",\"__window\":3}", out);
 }
 
 test "injectWindowField: handles empty object (no leading comma)" {
     var buf: [64]u8 = undefined;
-    const out = ipc.injectWindowField("{}", 1, null, null, &buf).?;
+    const out = ipc.injectWindowField("{}", .{ .window_id = 1, .window_name = null, .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"__window\":1}", out);
 }
 
 test "injectWindowField: handles whitespace-only object body" {
     var buf: [64]u8 = undefined;
-    const out = ipc.injectWindowField("{  }", 5, null, null, &buf).?;
+    const out = ipc.injectWindowField("{  }", .{ .window_id = 5, .window_name = null, .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{  \"__window\":5}", out);
 }
 
 test "injectWindowField: already-tagged request is returned as-is (no double-inject)" {
     var buf: [256]u8 = undefined;
     const src = "{\"cmd\":\"ping\",\"__window\":99}";
-    const out = ipc.injectWindowField(src, 1, null, null, &buf).?;
+    const out = ipc.injectWindowField(src, .{ .window_id = 1, .window_name = null, .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings(src, out);
 }
 
 test "injectWindowField: non-object input returned as-is" {
     var buf: [64]u8 = undefined;
-    try std.testing.expectEqualStrings("[1,2,3]", ipc.injectWindowField("[1,2,3]", 1, null, null, &buf).?);
-    try std.testing.expectEqualStrings("42", ipc.injectWindowField("42", 1, null, null, &buf).?);
-    try std.testing.expectEqualStrings("", ipc.injectWindowField("", 1, null, null, &buf).?);
+    try std.testing.expectEqualStrings("[1,2,3]", ipc.injectWindowField("[1,2,3]", .{ .window_id = 1 }, &buf).?);
+    try std.testing.expectEqualStrings("42", ipc.injectWindowField("42", .{ .window_id = 1, .window_name = null, .window_url = null }, &buf).?);
+    try std.testing.expectEqualStrings("", ipc.injectWindowField("", .{ .window_id = 1, .window_name = null, .window_url = null }, &buf).?);
 }
 
 test "injectWindowField: trailing whitespace before } still parses" {
     var buf: [64]u8 = undefined;
-    const out = ipc.injectWindowField("{\"a\":1}\n  ", 7, null, null, &buf).?;
+    const out = ipc.injectWindowField("{\"a\":1}\n  ", .{ .window_id = 7, .window_name = null, .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"a\":1,\"__window\":7}", out);
 }
 
 test "injectWindowField: returns null when output buffer too small" {
     var tiny: [4]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, null, null, &tiny);
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", .{ .window_id = 1, .window_name = null, .window_url = null }, &tiny);
     try std.testing.expect(out == null);
 }
 
@@ -300,7 +300,7 @@ test "injectWindowField: returns null when output buffer too small" {
 
 test "injectWindowField: name 있으면 __window_name도 주입" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 2, "settings", null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", .{ .window_id = 2, .window_name = "settings", .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings(
         "{\"cmd\":\"ping\",\"__window\":2,\"__window_name\":\"settings\"}",
         out,
@@ -309,57 +309,57 @@ test "injectWindowField: name 있으면 __window_name도 주입" {
 
 test "injectWindowField: name 있고 빈 객체일 때 sep 없이 주입" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{}", 1, "main", null, &buf).?;
+    const out = ipc.injectWindowField("{}", .{ .window_id = 1, .window_name = "main", .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"__window\":1,\"__window_name\":\"main\"}", out);
 }
 
 test "injectWindowField: __window 이미 있으면 name도 재주입 안 함" {
     var buf: [256]u8 = undefined;
     const src = "{\"cmd\":\"x\",\"__window\":9}";
-    try std.testing.expectEqualStrings(src, ipc.injectWindowField(src, 1, "should-not-appear", null, &buf).?);
+    try std.testing.expectEqualStrings(src, ipc.injectWindowField(src, .{ .window_id = 1, .window_name = "should-not-appear", .window_url = null }, &buf).?);
 }
 
 test "injectWindowField: name이 null이면 __window_name 미주입 (기존 동작 보존)" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"a\"}", 4, null, null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"a\"}", .{ .window_id = 4, .window_name = null, .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"a\",\"__window\":4}", out);
     try std.testing.expect(std.mem.indexOf(u8, out, "__window_name") == null);
 }
 
 test "injectWindowField: name 포함 시 out_buf 작으면 null" {
     var tiny: [20]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", 1, "very-long-window-name", null, &tiny);
+    const out = ipc.injectWindowField("{\"cmd\":\"ping\"}", .{ .window_id = 1, .window_name = "very-long-window-name", .window_url = null }, &tiny);
     try std.testing.expect(out == null);
 }
 
 test "injectWindowField: 빈 문자열 name도 정상 주입" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "", null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 1, .window_name = "", .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1,\"__window_name\":\"\"}", out);
 }
 
 test "injectWindowField: trailing whitespace + name 둘 다 처리" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"a\":1}\n", 3, "main", null, &buf).?;
+    const out = ipc.injectWindowField("{\"a\":1}\n", .{ .window_id = 3, .window_name = "main", .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"a\":1,\"__window\":3,\"__window_name\":\"main\"}", out);
 }
 
 test "injectWindowField: name에 \" 있으면 name 생략하고 id만 주입 (JSON 깨짐 방지)" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "bad\"name", null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 1, .window_name = "bad\"name" }, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1}", out);
     try std.testing.expect(std.mem.indexOf(u8, out, "__window_name") == null);
 }
 
 test "injectWindowField: name에 backslash 있으면 name 생략" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "weird\\path", null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 1, .window_name = "weird\\path", .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1}", out);
 }
 
 test "injectWindowField: name에 control char (newline) 있으면 name 생략" {
     var buf: [128]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 1, "line1\nline2", null, &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 1, .window_name = "line1\nline2", .window_url = null }, &buf).?;
     try std.testing.expectEqualStrings("{\"cmd\":\"x\",\"__window\":1}", out);
 }
 
@@ -367,7 +367,7 @@ test "injectWindowField: name에 control char (newline) 있으면 name 생략" {
 
 test "injectWindowField: url 주입 (name 없을 때)" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 2, null, "http://localhost:5173/", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 2, .window_name = null, .window_url = "http://localhost:5173/" }, &buf).?;
     try std.testing.expectEqualStrings(
         "{\"cmd\":\"x\",\"__window\":2,\"__window_url\":\"http://localhost:5173/\"}",
         out,
@@ -376,7 +376,7 @@ test "injectWindowField: url 주입 (name 없을 때)" {
 
 test "injectWindowField: url + name 둘 다 주입" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", 2, "main", "http://localhost/", &buf).?;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 2, .window_name = "main", .window_url = "http://localhost/" }, &buf).?;
     try std.testing.expectEqualStrings(
         "{\"cmd\":\"x\",\"__window\":2,\"__window_name\":\"main\",\"__window_url\":\"http://localhost/\"}",
         out,
@@ -385,7 +385,7 @@ test "injectWindowField: url + name 둘 다 주입" {
 
 test "injectWindowField: url의 \"/\\ 이스케이프" {
     var buf: [512]u8 = undefined;
-    const out = ipc.injectWindowField("{}", 1, null, "a\"b\\c", &buf).?;
+    const out = ipc.injectWindowField("{}", .{ .window_id = 1, .window_url = "a\"b\\c" }, &buf).?;
     // 기대: `"a\"b\\c"`로 이스케이프되어 JSON 리터럴 유효.
     try std.testing.expectEqualStrings(
         "{\"__window\":1,\"__window_url\":\"a\\\"b\\\\c\"}",
@@ -395,7 +395,7 @@ test "injectWindowField: url의 \"/\\ 이스케이프" {
 
 test "injectWindowField: url의 control char는 drop (JSON 리터럴 유효 유지)" {
     var buf: [256]u8 = undefined;
-    const out = ipc.injectWindowField("{}", 1, null, "http://a\x00b/c", &buf).?;
+    const out = ipc.injectWindowField("{}", .{ .window_id = 1, .window_name = null, .window_url = "http://a\x00b/c" }, &buf).?;
     // NUL 바이트 drop 후 "http://ab/c"만 남아야.
     try std.testing.expectEqualStrings(
         "{\"__window\":1,\"__window_url\":\"http://ab/c\"}",
@@ -408,6 +408,46 @@ test "injectWindowField: 이미 __window 박혀있으면 url도 재주입 안 �
     const src = "{\"cmd\":\"x\",\"__window\":3}";
     try std.testing.expectEqualStrings(
         src,
-        ipc.injectWindowField(src, 7, "ignored", "http://ignored/", &buf).?,
+        ipc.injectWindowField(src, .{ .window_id = 7, .window_name = "ignored", .window_url = "http://ignored/" }, &buf).?,
+    );
+}
+
+// --- is_main_frame -----------------------------------------------------
+
+test "injectWindowField: is_main_frame=true 주입" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 1, .is_main_frame = true }, &buf).?;
+    try std.testing.expectEqualStrings(
+        "{\"cmd\":\"x\",\"__window\":1,\"__window_main_frame\":true}",
+        out,
+    );
+}
+
+test "injectWindowField: is_main_frame=false 주입 (iframe)" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{}", .{ .window_id = 2, .is_main_frame = false }, &buf).?;
+    try std.testing.expectEqualStrings(
+        "{\"__window\":2,\"__window_main_frame\":false}",
+        out,
+    );
+}
+
+test "injectWindowField: is_main_frame null이면 필드 생략" {
+    var buf: [256]u8 = undefined;
+    const out = ipc.injectWindowField("{\"cmd\":\"x\"}", .{ .window_id = 1 }, &buf).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "__window_main_frame") == null);
+}
+
+test "injectWindowField: 모든 필드 동시 주입 순서 (id, name, url, main_frame)" {
+    var buf: [512]u8 = undefined;
+    const out = ipc.injectWindowField("{}", .{
+        .window_id = 5,
+        .window_name = "settings",
+        .window_url = "http://localhost/",
+        .is_main_frame = true,
+    }, &buf).?;
+    try std.testing.expectEqualStrings(
+        "{\"__window\":5,\"__window_name\":\"settings\",\"__window_url\":\"http://localhost/\",\"__window_main_frame\":true}",
+        out,
     );
 }

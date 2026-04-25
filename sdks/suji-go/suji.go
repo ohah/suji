@@ -30,9 +30,11 @@ type InvokeEvent struct {
 
 // Window — sender 창 정보.
 type Window struct {
-	ID   uint32 `json:"id"`
-	Name string `json:"name,omitempty"` // 익명 창은 빈 문자열
-	URL  string `json:"url,omitempty"`  // sender 창의 main frame URL (없으면 빈 문자열)
+	ID          uint32 `json:"id"`
+	Name        string `json:"name,omitempty"` // 익명 창은 빈 문자열
+	URL         string `json:"url,omitempty"`  // sender 창의 main frame URL (없으면 빈 문자열)
+	// IsMainFrame은 *bool로 두어 wire에서 주입 안 됐을 때(=null)와 false를 구분.
+	IsMainFrame *bool  `json:"is_main_frame,omitempty"`
 }
 
 // invokeEventType — reflect 경로에서 타입 비교용 sentinel.
@@ -135,6 +137,11 @@ func buildInvokeEvent(params map[string]any) *InvokeEvent {
 	if raw, ok := params["__window_url"]; ok {
 		if s, ok := raw.(string); ok {
 			ev.Window.URL = s
+		}
+	}
+	if raw, ok := params["__window_main_frame"]; ok {
+		if b, ok := raw.(bool); ok {
+			ev.Window.IsMainFrame = &b
 		}
 	}
 	return ev

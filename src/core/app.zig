@@ -99,7 +99,13 @@ pub const App = struct {
                 const win_id: u32 = if (win_id_raw >= 0) @intCast(win_id_raw) else 0;
                 const win_name = extractStringField(request_json, "__window_name");
                 const win_url = extractStringField(request_json, "__window_url");
-                const event = InvokeEvent{ .window = .{ .id = win_id, .name = win_name, .url = win_url } };
+                const win_main_frame = util.extractJsonBool(request_json, "__window_main_frame");
+                const event = InvokeEvent{ .window = .{
+                    .id = win_id,
+                    .name = win_name,
+                    .url = win_url,
+                    .is_main_frame = win_main_frame,
+                } };
                 const resp = h.func(req, event);
                 return resp.data;
             }
@@ -215,6 +221,9 @@ pub const InvokeEvent = struct {
         /// sender 창의 main frame URL (Electron `event.sender.url` 대응).
         /// 로드 중이거나 빈 페이지면 null. wire 레벨에서 `__window_url`이 주입된 경우만 설정.
         url: ?[]const u8 = null,
+        /// sender frame이 페이지의 main frame인지 (false면 iframe 내부 호출).
+        /// CEF cef_frame_t.is_main에서 파생. wire에서 주입 안 됐으면 null.
+        is_main_frame: ?bool = null,
     };
 };
 

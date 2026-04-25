@@ -7,23 +7,29 @@
 const std = @import("std");
 const window = @import("window");
 
-/// Phase 2.5 — 요청 JSON에 `__window: <id>` (+ optional `__window_name`, `__window_url`) 자동 주입.
+/// Phase 2.5 — 요청 JSON에 sender 컨텍스트 자동 주입.
+///   - `__window`: 항상 (sender 창의 WM id)
+///   - `__window_name`: name이 있고 JSON-safe할 때만
+///   - `__window_url`: url이 있을 때 (escape 후)
+///   - `__window_main_frame`: optional (null 아니면 boolean)
+///
+/// 동작 규칙:
 ///   - 이미 `"__window"` 필드가 있으면 원본 반환 (cross-hop 요청 재태깅 방지).
 ///   - `{...}` 로 끝나지 않는 입력(배열/프리미티브/공백 끝)은 원본 반환.
-///   - window_name이 non-null + JSON-safe면 `"__window_name":"..."`도 merge.
-///     unsafe char(`"`, `\`, control < 0x20) 포함 시 **id만 주입하고 name은 생략** —
-///     caller-provided raw interpolation으로 JSON이 깨지는 것 방지. WM 레벨에 아직
-///     이름 검증기가 없어 defensive fallback을 injection 지점에서 수행.
-///   - window_url이 non-null이면 JSON escape 처리 후 `"__window_url":"..."`로 주입.
-///     URL은 `/`, `:`, `?`, `=`, `&` 같은 문자를 포함하므로 isJsonSafeChars로는 부족 →
-///     window.escapeJsonChars가 `"`/`\\` 이스케이프 + control char drop.
-///   - out_buf 필요 크기: src.len + ~24 (no-name/url) 또는 + name.len + url.len*2 + ~80.
-///     부족하면 null 반환 → caller는 원본 사용.
+///   - JSON-unsafe name (`"`, `\`, control < 0x20)은 **name만 생략** (id는 주입).
+///   - URL은 `escapeJsonChars`로 `"`/`\\` 이스케이프 + control drop. 버퍼 부족 시 url 필드 생략.
+///   - out_buf 부족 시 null 반환 → caller는 원본 사용.
+pub const InjectFields = struct {
+    window_id: u32,
+    window_name: ?[]const u8 = null,
+    window_url: ?[]const u8 = null,
+    /// null이면 필드 생략. true/false면 그대로 emit.
+    is_main_frame: ?bool = null,
+};
+
 pub fn injectWindowField(
     src: []const u8,
-    window_id: u32,
-    window_name: ?[]const u8,
-    window_url: ?[]const u8,
+    fields: InjectFields,
     out_buf: []u8,
 ) ?[]const u8 {
     // 이미 박혀있으면 no-op
@@ -39,50 +45,37 @@ pub fn injectWindowField(
     const inner_trimmed = std.mem.trim(u8, body[1..], &std.ascii.whitespace);
     const sep: []const u8 = if (inner_trimmed.len == 0) "" else ",";
 
-    // name이 JSON-safe하면 주입, 아니면 id만. (간이 escape 대신 보수적 skip)
-    const safe_name: ?[]const u8 = if (window_name) |n|
+    // name이 JSON-safe하면 주입, 아니면 생략.
+    const safe_name: ?[]const u8 = if (fields.window_name) |n|
         (if (window.isJsonSafeChars(n)) n else null)
     else
         null;
 
-    // URL은 따로 escape 처리 — `/`, `:`, `?` 등은 JSON-safe지만 `"`/`\\`는 이스케이프 필요.
-    // 실패(버퍼 부족)면 URL 필드 생략.
+    // URL은 escape 처리. 실패(버퍼 부족)면 URL 필드 생략.
     var url_buf: [2048]u8 = undefined;
     const escaped_url: ?[]const u8 = blk: {
-        const raw = window_url orelse break :blk null;
+        const raw = fields.window_url orelse break :blk null;
         const n = window.escapeJsonChars(raw, &url_buf);
         if (n == 0 and raw.len > 0) break :blk null;
         break :blk url_buf[0..n];
     };
 
-    // 필드 조합: id / id+name / id+url / id+name+url. 네 가지 경우를 직접 가지치기하지 않고,
-    // bufPrint의 포맷 문자열을 케이스별로 분기 — 불필요한 separator를 내보내지 않아야 JSON 유효.
+    // 점진 빌드 — 분기 폭발 회피. fmt.bufPrint(out_buf, "...", .{...}) 결과 슬라이스로 진행.
+    var w = std.Io.Writer.fixed(out_buf);
+    w.writeAll(body) catch return null;
+    w.writeAll(sep) catch return null;
+    w.print("\"__window\":{d}", .{fields.window_id}) catch return null;
     if (safe_name) |n| {
-        if (escaped_url) |u| {
-            return std.fmt.bufPrint(
-                out_buf,
-                "{s}{s}\"__window\":{d},\"__window_name\":\"{s}\",\"__window_url\":\"{s}\"}}",
-                .{ body, sep, window_id, n, u },
-            ) catch null;
-        }
-        return std.fmt.bufPrint(
-            out_buf,
-            "{s}{s}\"__window\":{d},\"__window_name\":\"{s}\"}}",
-            .{ body, sep, window_id, n },
-        ) catch null;
+        w.print(",\"__window_name\":\"{s}\"", .{n}) catch return null;
     }
     if (escaped_url) |u| {
-        return std.fmt.bufPrint(
-            out_buf,
-            "{s}{s}\"__window\":{d},\"__window_url\":\"{s}\"}}",
-            .{ body, sep, window_id, u },
-        ) catch null;
+        w.print(",\"__window_url\":\"{s}\"", .{u}) catch return null;
     }
-    return std.fmt.bufPrint(
-        out_buf,
-        "{s}{s}\"__window\":{d}}}",
-        .{ body, sep, window_id },
-    ) catch null;
+    if (fields.is_main_frame) |b| {
+        w.print(",\"__window_main_frame\":{}", .{b}) catch return null;
+    }
+    w.writeByte('}') catch return null;
+    return w.buffered();
 }
 
 // wire 안전성 guard는 window.isJsonSafeChars 사용 (동일 정의).

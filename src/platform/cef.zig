@@ -693,9 +693,8 @@ fn handleBrowserInvoke(
     var data_buf: [8192]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
 
-    // Phase 2.5 — wire 레벨 `__window` (+ optional `__window_name`, `__window_url`) 자동 주입.
-    // 핸들러가 어느 창에서 호출됐는지 식별 가능하도록 sender browser → WM.id로 변환해 JSON에 merge.
-    // 이미 __window가 박혀있는 요청(cross-hop)은 보존.
+    // Phase 2.5 — wire 레벨 sender 컨텍스트(__window/__window_name/__window_url/__window_main_frame)
+    // 자동 주입. 이미 __window가 박혀있는 요청(cross-hop)은 보존.
     var injected_buf: [8192]u8 = undefined;
     var url_extract_buf: [2048]u8 = undefined;
     const data_to_backend: []const u8 = blk: {
@@ -706,7 +705,17 @@ fn handleBrowserInvoke(
         const win_name: ?[]const u8 = if (wm.get(win_id)) |w| w.name else null;
         // sender 창의 main frame URL. 읽기 실패는 non-fatal — null로 대체.
         const win_url: ?[]const u8 = getMainFrameUrl(br, &url_extract_buf);
-        break :blk window_ipc.injectWindowField(data, win_id, win_name, win_url, &injected_buf) orelse data;
+        // sender frame이 main인지 — iframe 식별. CEF cef_frame_t.is_main 직접 호출.
+        const is_main: ?bool = if (frame) |f|
+            (if (f.is_main) |fn_ptr| (fn_ptr(f) == 1) else null)
+        else
+            null;
+        break :blk window_ipc.injectWindowField(data, .{
+            .window_id = win_id,
+            .window_name = win_name,
+            .window_url = win_url,
+            .is_main_frame = is_main,
+        }, &injected_buf) orelse data;
     };
 
     // 백엔드 호출
@@ -904,13 +913,11 @@ fn onPreKeyEvent(
     const alt = (ev.modifiers & c.EVENTFLAG_ALT_DOWN) != 0;
     const key = ev.windows_key_code;
 
-    // F12 / Cmd+Shift+I / Cmd+Option+I — DevTools 토글
+    // F12 / Cmd+Shift+I / Cmd+Option+I — DevTools 토글.
+    // 단축키를 누른 창(br)을 대상으로 — 멀티윈도우에서도 각 창마다 자기 DevTools.
     const is_devtools_key = (key == 123) or (cmd and key == 'I' and (shift or alt));
     if (is_devtools_key) {
-        // 항상 메인 브라우저 기준으로 토글
-        if (g_browser) |main_br| {
-            toggleDevTools(main_br);
-        }
+        toggleDevTools(br);
         return 1;
     }
 

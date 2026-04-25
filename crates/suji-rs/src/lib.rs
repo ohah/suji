@@ -44,10 +44,13 @@ pub struct Window {
     /// sender 창의 main frame URL (Electron `event.sender.url` 대응).
     /// wire 레벨 `__window_url`에서 파생. 로드 전/빈 페이지면 None.
     pub url: Option<String>,
+    /// sender frame이 페이지의 main frame인지 (false면 iframe 내부 호출).
+    /// wire의 `__window_main_frame`에서 파생.
+    pub is_main_frame: Option<bool>,
 }
 
 impl InvokeEvent {
-    /// wire의 `__window` / `__window_name` / `__window_url` 필드에서 파생.
+    /// wire의 `__window` / `__window_name` / `__window_url` / `__window_main_frame` 필드에서 파생.
     /// #[doc(hidden)] 루트 request JSON Value를 받아 구성 — proc macro가 자동 호출.
     #[doc(hidden)]
     pub fn from_request(parsed: &serde_json::Value) -> Self {
@@ -64,7 +67,10 @@ impl InvokeEvent {
             .get("__window_url")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        Self { window: Window { id, name, url } }
+        let is_main_frame = parsed
+            .get("__window_main_frame")
+            .and_then(|v| v.as_bool());
+        Self { window: Window { id, name, url, is_main_frame } }
     }
 }
 
@@ -246,6 +252,22 @@ mod tests {
     fn invoke_event_url_is_none_when_missing() {
         let ev = InvokeEvent::from_request(&serde_json::json!({ "__window": 3 }));
         assert!(ev.window.url.is_none());
+    }
+
+    #[test]
+    fn invoke_event_parses_main_frame_field() {
+        let ev_main = InvokeEvent::from_request(&serde_json::json!({
+            "__window": 1, "__window_main_frame": true,
+        }));
+        assert_eq!(ev_main.window.is_main_frame, Some(true));
+
+        let ev_iframe = InvokeEvent::from_request(&serde_json::json!({
+            "__window": 1, "__window_main_frame": false,
+        }));
+        assert_eq!(ev_iframe.window.is_main_frame, Some(false));
+
+        let ev_none = InvokeEvent::from_request(&serde_json::json!({ "__window": 1 }));
+        assert!(ev_none.window.is_main_frame.is_none());
     }
 
     #[test]

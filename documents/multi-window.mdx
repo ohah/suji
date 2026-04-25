@@ -74,7 +74,8 @@ await window.__suji__.core(JSON.stringify({
   "content": "...",
   "__window": 2,                              // 항상 — sender 창의 WM id
   "__window_name": "settings",                // 창에 name이 설정된 경우만
-  "__window_url": "http://localhost:5173/"    // sender 창의 main frame URL (있을 때만)
+  "__window_url": "http://localhost:5173/",   // sender 창의 main frame URL (있을 때만)
+  "__window_main_frame": true                 // sender frame이 main인지 (false면 iframe)
 }
 ```
 

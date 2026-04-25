@@ -65,6 +65,16 @@ pub fn extractJsonInt(json: []const u8, key: []const u8) ?i64 {
     return std.fmt.parseInt(i64, json[start..end], 10) catch null;
 }
 
+/// JSON에서 `"key":true|false`의 boolean 추출. 다른 값(숫자/문자열/null)은 null.
+pub fn extractJsonBool(json: []const u8, key: []const u8) ?bool {
+    const after_colon = findKey(json, key) orelse return null;
+    var start = after_colon;
+    while (start < json.len and std.ascii.isWhitespace(json[start])) : (start += 1) {}
+    if (start + 4 <= json.len and std.mem.eql(u8, json[start .. start + 4], "true")) return true;
+    if (start + 5 <= json.len and std.mem.eql(u8, json[start .. start + 5], "false")) return false;
+    return null;
+}
+
 /// JSON에서 `"key":1.5`의 실수 추출.
 pub fn extractJsonFloat(json: []const u8, key: []const u8) ?f64 {
     const after_colon = findKey(json, key) orelse return null;
@@ -90,6 +100,15 @@ test "extractJsonInt basic + negative + whitespace" {
     try std.testing.expectEqual(@as(i64, -5), extractJsonInt("{\"n\": -5}", "n").?);
     try std.testing.expect(extractJsonInt("{\"n\":-}", "n") == null);
     try std.testing.expect(extractJsonInt("{\"m\":1}", "n") == null);
+}
+
+test "extractJsonBool true/false/누락/잘못된 값" {
+    try std.testing.expectEqual(@as(?bool, true), extractJsonBool("{\"k\":true}", "k"));
+    try std.testing.expectEqual(@as(?bool, false), extractJsonBool("{\"k\":false}", "k"));
+    try std.testing.expectEqual(@as(?bool, true), extractJsonBool("{\"k\": true}", "k"));
+    try std.testing.expect(extractJsonBool("{\"x\":true}", "k") == null); // 키 없음
+    try std.testing.expect(extractJsonBool("{\"k\":1}", "k") == null); // 숫자
+    try std.testing.expect(extractJsonBool("{\"k\":\"true\"}", "k") == null); // 문자열
 }
 
 test "extractJsonFloat basic + negative" {

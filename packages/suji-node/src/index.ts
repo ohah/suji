@@ -35,6 +35,8 @@ export interface InvokeEvent {
     name: string | null;
     /** sender 창의 main frame URL (로드 전/빈 페이지면 null). */
     url: string | null;
+    /** sender frame이 main frame인지 (false면 iframe). wire에서 주입 안 됐으면 null. */
+    is_main_frame: boolean | null;
   };
 }
 

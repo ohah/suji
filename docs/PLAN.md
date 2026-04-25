@@ -422,7 +422,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
                 WM에서 `.name("settings")`같이 지정된 창에서 호출 시 event.window.name으로 접근.
           - [x] `event.window`에 url 추가 — wire의 `__window_url`에서 파생. cef.zig가 sender의
                 main frame URL을 자동 주입. 4개 SDK 모두 노출 (Electron event.sender.url 대응).
-          - [ ] `event.window`에 frame 추가 (iframe 식별 — 현재는 main frame만)
+          - [x] `event.window`에 is_main_frame 추가 — wire의 `__window_main_frame`에서 파생.
+                cef_frame_t.is_main()으로 sender frame이 main인지 식별. 4개 SDK 모두 노출.
           - Frontend `suji.invoke('ch', data)`는 그대로 (호출 측 변경 없음)
   - [x] Phase 2.5: 멀티 윈도우 데이터 인프라 — 핵심 4축 완료
     - [x] `suji.send(event, data, {to: winId})` + 4개 언어 SDK 모두 `sendTo(id, ch, data)` — Electron `webContents.send` 대응. E2E 통과 (4언어 × target 라우팅).

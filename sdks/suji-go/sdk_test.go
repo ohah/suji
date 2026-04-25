@@ -65,9 +65,10 @@ func TestSendToNoopWithoutCore(t *testing.T) {
 func TestBuildInvokeEvent(t *testing.T) {
 	// JSON 디코더가 숫자를 float64로 주므로 그 타입을 그대로 넘김.
 	params := map[string]any{
-		"__window":      float64(7),
-		"__window_name": "settings",
-		"__window_url":  "http://localhost:5173/settings",
+		"__window":             float64(7),
+		"__window_name":        "settings",
+		"__window_url":         "http://localhost:5173/settings",
+		"__window_main_frame":  true,
 	}
 	ev := buildInvokeEvent(params)
 	if ev.Window.ID != 7 {
@@ -78,6 +79,21 @@ func TestBuildInvokeEvent(t *testing.T) {
 	}
 	if ev.Window.URL != "http://localhost:5173/settings" {
 		t.Fatalf("window.url = %q, want URL", ev.Window.URL)
+	}
+	if ev.Window.IsMainFrame == nil || *ev.Window.IsMainFrame != true {
+		t.Fatalf("window.is_main_frame = %v, want true", ev.Window.IsMainFrame)
+	}
+}
+
+func TestBuildInvokeEventMainFrameFalseDistinguishedFromMissing(t *testing.T) {
+	// is_main_frame=false가 nil(누락)과 정확히 구분되는지 확인.
+	evFalse := buildInvokeEvent(map[string]any{"__window_main_frame": false})
+	if evFalse.Window.IsMainFrame == nil || *evFalse.Window.IsMainFrame != false {
+		t.Fatalf("expected false, got %v", evFalse.Window.IsMainFrame)
+	}
+	evMissing := buildInvokeEvent(map[string]any{})
+	if evMissing.Window.IsMainFrame != nil {
+		t.Fatalf("expected nil, got %v", evMissing.Window.IsMainFrame)
 	}
 }
 
