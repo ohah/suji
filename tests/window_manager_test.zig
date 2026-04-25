@@ -2025,6 +2025,18 @@ test "escapeJsonChars: 이스케이프 + control drop 혼합" {
 }
 
 // ============================================
+// Phase 3 — TitleBarStyle.fromString (config + IPC 공유 매핑)
+// ============================================
+
+test "TitleBarStyle.fromString: hidden / hiddenInset / 미인식 → default" {
+    try std.testing.expectEqual(window.TitleBarStyle.hidden, window.TitleBarStyle.fromString("hidden"));
+    try std.testing.expectEqual(window.TitleBarStyle.hidden_inset, window.TitleBarStyle.fromString("hiddenInset"));
+    try std.testing.expectEqual(window.TitleBarStyle.default, window.TitleBarStyle.fromString("default"));
+    try std.testing.expectEqual(window.TitleBarStyle.default, window.TitleBarStyle.fromString("bogus"));
+    try std.testing.expectEqual(window.TitleBarStyle.default, window.TitleBarStyle.fromString(""));
+}
+
+// ============================================
 // Phase 3 — normalizeConstraints (에러 케이스 정규화)
 // ============================================
 

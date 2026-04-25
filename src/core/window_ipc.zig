@@ -132,14 +132,7 @@ pub fn parseCreateWindowFromJson(json: []const u8) CreateWindowReq {
     if (util.extractJsonBool(json, "frame")) |b| req.frame = b;
     if (util.extractJsonBool(json, "transparent")) |b| req.transparent = b;
     if (util.extractJsonString(json, "backgroundColor")) |s| req.background_color = s;
-    if (util.extractJsonString(json, "titleBarStyle")) |s| {
-        if (std.mem.eql(u8, s, "hidden")) {
-            req.title_bar_style = .hidden;
-        } else if (std.mem.eql(u8, s, "hiddenInset")) {
-            req.title_bar_style = .hidden_inset;
-        }
-        // 미인식은 .default 유지 (warning은 caller에서 — 모듈은 silent)
-    }
+    if (util.extractJsonString(json, "titleBarStyle")) |s| req.title_bar_style = window.TitleBarStyle.fromString(s);
     if (util.extractJsonBool(json, "resizable")) |b| req.resizable = b;
     if (util.extractJsonBool(json, "alwaysOnTop")) |b| req.always_on_top = b;
     if (util.extractJsonInt(json, "minWidth")) |n| req.min_width = util.nonNegU32(n);

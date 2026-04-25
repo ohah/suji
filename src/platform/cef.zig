@@ -1843,21 +1843,23 @@ const initWindowInfo = if (is_macos) struct {
 var g_warned_unsupported_options: bool = false;
 fn warnUnsupportedOptionsOnce(opts: WindowInitOpts) void {
     if (g_warned_unsupported_options) return;
-    const ap = opts.appearance;
-    const cs = opts.constraints;
-    const has_mac_only =
-        !ap.frame or ap.transparent or
-        ap.background_color != null or ap.title_bar_style != .default or
-        cs.always_on_top or cs.fullscreen or
-        cs.min_width != 0 or cs.min_height != 0 or
-        cs.max_width != 0 or cs.max_height != 0 or
-        opts.parent_id != null;
-    if (!has_mac_only) return;
+    if (!hasMacOnlyOption(opts)) return;
     g_warned_unsupported_options = true;
     if (!builtin.is_test) std.debug.print(
         "[suji] warning: window appearance/constraints (frame/transparent/parent/always_on_top/title_bar_style/min·max/fullscreen/background_color) are macOS-only and were ignored on this platform\n",
         .{},
     );
+}
+
+fn hasMacOnlyOption(opts: WindowInitOpts) bool {
+    const ap = opts.appearance;
+    const cs = opts.constraints;
+    return !ap.frame or ap.transparent or
+        ap.background_color != null or ap.title_bar_style != .default or
+        cs.always_on_top or cs.fullscreen or
+        cs.min_width != 0 or cs.min_height != 0 or
+        cs.max_width != 0 or cs.max_height != 0 or
+        opts.parent_id != null;
 }
 
 // ============================================

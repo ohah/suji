@@ -178,11 +178,7 @@ pub const Config = struct {
                     if (getBool(w, "frame")) |b| win.frame = b;
                     if (getBool(w, "transparent")) |b| win.transparent = b;
                     if (getStr(w, "backgroundColor")) |s| win.background_color = dupeStr(a, s);
-                    if (getStr(w, "titleBarStyle")) |s| {
-                        if (std.mem.eql(u8, s, "hidden")) win.title_bar_style = .hidden
-                        else if (std.mem.eql(u8, s, "hiddenInset")) win.title_bar_style = .hidden_inset
-                        else win.title_bar_style = .default;
-                    }
+                    if (getStr(w, "titleBarStyle")) |s| win.title_bar_style = TitleBarStyle.fromString(s);
                     // 제약 — i64 → u32 음수 clamp는 nonNegU32에서.
                     if (getBool(w, "alwaysOnTop")) |b| win.always_on_top = b;
                     if (getBool(w, "resizable")) |b| win.resizable = b;

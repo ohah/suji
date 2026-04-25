@@ -106,7 +106,19 @@ pub const CreateOptions = struct {
     constraints: Constraints = .{},
 };
 
-pub const TitleBarStyle = enum { default, hidden, hidden_inset };
+pub const TitleBarStyle = enum {
+    default,
+    hidden,
+    hidden_inset,
+
+    /// suji.json/IPC의 camelCase 문자열을 enum으로 매핑. 미인식은 .default.
+    /// "hidden" → .hidden / "hiddenInset" → .hidden_inset.
+    pub fn fromString(s: []const u8) TitleBarStyle {
+        if (std.mem.eql(u8, s, "hidden")) return .hidden;
+        if (std.mem.eql(u8, s, "hiddenInset")) return .hidden_inset;
+        return .default;
+    }
+};
 
 pub const Window = struct {
     id: u32,
