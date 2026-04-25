@@ -2345,9 +2345,9 @@ test "편집 6 메서드: 각자 호출이 native 카운트만 증가시킴 (cro
     try wm.paste(id);
     try wm.selectAll(id);
 
-    // edit_calls = [undo, redo, cut, copy, paste, select_all] 순서 (TestNative 정의)
-    inline for (0..6) |i| {
-        try std.testing.expectEqual(@as(usize, 1), native.edit_calls[i]);
+    // 각 필드가 정확히 1회씩 — named struct라 typo 시 컴파일 에러.
+    inline for (.{ "undo", "redo", "cut", "copy", "paste", "select_all" }) |name| {
+        try std.testing.expectEqual(@as(usize, 1), @field(native.edit_calls, name));
     }
 }
 

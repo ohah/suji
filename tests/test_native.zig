@@ -46,8 +46,16 @@ pub const TestNative = struct {
     set_zoom_level_calls: usize = 0,
     stub_zoom_level: f64 = 0,
 
-    // Phase 4-E: 편집/검색 캡처
-    edit_calls: [6]usize = [_]usize{0} ** 6, // undo, redo, cut, copy, paste, select_all 순서
+    // Phase 4-E: 편집/검색 캡처. named struct — 인덱스 매핑 mismatch 회귀 차단
+    // (이전엔 [6]usize + 인덱스로 호출자/검증자가 분리. 위치 바뀌면 silent 잘못 카운트).
+    edit_calls: struct {
+        undo: usize = 0,
+        redo: usize = 0,
+        cut: usize = 0,
+        copy: usize = 0,
+        paste: usize = 0,
+        select_all: usize = 0,
+    } = .{},
     find_calls: usize = 0,
     stop_find_calls: usize = 0,
     last_find_text: ?[]const u8 = null,
@@ -84,20 +92,21 @@ pub const TestNative = struct {
         .toggle_dev_tools = toggleDevTools,
         .set_zoom_level = setZoomLevel,
         .get_zoom_level = getZoomLevel,
-        .undo = makeEditFn(0),
-        .redo = makeEditFn(1),
-        .cut = makeEditFn(2),
-        .copy = makeEditFn(3),
-        .paste = makeEditFn(4),
-        .select_all = makeEditFn(5),
+        .undo = makeEditFn("undo"),
+        .redo = makeEditFn("redo"),
+        .cut = makeEditFn("cut"),
+        .copy = makeEditFn("copy"),
+        .paste = makeEditFn("paste"),
+        .select_all = makeEditFn("select_all"),
         .find_in_page = findInPage,
         .stop_find_in_page = stopFindInPage,
     };
 
-    fn makeEditFn(comptime idx: usize) *const fn (?*anyopaque, u64) void {
+    /// edit_calls의 named 필드 카운트 증가. 잘못된 필드명은 컴파일 에러.
+    fn makeEditFn(comptime field: []const u8) *const fn (?*anyopaque, u64) void {
         return struct {
             fn call(ctx: ?*anyopaque, _: u64) void {
-                fromCtx(ctx).edit_calls[idx] += 1;
+                @field(fromCtx(ctx).edit_calls, field) += 1;
             }
         }.call;
     }

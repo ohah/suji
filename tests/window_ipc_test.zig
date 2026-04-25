@@ -937,18 +937,18 @@ test "편집 6 핸들러: 자기 cmd 이름과 wm 메서드만 호출" {
     var buf: [256]u8 = undefined;
 
     const handlers = .{
-        .{ "undo", &ipc.handleUndo, 0 },
-        .{ "redo", &ipc.handleRedo, 1 },
-        .{ "cut", &ipc.handleCut, 2 },
-        .{ "copy", &ipc.handleCopy, 3 },
-        .{ "paste", &ipc.handlePaste, 4 },
-        .{ "select_all", &ipc.handleSelectAll, 5 },
+        .{ "undo", &ipc.handleUndo },
+        .{ "redo", &ipc.handleRedo },
+        .{ "cut", &ipc.handleCut },
+        .{ "copy", &ipc.handleCopy },
+        .{ "paste", &ipc.handlePaste },
+        .{ "select_all", &ipc.handleSelectAll },
     };
     inline for (handlers) |h| {
         const r = h[1](1, &buf, &wm).?;
         try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"" ++ h[0] ++ "\"") != null);
         try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
-        try std.testing.expectEqual(@as(usize, 1), native.edit_calls[h[2]]);
+        try std.testing.expectEqual(@as(usize, 1), @field(native.edit_calls, h[0]));
     }
 }
 

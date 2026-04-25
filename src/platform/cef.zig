@@ -565,7 +565,13 @@ pub const CefNative = struct {
     // ==================== Phase 4-E: 편집 (frame 위임) + 검색 ====================
 
     /// 6 trivial 편집 메서드 — 모두 main_frame.X() 호출. comptime으로 6 fn 생성.
+    /// `field`가 cef_frame_t에 없으면 컴파일 에러 (CEF API 변경 회귀 차단).
     fn makeFrameEditFn(comptime field: []const u8) *const fn (?*anyopaque, u64) void {
+        comptime {
+            if (!@hasField(c.cef_frame_t, field)) {
+                @compileError("cef_frame_t에 '" ++ field ++ "' 필드 없음");
+            }
+        }
         return struct {
             fn call(ctx: ?*anyopaque, handle: u64) void {
                 assertUiThread();
@@ -584,8 +590,11 @@ pub const CefNative = struct {
         const entry = self.browsers.get(handle) orelse return;
         const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
 
-        var text_buf: [1024]u8 = undefined;
-        const text_z = nullTerminateOrTruncate(text, &text_buf) orelse return;
+        var text_buf: [FIND_TEXT_STACK_BUF]u8 = undefined;
+        const text_z = nullTerminateOrTruncate(text, &text_buf) orelse {
+            log.warn("find_in_page: text {d} bytes > {d} stack buf — dropped", .{ text.len, FIND_TEXT_STACK_BUF });
+            return;
+        };
         var cef_text: c.cef_string_t = .{};
         setCefString(&cef_text, text_z);
         const find = host.find orelse return;
@@ -605,6 +614,8 @@ pub const CefNative = struct {
 const URL_BUF_SIZE: usize = 2048;
 /// executeJavascript의 fast-path stack 버퍼. 4KB 미만 코드는 alloc 없이.
 const JS_STACK_BUF_SIZE: usize = 4096;
+/// find_in_page text stack 버퍼. 검색어 1KB 초과면 log.warn + drop.
+const FIND_TEXT_STACK_BUF: usize = 1024;
 
 /// `[]const u8` → null-terminated `[:0]const u8` 복사. buf 부족 시 null 반환.
 /// CEF API(load_url/execute_java_script)에 전달하기 전에 필요.
