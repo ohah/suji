@@ -14,6 +14,7 @@ pub const my_app = suji.app()
     .handle("zig-stress", stressDeep)
     .handle("zig-whoami", whoami)
     .handle("zig-echo-to-sender", echoToSender)
+    .handle("windows-roundtrip-zig", windowsRoundtrip)
     // Electron 패턴 (macOS는 유지, 나머지는 종료).
     .on("window:all-closed", onWindowAllClosed);
 
@@ -55,6 +56,14 @@ fn add(req: suji.Request) suji.Response {
 
 fn info(req: suji.Request) suji.Response {
     return req.ok(.{ .runtime = "zig", .loaded_via = "dlopen" });
+}
+
+/// Phase 4-A round-trip 검증 — sender 창의 isLoading을 Zig SDK로 호출하고
+/// 응답 raw JSON을 그대로 회신. e2e가 응답에 `"is_loading"` 포함 확인.
+fn windowsRoundtrip(req: suji.Request, event: suji.InvokeEvent) suji.Response {
+    const id = event.window.id;
+    const resp = suji.windows.isLoading(id) orelse return req.err("zig windows.isLoading null");
+    return req.ok(.{ .from_backend = "zig", .window_id = id, .response_raw = resp });
 }
 
 // Zig → Rust

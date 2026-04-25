@@ -583,6 +583,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     defer registry.deinit();
     registry.setGlobal();
     registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
+    suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -742,6 +743,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     defer registry.deinit();
     registry.setGlobal();
     registry.setQuitHandler(&cef.quit);
+    suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -1010,12 +1012,26 @@ fn cefHandleChain(registry: *suji.BackendRegistry, data: []const u8, response_bu
     return result;
 }
 
-/// core: Zig 코어 직접 호출
+/// 백엔드 SDK의 callBackend("__core__"|"__fanout__"|"__chain__", ...) 경로 dispatcher.
+/// CEF의 cefInvokeHandler와 동일 라우팅을 backend SDK 경로에서도 제공.
+/// BackendRegistry.special_dispatch에 inject된다.
+fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
+    const registry = suji.BackendRegistry.global orelse return null;
+    if (std.mem.eql(u8, channel, "__core__")) return cefHandleCore(registry, data, response_buf);
+    if (std.mem.eql(u8, channel, "__fanout__")) return cefHandleFanout(registry, data, response_buf);
+    if (std.mem.eql(u8, channel, "__chain__")) return cefHandleChain(registry, data, response_buf);
+    return null;
+}
+
+/// core: Zig 코어 직접 호출 — 두 경로:
+///   1. CEF (frontend `__suji__.core`): data = `{"__core":true,"request":"<escaped cmd JSON>"}`
+///   2. Backend SDK (`callBackend("__core__", req)`): data = `<raw cmd JSON>` (backendSpecialDispatch 경유)
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
-    // data: {"__core":true,"request":"{\"cmd\":\"core_info\"}"}
-    const request_str = util.extractJsonString(data, "request") orelse return null;
     var req_buf: [4096]u8 = undefined;
-    const req_clean = unescapeJson(request_str, &req_buf);
+    const req_clean: []const u8 = if (util.extractJsonString(data, "request")) |request_str|
+        unescapeJson(request_str, &req_buf)
+    else
+        data;
 
     // create_window 커맨드 — WM 경유. Phase 3 옵션 풀 셋은 window_ipc에서 파싱.
     if (std.mem.indexOf(u8, req_clean, "create_window") != null) {

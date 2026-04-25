@@ -124,6 +124,12 @@ pub const BackendRegistry = struct {
 
     pub var global: ?*BackendRegistry = null;
 
+    /// special channel(`__core__`/`__fanout__`/`__chain__`) dispatcher.
+    /// main이 backend SDK 경로에도 동일 라우팅을 제공하기 위해 주입.
+    /// null이면 백엔드의 callBackend("__core__", ...)는 빈 `{}` 반환 (CEF 경로만 동작).
+    pub const SpecialDispatch = *const fn (channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8;
+    pub var special_dispatch: ?SpecialDispatch = null;
+
     /// 임베드 런타임 테이블. main이 Node/Python/Lua 등을 여기 등록.
     /// coreInvoke에서 dlopen registry에 없는 이름일 때 폴백으로 조회.
     pub var embed_runtimes: std.StringHashMap(EmbedRuntime) = undefined;
@@ -335,6 +341,21 @@ pub const BackendRegistry = struct {
     fn coreInvoke(backend_name: [*c]const u8, request: [*c]const u8) callconv(.c) [*c]const u8 {
         const reg = global orelse return @ptrCast(@constCast(""));
         const name = std.mem.span(@as([*:0]const u8, @ptrCast(backend_name)));
+
+        // special channel(`__core__`/`__fanout__`/`__chain__`) — main이 inject한 dispatcher.
+        // CEF의 cefInvokeHandler와 동일 라우팅을 backend SDK 경로에서도 제공.
+        if (special_dispatch) |dispatch| {
+            if (std.mem.eql(u8, name, "__core__") or
+                std.mem.eql(u8, name, "__fanout__") or
+                std.mem.eql(u8, name, "__chain__"))
+            {
+                const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
+                var resp_buf: [16384]u8 = undefined;
+                const out = dispatch(name, req_span, &resp_buf) orelse return @ptrCast(@constCast("{}"));
+                const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(@constCast("{}"));
+                return @ptrCast(owned);
+            }
+        }
 
         // dlopen 백엔드 경로
         if (reg.get(name)) |backend| {

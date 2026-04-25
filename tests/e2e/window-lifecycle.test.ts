@@ -210,6 +210,28 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
 });
 
 // ============================================
+// 5. Zig 백엔드 SDK windows.* round-trip — `suji::windows::isLoading` →
+//    callBackend("__core__") → cefHandleCore → wm.isLoading → CEF native.
+//    examples/multi-backend/backends/zig가 노출하는 'windows-roundtrip-zig'
+//    핸들러를 호출 → 응답에 코어가 돌려준 raw JSON이 들어있는지 확인.
+//    Rust/Go/Node SDK는 자체 spy로 cmd JSON 형식만 검증 (단위) — 코어
+//    라우팅은 같은 cefHandleCore라 추가 e2e 불필요.
+// ============================================
+
+describe("Zig backend SDK windows.* round-trip", () => {
+  test("zig handler가 suji.windows.isLoading 호출 → 코어 응답 회신", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.invoke("windows-roundtrip-zig", {}, { target: "zig" }),
+    );
+    // 응답 wrapping 형식과 무관하게 — 어딘가에 코어가 돌려준 is_loading JSON이 있어야 함.
+    const dump = JSON.stringify(r);
+    expect(dump).toContain("from_backend");
+    expect(dump).toContain('"cmd\\":\\"is_loading\\"');
+    expect(dump).toMatch(/"loading\\":(true|false)/);
+  });
+});
+
+// ============================================
 // 4. Phase 4-A: webContents (네비/JS) IPC
 // ============================================
 
