@@ -838,10 +838,10 @@ fn openWindow(
         else
             null;
 
-        // 음수 → 0 clamp. width/height/min·max는 config.nonNegU32에서 이미 처리됐고,
-        // 여기서는 width/height (i64 → u32)만 음수 한 번 더 가드. x/y는 i32라 음수 허용.
-        const w_px: u32 = if (w.width < 0) 0 else @intCast(w.width);
-        const h_px: u32 = if (w.height < 0) 0 else @intCast(w.height);
+        // 음수/오버플로 clamp. config.Window.width/height는 i64로 들어오므로 여기서 변환.
+        // x/y는 i32라 음수 허용 (화면 왼쪽 밖 배치 가능).
+        const w_px: u32 = util.nonNegU32(w.width);
+        const h_px: u32 = util.nonNegU32(w.height);
         _ = stack.manager.create(.{
             .name = win_name,
             .title = util.cstr(w.title),

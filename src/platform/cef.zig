@@ -2120,7 +2120,7 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
     const window = allocMacWindow(opts) orelse return .{ .content_view = null, .ns_window = null };
     if (opts.x == 0 and opts.y == 0) advanceCascade(window);
     applyMacWindowOptions(window, opts);
-    setMacWindowTitleZ(window, opts.title);
+    setMacWindowTitle(window, opts.title);
     const contentView = msgSend(window, "contentView");
     // NSWindow는 releasedWhenClosed=YES(기본값) + NSApp window list 보관으로 수명 관리.
     // 추가 retain 없이 자연스럽게 close 시 dealloc.
@@ -2176,16 +2176,6 @@ fn applyMacWindowOptions(window: *anyopaque, opts: WindowInitOpts) void {
     if (ap.background_color) |hex| applyBackgroundColor(window, hex);
     setMacContentSizeLimits(window, cs.min_width, cs.min_height, cs.max_width, cs.max_height);
     if (ap.title_bar_style != .default) applyTitleBarStyle(window, ap.title_bar_style);
-}
-
-/// 0-terminated [:0]const u8 → NSString → NSWindow.setTitle:.
-/// (createMacWindow 전용 — setMacWindowTitle은 임의 slice를 받음.)
-fn setMacWindowTitleZ(window: *anyopaque, title: [:0]const u8) void {
-    const NSString = getClass("NSString") orelse return;
-    const strSel = objc.sel_registerName("stringWithUTF8String:");
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const ns_title = strFn(NSString, @ptrCast(strSel), title.ptr) orelse return;
-    msgSendVoid1(window, "setTitle:", ns_title);
 }
 
 /// macOS: 자식 창을 부모 위에 attach. NSWindow.addChildWindow:ordered:NSWindowAbove(1).

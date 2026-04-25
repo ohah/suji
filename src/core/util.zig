@@ -28,6 +28,14 @@ pub fn cstrOpt(s: ?[:0]const u8) ?[]const u8 {
     return if (s) |v| std.mem.sliceTo(v, 0) else null;
 }
 
+/// i64 → u32 변환 (음수는 0 clamp, u32 max 초과는 maxInt 클램프).
+/// suji.json/wire에 잘못된 값이 들어와도 ReleaseSafe `@intCast` panic 회피.
+pub fn nonNegU32(v: i64) u32 {
+    if (v < 0) return 0;
+    if (v > std.math.maxInt(u32)) return std.math.maxInt(u32);
+    return @intCast(v);
+}
+
 /// IPC 버퍼 크기 상수
 pub const MAX_CHANNEL_NAME = 256;
 pub const MAX_REQUEST = 8192;

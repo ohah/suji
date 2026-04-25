@@ -1,6 +1,7 @@
 const std = @import("std");
 const runtime = @import("runtime");
 const window_mod = @import("window");
+const util = @import("util");
 
 /// Suji 프로젝트 설정
 /// suji.json에서 로드
@@ -121,12 +122,7 @@ pub const Config = struct {
         return if (v == .bool) v.bool else null;
     }
 
-    /// i64 → u32 변환 (음수는 0). suji.json에 잘못된 음수가 들어와도 panic 회피.
-    fn nonNegU32(v: i64) u32 {
-        if (v < 0) return 0;
-        if (v > std.math.maxInt(u32)) return std.math.maxInt(u32);
-        return @intCast(v);
-    }
+    // util.nonNegU32 직접 사용 (이 모듈 내부 alias 불필요).
 
     fn loadJson(allocator: std.mem.Allocator) !Config {
         const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
@@ -190,10 +186,10 @@ pub const Config = struct {
                     // 제약 — i64 → u32 음수 clamp는 nonNegU32에서.
                     if (getBool(w, "alwaysOnTop")) |b| win.always_on_top = b;
                     if (getBool(w, "resizable")) |b| win.resizable = b;
-                    if (getInt(w, "minWidth")) |n| win.min_width = nonNegU32(n);
-                    if (getInt(w, "minHeight")) |n| win.min_height = nonNegU32(n);
-                    if (getInt(w, "maxWidth")) |n| win.max_width = nonNegU32(n);
-                    if (getInt(w, "maxHeight")) |n| win.max_height = nonNegU32(n);
+                    if (getInt(w, "minWidth")) |n| win.min_width = util.nonNegU32(n);
+                    if (getInt(w, "minHeight")) |n| win.min_height = util.nonNegU32(n);
+                    if (getInt(w, "maxWidth")) |n| win.max_width = util.nonNegU32(n);
+                    if (getInt(w, "maxHeight")) |n| win.max_height = util.nonNegU32(n);
                     if (getBool(w, "fullscreen")) |b| win.fullscreen = b;
                     if (w.get("protocol")) |v| if (v == .string) {
                         if (std.mem.eql(u8, v.string, "file")) {
