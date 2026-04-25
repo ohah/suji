@@ -1035,6 +1035,9 @@ fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: [
 /// core: Zig 코어 직접 호출 — 두 경로:
 ///   1. CEF (frontend `__suji__.core`): data = `{"__core":true,"request":"<escaped cmd JSON>"}`
 ///   2. Backend SDK (`callBackend("__core__", req)`): data = `<raw cmd JSON>` (backendSpecialDispatch 경유)
+///
+/// cmd 분기는 `extractJsonString(req, "cmd")`로 정확 매치 — substring 매치는 새 cmd가
+/// 비슷한 이름으로 추가되거나 cmd 외 다른 필드에 같은 문자열이 있을 때 잘못 라우팅 위험.
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     var req_buf: [4096]u8 = undefined;
     const req_clean: []const u8 = if (util.extractJsonString(data, "request")) |request_str|
@@ -1042,8 +1045,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     else
         data;
 
-    // create_window 커맨드 — WM 경유. Phase 3 옵션 풀 셋은 window_ipc에서 파싱.
-    if (std.mem.indexOf(u8, req_clean, "create_window") != null) {
+    const cmd = util.extractJsonString(req_clean, "cmd") orelse "";
+
+    if (std.mem.eql(u8, cmd, "create_window")) {
         const wm = window_mod.WindowManager.global orelse return null;
         return window_ipc.handleCreateWindow(
             window_ipc.parseCreateWindowFromJson(req_clean),
@@ -1051,9 +1055,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             wm,
         );
     }
-
-    // set_title 커맨드
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"set_title\"") != null) {
+    if (std.mem.eql(u8, cmd, "set_title")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = @intCast(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleSetTitle(.{
@@ -1061,9 +1063,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .title = util.extractJsonString(req_clean, "title") orelse "",
         }, response_buf, wm);
     }
-
-    // set_bounds 커맨드
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"set_bounds\"") != null) {
+    if (std.mem.eql(u8, cmd, "set_bounds")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = @intCast(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleSetBounds(.{
@@ -1074,9 +1074,8 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .height = @intCast(util.extractJsonInt(req_clean, "height") orelse 0),
         }, response_buf, wm);
     }
-
-    // ── Phase 4-A: webContents (네비/JS) ──
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"load_url\"") != null) {
+    // Phase 4-A: webContents (네비/JS)
+    if (std.mem.eql(u8, cmd, "load_url")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleLoadUrl(.{
@@ -1084,7 +1083,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .url = util.extractJsonString(req_clean, "url") orelse "",
         }, response_buf, wm);
     }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"reload\"") != null) {
+    if (std.mem.eql(u8, cmd, "reload")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleReload(.{
@@ -1092,7 +1091,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .ignore_cache = util.extractJsonBool(req_clean, "ignoreCache") orelse false,
         }, response_buf, wm);
     }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"execute_javascript\"") != null) {
+    if (std.mem.eql(u8, cmd, "execute_javascript")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleExecuteJavascript(.{
@@ -1100,48 +1099,45 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .code = util.extractJsonString(req_clean, "code") orelse "",
         }, response_buf, wm);
     }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"get_url\"") != null) {
+    if (std.mem.eql(u8, cmd, "get_url")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleGetUrl(win_id, response_buf, wm);
     }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"is_loading\"") != null) {
+    if (std.mem.eql(u8, cmd, "is_loading")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleIsLoading(win_id, response_buf, wm);
     }
-
-    // ── Phase 4-C: DevTools (open/close/is/toggle) ──
-    // is_dev_tools_opened를 먼저 체크 — "open_dev_tools" substring이 그 안에도 매치되므로.
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"is_dev_tools_opened\"") != null) {
-        const wm = window_mod.WindowManager.global orelse return null;
-        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
-        return window_ipc.handleIsDevToolsOpened(win_id, response_buf, wm);
-    }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"toggle_dev_tools\"") != null) {
-        const wm = window_mod.WindowManager.global orelse return null;
-        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
-        return window_ipc.handleToggleDevTools(win_id, response_buf, wm);
-    }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"open_dev_tools\"") != null) {
+    // Phase 4-C: DevTools — 정확 매치라 4-A의 substring 회귀 가드(is_dev_tools_opened
+    // 우선 검사)도 불필요해짐.
+    if (std.mem.eql(u8, cmd, "open_dev_tools")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleOpenDevTools(win_id, response_buf, wm);
     }
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"close_dev_tools\"") != null) {
+    if (std.mem.eql(u8, cmd, "close_dev_tools")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleCloseDevTools(win_id, response_buf, wm);
     }
-
-    // quit 커맨드 — 프론트 `__suji__.quit()`가 라우팅됨
-    if (std.mem.indexOf(u8, req_clean, "\"cmd\":\"quit\"") != null) {
+    if (std.mem.eql(u8, cmd, "is_dev_tools_opened")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleIsDevToolsOpened(win_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "toggle_dev_tools")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleToggleDevTools(win_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "quit")) {
         cef.quit();
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"quit\"}}", .{}) catch return null;
         return result;
     }
 
-    if (std.mem.indexOf(u8, req_clean, "core_info") != null) {
+    if (std.mem.eql(u8, cmd, "core_info")) {
         var out_pos: usize = 0;
         const out = response_buf;
         out_pos += (std.fmt.bufPrint(out[out_pos..], "{{\"from\":\"zig-core\",\"backends\":[", .{}) catch return null).len;
@@ -1154,11 +1150,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         }
         out_pos += (std.fmt.bufPrint(out[out_pos..], "]}}", .{}) catch return null).len;
         return out[0..out_pos];
-    } else {
-        const result = "{\"from\":\"zig-core\",\"msg\":\"hello from zig\"}";
-        @memcpy(response_buf[0..result.len], result);
-        return response_buf[0..result.len];
     }
+
+    // 알 수 없는 cmd — default ack. raw cmd JSON이 아니거나 매치 실패한 모든 경우 도달.
+    const result = "{\"from\":\"zig-core\",\"msg\":\"hello from zig\"}";
+    @memcpy(response_buf[0..result.len], result);
+    return response_buf[0..result.len];
 }
 
 // JSON 필드 추출은 core/util.zig(util.extractJsonString / util.extractJsonInt) 사용

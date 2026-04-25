@@ -340,25 +340,34 @@ pub fn handleIsLoading(window_id: u32, response_buf: []u8, wm: *window.WindowMan
 
 // ============================================
 // Phase 4-C: DevTools (open/close/is/toggle)
-// 응답: open/close/toggle은 windowOp 형식, is_dev_tools_opened는 추가 `opened` 필드.
+// open/close/toggle은 wm 메서드만 다른 동일 패턴 → 함수 포인터로 통합.
+// is_dev_tools_opened는 별도 필드(opened)가 있어 분리.
 // ============================================
 
-pub fn handleOpenDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+const WmVoidFn = *const fn (*window.WindowManager, u32) window.Error!void;
+
+fn handleDevToolsOp(
+    cmd: []const u8,
+    method: WmVoidFn,
+    window_id: u32,
+    response_buf: []u8,
+    wm: *window.WindowManager,
+) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ok = if (wm.openDevTools(window_id)) |_| true else |_| false;
-    return respondWindowOp(response_buf, "open_dev_tools", window_id, ok);
+    const ok = if (method(wm, window_id)) |_| true else |_| false;
+    return respondWindowOp(response_buf, cmd, window_id, ok);
+}
+
+pub fn handleOpenDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("open_dev_tools", &window.WindowManager.openDevTools, window_id, response_buf, wm);
 }
 
 pub fn handleCloseDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ok = if (wm.closeDevTools(window_id)) |_| true else |_| false;
-    return respondWindowOp(response_buf, "close_dev_tools", window_id, ok);
+    return handleDevToolsOp("close_dev_tools", &window.WindowManager.closeDevTools, window_id, response_buf, wm);
 }
 
 pub fn handleToggleDevTools(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ok = if (wm.toggleDevTools(window_id)) |_| true else |_| false;
-    return respondWindowOp(response_buf, "toggle_dev_tools", window_id, ok);
+    return handleDevToolsOp("toggle_dev_tools", &window.WindowManager.toggleDevTools, window_id, response_buf, wm);
 }
 
 pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

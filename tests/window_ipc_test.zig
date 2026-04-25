@@ -827,3 +827,64 @@ test "Phase 4-C 핸들러: 알 수 없는 id면 ok:false" {
     try std.testing.expectEqual(@as(usize, 0), native.open_dev_tools_calls);
     try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":false") != null);
 }
+
+// ============================================
+// 회귀 테스트 — handleDevToolsOp 헬퍼 통합 (commit 73)
+//
+// open/close/toggle 핸들러는 이제 wm 메서드 함수 포인터만 다른 동일 헬퍼.
+// 각 핸들러가 자기 cmd 이름과 자기 wm 메서드를 정확히 호출함을 회귀로 고정.
+// ============================================
+
+test "handleDevToolsOp: 각 핸들러가 자기 cmd 이름을 응답에 정확히 포함" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    var buf: [256]u8 = undefined;
+    const open = ipc.handleOpenDevTools(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, open, "\"cmd\":\"open_dev_tools\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, open, "\"cmd\":\"close_dev_tools\"") == null);
+
+    const close = ipc.handleCloseDevTools(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, close, "\"cmd\":\"close_dev_tools\"") != null);
+
+    const toggle = ipc.handleToggleDevTools(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, toggle, "\"cmd\":\"toggle_dev_tools\"") != null);
+}
+
+test "handleDevToolsOp: 각 핸들러가 자기 wm 메서드만 호출 (cross-call 없음)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    _ = ipc.handleOpenDevTools(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.open_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.close_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.toggle_dev_tools_calls);
+
+    _ = ipc.handleCloseDevTools(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.close_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.toggle_dev_tools_calls);
+
+    _ = ipc.handleToggleDevTools(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.toggle_dev_tools_calls);
+}
+
+test "handleDevToolsOp: 모든 핸들러 작은 버퍼면 null (회귀)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var tiny: [3]u8 = undefined;
+    try std.testing.expect(ipc.handleOpenDevTools(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleCloseDevTools(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleToggleDevTools(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleIsDevToolsOpened(1, &tiny, &wm) == null);
+    // 작은 버퍼 시 native는 호출되지 않아야 (응답 보장 invariant).
+    try std.testing.expectEqual(@as(usize, 0), native.open_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.close_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.toggle_dev_tools_calls);
+}

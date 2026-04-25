@@ -390,7 +390,6 @@ export const windows = {
     return invoke<WindowOpResponse>('__core__', { cmd: 'set_bounds', windowId, ...bounds });
   },
 
-  // ── Phase 4-C: DevTools ──
   openDevTools(windowId: number): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'open_dev_tools', windowId });
   },

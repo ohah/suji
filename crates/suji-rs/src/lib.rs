@@ -217,8 +217,6 @@ pub mod windows {
         invoke("__core__", &format!(r#"{{"cmd":"is_loading","windowId":{}}}"#, window_id))
     }
 
-    // ── Phase 4-C: DevTools ──
-
     pub fn open_dev_tools(window_id: u32) -> Option<String> {
         invoke("__core__", &format!(r#"{{"cmd":"open_dev_tools","windowId":{}}}"#, window_id))
     }

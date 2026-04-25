@@ -60,8 +60,6 @@ func IsLoading(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"is_loading","windowId":%d}`, windowID))
 }
 
-// ── Phase 4-C: DevTools ──
-
 func OpenDevTools(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"open_dev_tools","windowId":%d}`, windowID))
 }

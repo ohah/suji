@@ -276,6 +276,30 @@ describe("DevTools API (Phase 4-C)", () => {
     );
     expect(r.ok).toBe(false);
   });
+
+  // ──────────────────────────────────────────────────────
+  // 회귀 — cmd 정확 매치 (commit 73). 이전엔 substring 매치였음.
+  // ──────────────────────────────────────────────────────
+
+  test("회귀: 가짜 cmd가 다른 cmd의 substring 포함해도 잘못 라우팅 안 됨", async () => {
+    // "open_dev_tools_extra"는 "open_dev_tools" substring 포함 → 이전 코드는 잘못 매치.
+    // 정확 매치 fix 후엔 fallback "hello from zig" 응답.
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "open_dev_tools_extra", windowId: 1 })),
+    );
+    expect(r.cmd).toBeUndefined(); // open_dev_tools 응답이 아님
+    expect(r.msg).toBe("hello from zig"); // default fallback
+  });
+
+  test("회귀: 옵션 필드에 'cmd' substring 포함돼도 잘못 라우팅 안 됨", async () => {
+    // create_window는 이전엔 substring "create_window"만 봤음 → title에 "create_window"
+    // 들어가면 cmd가 다른데도 라우팅됐을 위험. 정확 매치 후 fallback로.
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "noop", title: "create_window inside title" })),
+    );
+    expect(r.cmd).not.toBe("create_window");
+    expect(r.windowId).toBeUndefined();
+  });
 });
 
 describe("Zig backend SDK windows.* round-trip", () => {

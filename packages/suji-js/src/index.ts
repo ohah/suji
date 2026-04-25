@@ -227,8 +227,6 @@ export const windows = {
     return coreCall<IsLoadingResponse>({ cmd: "is_loading", windowId });
   },
 
-  // ── Phase 4-C: DevTools (open/close/is/toggle) ──
-
   /** DevTools 열기 — 이미 열려있으면 멱등 no-op */
   openDevTools(windowId: number): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "open_dev_tools", windowId });

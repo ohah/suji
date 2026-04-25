@@ -537,18 +537,12 @@ pub const windows = struct {
     }
 
     pub fn getURL(id: u32) ?[]const u8 {
-        var fields_buf: [64]u8 = undefined;
-        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d}", .{id}) catch return null;
-        return coreCmd("get_url", fields);
+        return windowIdCmd("get_url", id);
     }
 
     pub fn isLoading(id: u32) ?[]const u8 {
-        var fields_buf: [64]u8 = undefined;
-        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d}", .{id}) catch return null;
-        return coreCmd("is_loading", fields);
+        return windowIdCmd("is_loading", id);
     }
-
-    // ── Phase 4-C: DevTools ──
 
     pub fn openDevTools(id: u32) ?[]const u8 {
         return windowIdCmd("open_dev_tools", id);
