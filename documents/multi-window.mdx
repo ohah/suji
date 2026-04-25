@@ -85,6 +85,81 @@ await windows.setBounds(2, { x: 100, y: 100, width: 1200, height: 800 });
 - macOS: Cocoa 좌표 자동 변환 (화면 좌상단 기준 Y 입력)
 - Linux / Windows: no-op (스텁) — 추후 GTK/Win32 구현 예정
 
+## webContents — 네비게이션 / JS 실행 (Phase 4-A)
+
+Electron `webContents.loadURL/reload/executeJavaScript/getURL/isLoading` 대응. 모두 `windowId` 기반 — 어느 창이든 조작 가능.
+
+### `windows.loadURL(id, url)` — 새 페이지 로드
+
+```ts
+import { windows } from '@suji/api';
+await windows.loadURL(2, 'https://example.com/');
+```
+
+### `windows.reload(id, ignoreCache?)` — 현재 페이지 reload
+
+```ts
+await windows.reload(2);              // 일반 reload
+await windows.reload(2, true);        // disk 캐시 무시 (Electron reloadIgnoringCache)
+```
+
+### `windows.executeJavaScript(id, code)` — 렌더러에서 임의 JS 실행
+
+```ts
+await windows.executeJavaScript(2, 'document.title = "Hello"');
+```
+
+**fire-and-forget** — 응답에 결과(eval value)는 없음, `ok`만 반환. 결과가 필요하면 JS 측에서 `suji.send(channel, value)`로 회신.
+
+### `windows.getURL(id)` — 현재 main frame URL
+
+```ts
+const r = await windows.getURL(2);
+// r = { ok: true, url: "https://example.com/" } 또는
+//     { ok: false, url: null } (캐시 미스 — OnAddressChange 갱신 전)
+```
+
+### `windows.isLoading(id)` — 로딩 중 여부
+
+```ts
+const r = await windows.isLoading(2);
+// r = { ok: true, loading: true | false }
+```
+
+### 백엔드 SDK 미러
+
+같은 4-A API가 백엔드 4언어 SDK에도 노출되어 있어, **handler 안에서 다른 창을 조작**할 수 있다 (예: 메인 창의 핸들러가 settings 창을 reload).
+
+```zig
+// Zig
+_ = suji.windows.loadURL(2, "https://example.com/");
+_ = suji.windows.executeJavaScript(2, "console.log('hi')");
+```
+
+```rust
+// Rust
+suji::windows::load_url(2, "https://example.com/");
+suji::windows::execute_javascript(2, "console.log('hi')");
+```
+
+```go
+// Go
+import "github.com/ohah/suji-go/windows"
+windows.LoadURL(2, "https://example.com/")
+windows.ExecuteJavaScript(2, "console.log('hi')")
+```
+
+```js
+// Node
+import { windows } from '@suji/node';
+await windows.loadURL(2, 'https://example.com/');
+await windows.executeJavaScript(2, "console.log('hi')");
+```
+
+응답은 모두 `{from:"zig-core", cmd, windowId, ok}` 형태 (get_url/is_loading은 추가 필드). caller가 JSON 파싱.
+
+**Cross-platform**: 모두 macOS만 동작 (Linux/Windows는 CEF 자체 창 핸들이라 추후 구현). 미지원 플랫폼에선 silent no-op.
+
 ## 어느 창에서 호출됐는지 식별 — `__window` wire 자동 태깅
 
 프론트엔드가 `__suji__.invoke('save', data)`를 호출하면 수신 코어가 sender browser를

@@ -102,3 +102,30 @@ suji::send_to(event.window.id, "saved", &json!({ "ok": true }).to_string());
 ```
 
 Electron `webContents.send` 대응. 대상 창이 닫혔거나 core 주입 전이면 silent no-op.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+Frontend `@suji/api`의 `windows.*` 와 같은 cmd JSON을 코어로 보낸다 (IPC 경유, dlopen 호환). 응답은 `Option<String>` JSON.
+
+```rust
+use suji::windows;
+
+// 새 창
+let _ = windows::create_simple("Settings", "http://localhost:5173/settings");
+let _ = windows::create(r#""name":"hud","frame":false,"transparent":true"#);
+
+// 페이지 조작
+let _ = windows::load_url(2, "https://example.com/");
+let _ = windows::reload(2, true);                      // ignoreCache
+let _ = windows::execute_javascript(2, "document.title='Hi'");
+let _ = windows::set_title(2, "New Title");
+let _ = windows::set_bounds(2, windows::SetBoundsArgs {
+    x: 100, y: 100, width: 1200, height: 800,
+});
+
+// 상태 조회
+let _ = windows::get_url(2);     // {ok, url} 또는 {ok:false, url:null}
+let _ = windows::is_loading(2);  // {ok, loading}
+```
+
+`title`/`url`/`code` 등 문자열 필드는 SDK가 자동 escape.

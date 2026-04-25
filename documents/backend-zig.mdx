@@ -130,3 +130,28 @@ suji.send("theme-changed", "{\"color\":\"dark\"}");
 ```
 
 모든 창의 `__suji__.on("theme-changed", ...)` 리스너에 JSON 파싱되어 전달.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+Frontend `@suji/api`의 `windows.*`와 같은 cmd JSON을 코어로 보낸다 (dlopen 환경 호환을 위해 in-process WindowManager 직접 접근 X — IPC 경유). 응답은 `?[]const u8` JSON 문자열.
+
+```zig
+// 새 창 (단축)
+_ = suji.windows.createSimple("Settings", "http://localhost:5173/settings");
+
+// 옵션 풀 셋 — opts_json은 cmd 객체 안의 raw 필드 (camelCase)
+_ = suji.windows.create("\"name\":\"hud\",\"frame\":false,\"transparent\":true,\"alwaysOnTop\":true");
+
+// 페이지 조작
+_ = suji.windows.loadURL(2, "https://example.com/");
+_ = suji.windows.reload(2, true);                      // ignoreCache
+_ = suji.windows.executeJavaScript(2, "document.title='Hi'"); // fire-and-forget
+_ = suji.windows.setTitle(2, "New Title");
+_ = suji.windows.setBounds(2, .{ .x = 100, .y = 100, .width = 1200, .height = 800 });
+
+// 상태 조회
+_ = suji.windows.getURL(2);     // {ok, url} 또는 {ok:false, url:null}
+_ = suji.windows.isLoading(2);  // {ok, loading}
+```
+
+`title`/`url`/`code` 등 문자열 필드는 SDK가 자동 escape (`"` `\\` 이스케이프 + control char drop).

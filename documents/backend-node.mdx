@@ -150,3 +150,33 @@ handle('save', (data, event) => {
 ```
 
 Electron `webContents.send` 대응. 대상이 닫혔거나 bridge가 구버전이면 silent no-op.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+Frontend `@suji/api`의 `windows.*`와 동일한 cmd JSON을 코어로 보낸다 (IPC 경유). **유일하게 typed response** (Zig/Rust/Go는 raw JSON 문자열).
+
+```js
+const { windows } = require('@suji/node');
+
+// 새 창
+const r = await windows.create({
+  name: 'hud',
+  frame: false,
+  transparent: true,
+  alwaysOnTop: true,
+});
+// r = { from: "zig-core", cmd: "create_window", windowId: 3 }
+
+// 페이지 조작
+await windows.loadURL(2, 'https://example.com/');
+await windows.reload(2, true);                         // ignoreCache
+await windows.executeJavaScript(2, "document.title='Hi'"); // fire-and-forget
+await windows.setTitle(2, 'New Title');
+await windows.setBounds(2, { x: 100, y: 100, width: 1200, height: 800 });
+
+// 상태 조회
+const u = await windows.getURL(2);     // { ok, url } 또는 { ok:false, url:null }
+const l = await windows.isLoading(2);  // { ok, loading }
+```
+
+핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).

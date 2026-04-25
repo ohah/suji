@@ -54,6 +54,9 @@ fn onAllClosed(_: suji.Event) void {
 }
 // req.invoke("rust", request)  — 크로스 호출
 // suji.send("channel", data)   — 이벤트 발신
+// suji.sendTo(id, "ch", data)  — 특정 창에만 이벤트
+// suji.windows.loadURL(id, url)        — 창 페이지 변경 (Phase 4-A)
+// suji.windows.executeJavaScript(id, code) — 렌더러에서 JS 실행
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -65,7 +68,9 @@ fn ping() -> String { "pong".to_string() }
 suji::export_handlers!(ping);
 // suji::invoke("go", request)  — 크로스 호출
 // suji::send("channel", data)  — 이벤트 발신
+// suji::send_to(id, "ch", data) — 특정 창에만 이벤트
 // suji::on("channel", cb, arg) — 이벤트 수신
+// suji::windows::load_url(id, url) / reload(id, false) / execute_javascript(id, code)  (Phase 4-A)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -77,7 +82,10 @@ func (a *App) Ping() string { return "pong" }
 var _ = suji.Bind(&App{})
 // suji.Invoke("rust", request)
 // suji.Send("channel", data)
+// suji.SendTo(id, "ch", data)
 // suji.On("channel", callback)  — EventBus 연결 (bridge.c)
+// import "github.com/ohah/suji-go/windows"
+// windows.LoadURL(id, url) / Reload(id, false) / ExecuteJavaScript(id, code)  (Phase 4-A)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -91,6 +99,10 @@ suji.on("event", (data) => console.log(data))
 suji.emit("event", { msg: "hello" })
 suji.quit()                                                  // 앱 종료 요청
 suji.platform                                                // "macos" | "linux" | "windows" (상수)
+// import { windows } from '@suji/api';
+// await windows.create({ title:"Settings", url:"...", frame:false }) — 새 창
+// await windows.loadURL(id, url) / reload(id, true) / executeJavaScript(id, code)  (Phase 4-A)
+// await windows.getURL(id) / isLoading(id) / setTitle(id, t) / setBounds(id, {...})
 ```
 
 ## suji.json 설정

@@ -106,3 +106,32 @@ suji.SendTo(event.Window.ID, "saved", `{"ok":true}`)
 ```
 
 Electron `webContents.send` 대응. 대상이 닫혔거나 core 주입 전이면 silent no-op.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+별도 sub-package로 노출 — `import "github.com/ohah/suji-go/windows"`. 코어로 cmd JSON 전송 (IPC 경유, dlopen 호환). 응답은 raw JSON `string`.
+
+```go
+import (
+    "github.com/ohah/suji-go/windows"
+)
+
+// 새 창
+windows.CreateSimple("Settings", "http://localhost:5173/settings")
+windows.Create(`"name":"hud","frame":false,"transparent":true`)
+
+// 페이지 조작
+windows.LoadURL(2, "https://example.com/")
+windows.Reload(2, true)                   // ignoreCache
+windows.ExecuteJavaScript(2, "document.title='Hi'")  // fire-and-forget
+windows.SetTitle(2, "New Title")
+windows.SetBounds(2, windows.SetBoundsArgs{
+    X: 100, Y: 100, Width: 1200, Height: 800,
+})
+
+// 상태 조회
+windows.GetURL(2)     // {ok, url} 또는 {ok:false, url:null}
+windows.IsLoading(2)  // {ok, loading}
+```
+
+`title`/`url`/`code` 등 문자열 필드는 SDK가 자동 escape.
