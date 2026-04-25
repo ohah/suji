@@ -125,6 +125,20 @@ export const windows = {
     toggleDevTools(windowId) {
         return coreCall({ cmd: "toggle_dev_tools", windowId });
     },
+    /** 줌 레벨 변경. Electron 호환 — 0 = 100%, 1 = 120%, -1 = 1/1.2 (logarithmic) */
+    setZoomLevel(windowId, level) {
+        return coreCall({ cmd: "set_zoom_level", windowId, level });
+    },
+    getZoomLevel(windowId) {
+        return coreCall({ cmd: "get_zoom_level", windowId });
+    },
+    /** 줌 factor 변경. 1.0 = 100%, 1.5 = 150% (linear). 내부적으로 level = log(factor)/log(1.2) 변환 */
+    setZoomFactor(windowId, factor) {
+        return coreCall({ cmd: "set_zoom_factor", windowId, factor });
+    },
+    getZoomFactor(windowId) {
+        return coreCall({ cmd: "get_zoom_factor", windowId });
+    },
 };
 /**
  * 여러 백엔드에 동시 요청

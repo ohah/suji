@@ -118,6 +118,14 @@ export interface IsDevToolsOpenedResponse extends WindowOpResponse {
     cmd: "is_dev_tools_opened";
     opened: boolean;
 }
+export interface ZoomLevelResponse extends WindowOpResponse {
+    cmd: "get_zoom_level";
+    level: number;
+}
+export interface ZoomFactorResponse extends WindowOpResponse {
+    cmd: "get_zoom_factor";
+    factor: number;
+}
 export declare const windows: {
     /**
      * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
@@ -147,6 +155,12 @@ export declare const windows: {
     isDevToolsOpened(windowId: number): Promise<IsDevToolsOpenedResponse>;
     /** DevTools 토글 — F12 단축키와 동일 동작 */
     toggleDevTools(windowId: number): Promise<WindowOpResponse>;
+    /** 줌 레벨 변경. Electron 호환 — 0 = 100%, 1 = 120%, -1 = 1/1.2 (logarithmic) */
+    setZoomLevel(windowId: number, level: number): Promise<WindowOpResponse>;
+    getZoomLevel(windowId: number): Promise<ZoomLevelResponse>;
+    /** 줌 factor 변경. 1.0 = 100%, 1.5 = 150% (linear). 내부적으로 level = log(factor)/log(1.2) 변환 */
+    setZoomFactor(windowId: number, factor: number): Promise<WindowOpResponse>;
+    getZoomFactor(windowId: number): Promise<ZoomFactorResponse>;
 };
 /**
  * 여러 백엔드에 동시 요청

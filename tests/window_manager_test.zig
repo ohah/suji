@@ -2273,6 +2273,61 @@ test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
     try std.testing.expect(std.mem.indexOf(u8, body, "toggleDevTools(main_browser") == null);
 }
 
+// ============================================
+// Phase 4-B: 줌 (level / factor)
+// ============================================
+
+test "setZoomLevel: native까지 전달 + getZoomLevel로 읽기" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.setZoomLevel(id, 1.5);
+    try std.testing.expectEqual(@as(usize, 1), native.set_zoom_level_calls);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.5), try wm.getZoomLevel(id), 1e-9);
+}
+
+test "setZoomFactor: pow(1.2, level) 변환 — factor=1.2 ↔ level=1, factor=1 ↔ level=0" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try wm.setZoomFactor(id, 1.0); // 100% → level=0
+    try std.testing.expectApproxEqAbs(@as(f64, 0), native.stub_zoom_level, 1e-9);
+
+    try wm.setZoomFactor(id, 1.2); // level=1 (정확히)
+    try std.testing.expectApproxEqAbs(@as(f64, 1), native.stub_zoom_level, 1e-9);
+
+    // 역방향 round-trip — getZoomFactor가 setZoomFactor 입력 복원
+    try wm.setZoomFactor(id, 1.5);
+    try std.testing.expectApproxEqAbs(@as(f64, 1.5), try wm.getZoomFactor(id), 1e-9);
+}
+
+test "setZoomFactor: factor<=0이면 level=0 (방어적 — log(0) 회피)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    native.stub_zoom_level = 5; // 더러운 초기값
+    try wm.setZoomFactor(id, 0);
+    try std.testing.expectEqual(@as(f64, 0), native.stub_zoom_level);
+    try wm.setZoomFactor(id, -1);
+    try std.testing.expectEqual(@as(f64, 0), native.stub_zoom_level);
+}
+
+test "줌 메서드: destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setZoomLevel(id, 0));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.getZoomLevel(id));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setZoomLevel(999, 0));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.getZoomFactor(999));
+}
+
 test "회귀: 4-C cef.zig openDevTools/closeDevTools/toggleDevTools가 인자 browser 사용" {
     // 헬퍼 분해 후 sender browser(매개변수)를 사용함을 정적 검증 — 만약 실수로
     // g_browser/g_main_browser 같은 글로벌로 바꾸면 멀티 윈도우 회귀.

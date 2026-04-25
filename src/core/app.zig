@@ -557,6 +557,23 @@ pub const windows = struct {
         return windowIdCmd("toggle_dev_tools", id);
     }
 
+    pub fn setZoomLevel(id: u32, level: f64) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"level\":{d}", .{ id, level }) catch return null;
+        return coreCmd("set_zoom_level", fields);
+    }
+    pub fn getZoomLevel(id: u32) ?[]const u8 {
+        return windowIdCmd("get_zoom_level", id);
+    }
+    pub fn setZoomFactor(id: u32, factor: f64) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"factor\":{d}", .{ id, factor }) catch return null;
+        return coreCmd("set_zoom_factor", fields);
+    }
+    pub fn getZoomFactor(id: u32) ?[]const u8 {
+        return windowIdCmd("get_zoom_factor", id);
+    }
+
     /// `windowId`만 들어가는 단순 cmd 헬퍼 — getURL/isLoading/openDevTools/... 공통.
     fn windowIdCmd(cmd: []const u8, id: u32) ?[]const u8 {
         var fields_buf: [64]u8 = undefined;

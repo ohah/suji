@@ -1131,6 +1131,29 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleToggleDevTools(win_id, response_buf, wm);
     }
+    // Phase 4-B: 줌
+    if (std.mem.eql(u8, cmd, "set_zoom_level")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const level = util.extractJsonFloat(req_clean, "level") orelse 0;
+        return window_ipc.handleSetZoomLevel(.{ .window_id = win_id, .value = level }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_zoom_factor")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const factor = util.extractJsonFloat(req_clean, "factor") orelse 1;
+        return window_ipc.handleSetZoomFactor(.{ .window_id = win_id, .value = factor }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "get_zoom_level")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleGetZoomLevel(win_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "get_zoom_factor")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleGetZoomFactor(win_id, response_buf, wm);
+    }
     if (std.mem.eql(u8, cmd, "quit")) {
         cef.quit();
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"quit\"}}", .{}) catch return null;

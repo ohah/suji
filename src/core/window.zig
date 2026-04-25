@@ -157,6 +157,10 @@ pub const Native = struct {
         close_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
         is_dev_tools_opened: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         toggle_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        // Phase 4-B: 줌 — level만 노출. factor는 WM이 pow(1.2, level)로 변환
+        // (Electron 호환 — `setZoomFactor(1.5)` ≈ `setZoomLevel(2.22)`).
+        set_zoom_level: *const fn (ctx: ?*anyopaque, handle: u64, level: f64) void,
+        get_zoom_level: *const fn (ctx: ?*anyopaque, handle: u64) f64,
     };
 
     pub fn createWindow(self: Native, opts: *const CreateOptions) !u64 {
@@ -203,6 +207,12 @@ pub const Native = struct {
     }
     pub fn toggleDevTools(self: Native, handle: u64) void {
         self.vtable.toggle_dev_tools(self.ctx, handle);
+    }
+    pub fn setZoomLevel(self: Native, handle: u64, level: f64) void {
+        self.vtable.set_zoom_level(self.ctx, handle, level);
+    }
+    pub fn getZoomLevel(self: Native, handle: u64) f64 {
+        return self.vtable.get_zoom_level(self.ctx, handle);
     }
 };
 
@@ -758,5 +768,33 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         self.native.toggleDevTools(win.native_handle);
+    }
+
+    // ==================== Phase 4-B: 줌 ====================
+    // CEF는 zoom_level만 노출 — Electron의 zoomFactor는 pow(1.2, level)로 변환.
+
+    pub fn setZoomLevel(self: *WindowManager, id: u32, level: f64) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setZoomLevel(win.native_handle, level);
+    }
+
+    pub fn getZoomLevel(self: *WindowManager, id: u32) Error!f64 {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.getZoomLevel(win.native_handle);
+    }
+
+    /// factor → level 변환: level = log(factor) / log(1.2). factor < 0이면 0(기본 100%) 사용.
+    pub fn setZoomFactor(self: *WindowManager, id: u32, factor: f64) Error!void {
+        const level: f64 = if (factor > 0) @log(factor) / @log(1.2) else 0;
+        return self.setZoomLevel(id, level);
+    }
+
+    pub fn getZoomFactor(self: *WindowManager, id: u32) Error!f64 {
+        const level = try self.getZoomLevel(id);
+        return std.math.pow(f64, 1.2, level);
     }
 };

@@ -451,7 +451,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] **Phase 4-A 네비/JS** — `load_url`, `reload`(`ignoreCache`), `execute_javascript`,
           `get_url`(캐시), `is_loading` 6개. WM 메서드 + IPC 핸들러 + Frontend SDK
           (`windows.loadURL/reload/executeJavaScript/getURL/isLoading`) + 단위 17 + e2e 3.
-    - [ ] Phase 4-B 줌 — `set_zoom_factor`, `get_zoom_factor`, `set_zoom_level`, `get_zoom_level`
+    - [x] **Phase 4-B 줌** — `set_zoom_level/get_zoom_level/set_zoom_factor/get_zoom_factor`. CEF는
+          zoom_level만 노출 — factor는 WM에서 `pow(1.2, level)` 변환 (Electron 호환). Native
+          vtable level 2개 + WM 4개 + IPC 4 + 5 SDK + 단위 9 + e2e 4. CEF set_zoom_level은
+          navigation 시점 deferred — round-trip 정확 검증은 단위가 담당, e2e는 ok 응답 형식만.
     - [x] **Phase 4-C 핵심** — `open_dev_tools`, `close_dev_tools`, `is_dev_tools_opened`,
           `toggle_dev_tools` 4개. WM 메서드 + IPC 핸들러 + 5 SDK (Frontend + Zig/Rust/Go/Node) +
           단위 11 + e2e 3. open/close 멱등 — 이미 열림/닫힘이면 no-op. 기존 F12 단축키

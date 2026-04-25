@@ -276,6 +276,8 @@ pub const CefNative = struct {
         .close_dev_tools = closeDevToolsImpl,
         .is_dev_tools_opened = isDevToolsOpenedImpl,
         .toggle_dev_tools = toggleDevToolsImpl,
+        .set_zoom_level = setZoomLevelImpl,
+        .get_zoom_level = getZoomLevelImpl,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
@@ -533,6 +535,23 @@ pub const CefNative = struct {
         const self = fromCtx(ctx);
         const entry = self.browsers.get(handle) orelse return;
         toggleDevTools(entry.browser);
+    }
+
+    // ==================== Phase 4-B: 줌 ====================
+
+    fn setZoomLevelImpl(ctx: ?*anyopaque, handle: u64, level: f64) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+        host.set_zoom_level.?(host, level);
+    }
+
+    fn getZoomLevelImpl(ctx: ?*anyopaque, handle: u64) f64 {
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return 0;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return 0;
+        return host.get_zoom_level.?(host);
     }
 };
 

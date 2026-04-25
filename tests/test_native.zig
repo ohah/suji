@@ -41,6 +41,10 @@ pub const TestNative = struct {
     toggle_dev_tools_calls: usize = 0,
     /// is_dev_tools_opened 반환값. toggle/open/close가 자동 갱신.
     stub_dev_tools_opened: bool = false,
+
+    // Phase 4-B: 줌 — set 호출이 stub_zoom_level 갱신 (get은 그 값 반환).
+    set_zoom_level_calls: usize = 0,
+    stub_zoom_level: f64 = 0,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
@@ -68,6 +72,8 @@ pub const TestNative = struct {
         .close_dev_tools = closeDevTools,
         .is_dev_tools_opened = isDevToolsOpened,
         .toggle_dev_tools = toggleDevTools,
+        .set_zoom_level = setZoomLevel,
+        .get_zoom_level = getZoomLevel,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *TestNative {
@@ -166,5 +172,15 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.toggle_dev_tools_calls += 1;
         self.stub_dev_tools_opened = !self.stub_dev_tools_opened;
+    }
+
+    fn setZoomLevel(ctx: ?*anyopaque, _: u64, level: f64) void {
+        const self = fromCtx(ctx);
+        self.set_zoom_level_calls += 1;
+        self.stub_zoom_level = level;
+    }
+
+    fn getZoomLevel(ctx: ?*anyopaque, _: u64) f64 {
+        return fromCtx(ctx).stub_zoom_level;
     }
 };

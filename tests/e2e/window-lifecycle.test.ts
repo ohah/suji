@@ -219,6 +219,59 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
 // ============================================
 
 // ============================================
+// Phase 4-B: 줌 (set/get level + factor)
+// ============================================
+
+describe("Zoom API (Phase 4-B)", () => {
+  // CEF는 set_zoom_level 적용을 navigation 시점에 deferred — about:blank에 즉시 set
+  // 직후 get은 cache된 기본값(0) 반환 가능. e2e는 ok 응답 + 응답 형식만 검증.
+  // 실제 set→get round-trip은 TestNative 기반 단위 테스트에서 보장.
+
+  test("set_zoom_level: ok 응답 + cmd 정확 매치", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "zoom-set-level", url: "about:blank" });
+    const id = created.windowId;
+    const r: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_zoom_level", windowId: id, level: 1.5 },
+    );
+    expect(r.cmd).toBe("set_zoom_level");
+    expect(r.ok).toBe(true);
+  });
+
+  test("set_zoom_factor: ok 응답 + factor → level 변환 (코어가 wm.setZoomFactor 거침)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "zoom-set-factor", url: "about:blank" });
+    const id = created.windowId;
+    const r: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_zoom_factor", windowId: id, factor: 1.2 },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test("get_zoom_level / get_zoom_factor: 응답 형식 (level/factor 필드 + ok:true)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "zoom-get", url: "about:blank" });
+    const id = created.windowId;
+    const evalCmd = (cmd: string): Promise<any> =>
+      page.evaluate((req) => (window as any).__suji__.core(JSON.stringify(req)), { cmd, windowId: id });
+
+    const gl = await evalCmd("get_zoom_level");
+    expect(gl.ok).toBe(true);
+    expect(typeof gl.level).toBe("number");
+
+    const gf = await evalCmd("get_zoom_factor");
+    expect(gf.ok).toBe(true);
+    expect(typeof gf.factor).toBe("number");
+  });
+
+  test("알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "set_zoom_level", windowId: 99999, level: 1 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+});
+
+// ============================================
 // Phase 4-C: DevTools API (open / close / is / toggle)
 // ============================================
 

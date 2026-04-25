@@ -73,6 +73,19 @@ func ToggleDevTools(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"toggle_dev_tools","windowId":%d}`, windowID))
 }
 
+func SetZoomLevel(windowID uint32, level float64) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"set_zoom_level","windowId":%d,"level":%g}`, windowID, level))
+}
+func GetZoomLevel(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_zoom_level","windowId":%d}`, windowID))
+}
+func SetZoomFactor(windowID uint32, factor float64) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"set_zoom_factor","windowId":%d,"factor":%g}`, windowID, factor))
+}
+func GetZoomFactor(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_zoom_factor","windowId":%d}`, windowID))
+}
+
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,

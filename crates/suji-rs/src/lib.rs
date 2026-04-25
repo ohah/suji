@@ -230,6 +230,19 @@ pub mod windows {
         invoke("__core__", &format!(r#"{{"cmd":"toggle_dev_tools","windowId":{}}}"#, window_id))
     }
 
+    pub fn set_zoom_level(window_id: u32, level: f64) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"set_zoom_level","windowId":{},"level":{}}}"#, window_id, level))
+    }
+    pub fn get_zoom_level(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"get_zoom_level","windowId":{}}}"#, window_id))
+    }
+    pub fn set_zoom_factor(window_id: u32, factor: f64) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"set_zoom_factor","windowId":{},"factor":{}}}"#, window_id, factor))
+    }
+    pub fn get_zoom_factor(window_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"get_zoom_factor","windowId":{}}}"#, window_id))
+    }
+
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,

@@ -175,6 +175,16 @@ export interface IsDevToolsOpenedResponse extends WindowOpResponse {
   opened: boolean;
 }
 
+export interface ZoomLevelResponse extends WindowOpResponse {
+  cmd: "get_zoom_level";
+  level: number;
+}
+
+export interface ZoomFactorResponse extends WindowOpResponse {
+  cmd: "get_zoom_factor";
+  factor: number;
+}
+
 async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
   const raw = await getBridge().core(JSON.stringify(request));
   return (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
@@ -245,6 +255,24 @@ export const windows = {
   /** DevTools 토글 — F12 단축키와 동일 동작 */
   toggleDevTools(windowId: number): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "toggle_dev_tools", windowId });
+  },
+
+  /** 줌 레벨 변경. Electron 호환 — 0 = 100%, 1 = 120%, -1 = 1/1.2 (logarithmic) */
+  setZoomLevel(windowId: number, level: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_zoom_level", windowId, level });
+  },
+
+  getZoomLevel(windowId: number): Promise<ZoomLevelResponse> {
+    return coreCall<ZoomLevelResponse>({ cmd: "get_zoom_level", windowId });
+  },
+
+  /** 줌 factor 변경. 1.0 = 100%, 1.5 = 150% (linear). 내부적으로 level = log(factor)/log(1.2) 변환 */
+  setZoomFactor(windowId: number, factor: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_zoom_factor", windowId, factor });
+  },
+
+  getZoomFactor(windowId: number): Promise<ZoomFactorResponse> {
+    return coreCall<ZoomFactorResponse>({ cmd: "get_zoom_factor", windowId });
   },
 };
 

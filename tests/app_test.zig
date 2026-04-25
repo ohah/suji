@@ -711,6 +711,27 @@ test "windows.setTitle: title의 \" 이스케이프" {
     }.run);
 }
 
+// Phase 4-B: 줌 — set은 windowId+level/factor, get은 windowId.
+test "windows.setZoomLevel / setZoomFactor / getZoomLevel / getZoomFactor" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.setZoomLevel(2, 1.5);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"set_zoom_level\",\"windowId\":2,\"level\":1.5") != null);
+
+            _ = app_mod.windows.setZoomFactor(2, 1.2);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"set_zoom_factor\",\"windowId\":2,\"factor\":1.2") != null);
+
+            _ = app_mod.windows.getZoomLevel(2);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"get_zoom_level\",\"windowId\":2") != null);
+
+            _ = app_mod.windows.getZoomFactor(2);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"get_zoom_factor\",\"windowId\":2") != null);
+
+            try std.testing.expectEqual(@as(usize, 4), InvokeSpy.call_count);
+        }
+    }.run);
+}
+
 // Phase 4-C: DevTools — windowId만 들어가는 단순 cmd 4종.
 test "windows.openDevTools / closeDevTools / isDevToolsOpened / toggleDevTools" {
     try withInvokeCore(struct {

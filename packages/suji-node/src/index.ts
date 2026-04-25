@@ -355,6 +355,16 @@ export interface IsDevToolsOpenedResponse extends WindowOpResponse {
   opened: boolean;
 }
 
+export interface ZoomLevelResponse extends WindowOpResponse {
+  cmd: 'get_zoom_level';
+  level: number;
+}
+
+export interface ZoomFactorResponse extends WindowOpResponse {
+  cmd: 'get_zoom_factor';
+  factor: number;
+}
+
 export interface SetBoundsArgs {
   x?: number;
   y?: number;
@@ -401,5 +411,18 @@ export const windows = {
   },
   toggleDevTools(windowId: number): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'toggle_dev_tools', windowId });
+  },
+
+  setZoomLevel(windowId: number, level: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_zoom_level', windowId, level });
+  },
+  getZoomLevel(windowId: number): Promise<ZoomLevelResponse> {
+    return invoke<ZoomLevelResponse>('__core__', { cmd: 'get_zoom_level', windowId });
+  },
+  setZoomFactor(windowId: number, factor: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_zoom_factor', windowId, factor });
+  },
+  getZoomFactor(windowId: number): Promise<ZoomFactorResponse> {
+    return invoke<ZoomFactorResponse>('__core__', { cmd: 'get_zoom_factor', windowId });
   },
 };

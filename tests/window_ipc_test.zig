@@ -873,6 +873,69 @@ test "handleDevToolsOp: 각 핸들러가 자기 wm 메서드만 호출 (cross-ca
     try std.testing.expectEqual(@as(usize, 1), native.toggle_dev_tools_calls);
 }
 
+// ============================================
+// Phase 4-B: 줌 IPC 핸들러
+// ============================================
+
+test "handleSetZoomLevel: native 호출 + windowOp 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleSetZoomLevel(.{ .window_id = 1, .value = 2.0 }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.set_zoom_level_calls);
+    try std.testing.expectApproxEqAbs(@as(f64, 2.0), native.stub_zoom_level, 1e-9);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"set_zoom_level\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}
+
+test "handleSetZoomFactor: factor → level 변환 후 native 호출" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleSetZoomFactor(.{ .window_id = 1, .value = 1.2 }, &buf, &wm).?;
+    try std.testing.expectApproxEqAbs(@as(f64, 1.0), native.stub_zoom_level, 1e-9); // log(1.2)/log(1.2) = 1
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"set_zoom_factor\"") != null);
+}
+
+test "handleGetZoomLevel: stub 값이 응답 level 필드로" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    native.stub_zoom_level = 1.5;
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleGetZoomLevel(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"level\":1.5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}
+
+test "handleGetZoomFactor: pow(1.2, level)로 변환 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    native.stub_zoom_level = 1; // factor = 1.2
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleGetZoomFactor(1, &buf, &wm).?;
+    // bufPrint {d}는 실수 정밀도라 "1.2"가 아닌 "1.2000..." 가능 — substring 확인
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"factor\":1.2") != null);
+}
+
+test "줌 핸들러: 알 수 없는 id면 ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const r1 = ipc.handleSetZoomLevel(.{ .window_id = 999, .value = 1 }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":false") != null);
+    const r2 = ipc.handleGetZoomLevel(999, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":false") != null);
+}
+
 test "handleDevToolsOp: 모든 핸들러 작은 버퍼면 null (회귀)" {
     var native = TestNative{};
     var wm = newWm(&native);
