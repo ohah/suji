@@ -480,6 +480,36 @@ test "special_dispatch는 __fanout__ / __chain__ channel도 dispatch" {
     try std.testing.expectEqual(@as(usize, 2), SpecialDispatchSpy.call_count);
 }
 
+// ============================================
+// 회귀 테스트 — main.zig가 두 init 경로(dev/prod) 모두에서 special_dispatch
+// inject. 한 곳 누락되면 해당 모드의 backend SDK windows.* 가 silent 동작 안 함
+// (사용자가 dev에선 OK, prod에선 안 되는 식의 이상한 회귀).
+// 컴파일된 수치 동작이 아니라 소스 정적 패턴 검증 — 누락이 즉시 드러남.
+// ============================================
+
+test "main.zig: special_dispatch inject가 dev + prod 두 init에 모두 있어야" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // setGlobal()이 두 곳(dev/prod fn) — 각각 직후에 special_dispatch = backendSpecialDispatch가 와야.
+    var inject_count: usize = 0;
+    var search_from: usize = 0;
+    while (std.mem.indexOfPos(u8, source, search_from, "BackendRegistry.special_dispatch = backendSpecialDispatch")) |pos| {
+        inject_count += 1;
+        search_from = pos + 1;
+    }
+    try std.testing.expect(inject_count >= 2);
+
+    // 그리고 backendSpecialDispatch 함수 본문은 SPECIAL_DISPATCHERS 테이블 순회.
+    try std.testing.expect(std.mem.indexOf(u8, source, "for (SPECIAL_DISPATCHERS)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "fn backendSpecialDispatch(") != null);
+}
+
 test "non-special channel은 dispatcher를 거치지 않음 (회귀 방지)" {
     // dispatcher가 set돼 있어도 일반 backend 이름은 dlopen registry로만 가야 함.
     SpecialDispatchSpy.reset();

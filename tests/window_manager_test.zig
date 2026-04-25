@@ -2240,3 +2240,56 @@ test "DevTools 메서드: 알 수 없는 id에 호출 시 WindowNotFound" {
     try std.testing.expectError(window.Error.WindowNotFound, wm.toggleDevTools(999));
     try std.testing.expectError(window.Error.WindowNotFound, wm.isDevToolsOpened(999));
 }
+
+// ============================================
+// 회귀 — F12 / Cmd+Shift+I 단축키가 sender 창(br)에만 토글
+// (이전 버그: g_browser 싱글 참조로 항상 main 창만 토글)
+//
+// 정적 패턴 검증 — onPreKeyEvent body에서 toggleDevTools 호출이 함수 인자
+// `br`(sender)을 받아야지, 모듈-레벨 g_browser 같은 싱글 참조면 fail.
+// ============================================
+
+test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "fn onPreKeyEvent(";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.OnPreKeyEventNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // br = browser 함수 인자 alias.
+    try std.testing.expect(std.mem.indexOf(u8, body, "const br = browser orelse return 0;") != null);
+    // F12(key==123) 또는 Cmd+I 체크 후 toggleDevTools(br) 호출 — sender 창에만.
+    try std.testing.expect(std.mem.indexOf(u8, body, "key == 123") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "toggleDevTools(br)") != null);
+    // 회귀 가드: 싱글 글로벌 참조 사용 금지.
+    try std.testing.expect(std.mem.indexOf(u8, body, "toggleDevTools(g_browser") == null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "toggleDevTools(main_browser") == null);
+}
+
+test "회귀: 4-C cef.zig openDevTools/closeDevTools/toggleDevTools가 인자 browser 사용" {
+    // 헬퍼 분해 후 sender browser(매개변수)를 사용함을 정적 검증 — 만약 실수로
+    // g_browser/g_main_browser 같은 글로벌로 바꾸면 멀티 윈도우 회귀.
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    inline for (.{
+        "fn openDevTools(browser: *c.cef_browser_t) void {",
+        "fn closeDevTools(browser: *c.cef_browser_t) void {",
+        "fn toggleDevTools(browser: *c.cef_browser_t) void {",
+        "fn hasDevTools(browser: *c.cef_browser_t) bool {",
+    }) |sig| {
+        try std.testing.expect(std.mem.indexOf(u8, source, sig) != null);
+    }
+}
