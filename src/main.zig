@@ -595,6 +595,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setTrayEmitHandler(&trayEmitHandler);
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
+    cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -758,6 +759,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setTrayEmitHandler(&trayEmitHandler);
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
+    cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -1373,6 +1375,21 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_reset_application_menu\",\"success\":{}}}", .{ok}) catch null;
     }
 
+    // Global shortcut API — Carbon Hot Key (macOS only).
+    if (std.mem.eql(u8, cmd, "global_shortcut_register")) {
+        return handleGlobalShortcutRegister(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "global_shortcut_unregister")) {
+        return handleGlobalShortcutUnregister(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "global_shortcut_unregister_all")) {
+        cef.globalShortcutUnregisterAll();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_unregister_all\",\"success\":true}}", .{}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "global_shortcut_is_registered")) {
+        return handleGlobalShortcutIsRegistered(req_clean, response_buf);
+    }
+
     // Notification API — UNUserNotificationCenter (macOS only).
     if (std.mem.eql(u8, cmd, "notification_is_supported")) {
         const supported = cef.notificationIsSupported();
@@ -1826,6 +1843,46 @@ fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 }
 
 // ============================================
+// Global shortcut handlers
+// ============================================
+
+fn fsAcceleratorFromRequest(req_clean: []const u8, out: []u8) ?[]const u8 {
+    const raw = util.extractJsonString(req_clean, "accelerator") orelse return null;
+    const n = util.unescapeJsonStr(raw, out) orelse return null;
+    if (n == 0) return null;
+    return out[0..n];
+}
+
+fn handleGlobalShortcutRegister(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var accel_buf: [128]u8 = undefined;
+    const accel = fsAcceleratorFromRequest(req_clean, &accel_buf) orelse return coreError(response_buf, "global_shortcut_register", "accelerator");
+
+    var click_buf: [128]u8 = undefined;
+    const click_raw = util.extractJsonString(req_clean, "click") orelse "";
+    const click_n = util.unescapeJsonStr(click_raw, &click_buf) orelse return coreError(response_buf, "global_shortcut_register", "click");
+    const click = click_buf[0..click_n];
+
+    const ok = cef.globalShortcutRegister(accel, click);
+    const code: []const u8 = if (ok) "" else "register";
+    if (!ok) return coreError(response_buf, "global_shortcut_register", code);
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_register\",\"success\":true}}", .{}) catch null;
+}
+
+fn handleGlobalShortcutUnregister(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var accel_buf: [128]u8 = undefined;
+    const accel = fsAcceleratorFromRequest(req_clean, &accel_buf) orelse return coreError(response_buf, "global_shortcut_unregister", "accelerator");
+    const ok = cef.globalShortcutUnregister(accel);
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_unregister\",\"success\":{}}}", .{ok}) catch null;
+}
+
+fn handleGlobalShortcutIsRegistered(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var accel_buf: [128]u8 = undefined;
+    const accel = fsAcceleratorFromRequest(req_clean, &accel_buf) orelse return coreError(response_buf, "global_shortcut_is_registered", "accelerator");
+    const registered = cef.globalShortcutIsRegistered(accel);
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_is_registered\",\"registered\":{}}}", .{registered}) catch null;
+}
+
+// ============================================
 // Application menu handlers — std.json.Value로 재귀 submenu 파싱
 // ============================================
 
@@ -1939,6 +1996,14 @@ fn menuEmitHandler(click: []const u8) void {
     var click_esc: [256]u8 = undefined;
     const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
     emitToBus("menu:click", "{{\"click\":\"{s}\"}}", .{click_esc[0..click_n]});
+}
+
+fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {
+    var accel_esc: [256]u8 = undefined;
+    var click_esc: [256]u8 = undefined;
+    const accel_n = util.escapeJsonStrFull(accelerator, &accel_esc) orelse return;
+    const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
+    emitToBus("globalShortcut:trigger", "{{\"accelerator\":\"{s}\",\"click\":\"{s}\"}}", .{ accel_esc[0..accel_n], click_esc[0..click_n] });
 }
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {

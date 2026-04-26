@@ -856,6 +856,41 @@ pub const menu = struct {
     }
 };
 
+/// macOS Carbon Hot Key 기반 (Electron `globalShortcut.*`). accelerator 파싱:
+/// `"Cmd+Shift+K"`, `"CommandOrControl+P"`, `"Alt+F4"` 등. 트리거 시 EventBus의
+/// `globalShortcut:trigger {accelerator, click}`로 수신.
+pub const globalShortcut = struct {
+    pub fn register(accelerator: []const u8, click: []const u8) ?[]const u8 {
+        var a_buf: [128]u8 = undefined;
+        var c_buf: [128]u8 = undefined;
+        const a_n = util.escapeJsonStrFull(accelerator, &a_buf) orelse return null;
+        const c_n = util.escapeJsonStrFull(click, &c_buf) orelse return null;
+        var fields_buf: [320]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\",\"click\":\"{s}\"", .{ a_buf[0..a_n], c_buf[0..c_n] }) catch return null;
+        return coreCmd("global_shortcut_register", fields);
+    }
+
+    pub fn unregister(accelerator: []const u8) ?[]const u8 {
+        var a_buf: [128]u8 = undefined;
+        const a_n = util.escapeJsonStrFull(accelerator, &a_buf) orelse return null;
+        var fields_buf: [160]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\"", .{a_buf[0..a_n]}) catch return null;
+        return coreCmd("global_shortcut_unregister", fields);
+    }
+
+    pub fn unregisterAll() ?[]const u8 {
+        return coreCmd("global_shortcut_unregister_all", "");
+    }
+
+    pub fn isRegistered(accelerator: []const u8) ?[]const u8 {
+        var a_buf: [128]u8 = undefined;
+        const a_n = util.escapeJsonStrFull(accelerator, &a_buf) orelse return null;
+        var fields_buf: [160]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\"", .{a_buf[0..a_n]}) catch return null;
+        return coreCmd("global_shortcut_is_registered", fields);
+    }
+};
+
 pub const dialog = struct {
     /// 메시지 박스 — pre-built JSON fields(buttons 배열 등) 직접 전달.
     /// 응답: `{"from","cmd","response":N,"checkboxChecked":bool}`.

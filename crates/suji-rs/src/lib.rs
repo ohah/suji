@@ -823,6 +823,54 @@ pub mod menu {
     }
 }
 
+/// macOS Carbon Hot Key wrapper. Accelerator syntax: `"Cmd+Shift+K"`,
+/// `"CommandOrControl+P"`, `"Alt+F4"`, etc. Triggers fire on the EventBus channel
+/// `globalShortcut:trigger {accelerator, click}`. Linux/Windows are stubs.
+pub mod global_shortcut {
+    use crate::{invoke, serde_json};
+
+    pub(crate) fn register_request(accelerator: &str, click: &str) -> String {
+        serde_json::json!({
+            "cmd": "global_shortcut_register",
+            "accelerator": accelerator,
+            "click": click,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn unregister_request(accelerator: &str) -> String {
+        serde_json::json!({
+            "cmd": "global_shortcut_unregister",
+            "accelerator": accelerator,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn is_registered_request(accelerator: &str) -> String {
+        serde_json::json!({
+            "cmd": "global_shortcut_is_registered",
+            "accelerator": accelerator,
+        })
+        .to_string()
+    }
+
+    pub fn register(accelerator: &str, click: &str) -> Option<String> {
+        invoke("__core__", &register_request(accelerator, click))
+    }
+
+    pub fn unregister(accelerator: &str) -> Option<String> {
+        invoke("__core__", &unregister_request(accelerator))
+    }
+
+    pub fn unregister_all() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"global_shortcut_unregister_all"}"#)
+    }
+
+    pub fn is_registered(accelerator: &str) -> Option<String> {
+        invoke("__core__", &is_registered_request(accelerator))
+    }
+}
+
 pub mod dialog {
     use crate::{escape_json_full, invoke, serde_json};
 
@@ -1050,6 +1098,26 @@ mod tests {
         assert_eq!(rm["cmd"], "fs_rm");
         assert_eq!(rm["recursive"], true);
         assert_eq!(rm["force"], false);
+    }
+
+    #[test]
+    fn global_shortcut_requests_build_valid_json() {
+        let reg: serde_json::Value =
+            serde_json::from_str(&crate::global_shortcut::register_request("Cmd+Shift+K", "openSettings"))
+                .unwrap();
+        assert_eq!(reg["cmd"], "global_shortcut_register");
+        assert_eq!(reg["accelerator"], "Cmd+Shift+K");
+        assert_eq!(reg["click"], "openSettings");
+
+        let unreg: serde_json::Value =
+            serde_json::from_str(&crate::global_shortcut::unregister_request("Cmd+Q")).unwrap();
+        assert_eq!(unreg["cmd"], "global_shortcut_unregister");
+        assert_eq!(unreg["accelerator"], "Cmd+Q");
+
+        let is_reg: serde_json::Value =
+            serde_json::from_str(&crate::global_shortcut::is_registered_request("Alt+F4")).unwrap();
+        assert_eq!(is_reg["cmd"], "global_shortcut_is_registered");
+        assert_eq!(is_reg["accelerator"], "Alt+F4");
     }
 
     #[test]

@@ -139,6 +139,14 @@ pub fn build(b: *std.Build) void {
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
         root_module.linkFramework("UserNotifications", .{});
+        // global_shortcut.m — Carbon RegisterEventHotKey wrapper. Carbon is deprecated for
+        // most uses but the Hot Key API is still the only no-permission system-wide path
+        // (NSEvent.addGlobalMonitorForEvents requires accessibility). Same approach Electron uses.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/global_shortcut.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
+        root_module.linkFramework("Carbon", .{});
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");

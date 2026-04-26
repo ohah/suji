@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -193,6 +193,31 @@ describe("fs", () => {
   it("stat throws on failure", async () => {
     mockBridge.core.mockResolvedValueOnce({ success: false, error: "not_found" });
     await expect(sujiFs.stat("/missing")).rejects.toThrow("not_found");
+  });
+});
+
+describe("globalShortcut", () => {
+  it("register / unregister / unregisterAll / isRegistered call core", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await globalShortcut.register("Cmd+Shift+K", "openSettings")).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"global_shortcut_register","accelerator":"Cmd+Shift+K","click":"openSettings"}');
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await globalShortcut.unregister("Cmd+Shift+K")).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"global_shortcut_unregister","accelerator":"Cmd+Shift+K"}');
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await globalShortcut.unregisterAll()).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"global_shortcut_unregister_all"}');
+
+    mockBridge.core.mockResolvedValueOnce({ registered: true });
+    expect(await globalShortcut.isRegistered("Cmd+Q")).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"global_shortcut_is_registered","accelerator":"Cmd+Q"}');
+  });
+
+  it("register returns false on success:false", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false, error: "register" });
+    expect(await globalShortcut.register("X", "y")).toBe(false);
   });
 });
 

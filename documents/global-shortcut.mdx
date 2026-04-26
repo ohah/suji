@@ -1,0 +1,120 @@
+---
+title: Global Shortcut (Phase 5-E)
+description: 시스템 전역 단축키 — macOS Carbon Hot Key API 기반, accelerator 문자열 → trigger 이벤트
+---
+
+# Global Shortcut
+
+Electron `globalShortcut.*`에 대응하는 시스템 전역 단축키 API. 현재 macOS만 지원하며
+Carbon `RegisterEventHotKey`를 사용한다 (`NSEvent.addGlobalMonitorForEvents`는
+accessibility 권한 다이얼로그가 필요하지만 Carbon Hot Key는 권한 불필요 + .app 번들
+없이도 동작 — Electron이 macOS에서 사용하는 방식과 동일).
+
+트리거가 발생하면 `globalShortcut:trigger` 채널로 EventBus에 emit:
+
+```json
+{ "accelerator": "Cmd+Shift+K", "click": "openSettings" }
+```
+
+## 플랫폼 지원
+
+| API | macOS | Linux | Windows |
+|---|---|---|---|
+| `globalShortcut.register` | ✅ Carbon Hot Key | stub (false) | stub |
+| `globalShortcut.unregister` | ✅ | stub | stub |
+| `globalShortcut.unregisterAll` | ✅ | stub | stub |
+| `globalShortcut.isRegistered` | ✅ | stub (false) | stub |
+| Trigger event | ✅ `globalShortcut:trigger` | — | — |
+
+## Accelerator 문법
+
+`+`로 연결된 modifier + 단일 키 (Electron 호환). 마지막 비-modifier 토큰이 메인 키.
+
+| Modifier | Aliases |
+|---|---|
+| Cmd | `Command`, `CmdOrCtrl`, `CommandOrControl`, `Meta`, `Super` |
+| Shift | `Shift` |
+| Alt | `Option` |
+| Ctrl | `Control` |
+
+| Key | 예시 |
+|---|---|
+| 알파벳/숫자 | `A`-`Z`, `0`-`9` |
+| Function | `F1`-`F20` |
+| Whitespace/Edit | `Space`, `Tab`, `Return` (or `Enter`), `Esc` (or `Escape`), `Delete` (or `Backspace`), `ForwardDelete` |
+| Navigation | `Up`, `Down`, `Left`, `Right`, `PageUp`, `PageDown`, `Home`, `End` |
+| Punctuation | `Plus`, `Minus`, `Comma`, `Period`, `Slash`, `Backslash` |
+
+예시: `"Cmd+Shift+K"`, `"CommandOrControl+P"`, `"Alt+F4"`, `"Cmd+Shift+Up"`.
+
+## API
+
+| API | cmd | 응답 |
+|---|---|---|
+| `globalShortcut.register(accel, click)` | `global_shortcut_register` | `{success:true}` |
+| `globalShortcut.unregister(accel)` | `global_shortcut_unregister` | `{success:true}` |
+| `globalShortcut.unregisterAll()` | `global_shortcut_unregister_all` | `{success:true}` |
+| `globalShortcut.isRegistered(accel)` | `global_shortcut_is_registered` | `{registered:bool}` |
+
+실패 응답은 `{success:false,error}`. 에러 코드: `accelerator` (빈 또는 unescape 실패),
+`click` (unescape 실패), `register` (이미 등록됨 / 키 매핑 실패 / OS 거부).
+
+## Frontend JS
+
+```ts
+import { globalShortcut, on } from '@suji/api';
+
+await globalShortcut.register('Cmd+Shift+K', 'openSettings');
+
+on('globalShortcut:trigger', ({ accelerator, click }) => {
+  console.log(`hot key: ${accelerator} → ${click}`);
+});
+
+await globalShortcut.unregister('Cmd+Shift+K');
+await globalShortcut.unregisterAll();
+```
+
+## Node 백엔드
+
+```js
+import { globalShortcut } from '@suji/node';
+
+await globalShortcut.register('CommandOrControl+Shift+I', 'devtools');
+await globalShortcut.isRegistered('CommandOrControl+Shift+I'); // true
+```
+
+## Zig 백엔드
+
+```zig
+_ = suji.globalShortcut.register("Cmd+Shift+K", "openSettings");
+suji.on("globalShortcut:trigger", onShortcut);
+
+fn onShortcut(event: suji.Event) void {
+    // event.data: {"accelerator":"...","click":"..."}
+}
+```
+
+## Rust 백엔드
+
+```rust
+use suji::global_shortcut;
+
+global_shortcut::register("Cmd+Shift+K", "openSettings");
+suji::on("globalShortcut:trigger", on_shortcut, std::ptr::null_mut());
+```
+
+## Go 백엔드
+
+```go
+import "github.com/ohah/suji-go/globalshortcut"
+
+globalshortcut.Register("Cmd+Shift+K", "openSettings")
+suji.On("globalShortcut:trigger", func(data string) { ... })
+```
+
+## 한계
+
+- macOS만 지원. Linux/Windows는 모두 stub (false 반환). 향후 추가 예정.
+- 동시 등록 한도 64개 (`SUJI_HOTKEY_MAX`).
+- accelerator/click 문자열 한도 각 128 byte.
+- 동일 accelerator는 한 번만 등록 가능 — 두 번째 register는 `error:"register"`.

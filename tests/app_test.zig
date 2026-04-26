@@ -999,6 +999,27 @@ test "fs.*: __core__ 파일 시스템 cmd 전송" {
     }.run);
 }
 
+test "globalShortcut.*: __core__ Carbon Hot Key cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.globalShortcut.register("Cmd+Shift+K", "openSettings");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"global_shortcut_register\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"accelerator\":\"Cmd+Shift+K\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"click\":\"openSettings\"") != null);
+
+            _ = app_mod.globalShortcut.unregister("Cmd+Shift+K");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"global_shortcut_unregister\"") != null);
+
+            _ = app_mod.globalShortcut.unregisterAll();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"global_shortcut_unregister_all\"") != null);
+
+            _ = app_mod.globalShortcut.isRegistered("Cmd+Q");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"global_shortcut_is_registered\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"accelerator\":\"Cmd+Q\"") != null);
+        }
+    }.run);
+}
+
 test "notification.isSupported: __core__ + notification_is_supported 전송" {
     try withInvokeCore(struct {
         fn run() !void {

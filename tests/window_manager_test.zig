@@ -3017,6 +3017,87 @@ test "회귀: File System API (Phase 5-F) — core route + Zig/Rust/Go/Node/JS S
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "FsDirEntry") != null);
 }
 
+test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"global_shortcut_register\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"global_shortcut_unregister\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"global_shortcut_unregister_all\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"global_shortcut_is_registered\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "globalShortcutEmitHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "setGlobalShortcutEmitHandler") != null);
+
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "globalShortcutRegister") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_global_shortcut_register") != null);
+
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/global_shortcut.m",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(m_src);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "RegisterEventHotKey") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "parse_accelerator") != null);
+
+    const app_src2 = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src2);
+    try std.testing.expect(std.mem.indexOf(u8, app_src2, "pub const globalShortcut = struct") != null);
+
+    const rs_src2 = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src2);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src2, "pub mod global_shortcut") != null);
+
+    const go_src2 = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/globalshortcut/globalshortcut.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_src2);
+    try std.testing.expect(std.mem.indexOf(u8, go_src2, "func Register(") != null);
+
+    const ts_src2 = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src2);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src2, "export const globalShortcut") != null);
+
+    const node_src2 = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-node/src/index.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(node_src2);
+    try std.testing.expect(std.mem.indexOf(u8, node_src2, "export const globalShortcut") != null);
+}
+
 test "회귀: multi-backend demo exposes native API controls" {
     const app_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

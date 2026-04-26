@@ -1338,6 +1338,64 @@ pub fn notificationClose(id: []const u8) bool {
 }
 
 // ============================================
+// Global shortcut API — Carbon RegisterEventHotKey (Electron `globalShortcut.*`)
+// ============================================
+// macOS: Carbon Hot Key API (system-wide, 권한 불필요). global_shortcut.m이 wrap —
+// accelerator 문자열 → modifier mask + virtual key code → RegisterEventHotKey.
+// 트리거 시 `globalShortcut:trigger {accelerator, click}` EventBus emit.
+// 비-macOS는 모두 stub.
+
+pub const GlobalShortcutEmitHandler = *const fn (accelerator: []const u8, click: []const u8) void;
+pub var g_global_shortcut_emit_handler: ?GlobalShortcutEmitHandler = null;
+
+const GLOBAL_SHORTCUT_STR_MAX: usize = 128;
+
+fn globalShortcutTriggerC(accel_cstr: [*:0]const u8, click_cstr: [*:0]const u8) callconv(.c) void {
+    if (g_global_shortcut_emit_handler) |emit| emit(std.mem.span(accel_cstr), std.mem.span(click_cstr));
+}
+
+pub fn setGlobalShortcutEmitHandler(handler: GlobalShortcutEmitHandler) void {
+    if (!comptime is_macos) return;
+    g_global_shortcut_emit_handler = handler;
+    suji_global_shortcut_set_callback(&globalShortcutTriggerC);
+}
+
+fn writeCStr(slice: []const u8, buf: *[GLOBAL_SHORTCUT_STR_MAX]u8) ?[*:0]const u8 {
+    if (slice.len + 1 > buf.len) return null;
+    @memcpy(buf[0..slice.len], slice);
+    buf[slice.len] = 0;
+    return @ptrCast(buf);
+}
+
+pub fn globalShortcutRegister(accelerator: []const u8, click: []const u8) bool {
+    if (!comptime is_macos) return false;
+    var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
+    var click_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
+    const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return false;
+    const click_cstr = writeCStr(click, &click_buf) orelse return false;
+    return suji_global_shortcut_register(accel_cstr, click_cstr) != 0;
+}
+
+pub fn globalShortcutUnregister(accelerator: []const u8) bool {
+    if (!comptime is_macos) return false;
+    var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
+    const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return false;
+    return suji_global_shortcut_unregister(accel_cstr) != 0;
+}
+
+pub fn globalShortcutUnregisterAll() void {
+    if (!comptime is_macos) return;
+    suji_global_shortcut_unregister_all();
+}
+
+pub fn globalShortcutIsRegistered(accelerator: []const u8) bool {
+    if (!comptime is_macos) return false;
+    var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
+    const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return false;
+    return suji_global_shortcut_is_registered(accel_cstr) != 0;
+}
+
+// ============================================
 // Dialog API — NSAlert / NSOpenPanel / NSSavePanel (Electron `dialog.*`)
 // ============================================
 // 두 가지 modal 모드:
@@ -1359,6 +1417,13 @@ extern "c" fn suji_notification_set_click_callback(cb: *const fn ([*:0]const u8)
 extern "c" fn suji_notification_request_permission() i32;
 extern "c" fn suji_notification_show(id: [*:0]const u8, title: [*:0]const u8, body: [*:0]const u8, silent: i32) i32;
 extern "c" fn suji_notification_close(id: [*:0]const u8) void;
+
+// global_shortcut.m — Carbon RegisterEventHotKey wrapper.
+extern "c" fn suji_global_shortcut_set_callback(cb: *const fn ([*:0]const u8, [*:0]const u8) callconv(.c) void) void;
+extern "c" fn suji_global_shortcut_register(accelerator: [*:0]const u8, click: [*:0]const u8) i32;
+extern "c" fn suji_global_shortcut_unregister(accelerator: [*:0]const u8) i32;
+extern "c" fn suji_global_shortcut_unregister_all() void;
+extern "c" fn suji_global_shortcut_is_registered(accelerator: [*:0]const u8) i32;
 
 /// CEF browser native_handle → NSWindow 포인터 lookup. main.zig가 windowId(WM)를
 /// browser handle로 변환 후 호출.

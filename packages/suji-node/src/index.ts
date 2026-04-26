@@ -710,6 +710,32 @@ export const menu = {
   },
 };
 
+// ============================================
+// globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
+// ============================================
+
+export const globalShortcut = {
+  async register(accelerator: string, click: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'global_shortcut_register', accelerator, click });
+    return r.success === true;
+  },
+
+  async unregister(accelerator: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'global_shortcut_unregister', accelerator });
+    return r.success === true;
+  },
+
+  async unregisterAll(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'global_shortcut_unregister_all' });
+    return r.success === true;
+  },
+
+  async isRegistered(accelerator: string): Promise<boolean> {
+    const r = await invoke<{ registered: boolean }>('__core__', { cmd: 'global_shortcut_is_registered', accelerator });
+    return r.registered === true;
+  },
+};
+
 // Dialog 옵션 타입은 frontend `@suji/api`와 동일.
 export type MessageBoxStyle = 'none' | 'info' | 'warning' | 'error' | 'question';
 

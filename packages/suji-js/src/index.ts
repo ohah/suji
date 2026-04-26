@@ -507,6 +507,34 @@ export const menu = {
 };
 
 // ============================================
+// globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
+// ============================================
+// Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4". Trigger fires on
+// `globalShortcut:trigger {accelerator, click}` via `suji.on`. Linux/Windows are stubs.
+
+export const globalShortcut = {
+  async register(accelerator: string, click: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "global_shortcut_register", accelerator, click });
+    return r.success === true;
+  },
+
+  async unregister(accelerator: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "global_shortcut_unregister", accelerator });
+    return r.success === true;
+  },
+
+  async unregisterAll(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "global_shortcut_unregister_all" });
+    return r.success === true;
+  },
+
+  async isRegistered(accelerator: string): Promise<boolean> {
+    const r = await coreCall<{ registered: boolean }>({ cmd: "global_shortcut_is_registered", accelerator });
+    return r.registered === true;
+  },
+};
+
+// ============================================
 // shell — 외부 핸들러 호출 (Electron `shell.*`)
 // ============================================
 // 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.

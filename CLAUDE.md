@@ -73,6 +73,8 @@ fn onAllClosed(_: suji.Event) void {
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수)
 // suji.menu.setApplicationMenuRaw("\"items\":[...]") / resetApplicationMenu()
 //                                       (macOS NSMenu, menu:click 이벤트)
+// suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
+//   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key, globalShortcut:trigger 이벤트)
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -97,6 +99,8 @@ suji::export_handlers!(ping);
 // suji::tray::create("🚀", "tip") / set_menu(id, &[MenuItem::Item{...}, MenuItem::Separator]) / destroy(id)
 // suji::notification::{is_supported, request_permission, show("T","B",false), close("id")}
 // suji::menu::set_application_menu(&[MenuItem::Submenu{...}]) / reset_application_menu()
+// suji::global_shortcut::{register("Cmd+Shift+K","openSettings"), unregister(a),
+//   unregister_all(), is_registered(a)}    (macOS Carbon Hot Key)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -127,6 +131,8 @@ var _ = suji.Bind(&App{})
 // notification.Show("Title", "Body", false) / RequestPermission() / Close(id)
 // import "github.com/ohah/suji-go/menu"
 // menu.SetApplicationMenu([]menu.MenuItem{menu.Submenu("Tools", []menu.MenuItem{menu.Item("Run", "run")})})
+// import "github.com/ohah/suji-go/globalshortcut"
+// globalshortcut.Register("Cmd+Shift+K", "openSettings") / Unregister(a) / UnregisterAll() / IsRegistered(a)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -159,6 +165,11 @@ suji.platform                                                // "macos" | "linux
 // await dialog.showSaveDialog({ defaultPath:'~/x.txt', nameFieldLabel })  (NSSavePanel)
 // await dialog.showSaveDialog(windowId, options) — sheet
 // await dialog.showErrorBox(title, content)                               (간이 에러 popup)
+
+// import { globalShortcut } from '@suji/api';
+// await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key)
+// await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
+// suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 ```
 
 ## suji.json 설정
