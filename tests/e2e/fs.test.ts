@@ -135,4 +135,84 @@ describe("fs core commands", () => {
     const idem = await core<{ success: boolean }>({ cmd: "fs_mkdir", path: dir, recursive: true });
     expect(idem.success).toBe(true);
   });
+
+  test("stat: mtime은 ms 단위 (Date.now() 근방, ns 아님)", async () => {
+    const file = `${FIXTURE_BASE}/mtime-test.txt`;
+    await core({ cmd: "fs_mkdir", path: FIXTURE_BASE, recursive: true });
+    const before = Date.now();
+    await core({ cmd: "fs_write_file", path: file, text: "x" });
+    const after = Date.now();
+
+    const st = await core<{ success: boolean; mtime: number }>({ cmd: "fs_stat", path: file });
+    expect(st.success).toBe(true);
+    // ms 단위면 Date.now() ± 약간의 오차 안에 들어와야 함.
+    // ns 단위였다면 1e6배 큰 값이라 이 범위를 벗어남.
+    expect(st.mtime).toBeGreaterThanOrEqual(before - 5000);
+    expect(st.mtime).toBeLessThanOrEqual(after + 5000);
+    // ns 명시적 차단: 13자리 (현재) ms vs 16자리 ns.
+    expect(st.mtime.toString().length).toBeLessThanOrEqual(14);
+  });
+
+  test("readdir: directory entry는 type=directory", async () => {
+    const root = `${FIXTURE_BASE}/readdir-test`;
+    await core({ cmd: "fs_mkdir", path: `${root}/subdir`, recursive: true });
+    await core({ cmd: "fs_write_file", path: `${root}/file.txt`, text: "x" });
+
+    const ls = await core<{ success: boolean; entries: Array<{ name: string; type: string }> }>({
+      cmd: "fs_readdir",
+      path: root,
+    });
+    expect(ls.success).toBe(true);
+    expect(ls.entries).toContainEqual({ name: "subdir", type: "directory" });
+    expect(ls.entries).toContainEqual({ name: "file.txt", type: "file" });
+  });
+
+  test("rm: nested directory tree 재귀 삭제", async () => {
+    const root = `${FIXTURE_BASE}/rm-tree`;
+    await core({ cmd: "fs_mkdir", path: `${root}/a/b/c`, recursive: true });
+    await core({ cmd: "fs_write_file", path: `${root}/a/file1.txt`, text: "1" });
+    await core({ cmd: "fs_write_file", path: `${root}/a/b/file2.txt`, text: "2" });
+    await core({ cmd: "fs_write_file", path: `${root}/a/b/c/file3.txt`, text: "3" });
+
+    const rmRes = await core<{ success: boolean }>({
+      cmd: "fs_rm",
+      path: root,
+      recursive: true,
+      force: false,
+    });
+    expect(rmRes.success).toBe(true);
+
+    const st = await core<{ success: boolean; error: string }>({ cmd: "fs_stat", path: root });
+    expect(st.success).toBe(false);
+  });
+
+  test("rm: recursive=false on non-empty directory returns error (not is_dir or rm)", async () => {
+    const dir = `${FIXTURE_BASE}/rm-nonempty`;
+    await core({ cmd: "fs_mkdir", path: dir, recursive: true });
+    await core({ cmd: "fs_write_file", path: `${dir}/x.txt`, text: "x" });
+
+    const r = await core<{ success: boolean; error: string }>({
+      cmd: "fs_rm",
+      path: dir,
+      recursive: false,
+      force: false,
+    });
+    expect(r.success).toBe(false);
+    // deleteFile on directory → IsDir 또는 일반 rm 에러.
+    expect(["is_dir", "rm"]).toContain(r.error);
+
+    // cleanup
+    await core({ cmd: "fs_rm", path: dir, recursive: true, force: false });
+  });
+
+  test("readFile/writeFile unicode (한글 + emoji) round-trip", async () => {
+    const file = `${FIXTURE_BASE}/unicode.txt`;
+    await core({ cmd: "fs_mkdir", path: FIXTURE_BASE, recursive: true });
+    const content = "한글 테스트 🎉 emoji + special \"quote\" \\backslash";
+
+    await core({ cmd: "fs_write_file", path: file, text: content });
+    const r = await core<{ success: boolean; text: string }>({ cmd: "fs_read_file", path: file });
+    expect(r.success).toBe(true);
+    expect(r.text).toBe(content);
+  });
 });

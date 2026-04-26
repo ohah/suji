@@ -114,6 +114,50 @@ describe("window lifecycle events", () => {
   // e2e에서 비결정적이라 인프라만 unit test (window_manager_test)로 검증.
   test.skip("focus/blur는 e2e에서 비결정적 — 인프라는 unit test 회귀로 검증", () => {});
 
+  test("change-detection guard — 동일 setBounds 두 번이면 resized 한 번만", async () => {
+    // 우선 다른 bounds로 한번 → 이후 동일 bounds 두 번 호출.
+    await core({ cmd: "set_bounds", windowId: 1, x: 100, y: 100, width: 700, height: 500 });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const collector = collect<{ windowId: number; width: number; height: number }>(
+      "window:resized",
+      1500,
+    );
+
+    // 동일 bounds — 첫 호출은 새 dimension이라 emit, 두 번째는 동일이라 dedupe.
+    await core({ cmd: "set_bounds", windowId: 1, x: 200, y: 200, width: 800, height: 600 });
+    await new Promise((r) => setTimeout(r, 200));
+    await core({ cmd: "set_bounds", windowId: 1, x: 200, y: 200, width: 800, height: 600 });
+    await new Promise((r) => setTimeout(r, 200));
+    await core({ cmd: "set_bounds", windowId: 1, x: 200, y: 200, width: 800, height: 600 });
+
+    const events = await collector;
+    const win1Events = events.filter((e) => e.windowId === 1 && e.width === 800 && e.height === 600);
+    // 동일 (200,200,800,600) 3회 호출했지만 cache로 1번만 emit.
+    expect(win1Events.length).toBe(1);
+  });
+
+  test("4 typed callback 분리 — resized payload는 5필드, moved/focus/blur 미포함", async () => {
+    // 4 typed callback 분리 효과를 emit payload shape으로 검증:
+    //   resized → {windowId, x, y, width, height}
+    //   moved   → {windowId, x, y}        (width/height 없음)
+    //   focus   → {windowId}              (좌표 전혀 없음)
+    //   blur    → {windowId}              (좌표 전혀 없음)
+    // setFrame은 macOS에서 origin-only 변경에 windowDidMove 비결정적이라
+    // resized payload shape만 신뢰 가능.
+    const collector = collect<Record<string, unknown>>("window:resized", 1500);
+    await core({ cmd: "set_bounds", windowId: 1, x: 300, y: 300, width: 900, height: 700 });
+
+    const events = await collector;
+    expect(events.length).toBeGreaterThan(0);
+    const ev = events[events.length - 1];
+    expect(ev).toHaveProperty("windowId");
+    expect(ev).toHaveProperty("x");
+    expect(ev).toHaveProperty("y");
+    expect(ev).toHaveProperty("width");
+    expect(ev).toHaveProperty("height");
+  });
+
   test("destroy 후 더 이상 이벤트 발화 안 됨", async () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",

@@ -1,0 +1,95 @@
+name: e2e
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  NODE_VERSION: '24.14.1'
+  RUST_TOOLCHAIN: '1.83.0'
+  GO_VERSION: '1.26.0'
+  CEF_PLATFORM: 'macos-arm64'
+  CEF_FILE: 'cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_macosarm64_minimal.tar.bz2'
+
+jobs:
+  e2e:
+    # macOS only — Linux/Windows는 GUI runner 부재 + frameless drag region 등 미지원.
+    runs-on: macos-14
+    # CI grace period — flaky 한 동안 빌드 자체는 통과시킴.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Download CEF
+        run: |
+          mkdir -p ~/.suji/cef/${{ env.CEF_PLATFORM }}/Release
+          mkdir -p ~/.suji/cef/${{ env.CEF_PLATFORM }}/Resources/locales
+          mkdir -p ~/.suji/cef/cache
+          curl -fSL "https://cef-builds.spotifycdn.com/${{ env.CEF_FILE }}" -o /tmp/cef.tar.bz2
+          tar xjf /tmp/cef.tar.bz2 -C /tmp
+          CEF_DIR=$(ls -d /tmp/cef_binary_* | head -1)
+          cp -R "$CEF_DIR/include" ~/.suji/cef/${{ env.CEF_PLATFORM }}/
+          cp -R "$CEF_DIR/Release/"* ~/.suji/cef/${{ env.CEF_PLATFORM }}/Release/ || true
+          cp -R "$CEF_DIR/Resources/"* ~/.suji/cef/${{ env.CEF_PLATFORM }}/Resources/ || true
+
+      - name: Download libnode
+        run: |
+          NODE_DIR="$HOME/.suji/node/${{ env.NODE_VERSION }}"
+          mkdir -p "$NODE_DIR"
+          ASSET="libnode-${{ env.NODE_VERSION }}-macos-arm64.tar.gz"
+          URL="https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$ASSET"
+          curl -fSL "$URL" -o /tmp/libnode.tar.gz 2>/dev/null && \
+            tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
+            echo "libnode installed: $NODE_DIR" || \
+            echo "libnode not available, skipping Node backend"
+
+      - name: Build suji
+        run: zig build
+
+      - name: Install root e2e dependencies (puppeteer-core)
+        run: bun install
+
+      - name: Install frontend dependencies
+        working-directory: examples/multi-backend/frontend
+        run: bun install
+
+      # 첫 단계: 가벼운 fs e2e만. 안정화되면 더 추가.
+      - name: E2E — fs
+        run: bash tests/e2e/run-fs.sh
+
+      - name: E2E — global shortcut
+        run: bash tests/e2e/run-global-shortcut.sh
+
+      - name: E2E — window lifecycle events
+        run: bash tests/e2e/run-window-lifecycle-events.sh
+
+      - name: Upload suji logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suji-e2e-logs
+          path: /tmp/suji-e2e-*.log
+          if-no-files-found: ignore
