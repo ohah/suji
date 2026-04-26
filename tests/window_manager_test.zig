@@ -1794,7 +1794,9 @@ test "findByNativeHandle returns null for unknown handle" {
 
 fn countEvents(sink: *const TestSink, name: []const u8) usize {
     var n: usize = 0;
-    for (sink.events.items) |ev| if (std.mem.eql(u8, ev.name, name)) { n += 1; };
+    for (sink.events.items) |ev| if (std.mem.eql(u8, ev.name, name)) {
+        n += 1;
+    };
     return n;
 }
 
@@ -2414,13 +2416,21 @@ test "회귀: Cmd+Q는 NSApp.terminate: 우회 — SujiQuitTarget.sujiQuit: → 
     try std.testing.expect(std.mem.indexOf(u8, source, "sujiQuit:") != null);
     try std.testing.expect(std.mem.indexOf(u8, source, "ensureQuitTarget") != null);
 
-    // setupMainMenu는 addQuitMenuItem(app_menu)만 호출 — terminate: 직접 등록 금지.
+    // setupMainMenu는 기본 App 메뉴를 helper로 위임하고, helper가 addQuitMenuItem(app_menu)을
+    // 호출한다. terminate: 직접 등록 금지.
     const menu_marker = "fn setupMainMenu(";
     const menu_start = std.mem.indexOf(u8, source, menu_marker) orelse return error.SetupMainMenuNotFound;
     const menu_end = std.mem.indexOfPos(u8, source, menu_start + menu_marker.len, "\nfn ") orelse source.len;
     const menu_body = source[menu_start..menu_end];
-    try std.testing.expect(std.mem.indexOf(u8, menu_body, "addQuitMenuItem(app_menu)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, menu_body, "addDefaultAppMenu(menubar)") != null);
     try std.testing.expect(std.mem.indexOf(u8, menu_body, "\"terminate:\"") == null);
+
+    const app_menu_marker = "fn addDefaultAppMenu(";
+    const app_menu_start = std.mem.indexOf(u8, source, app_menu_marker) orelse return error.DefaultAppMenuNotFound;
+    const app_menu_end = std.mem.indexOfPos(u8, source, app_menu_start + app_menu_marker.len, "\nfn ") orelse source.len;
+    const app_menu_body = source[app_menu_start..app_menu_end];
+    try std.testing.expect(std.mem.indexOf(u8, app_menu_body, "addQuitMenuItem(app_menu)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_menu_body, "\"terminate:\"") == null);
 
     // sujiQuitImpl은 quit() 호출 (cef_quit_message_loop 직접 호출 금지 — 그러면
     // close_browser/close_dev_tools 사전 정리 우회).
@@ -2665,6 +2675,8 @@ test "회귀: Notification API (Phase 5-C) — UNUserNotificationCenter + .m 파
     try std.testing.expect(std.mem.indexOf(u8, m_src, "didReceiveNotificationResponse:") != null);
     // foreground도 표시 (default 무음 처리 회피).
     try std.testing.expect(std.mem.indexOf(u8, m_src, "willPresentNotification:") != null);
+    // foreground silent notification은 sound presentation option을 요청하지 않아야 함.
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "notification.request.content.sound ? UNNotificationPresentationOptionSound : 0") != null);
     // 4개 C 함수 export.
     try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_notification_set_click_callback") != null);
     try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_notification_request_permission") != null);
@@ -2858,6 +2870,84 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem + 메뉴 + click 라우팅 +
     defer std.testing.allocator.free(ts_src);
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "export const tray =") != null);
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "TrayMenuItem") != null);
+}
+
+test "회귀: Menu API (Phase 5-D) — NSMenu 커스터마이즈 + click 라우팅 + 4 SDK" {
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setApplicationMenu(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn resetApplicationMenu(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"SujiAppMenuTarget\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "appMenuClick:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setState:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setRepresentedObject:") != null);
+
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"menu_set_application_menu\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"menu_reset_application_menu\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.setMenuEmitHandler(&menuEmitHandler)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "menu:click") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "parseApplicationMenuItem") != null);
+
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const menu = struct") != null);
+
+    const rs_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod menu {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "set_application_menu") != null);
+
+    const go_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/menu/menu.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_src);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func SetApplicationMenu(") != null);
+
+    const node_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-node/src/index.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(node_src);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const menu =") != null);
+
+    const ts_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "export const menu =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "MenuCheckboxItem") != null);
 }
 
 test "회귀: 백엔드 SDK clipboard/shell/dialog 노출 — Zig/Rust/Go/Node 4개 모두" {

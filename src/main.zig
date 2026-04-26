@@ -95,7 +95,6 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-
 /// 현재 프로세스 PID — POSIX는 `std.c.getpid()`, Windows는 kernel32.GetCurrentProcessId.
 /// Zig 0.16 std.os.windows.kernel32에서 GetCurrentProcessId가 제거돼 extern 직접 선언.
 /// std.c.getpid()는 Windows에선 opaque stub(`?*anyopaque`)이라 직접 사용 시 fmt {d} 실패.
@@ -595,6 +594,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
     cef.setTrayEmitHandler(&trayEmitHandler);
     cef.setNotificationEmitHandler(&notificationEmitHandler);
+    cef.setMenuEmitHandler(&menuEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -757,6 +757,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
     cef.setTrayEmitHandler(&trayEmitHandler);
     cef.setNotificationEmitHandler(&notificationEmitHandler);
+    cef.setMenuEmitHandler(&menuEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -1344,6 +1345,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
+    // Application Menu API — NSMenu customization.
+    if (std.mem.eql(u8, cmd, "menu_set_application_menu")) {
+        return handleMenuSetApplicationMenu(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "menu_reset_application_menu")) {
+        const ok = cef.resetApplicationMenu();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_reset_application_menu\",\"success\":{}}}", .{ok}) catch null;
+    }
+
     // Notification API — UNUserNotificationCenter (macOS only).
     if (std.mem.eql(u8, cmd, "notification_is_supported")) {
         const supported = cef.notificationIsSupported();
@@ -1607,7 +1617,7 @@ fn handleDialogShowOpenDialog(req_clean: []const u8, response_buf: []u8) ?[]cons
 // ============================================
 
 const TrayMenuItemJson = struct {
-    type: []const u8 = "",            // "separator"면 separator, 아니면 일반 item
+    type: []const u8 = "", // "separator"면 separator, 아니면 일반 item
     label: []const u8 = "",
     click: []const u8 = "",
 };
@@ -1643,6 +1653,90 @@ fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_menu\",\"success\":{}}}", .{ok}) catch null;
 }
 
+// ============================================
+// Application menu handlers — std.json.Value로 재귀 submenu 파싱
+// ============================================
+
+fn handleMenuSetApplicationMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA * 2]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, req_clean, .{}) catch {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+    };
+    defer parsed.deinit();
+    if (parsed.value != .object) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+    }
+    const items_val = parsed.value.object.get("items") orelse {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+    };
+    if (items_val != .array) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+    }
+
+    const items = parseApplicationMenuItems(arena, items_val.array.items) catch {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+    };
+    const ok = cef.setApplicationMenu(items);
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+const MenuParseError = error{ OutOfMemory, InvalidMenuItem };
+
+fn parseApplicationMenuItems(arena: std.mem.Allocator, values: []const std.json.Value) MenuParseError![]cef.ApplicationMenuItem {
+    var out = try arena.alloc(cef.ApplicationMenuItem, values.len);
+    for (values, 0..) |v, i| out[i] = try parseApplicationMenuItem(arena, v);
+    return out;
+}
+
+fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) MenuParseError!cef.ApplicationMenuItem {
+    if (value != .object) return error.InvalidMenuItem;
+    const obj = value.object;
+    const typ = jsonString(obj, "type") orelse "";
+    if (std.mem.eql(u8, typ, "separator")) return .separator;
+
+    const label = jsonString(obj, "label") orelse "";
+    const click = jsonString(obj, "click") orelse "";
+    const enabled = jsonBool(obj, "enabled") orelse true;
+
+    if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
+        const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
+        if (sub_val != .array) return error.InvalidMenuItem;
+        return .{ .submenu = .{
+            .label = label,
+            .enabled = enabled,
+            .items = try parseApplicationMenuItems(arena, sub_val.array.items),
+        } };
+    }
+    if (std.mem.eql(u8, typ, "checkbox")) {
+        return .{ .checkbox = .{
+            .label = label,
+            .click = click,
+            .checked = jsonBool(obj, "checked") orelse false,
+            .enabled = enabled,
+        } };
+    }
+    return .{ .item = .{
+        .label = label,
+        .click = click,
+        .enabled = enabled,
+    } };
+}
+
+fn jsonString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const v = obj.get(key) orelse return null;
+    if (v != .string) return null;
+    return v.string;
+}
+
+fn jsonBool(obj: std.json.ObjectMap, key: []const u8) ?bool {
+    const v = obj.get(key) orelse return null;
+    if (v != .bool) return null;
+    return v.bool;
+}
+
 /// notification id 카운터 — `suji-notif-{N}` 형식 식별자 발급.
 var g_next_notification_id: u32 = 1;
 
@@ -1674,6 +1768,17 @@ fn trayEmitHandler(tray_id: u32, click: []const u8) void {
     const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
     const data = std.fmt.bufPrint(&data_buf, "{{\"trayId\":{d},\"click\":\"{s}\"}}", .{ tray_id, click_esc[0..click_n] }) catch return;
     bus.emit("tray:menu-click", data);
+}
+
+/// cef.zig의 app menu click → EventBus 라우팅.
+fn menuEmitHandler(click: []const u8) void {
+    const registry = suji.BackendRegistry.global orelse return;
+    const bus = registry.event_bus orelse return;
+    var data_buf: [512]u8 = undefined;
+    var click_esc: [256]u8 = undefined;
+    const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
+    const data = std.fmt.bufPrint(&data_buf, "{{\"click\":\"{s}\"}}", .{click_esc[0..click_n]}) catch return;
+    bus.emit("menu:click", data);
 }
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
@@ -1774,4 +1879,3 @@ fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 
 
     return null;
 }
-

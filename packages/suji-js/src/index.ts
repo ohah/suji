@@ -461,6 +461,52 @@ export const tray = {
 };
 
 // ============================================
+// menu — macOS application menu customization
+// ============================================
+// App 메뉴(Quit/Hide 등)는 Suji가 유지하고, 전달한 top-level 메뉴가 그 뒤에 붙는다.
+// 메뉴 항목 클릭은 `suji.on('menu:click', ({ click }) => ...)` 로 수신.
+
+export interface MenuSeparator {
+  type: "separator";
+}
+
+export interface MenuCommandItem {
+  type?: "item";
+  label: string;
+  click: string;
+  enabled?: boolean;
+}
+
+export interface MenuCheckboxItem {
+  type: "checkbox";
+  label: string;
+  click: string;
+  checked?: boolean;
+  enabled?: boolean;
+}
+
+export interface MenuSubmenuItem {
+  type?: "submenu";
+  label: string;
+  enabled?: boolean;
+  submenu: MenuItem[];
+}
+
+export type MenuItem = MenuCommandItem | MenuCheckboxItem | MenuSeparator | MenuSubmenuItem;
+
+export const menu = {
+  async setApplicationMenu(items: MenuItem[]): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "menu_set_application_menu", items });
+    return r.success === true;
+  },
+
+  async resetApplicationMenu(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
+    return r.success === true;
+  },
+};
+
+// ============================================
 // shell — 외부 핸들러 호출 (Electron `shell.*`)
 // ============================================
 // 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.

@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, type InvokeEvent } from './index';
+import { handle, send, sendTo, menu, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -89,5 +89,22 @@ describe('send / sendTo', () => {
     (bridge as any).sendTo = undefined;
     expect(() => sendTo(1, 'x', {})).not.toThrow();
     bridge.sendTo = savedSendTo;
+  });
+});
+
+describe('menu', () => {
+  it('setApplicationMenu invokes __core__ with items', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    const ok = await menu.setApplicationMenu([
+      { label: 'Tools', submenu: [{ label: 'Run', click: 'run' }, { type: 'checkbox', label: 'Flag', click: 'flag', checked: true }] },
+    ]);
+    expect(ok).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"menu_set_application_menu","items":[{"label":"Tools","submenu":[{"label":"Run","click":"run"},{"type":"checkbox","label":"Flag","click":"flag","checked":true}]}]}');
+  });
+
+  it('resetApplicationMenu invokes __core__', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    await menu.resetApplicationMenu();
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"menu_reset_application_menu"}');
   });
 });

@@ -599,6 +599,45 @@ export const tray = {
   },
 };
 
+// ============================================
+// menu — macOS application menu customization.
+// App 메뉴(Quit/Hide 등)는 Suji가 유지하고, 클릭은 `menu:click {click}` 이벤트로 수신.
+// ============================================
+
+export interface MenuSeparator { type: 'separator'; }
+export interface MenuCommandItem {
+  type?: 'item';
+  label: string;
+  click: string;
+  enabled?: boolean;
+}
+export interface MenuCheckboxItem {
+  type: 'checkbox';
+  label: string;
+  click: string;
+  checked?: boolean;
+  enabled?: boolean;
+}
+export interface MenuSubmenuItem {
+  type?: 'submenu';
+  label: string;
+  enabled?: boolean;
+  submenu: MenuItem[];
+}
+export type MenuItem = MenuCommandItem | MenuCheckboxItem | MenuSeparator | MenuSubmenuItem;
+
+export const menu = {
+  async setApplicationMenu(items: MenuItem[]): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'menu_set_application_menu', items });
+    return r.success === true;
+  },
+
+  async resetApplicationMenu(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'menu_reset_application_menu' });
+    return r.success === true;
+  },
+};
+
 // Dialog 옵션 타입은 frontend `@suji/api`와 동일.
 export type MessageBoxStyle = 'none' | 'info' | 'warning' | 'error' | 'question';
 

@@ -187,6 +187,175 @@ export declare const windows: {
         success: boolean;
     }>;
 };
+export declare const clipboard: {
+    /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
+    readText(): Promise<string>;
+    /** 클립보드에 plain text 쓰기. 성공 시 true. */
+    writeText(text: string): Promise<boolean>;
+    /** 클립보드 비우기. */
+    clear(): Promise<boolean>;
+};
+export interface NotificationOptions {
+    title: string;
+    body: string;
+    /** 사운드 묻음 */
+    silent?: boolean;
+}
+export declare const notification: {
+    /** 플랫폼 지원 여부 — 현재 macOS만 true. */
+    isSupported(): Promise<boolean>;
+    /** 알림 권한 요청 — 첫 호출 시 OS 다이얼로그. 이후 캐시. */
+    requestPermission(): Promise<boolean>;
+    /** 알림 표시. 반환 `notificationId`로 close 가능. success=false면 권한/번들 문제. */
+    show(options: NotificationOptions): Promise<{
+        notificationId: string;
+        success: boolean;
+    }>;
+    close(notificationId: string): Promise<boolean>;
+};
+export interface TrayMenuSeparator {
+    type: "separator";
+}
+export interface TrayMenuItemSpec {
+    /** 메뉴에 표시될 텍스트. */
+    label: string;
+    /** 클릭 시 emit될 이벤트 이름 — `tray:menu-click {trayId, click}` 페이로드의 click 필드. */
+    click: string;
+}
+export type TrayMenuItem = TrayMenuItemSpec | TrayMenuSeparator;
+export interface TrayCreateOptions {
+    /** 메뉴바에 표시될 텍스트 (icon 미지원 v1라 가시성 위해 권장). */
+    title?: string;
+    /** 마우스 호버 시 표시될 툴팁. */
+    tooltip?: string;
+}
+export declare const tray: {
+    /** 새 시스템 트레이 아이콘 생성. 반환된 trayId로 이후 update/destroy. */
+    create(options?: TrayCreateOptions): Promise<{
+        trayId: number;
+    }>;
+    setTitle(trayId: number, title: string): Promise<boolean>;
+    setTooltip(trayId: number, tooltip: string): Promise<boolean>;
+    /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. items는 분리선/일반 항목 혼합 가능.
+     *  메뉴 항목 클릭은 `suji.on('tray:menu-click', ({trayId, click}) => ...)` 로 수신. */
+    setMenu(trayId: number, items: TrayMenuItem[]): Promise<boolean>;
+    destroy(trayId: number): Promise<boolean>;
+};
+export interface MenuSeparator {
+    type: "separator";
+}
+export interface MenuCommandItem {
+    type?: "item";
+    label: string;
+    click: string;
+    enabled?: boolean;
+}
+export interface MenuCheckboxItem {
+    type: "checkbox";
+    label: string;
+    click: string;
+    checked?: boolean;
+    enabled?: boolean;
+}
+export interface MenuSubmenuItem {
+    type?: "submenu";
+    label: string;
+    enabled?: boolean;
+    submenu: MenuItem[];
+}
+export type MenuItem = MenuCommandItem | MenuCheckboxItem | MenuSeparator | MenuSubmenuItem;
+export declare const menu: {
+    setApplicationMenu(items: MenuItem[]): Promise<boolean>;
+    resetApplicationMenu(): Promise<boolean>;
+};
+export declare const shell: {
+    /** URL을 시스템 기본 핸들러로 열기 (http(s) → 브라우저, mailto: → 메일 앱 등).
+     *  잘못된 URL syntax면 false. */
+    openExternal(url: string): Promise<boolean>;
+    /** Finder/탐색기에서 파일/폴더 reveal — 부모 폴더 열리고 항목 선택. 경로 없으면 false. */
+    showItemInFolder(path: string): Promise<boolean>;
+    /** 시스템 비프음. */
+    beep(): Promise<boolean>;
+};
+export type MessageBoxStyle = "none" | "info" | "warning" | "error" | "question";
+export interface MessageBoxOptions {
+    /** 아이콘 / 시스템 사운드 결정. 기본 "none". */
+    type?: MessageBoxStyle;
+    /** 창 타이틀. */
+    title?: string;
+    /** 주 메시지 (필수에 가까움 — 빈 값이면 macOS가 자동 텍스트). */
+    message: string;
+    /** 보조 메시지 (작은 폰트). */
+    detail?: string;
+    /** 버튼 레이블 배열. 빈 배열이면 ["OK"]. */
+    buttons?: string[];
+    /** Enter로 활성화될 버튼 index (기본: 첫 번째). */
+    defaultId?: number;
+    /** ESC로 활성화될 버튼 index. */
+    cancelId?: number;
+    /** suppression checkbox 레이블. 빈 문자열이면 체크박스 비활성. */
+    checkboxLabel?: string;
+    /** 체크박스 초기 상태. */
+    checkboxChecked?: boolean;
+}
+export interface FileFilter {
+    /** 필터 그룹 표시명 (현재 macOS UI에는 미반영 — 모든 extensions가 통합 허용). */
+    name: string;
+    /** 허용 확장자 (점 없이): `["jpg", "png"]`. `"*"`은 모든 파일. */
+    extensions: string[];
+}
+export type OpenDialogProperty = "openFile" | "openDirectory" | "multiSelections" | "showHiddenFiles" | "createDirectory" | "noResolveAliases" | "treatPackageAsDirectory";
+export interface OpenDialogOptions {
+    title?: string;
+    /** 초기 디렉토리 (또는 파일명 포함 경로 — 마지막 segment가 파일명으로 들어감). */
+    defaultPath?: string;
+    /** 확인 버튼 레이블 ("Open" 대신). */
+    buttonLabel?: string;
+    /** 다이얼로그 상단 메시지 (macOS 한정 표시). */
+    message?: string;
+    filters?: FileFilter[];
+    /** 기본: ["openFile"]. */
+    properties?: OpenDialogProperty[];
+}
+export type SaveDialogProperty = "showHiddenFiles" | "createDirectory" | "treatPackageAsDirectory";
+export interface SaveDialogOptions {
+    title?: string;
+    defaultPath?: string;
+    buttonLabel?: string;
+    message?: string;
+    /** 파일명 입력란의 레이블. */
+    nameFieldLabel?: string;
+    /** macOS Finder 태그 입력 필드 표시. */
+    showsTagField?: boolean;
+    filters?: FileFilter[];
+    properties?: SaveDialogProperty[];
+}
+export declare const dialog: {
+    /** 메시지 박스. 첫 인자에 windowId(number) 주면 sheet — 그 창에 부착. 없으면 free-floating.
+     *  반환: 사용자가 클릭한 버튼 index + checkbox 상태. */
+    showMessageBox(arg1: MessageBoxOptions | number, arg2?: MessageBoxOptions): Promise<{
+        response: number;
+        checkboxChecked: boolean;
+    }>;
+    /** 단순 에러 popup (NSAlert critical style + OK 버튼). 응답 없음 — Electron 동등. */
+    showErrorBox(title: string, content: string): Promise<void>;
+    /** 파일/폴더 선택. 첫 인자 windowId면 sheet. 취소면 `{canceled:true, filePaths:[]}`. */
+    showOpenDialog(arg1?: OpenDialogOptions | number, arg2?: OpenDialogOptions): Promise<{
+        canceled: boolean;
+        filePaths: string[];
+    }>;
+    /** 저장 경로 선택. 첫 인자 windowId면 sheet. 취소면 `{canceled:true, filePath:""}`. */
+    showSaveDialog(arg1?: SaveDialogOptions | number, arg2?: SaveDialogOptions): Promise<{
+        canceled: boolean;
+        filePath: string;
+    }>;
+    /** Sync 변종 — `response: number`만 반환. windowId 첫 인자 지원. */
+    showMessageBoxSync(arg1: MessageBoxOptions | number, arg2?: MessageBoxOptions): Promise<number>;
+    /** Sync 변종 — 취소면 `undefined`, 아니면 `string[]`. windowId 첫 인자 지원. */
+    showOpenDialogSync(arg1?: OpenDialogOptions | number, arg2?: OpenDialogOptions): Promise<string[] | undefined>;
+    /** Sync 변종 — 취소면 `undefined`, 아니면 `string`. windowId 첫 인자 지원. */
+    showSaveDialogSync(arg1?: SaveDialogOptions | number, arg2?: SaveDialogOptions): Promise<string | undefined>;
+};
 /**
  * 여러 백엔드에 동시 요청
  */

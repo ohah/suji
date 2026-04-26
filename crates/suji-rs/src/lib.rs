@@ -510,6 +510,56 @@ pub mod tray {
     }
 }
 
+pub mod menu {
+    use crate::{invoke, serde_json};
+
+    /// Application menu item — top-level entries should be Submenu.
+    pub enum MenuItem<'a> {
+        Item { label: &'a str, click: &'a str, enabled: bool },
+        Checkbox { label: &'a str, click: &'a str, checked: bool, enabled: bool },
+        Separator,
+        Submenu { label: &'a str, enabled: bool, submenu: Vec<MenuItem<'a>> },
+    }
+
+    fn item_to_json(item: &MenuItem) -> serde_json::Value {
+        match item {
+            MenuItem::Item { label, click, enabled } => serde_json::json!({
+                "type": "item",
+                "label": label,
+                "click": click,
+                "enabled": enabled,
+            }),
+            MenuItem::Checkbox { label, click, checked, enabled } => serde_json::json!({
+                "type": "checkbox",
+                "label": label,
+                "click": click,
+                "checked": checked,
+                "enabled": enabled,
+            }),
+            MenuItem::Separator => serde_json::json!({"type": "separator"}),
+            MenuItem::Submenu { label, enabled, submenu } => serde_json::json!({
+                "type": "submenu",
+                "label": label,
+                "enabled": enabled,
+                "submenu": submenu.iter().map(item_to_json).collect::<Vec<_>>(),
+            }),
+        }
+    }
+
+    /// Set the macOS application menu. Clicks emit `menu:click {click}`.
+    pub fn set_application_menu(items: &[MenuItem]) -> Option<String> {
+        let req = serde_json::json!({
+            "cmd": "menu_set_application_menu",
+            "items": items.iter().map(item_to_json).collect::<Vec<_>>(),
+        }).to_string();
+        invoke("__core__", &req)
+    }
+
+    pub fn reset_application_menu() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"menu_reset_application_menu"}"#)
+    }
+}
+
 pub mod dialog {
     use crate::{escape_json_full, invoke, serde_json};
 

@@ -83,7 +83,6 @@ pub const App = struct {
         return new;
     }
 
-
     /// IPC 요청 처리. request_json의 `__window` 필드(cef.zig가 wire에 자동 주입)에서
     /// 파생한 InvokeEvent를 함께 핸들러에 전달. `__window`가 없으면 window.id=0.
     pub fn handleIpc(self: *const App, allocator: std.mem.Allocator, request_json: []const u8) ?[]const u8 {
@@ -170,7 +169,6 @@ pub const Request = struct {
         _ = self;
         return callBackend(backend, request);
     }
-
 
     /// 에러 응답
     pub fn err(self: *const Request, msg: []const u8) Response {
@@ -263,7 +261,6 @@ pub fn sendTo(target: u32, channel: []const u8, data: []const u8) void {
 pub fn app() App {
     return App{};
 }
-
 
 // ============================================
 // 런타임 JSON 직렬화
@@ -789,6 +786,19 @@ pub const tray = struct {
         var fields_buf: [64]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"trayId\":{d}", .{tray_id}) catch return null;
         return coreCmd("tray_destroy", fields);
+    }
+};
+
+pub const menu = struct {
+    /// 애플리케이션 메뉴 설정 — items_json은 cmd 객체에 들어갈 raw JSON `"items":[...]`.
+    /// 클릭은 EventBus의 `menu:click {"click":"..."}` 로 수신.
+    pub fn setApplicationMenuRaw(items_json: []const u8) ?[]const u8 {
+        return coreCmd("menu_set_application_menu", items_json);
+    }
+
+    /// Suji 기본 App/File/Edit/View/Window/Help 메뉴로 복원.
+    pub fn resetApplicationMenu() ?[]const u8 {
+        return coreCmd("menu_reset_application_menu", "");
     }
 };
 

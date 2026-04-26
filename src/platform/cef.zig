@@ -911,6 +911,173 @@ pub fn shellBeep() void {
 }
 
 // ============================================
+// Application Menu API — NSMenu customization
+// ============================================
+// macOS 메뉴바 커스터마이즈. App 메뉴(Quit/Hide 등)는 macOS 관례와 종료 라우팅을 위해
+// 프레임워크가 유지하고, caller가 전달한 top-level 메뉴를 그 뒤에 붙인다.
+//
+// 클릭 시 SujiAppMenuTarget.appMenuClick:이 representedObject(NSString click name)를 읽어
+// `menu:click {"click":"..."}` 이벤트를 발화한다. checkbox는 클릭 시 state를 토글한다.
+
+pub const ApplicationMenuItem = union(enum) {
+    item: struct {
+        label: []const u8,
+        click: []const u8,
+        enabled: bool = true,
+    },
+    checkbox: struct {
+        label: []const u8,
+        click: []const u8,
+        checked: bool = false,
+        enabled: bool = true,
+    },
+    separator,
+    submenu: struct {
+        label: []const u8,
+        enabled: bool = true,
+        items: []const ApplicationMenuItem,
+    },
+};
+
+pub const MenuEmitHandler = *const fn (click: []const u8) void;
+pub var g_menu_emit_handler: ?MenuEmitHandler = null;
+var g_app_menu_target: ?*anyopaque = null;
+
+pub fn setMenuEmitHandler(handler: MenuEmitHandler) void {
+    g_menu_emit_handler = handler;
+}
+
+fn ensureAppMenuTarget() ?*anyopaque {
+    if (g_app_menu_target) |existing| return existing;
+    if (!comptime is_macos) return null;
+    const NSObject = getClass("NSObject") orelse return null;
+    const cls = objc.objc_allocateClassPair(NSObject, "SujiAppMenuTarget", 0) orelse
+        getClass("SujiAppMenuTarget") orelse return null;
+    const sel = objc.sel_registerName("appMenuClick:");
+    _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&appMenuClickImpl), "v@:@");
+    objc.objc_registerClassPair(cls);
+    const alloc = msgSend(cls, "alloc") orelse return null;
+    const instance = msgSend(alloc, "init") orelse return null;
+    g_app_menu_target = instance;
+    return instance;
+}
+
+fn appMenuClickImpl(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callconv(.c) void {
+    const item = sender orelse return;
+
+    const tagFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+        @ptrCast(&objc.objc_msgSend);
+    const tag = tagFn(item, @ptrCast(objc.sel_registerName("tag")));
+    if (tag == 1) {
+        const stateFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+            @ptrCast(&objc.objc_msgSend);
+        const setStateFn: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void =
+            @ptrCast(&objc.objc_msgSend);
+        const current = stateFn(item, @ptrCast(objc.sel_registerName("state")));
+        setStateFn(item, @ptrCast(objc.sel_registerName("setState:")), if (current == 0) 1 else 0);
+    }
+
+    const repObjFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_str = repObjFn(item, @ptrCast(objc.sel_registerName("representedObject"))) orelse return;
+    const utf8Fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 =
+        @ptrCast(&objc.objc_msgSend);
+    const cstr = utf8Fn(ns_str, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return;
+    if (g_menu_emit_handler) |emit| emit(std.mem.span(cstr));
+}
+
+pub fn setApplicationMenu(items: []const ApplicationMenuItem) bool {
+    if (!comptime is_macos) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const NSMenu = getClass("NSMenu") orelse return false;
+    const menubar = msgSend(msgSend(NSMenu, "alloc") orelse return false, "init") orelse return false;
+
+    addDefaultAppMenu(menubar);
+    for (items) |item| {
+        switch (item) {
+            .submenu => |sub| {
+                const menu = createMenuFromItems(sub.label, sub.items) orelse continue;
+                const top = addSubmenuItem(menubar, sub.label, menu) orelse continue;
+                setMenuItemEnabled(top, sub.enabled);
+            },
+            else => {},
+        }
+    }
+
+    msgSendVoid1(app, "setMainMenu:", menubar);
+    return true;
+}
+
+pub fn resetApplicationMenu() bool {
+    if (!comptime is_macos) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    setupMainMenu(app);
+    return true;
+}
+
+fn createMenuFromItems(title: []const u8, items: []const ApplicationMenuItem) ?*anyopaque {
+    const menu = createMenuFromSlice(title) orelse return null;
+    for (items) |item| addApplicationMenuItem(menu, item);
+    return menu;
+}
+
+fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+    switch (item) {
+        .separator => {
+            const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
+            msgSendVoid1(menu, "addItem:", sep);
+        },
+        .item => |it| {
+            const target = ensureAppMenuTarget() orelse return;
+            const ns_label = nsStringFromSlice(it.label) orelse return;
+            const ns_click = nsStringFromSlice(it.click) orelse return;
+            const empty = nsStringFromSlice("") orelse return;
+            const m = allocNSMenuItem(ns_label, "appMenuClick:", empty) orelse return;
+            msgSendVoid1(m, "setTarget:", target);
+            msgSendVoid1(m, "setRepresentedObject:", ns_click);
+            setMenuItemEnabled(m, it.enabled);
+            msgSendVoid1(menu, "addItem:", m);
+        },
+        .checkbox => |it| {
+            const target = ensureAppMenuTarget() orelse return;
+            const ns_label = nsStringFromSlice(it.label) orelse return;
+            const ns_click = nsStringFromSlice(it.click) orelse return;
+            const empty = nsStringFromSlice("") orelse return;
+            const m = allocNSMenuItem(ns_label, "appMenuClick:", empty) orelse return;
+            msgSendVoid1(m, "setTarget:", target);
+            msgSendVoid1(m, "setRepresentedObject:", ns_click);
+            setMenuItemTag(m, 1);
+            setMenuItemState(m, it.checked);
+            setMenuItemEnabled(m, it.enabled);
+            msgSendVoid1(menu, "addItem:", m);
+        },
+        .submenu => |sub| {
+            const sub_menu = createMenuFromItems(sub.label, sub.items) orelse return;
+            const m = addSubmenuItem(menu, sub.label, sub_menu) orelse return;
+            setMenuItemEnabled(m, sub.enabled);
+        },
+    }
+}
+
+fn setMenuItemEnabled(item: *anyopaque, enabled: bool) void {
+    const f: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(item, @ptrCast(objc.sel_registerName("setEnabled:")), if (enabled) 1 else 0);
+}
+
+fn setMenuItemState(item: *anyopaque, checked: bool) void {
+    const f: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(item, @ptrCast(objc.sel_registerName("setState:")), if (checked) 1 else 0);
+}
+
+fn setMenuItemTag(item: *anyopaque, tag: i64) void {
+    const f: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(item, @ptrCast(objc.sel_registerName("setTag:")), tag);
+}
+
+// ============================================
 // Tray API — NSStatusItem (Electron `Tray`)
 // ============================================
 // NSStatusBar.systemStatusBar에 statusItem 추가. 메뉴 클릭 시 SujiTrayTarget.trayMenuClick:이
@@ -3289,20 +3456,12 @@ fn setupMainMenu(app: ?*anyopaque) void {
     const menubar = msgSend(msgSend(NSMenu, "alloc") orelse return, "init") orelse return;
 
     // 1. App 메뉴
-    const app_menu = createMenu("") orelse return;
-    addMenuItem(app_menu, "About Suji", "orderFrontStandardAboutPanel:", "");
-    addSeparator(app_menu);
-    addMenuItem(app_menu, "Hide Suji", "hide:", "h");
-    addMenuItemWithModifier(app_menu, "Hide Others", "hideOtherApplications:", "h", true);
-    addMenuItem(app_menu, "Show All", "unhideAllApplications:", "");
-    addSeparator(app_menu);
-    addQuitMenuItem(app_menu);
-    addSubmenuItem(menubar, "", app_menu);
+    addDefaultAppMenu(menubar);
 
     // 2. File 메뉴
     const file_menu = createMenu("File") orelse return;
     addMenuItem(file_menu, "Close Window", "performClose:", "w");
-    addSubmenuItem(menubar, "File", file_menu);
+    _ = addSubmenuItem(menubar, "File", file_menu);
 
     // 3. Edit 메뉴
     const edit_menu = createMenu("Edit") orelse return;
@@ -3325,15 +3484,15 @@ fn setupMainMenu(app: ?*anyopaque) void {
         addMenuItem(sub_menu, "Smart Dashes", "toggleAutomaticDashSubstitution:", "");
         addMenuItem(sub_menu, "Smart Links", "toggleAutomaticLinkDetection:", "");
         addMenuItem(sub_menu, "Text Replacement", "toggleAutomaticTextReplacement:", "");
-        addSubmenuItem(edit_menu, "Substitutions", sub_menu);
+        _ = addSubmenuItem(edit_menu, "Substitutions", sub_menu);
     }
     // Speech 서브메뉴
     if (createMenu("Speech")) |speech_menu| {
         addMenuItem(speech_menu, "Start Speaking", "startSpeaking:", "");
         addMenuItem(speech_menu, "Stop Speaking", "stopSpeaking:", "");
-        addSubmenuItem(edit_menu, "Speech", speech_menu);
+        _ = addSubmenuItem(edit_menu, "Speech", speech_menu);
     }
-    addSubmenuItem(menubar, "Edit", edit_menu);
+    _ = addSubmenuItem(menubar, "Edit", edit_menu);
 
     // 4. View 메뉴
     const view_menu = createMenu("View") orelse return;
@@ -3346,7 +3505,7 @@ fn setupMainMenu(app: ?*anyopaque) void {
     addMenuItem(view_menu, "Zoom Out", "zoomOut:", "-");
     addSeparator(view_menu);
     addMenuItem(view_menu, "Toggle Full Screen", "toggleFullScreen:", "f");
-    addSubmenuItem(menubar, "View", view_menu);
+    _ = addSubmenuItem(menubar, "View", view_menu);
 
     // 5. Window 메뉴
     const window_menu = createMenu("Window") orelse return;
@@ -3354,13 +3513,25 @@ fn setupMainMenu(app: ?*anyopaque) void {
     addMenuItem(window_menu, "Zoom", "performZoom:", "");
     addSeparator(window_menu);
     addMenuItem(window_menu, "Bring All to Front", "arrangeInFront:", "");
-    addSubmenuItem(menubar, "Window", window_menu);
+    _ = addSubmenuItem(menubar, "Window", window_menu);
 
     // 6. Help 메뉴
     const help_menu = createMenu("Help") orelse return;
-    addSubmenuItem(menubar, "Help", help_menu);
+    _ = addSubmenuItem(menubar, "Help", help_menu);
 
     msgSendVoid1(app, "setMainMenu:", menubar);
+}
+
+fn addDefaultAppMenu(menubar: *anyopaque) void {
+    const app_menu = createMenu("") orelse return;
+    addMenuItem(app_menu, "About Suji", "orderFrontStandardAboutPanel:", "");
+    addSeparator(app_menu);
+    addMenuItem(app_menu, "Hide Suji", "hide:", "h");
+    addMenuItemWithModifier(app_menu, "Hide Others", "hideOtherApplications:", "h", true);
+    addMenuItem(app_menu, "Show All", "unhideAllApplications:", "");
+    addSeparator(app_menu);
+    addQuitMenuItem(app_menu);
+    _ = addSubmenuItem(menubar, "", app_menu);
 }
 
 fn createMenu(title: [:0]const u8) ?*anyopaque {
@@ -3374,16 +3545,24 @@ fn createMenu(title: [:0]const u8) ?*anyopaque {
     return initFn(alloc, @ptrCast(initSel), ns_title);
 }
 
-fn addSubmenuItem(menubar: *anyopaque, title: [:0]const u8, submenu: *anyopaque) void {
-    const item = msgSend(msgSend(getClass("NSMenuItem") orelse return, "alloc") orelse return, "init") orelse return;
+fn createMenuFromSlice(title: []const u8) ?*anyopaque {
+    const NSMenu = getClass("NSMenu") orelse return null;
+    const alloc = msgSend(NSMenu, "alloc") orelse return null;
+    const ns_title = nsStringFromSlice(title) orelse return null;
+    const initSel = objc.sel_registerName("initWithTitle:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    return initFn(alloc, @ptrCast(initSel), ns_title);
+}
+
+fn addSubmenuItem(menubar: *anyopaque, title: []const u8, submenu: *anyopaque) ?*anyopaque {
+    const item = msgSend(msgSend(getClass("NSMenuItem") orelse return null, "alloc") orelse return null, "init") orelse return null;
     msgSendVoid1(item, "setSubmenu:", submenu);
     if (title.len > 0) {
-        const NSString = getClass("NSString") orelse return;
-        const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-        const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
+        const ns_title = nsStringFromSlice(title) orelse return null;
         msgSendVoid1(item, "setTitle:", ns_title);
     }
     msgSendVoid1(menubar, "addItem:", item);
+    return item;
 }
 
 fn addMenuItemWithModifier(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8, shift: bool) void {

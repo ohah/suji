@@ -956,6 +956,20 @@ test "tray.setMenuRaw + tray.destroy: trayId 전송" {
     }.run);
 }
 
+test "menu.setApplicationMenuRaw + resetApplicationMenu: cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.menu.setApplicationMenuRaw("\"items\":[{\"type\":\"submenu\",\"label\":\"Tools\",\"submenu\":[{\"label\":\"Run\",\"click\":\"run\"},{\"type\":\"checkbox\",\"label\":\"Flag\",\"click\":\"flag\",\"checked\":true},{\"type\":\"separator\"}]}]");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"menu_set_application_menu\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"label\":\"Tools\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"type\":\"checkbox\"") != null);
+
+            _ = app_mod.menu.resetApplicationMenu();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"menu_reset_application_menu\"") != null);
+        }
+    }.run);
+}
+
 test "notification.isSupported: __core__ + notification_is_supported 전송" {
     try withInvokeCore(struct {
         fn run() !void {

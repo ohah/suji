@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -137,6 +137,23 @@ describe("chain", () => {
     await chain("rust", "go", "relay", { msg: "hello" });
     expect(mockBridge.chain).toHaveBeenCalledTimes(1);
     expect(mockBridge.chain).toHaveBeenCalledWith("rust", "go", '{"cmd":"relay","msg":"hello"}');
+  });
+});
+
+describe("menu", () => {
+  it("setApplicationMenu calls core with items", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    const ok = await menu.setApplicationMenu([
+      { label: "Tools", submenu: [{ label: "Run", click: "run" }, { type: "checkbox", label: "Flag", click: "flag", checked: true }] },
+    ]);
+    expect(ok).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"menu_set_application_menu","items":[{"label":"Tools","submenu":[{"label":"Run","click":"run"},{"type":"checkbox","label":"Flag","click":"flag","checked":true}]}]}');
+  });
+
+  it("resetApplicationMenu calls core", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    await menu.resetApplicationMenu();
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"menu_reset_application_menu"}');
   });
 });
 
