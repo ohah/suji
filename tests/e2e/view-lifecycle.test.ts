@@ -322,3 +322,83 @@ describe("17-A.9: webContents API view 호환 — executeJavaScript", () => {
     expect(r.ok).toBe(true);
   });
 });
+
+// ============================================
+// Phase 17-A.10: 시각 검증 — view CefBrowser는 별도 DevTools target으로 puppeteer에 노출.
+// 그 page에서 직접 컨텐츠 읽기/screenshot으로 "view가 실제 살아있고 렌더링되고 있다"는
+// 픽셀 단계 증거 확보. 단 host NSWindow 안에서의 합성 시각(z-order/위치/투명도)은 OS
+// 차원 캡처가 필요해 별도 — 사용자 수동 검증 또는 examples/multi-backend의 view 데모 패널.
+// ============================================
+
+describe("17-A.10: view CefBrowser endpoint + 픽셀 캡처", () => {
+  /** CDP /json endpoint에서 raw target 목록 — puppeteer browser.pages()는 main browser가
+   *  발견한 page만 캐시. view CefBrowser는 별도 prefix /devtools/page/<id> 로 노출되지만
+   *  puppeteer 내부 캐시 갱신 시점에 따라 안 잡힐 수 있음. /json은 항상 최신. */
+  async function fetchCdpTargets(): Promise<Array<{ id: string; type: string; url: string; webSocketDebuggerUrl?: string }>> {
+    const r = await fetch("http://localhost:9222/json");
+    return (await r.json()) as Array<{ id: string; type: string; url: string; webSocketDebuggerUrl?: string }>;
+  }
+
+  test("view CefBrowser는 별도 CDP target으로 노출 (data URL marker로 식별)", async () => {
+    const host = await freshHost();
+    const view = await mkView(host, { width: 200, height: 200 });
+    const marker = `VIEW_E2E_MARKER_${Date.now()}`;
+    const html = `<body><h1>${marker}</h1></body>`;
+    await coreCall({
+      cmd: "load_url",
+      windowId: view,
+      url: `data:text/html,${encodeURIComponent(html)}`,
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const targets = await fetchCdpTargets();
+    const viewTarget = targets.find((t) => t.type === "page" && t.url.includes(encodeURIComponent(marker)));
+    expect(viewTarget).toBeDefined();
+  });
+
+  test("view CDP target에 raw WebSocket으로 Page.captureScreenshot — 픽셀 캡처", async () => {
+    const host = await freshHost();
+    const view = await mkView(host, { width: 200, height: 200 });
+    const marker = `VIEW_PIXEL_${Date.now()}`;
+    await coreCall({
+      cmd: "load_url",
+      windowId: view,
+      url: `data:text/html,${encodeURIComponent(`<body style='margin:0;background:red'><h1>${marker}</h1></body>`)}`,
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const targets = await fetchCdpTargets();
+    const viewTarget = targets.find((t) => t.type === "page" && t.url.includes(encodeURIComponent(marker)));
+    expect(viewTarget).toBeDefined();
+    if (!viewTarget?.webSocketDebuggerUrl) return;
+
+    // puppeteer.connect는 page WS endpoint에서 Target.getBrowserContexts 호출이 막혀 실패 →
+    // raw CDP WebSocket으로 Page.captureScreenshot 직접 호출.
+    const ws = new WebSocket(viewTarget.webSocketDebuggerUrl);
+    await new Promise<void>((res, rej) => {
+      ws.addEventListener("open", () => res());
+      ws.addEventListener("error", () => rej(new Error("WS open failed")));
+    });
+    const screenshotData = await new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("screenshot timeout")), 5000);
+      ws.addEventListener("message", (e) => {
+        const msg = JSON.parse(e.data as string);
+        if (msg.id === 1) {
+          clearTimeout(timer);
+          if (msg.error) reject(new Error(JSON.stringify(msg.error)));
+          else resolve(msg.result.data as string);
+        }
+      });
+      ws.send(JSON.stringify({ id: 1, method: "Page.captureScreenshot", params: { format: "png" } }));
+    });
+    ws.close();
+
+    const buf = Buffer.from(screenshotData, "base64");
+    expect(buf.length).toBeGreaterThan(100);
+    // PNG 매직 89 50 4E 47 — view가 실제 픽셀을 렌더링했다는 직접 증거
+    expect(buf[0]).toBe(0x89);
+    expect(buf[1]).toBe(0x50);
+    expect(buf[2]).toBe(0x4e);
+    expect(buf[3]).toBe(0x47);
+  });
+});

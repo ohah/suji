@@ -18,7 +18,10 @@ const S = (v: unknown) => typeof v === "object" ? JSON.stringify(v) : String(v);
 
 function App() {
   const [logs, setLogs] = useState<string[]>(["Ready."]);
+  const [viewIds, setViewIds] = useState<number[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
+  // suji dev 시작 시 첫 창은 항상 windowId=1 — view 데모는 그 창을 host로 사용.
+  const HOST_ID = 1;
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -354,6 +357,72 @@ function App() {
               const ok = r.filter(x => x.status === "fulfilled").length;
               log(`=== ${ok}/${r.length} ok in ${(performance.now() - start).toFixed(1)}ms ===`);
             }}>CHAOS</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>WebContentsView (Phase 17-A)</h3>
+          <div className="row">
+            <button onClick={async () => {
+              // data: URL — view 시각 식별용 색깔 페이지 (host 위에 child NSView로 합성됨).
+              const html = `<body style="margin:0;background:crimson;color:white;font:32px sans-serif;display:flex;align-items:center;justify-content:center">RED VIEW ${viewIds.length + 1}</body>`;
+              const r = await core({
+                cmd: "create_view",
+                hostId: HOST_ID,
+                url: `data:text/html,${encodeURIComponent(html)}`,
+                x: 60 + viewIds.length * 30,
+                y: 240 + viewIds.length * 30,
+                width: 320,
+                height: 200,
+              }) as { viewId?: number; error?: string };
+              if (r.viewId) {
+                setViewIds(prev => [...prev, r.viewId!]);
+                log(`view created: ${r.viewId} (red)`);
+              } else log(`view error: ${S(r)}`);
+            }}>+ Red View</button>
+            <button onClick={async () => {
+              const html = `<body style="margin:0;background:royalblue;color:white;font:32px sans-serif;display:flex;align-items:center;justify-content:center">BLUE VIEW ${viewIds.length + 1}</body>`;
+              const r = await core({
+                cmd: "create_view",
+                hostId: HOST_ID,
+                url: `data:text/html,${encodeURIComponent(html)}`,
+                x: 200 + viewIds.length * 20,
+                y: 280 + viewIds.length * 20,
+                width: 320,
+                height: 200,
+              }) as { viewId?: number; error?: string };
+              if (r.viewId) {
+                setViewIds(prev => [...prev, r.viewId!]);
+                log(`view created: ${r.viewId} (blue)`);
+              } else log(`view error: ${S(r)}`);
+            }}>+ Blue View</button>
+            <button onClick={async () => {
+              if (viewIds.length < 2) { log("need 2+ views"); return; }
+              // 마지막 두 view의 z-order 토글 — 두 번째를 top으로.
+              const second = viewIds[viewIds.length - 2];
+              await core({ cmd: "set_top_view", hostId: HOST_ID, viewId: second });
+              setViewIds(prev => [...prev.slice(0, -2), prev[prev.length - 1], prev[prev.length - 2]]);
+              log(`set_top_view: ${second} (now top)`);
+            }}>Toggle Top</button>
+            <button onClick={async () => {
+              if (viewIds.length === 0) { log("no views"); return; }
+              const last = viewIds[viewIds.length - 1];
+              await core({ cmd: "destroy_view", viewId: last });
+              setViewIds(prev => prev.slice(0, -1));
+              log(`destroy_view: ${last}`);
+            }}>- Destroy Last</button>
+            <button onClick={async () => {
+              for (const id of viewIds) await core({ cmd: "destroy_view", viewId: id });
+              setViewIds([]);
+              log("all views destroyed");
+            }}>Destroy All</button>
+            <button onClick={async () => {
+              const r = await core({ cmd: "get_child_views", hostId: HOST_ID }) as { viewIds: number[] };
+              log(`getChildViews: [${r.viewIds.join(", ")}]`);
+            }}>get_child_views</button>
+          </div>
+          <div style={{fontSize:11,color:"#888",marginTop:6}}>
+            host=window#{HOST_ID} · views=[{viewIds.join(", ") || "(none)"}]
           </div>
         </section>
       </div>
