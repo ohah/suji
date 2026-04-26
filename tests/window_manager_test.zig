@@ -3017,6 +3017,38 @@ test "회귀: File System API (Phase 5-F) — core route + Zig/Rust/Go/Node/JS S
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "FsDirEntry") != null);
 }
 
+test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우회" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "isPathAllowedForFrontend") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "g_in_backend_invoke") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "setGlobalConfig") != null);
+    // 5 fs handler 모두 sandbox check 호출.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_read_file\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_write_file\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_stat\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_mkdir\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_rm\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_readdir\"") != null);
+
+    const cfg_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/config.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cfg_src);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "pub const Fs = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "allowed_roots") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "allowedRoots") != null);
+}
+
 test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

@@ -762,6 +762,62 @@ pub const fs = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\",\"recursive\":{},\"force\":{}", .{ p_buf[0..p_n], recursive, force }) catch return null;
         return coreCmd("fs_rm", fields);
     }
+
+    pub const FileType = enum { file, directory, symlink, other };
+    pub const Stat = struct {
+        type: FileType,
+        size: u64,
+        mtime_ms: i64,
+    };
+
+    /// `stat`의 typed wrapper. raw JSON 응답을 파싱해 Stat 구조체 반환.
+    /// 실패 시 null (path 거부 / not_found / sandbox forbidden 등).
+    pub fn statTyped(path: []const u8) ?Stat {
+        const raw = stat(path) orelse return null;
+        if (util.extractJsonBool(raw, "success") orelse false == false) return null;
+        const type_str = util.extractJsonString(raw, "type") orelse return null;
+        const size = util.extractJsonInt(raw, "size") orelse return null;
+        const mtime = util.extractJsonInt(raw, "mtime") orelse return null;
+        const t: FileType = if (std.mem.eql(u8, type_str, "file")) .file
+            else if (std.mem.eql(u8, type_str, "directory")) .directory
+            else if (std.mem.eql(u8, type_str, "symlink")) .symlink
+            else .other;
+        return .{ .type = t, .size = @intCast(size), .mtime_ms = mtime };
+    }
+
+    /// `readdir` typed wrapper. raw JSON entries 배열을 caller-supplied buffer에 파싱.
+    /// 반환: 채운 entry 수 (실패 시 null). 배열 element name은 raw JSON 슬라이스 참조라
+    /// raw 응답 lifetime 안에서만 유효.
+    /// 호출 패턴: const raw = fs.readdir(p); const entries = fs.parseEntries(raw, &buf);
+    pub fn parseEntries(raw_response: []const u8, out: []DirEntry) ?usize {
+        if (util.extractJsonBool(raw_response, "success") orelse false == false) return null;
+        const entries_start = std.mem.indexOf(u8, raw_response, "\"entries\":[") orelse return 0;
+        var pos = entries_start + "\"entries\":[".len;
+        var count: usize = 0;
+        while (count < out.len and pos < raw_response.len) {
+            // skip whitespace
+            while (pos < raw_response.len and (raw_response[pos] == ',' or raw_response[pos] == ' ')) pos += 1;
+            if (pos >= raw_response.len or raw_response[pos] == ']') break;
+            // entry는 {"name":"...","type":"..."}
+            const obj_end = std.mem.indexOfScalarPos(u8, raw_response, pos, '}') orelse break;
+            const obj = raw_response[pos .. obj_end + 1];
+            const name = util.extractJsonString(obj, "name") orelse break;
+            const type_str = util.extractJsonString(obj, "type") orelse "other";
+            const t: FileType = if (std.mem.eql(u8, type_str, "file")) .file
+                else if (std.mem.eql(u8, type_str, "directory")) .directory
+                else if (std.mem.eql(u8, type_str, "symlink")) .symlink
+                else .other;
+            out[count] = .{ .name = name, .type = t };
+            count += 1;
+            pos = obj_end + 1;
+        }
+        return count;
+    }
+
+    pub const DirEntry = struct {
+        name: []const u8,
+        type: FileType,
+    };
 };
 
 pub const notification = struct {

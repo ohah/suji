@@ -215,4 +215,17 @@ describe("fs core commands", () => {
     expect(r.success).toBe(true);
     expect(r.text).toBe(content);
   });
+
+  // === Path safety / sandbox 검증 ===
+  // 이 example은 suji.json에 `fs.allowedRoots: ["*"]` (escape hatch). 따라서 일반
+  // path는 모두 통과. 단 `..` traversal은 모든 mode에 항상 차단 (security-critical).
+
+  test("sandbox: `..` path traversal은 [\"*\"] mode에서도 항상 차단", async () => {
+    const r = await core<{ success: boolean; error: string }>({
+      cmd: "fs_read_file",
+      path: `${FIXTURE_BASE}/../../etc/passwd`,
+    });
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("forbidden");
+  });
 });

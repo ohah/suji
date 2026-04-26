@@ -25,5 +25,8 @@
     "dir": "frontend",
     "dev_url": "http://localhost:5173",
     "dist_dir": "frontend/dist"
+  },
+  "fs": {
+    "allowedRoots": ["*"]
   }
 }

@@ -8,8 +8,30 @@ description: 텍스트 파일 read/write + stat/mkdir/readdir — Zig std.fs 기
 Electron `fs` 사용 흐름에 대응하는 Suji core 파일 시스템 API. Frontend JS와
 Zig/Rust/Go/Node 백엔드 SDK 모두 같은 `__core__` cmd를 사용한다.
 
-현재 범위는 UTF-8 텍스트 파일과 디렉토리 metadata/listing이다. 바이너리/스트리밍/권한 모델은
-별도 후속 API로 둔다.
+현재 범위는 UTF-8 텍스트 파일과 디렉토리 metadata/listing이다. 바이너리/스트리밍은 후속.
+
+## Sandbox (Electron `webPreferences.sandbox` 대응)
+
+Frontend(renderer)에서 호출되는 `fs.*`는 path 화이트리스트로 검증된다. Backend는 항상 무제한
+(사용자 자체 코드라 신뢰).
+
+`suji.json`:
+```json
+{
+  "fs": {
+    "allowedRoots": ["~/Documents/myapp", "/tmp/myapp"]
+  }
+}
+```
+
+| 설정 | Frontend 동작 |
+|---|---|
+| `allowedRoots` 미설정 / `[]` | 모든 frontend `fs.*` 차단 → `error: "forbidden"` |
+| `["~/Documents/myapp"]` | 해당 prefix 안 path만 허용 (`~`은 `$HOME`으로 확장) |
+| `["*"]` | escape hatch — 모든 path 허용 (`..` traversal은 여전히 차단) |
+
+**path traversal 가드**: `..` 토큰 포함 path는 모든 mode에서 항상 차단 (`["*"]`도 우회 불가).
+Backend SDK 호출은 sandbox 우회 (thread-local 마커).
 
 ## API
 

@@ -15,6 +15,7 @@ pub const Config = struct {
     plugins: ?[]const [:0]const u8 = null,
     asset_dir: [:0]const u8 = "assets",
     frontend: Frontend = .{},
+    fs: Fs = .{},
 
     // _arena는 포인터로 보관. 값으로 담으면 `Config { ._arena = arena }` 시점에 arena의
     // 내부 state(buffer 리스트 head)가 COPY되고, 이후 동일 arena를 거치는 할당(예:
@@ -78,6 +79,13 @@ pub const Config = struct {
         dir: [:0]const u8 = "frontend",
         dev_url: [:0]const u8 = "http://localhost:5173",
         dist_dir: [:0]const u8 = "frontend/dist",
+    };
+
+    /// File system sandbox (Electron `webPreferences.sandbox` 대응).
+    /// frontend(renderer)에서 호출되는 fs.* cmd가 검증 대상. backend는 항상 무제한.
+    /// allowedRoots 비어있으면 frontend fs 완전 차단. ["*"] = unrestricted (escape hatch).
+    pub const Fs = struct {
+        allowed_roots: []const [:0]const u8 = &.{},
     };
 
     /// 시작 시 자동 생성할 창의 최대 개수.
@@ -253,6 +261,23 @@ pub const Config = struct {
                 if (getStr(fe, "dir")) |s| config.frontend.dir = dupeStr(a, s);
                 if (getStr(fe, "dev_url")) |s| config.frontend.dev_url = dupeStr(a, s);
                 if (getStr(fe, "dist_dir")) |s| config.frontend.dist_dir = dupeStr(a, s);
+            }
+        }
+
+        if (root.get("fs")) |fs_val| {
+            if (fs_val == .object) {
+                const fs_obj = fs_val.object;
+                if (fs_obj.get("allowedRoots")) |roots_val| {
+                    if (roots_val == .array) {
+                        const arr = roots_val.array.items;
+                        if (a.alloc([:0]const u8, arr.len)) |roots| {
+                            for (arr, 0..) |item, i| {
+                                roots[i] = if (item == .string) dupeStr(a, item.string) else dupeStr(a, "");
+                            }
+                            config.fs.allowed_roots = roots;
+                        } else |_| {}
+                    }
+                }
             }
         }
 

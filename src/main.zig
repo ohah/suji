@@ -584,6 +584,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
         return;
     };
     defer config.deinit();
+    setGlobalConfig(&config);
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
@@ -749,6 +750,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
         return;
     };
     defer config.deinit();
+    setGlobalConfig(&config);
 
     std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
 
@@ -1044,6 +1046,9 @@ const SPECIAL_DISPATCHERS = [_]SpecialDispatcher{
 /// BackendRegistry.special_dispatch에 inject된다.
 fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: []u8) ?[]const u8 {
     const registry = suji.BackendRegistry.global orelse return null;
+    // Backend SDK가 호출한 흐름이라 fs sandbox 등 frontend-only 검증을 우회.
+    g_in_backend_invoke = true;
+    defer g_in_backend_invoke = false;
     for (SPECIAL_DISPATCHERS) |d| {
         if (std.mem.eql(u8, channel, d.channel)) return d.handler(registry, data, response_buf);
     }
@@ -1616,6 +1621,70 @@ fn coreError(response_buf: []u8, cmd: []const u8, err: []const u8) ?[]const u8 {
 const FS_MAX_TEXT_BYTES: usize = 8192;
 const FS_MAX_PATH_BYTES: usize = 4096;
 
+/// 전체 suji.json config을 glob 노출 — fs sandbox / 향후 network/shell allowlist /
+/// 플러그인 접근까지 단일 진입점. dev/run 시작 시 setGlobalConfig로 주입.
+/// lifetime: dev/run 함수가 process lifetime이라 stack address 안전.
+var g_config: ?*const suji.Config = null;
+
+pub fn setGlobalConfig(c: *const suji.Config) void {
+    g_config = c;
+}
+
+/// Backend invoke 흐름에서는 sandbox 적용 X (사용자 자체 코드라 신뢰).
+/// BackendRegistry __core__ 채널 핸들러가 set, frontend IPC origin은 false 유지.
+threadlocal var g_in_backend_invoke: bool = false;
+
+extern "c" fn getenv(name: [*:0]const u8) ?[*:0]const u8;
+
+/// `~`을 $HOME으로 확장한 절대 경로를 caller buffer에 복사.
+fn expandHome(path: []const u8, out: []u8) ?[]const u8 {
+    if (path.len == 0) return null;
+    if (path[0] != '~') {
+        if (path.len > out.len) return null;
+        @memcpy(out[0..path.len], path);
+        return out[0..path.len];
+    }
+    const home_cstr: ?[*:0]const u8 = getenv("HOME");
+    const home = std.mem.span(home_cstr orelse return null);
+    const rest = path[1..];
+    const total = home.len + rest.len;
+    if (total > out.len) return null;
+    @memcpy(out[0..home.len], home);
+    @memcpy(out[home.len..total], rest);
+    return out[0..total];
+}
+
+/// frontend가 호출한 fs.* path가 sandbox 통과하는지 검증.
+/// (1) `..` 토큰 거부 — security-critical, 모든 mode에 항상 적용,
+/// (2) config 미설정/roots 비어있음 → 차단,
+/// (3) ["*"]면 무제한 (`..` 외),
+/// (4) `~` 확장 후 allowed_roots 중 하나로 startsWith 매치.
+fn isPathAllowedForFrontend(path: []const u8) bool {
+    // path traversal 가드는 mode 무관 항상 적용 — escape hatch ["*"]도 우회 불가.
+    if (std.mem.indexOf(u8, path, "..") != null) return false;
+
+    const cfg = g_config orelse return false;
+    const roots = cfg.fs.allowed_roots;
+    if (roots.len == 0) return false;
+    if (roots.len == 1 and std.mem.eql(u8, roots[0], "*")) return true;
+
+    var resolved_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const resolved = expandHome(path, &resolved_buf) orelse return false;
+
+    var root_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    for (roots) |root| {
+        const root_resolved = expandHome(root, &root_buf) orelse continue;
+        if (std.mem.startsWith(u8, resolved, root_resolved)) return true;
+    }
+    return false;
+}
+
+fn fsSandboxCheck(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
+    if (g_in_backend_invoke) return null;
+    if (isPathAllowedForFrontend(path)) return null;
+    return coreError(response_buf, cmd, "forbidden");
+}
+
 /// `__core__` 핸들러 공통 — JSON에서 string field 추출 후 unescape. 빈 문자열은 거부.
 fn extractEscapedField(req_clean: []const u8, key: []const u8, out: []u8) ?[]const u8 {
     const raw = util.extractJsonString(req_clean, key) orelse return null;
@@ -1647,6 +1716,7 @@ fn fsKindName(kind: std.Io.File.Kind) []const u8 {
 fn handleFsReadFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_read_file", "path");
+    if (fsSandboxCheck(response_buf, "fs_read_file", path)) |err| return err;
 
     var text_buf: [FS_MAX_TEXT_BYTES]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&text_buf);
@@ -1668,6 +1738,7 @@ fn handleFsReadFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 fn handleFsWriteFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_write_file", "path");
+    if (fsSandboxCheck(response_buf, "fs_write_file", path)) |err| return err;
     const raw_text = util.extractJsonString(req_clean, "text") orelse "";
 
     var text_buf: [FS_MAX_TEXT_BYTES]u8 = undefined;
@@ -1686,6 +1757,7 @@ fn handleFsWriteFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 fn handleFsStat(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_stat", "path");
+    if (fsSandboxCheck(response_buf, "fs_stat", path)) |err| return err;
     const st = std.Io.Dir.cwd().statFile(runtime.io, path, .{}) catch return coreError(response_buf, "fs_stat", "not_found");
     // ns since epoch → ms — JS `Date(ms)` 호환 + 2^53 안전 범위 확보 (ns 그대로면 ~104일 후 손실).
     const mtime_ms = @divFloor(st.mtime.nanoseconds, 1_000_000);
@@ -1699,6 +1771,7 @@ fn handleFsStat(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 fn handleFsMkdir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_mkdir", "path");
+    if (fsSandboxCheck(response_buf, "fs_mkdir", path)) |err| return err;
     const recursive = util.extractJsonBool(req_clean, "recursive") orelse false;
     if (recursive) {
         // recursive=true는 createDirPath 자체가 idempotent (POSIX `mkdir -p`).
@@ -1716,6 +1789,7 @@ fn handleFsMkdir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 fn handleFsRm(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_rm", "path");
+    if (fsSandboxCheck(response_buf, "fs_rm", path)) |err| return err;
     const recursive = util.extractJsonBool(req_clean, "recursive") orelse false;
     const force = util.extractJsonBool(req_clean, "force") orelse false;
 
@@ -1738,6 +1812,7 @@ fn handleFsRm(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 fn handleFsReadDir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_readdir", "path");
+    if (fsSandboxCheck(response_buf, "fs_readdir", path)) |err| return err;
     var dir = std.Io.Dir.cwd().openDir(runtime.io, path, .{ .iterate = true }) catch return coreError(response_buf, "fs_readdir", "open");
     defer dir.close(runtime.io);
 
