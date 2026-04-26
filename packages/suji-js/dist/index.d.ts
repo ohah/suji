@@ -126,6 +126,37 @@ export interface ZoomFactorResponse extends WindowOpResponse {
     cmd: "get_zoom_factor";
     factor: number;
 }
+export interface ViewOptions {
+    /** view를 합성할 host 창 id. live & .window이어야 함 */
+    hostId: number;
+    /** 초기 로드 URL */
+    url?: string;
+    /** view 식별/디버깅 이름 (by_name 등록 X — view는 host scope) */
+    name?: string;
+    /** host contentView 좌표계의 view 위치/크기 (top-left). 기본 {0, 0, 800, 600} */
+    bounds?: SetBoundsArgs;
+}
+export interface CreateViewResponse {
+    cmd: "create_view";
+    from: "zig-core";
+    viewId: number;
+}
+/** view 전용 op 응답 — `windowId` 키 대신 `viewId`로 응답. webContents 메서드(load_url 등)
+ *  는 그대로 windowId 키 사용 (id 풀 공유). */
+export interface ViewOpResponse {
+    cmd: string;
+    from: "zig-core";
+    viewId: number;
+    ok: boolean;
+}
+export interface GetChildViewsResponse {
+    cmd: "get_child_views";
+    from: "zig-core";
+    hostId: number;
+    ok: boolean;
+    /** z-order 순서 (0=bottom, 마지막=top). 빈 배열이면 host에 view 없음 */
+    viewIds: number[];
+}
 export declare const windows: {
     /**
      * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
@@ -186,6 +217,25 @@ export declare const windows: {
     printToPDF(windowId: number, path: string): Promise<{
         success: boolean;
     }>;
+    /** host 창 contentView 안에 새 view 합성 (Electron `WebContentsView`). 자동으로 host의
+     *  view_children top에 추가됨 — 이후 addChildView로 z-order 변경 가능. */
+    createView(opts: ViewOptions): Promise<CreateViewResponse>;
+    /** view 파괴. host의 view_children에서 자동 제거 + `window:view-destroyed` 이벤트 */
+    destroyView(viewId: number): Promise<ViewOpResponse>;
+    /** view를 host children에 추가/재배치. index 생략 시 top. 같은 view 재호출 시 위치 갱신
+     *  (Electron WebContentsView idiom). host 이동은 미지원. */
+    addChildView(hostId: number, viewId: number, index?: number): Promise<ViewOpResponse>;
+    /** view를 host children에서 분리 (destroy X). native에서 setHidden(true). 다시 addChildView
+     *  로 같은 host에 붙일 수 있음. */
+    removeChildView(hostId: number, viewId: number): Promise<ViewOpResponse>;
+    /** addChildView(host, view, undefined) 편의 — Electron `setTopBrowserView` 동등 */
+    setTopView(hostId: number, viewId: number): Promise<ViewOpResponse>;
+    /** view 위치/크기 변경. host contentView 좌표계 (top-left). */
+    setViewBounds(viewId: number, bounds: SetBoundsArgs): Promise<ViewOpResponse>;
+    /** view 표시/숨김 토글. CEF host.was_hidden도 함께 호출 (렌더링/입력 일시정지) */
+    setViewVisible(viewId: number, visible: boolean): Promise<ViewOpResponse>;
+    /** host의 child view id들을 z-order 순서로 조회 (0=bottom, 마지막=top) */
+    getChildViews(hostId: number): Promise<GetChildViewsResponse>;
 };
 export declare const clipboard: {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
@@ -268,6 +318,12 @@ export declare const menu: {
     setApplicationMenu(items: MenuItem[]): Promise<boolean>;
     resetApplicationMenu(): Promise<boolean>;
 };
+export declare const globalShortcut: {
+    register(accelerator: string, click: string): Promise<boolean>;
+    unregister(accelerator: string): Promise<boolean>;
+    unregisterAll(): Promise<boolean>;
+    isRegistered(accelerator: string): Promise<boolean>;
+};
 export declare const shell: {
     /** URL을 시스템 기본 핸들러로 열기 (http(s) → 브라우저, mailto: → 메일 앱 등).
      *  잘못된 URL syntax면 false. */
@@ -282,6 +338,7 @@ export interface FsStat {
     success: boolean;
     type: FileType;
     size: number;
+    /** Last modification time in milliseconds since UTC 1970-01-01 (compatible with `new Date(mtime)`). */
     mtime: number;
 }
 export interface FsDirEntry {
@@ -296,6 +353,11 @@ export declare const fs: {
         recursive?: boolean;
     }): Promise<boolean>;
     readdir(path: string): Promise<FsDirEntry[]>;
+    /** Remove `path`. `recursive` deletes directories; `force` ignores not-found (matches `node:fs.rm`). */
+    rm(path: string, options?: {
+        recursive?: boolean;
+        force?: boolean;
+    }): Promise<boolean>;
 };
 export type MessageBoxStyle = "none" | "info" | "warning" | "error" | "question";
 export interface MessageBoxOptions {

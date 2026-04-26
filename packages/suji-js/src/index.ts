@@ -185,6 +185,45 @@ export interface ZoomFactorResponse extends WindowOpResponse {
   factor: number;
 }
 
+// ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
+// viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
+// `windows.executeJavaScript(viewId, ...)` 등 모든 webContents API가 view에도 동작.
+
+export interface ViewOptions {
+  /** view를 합성할 host 창 id. live & .window이어야 함 */
+  hostId: number;
+  /** 초기 로드 URL */
+  url?: string;
+  /** view 식별/디버깅 이름 (by_name 등록 X — view는 host scope) */
+  name?: string;
+  /** host contentView 좌표계의 view 위치/크기 (top-left). 기본 {0, 0, 800, 600} */
+  bounds?: SetBoundsArgs;
+}
+
+export interface CreateViewResponse {
+  cmd: "create_view";
+  from: "zig-core";
+  viewId: number;
+}
+
+/** view 전용 op 응답 — `windowId` 키 대신 `viewId`로 응답. webContents 메서드(load_url 등)
+ *  는 그대로 windowId 키 사용 (id 풀 공유). */
+export interface ViewOpResponse {
+  cmd: string;
+  from: "zig-core";
+  viewId: number;
+  ok: boolean;
+}
+
+export interface GetChildViewsResponse {
+  cmd: "get_child_views";
+  from: "zig-core";
+  hostId: number;
+  ok: boolean;
+  /** z-order 순서 (0=bottom, 마지막=top). 빈 배열이면 host에 view 없음 */
+  viewIds: number[];
+}
+
 async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
   const raw = await getBridge().core(JSON.stringify(request));
   return (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
@@ -335,6 +374,62 @@ export const windows = {
       });
       coreCall({ cmd: "print_to_pdf", windowId, path });
     });
+  },
+
+  // ── Phase 17-A: WebContentsView ──
+  // viewId는 windowId와 같은 풀이라 loadURL/executeJavaScript/openDevTools/setZoomFactor
+  // 등 모든 webContents API에 viewId를 그대로 넘기면 동작.
+
+  /** host 창 contentView 안에 새 view 합성 (Electron `WebContentsView`). 자동으로 host의
+   *  view_children top에 추가됨 — 이후 addChildView로 z-order 변경 가능. */
+  createView(opts: ViewOptions): Promise<CreateViewResponse> {
+    return coreCall<CreateViewResponse>({
+      cmd: "create_view",
+      hostId: opts.hostId,
+      url: opts.url,
+      name: opts.name,
+      x: opts.bounds?.x ?? 0,
+      y: opts.bounds?.y ?? 0,
+      width: opts.bounds?.width ?? 800,
+      height: opts.bounds?.height ?? 600,
+    });
+  },
+
+  /** view 파괴. host의 view_children에서 자동 제거 + `window:view-destroyed` 이벤트 */
+  destroyView(viewId: number): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "destroy_view", viewId });
+  },
+
+  /** view를 host children에 추가/재배치. index 생략 시 top. 같은 view 재호출 시 위치 갱신
+   *  (Electron WebContentsView idiom). host 이동은 미지원. */
+  addChildView(hostId: number, viewId: number, index?: number): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "add_child_view", hostId, viewId, index });
+  },
+
+  /** view를 host children에서 분리 (destroy X). native에서 setHidden(true). 다시 addChildView
+   *  로 같은 host에 붙일 수 있음. */
+  removeChildView(hostId: number, viewId: number): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "remove_child_view", hostId, viewId });
+  },
+
+  /** addChildView(host, view, undefined) 편의 — Electron `setTopBrowserView` 동등 */
+  setTopView(hostId: number, viewId: number): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "set_top_view", hostId, viewId });
+  },
+
+  /** view 위치/크기 변경. host contentView 좌표계 (top-left). */
+  setViewBounds(viewId: number, bounds: SetBoundsArgs): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "set_view_bounds", viewId, ...bounds });
+  },
+
+  /** view 표시/숨김 토글. CEF host.was_hidden도 함께 호출 (렌더링/입력 일시정지) */
+  setViewVisible(viewId: number, visible: boolean): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "set_view_visible", viewId, visible });
+  },
+
+  /** host의 child view id들을 z-order 순서로 조회 (0=bottom, 마지막=top) */
+  getChildViews(hostId: number): Promise<GetChildViewsResponse> {
+    return coreCall<GetChildViewsResponse>({ cmd: "get_child_views", hostId });
   },
 };
 

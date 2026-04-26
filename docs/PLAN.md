@@ -1358,7 +1358,12 @@ suji build → 결과물:
 14. **`child_process` / HTTP / SQLite SDK** — 흔한 use case (Zig std.process.Child / std.http 노출만 — 분량 소)
 15. **`safeStorage` (Keychain 암호화)** — 사용자 인증 토큰/secret 저장 (macOS Keychain / Win DPAPI / Linux libsecret)
 16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge) — 분량 소 each
-17. **`windows.createView` (BrowserView 동등)** — 한 창 multi-content 합성 (멀티탭 브라우저 앱 use case 명확할 때)
+17. ✅ **`windows.createView` (Electron WebContentsView 동등) — Phase 17-A (macOS) 완료**.
+    한 창 contentView 안에 child NSView+CefBrowser 합성. id 풀 공유 + 모든 webContents API
+    (loadURL/executeJavaScript/openDevTools/setZoomFactor/printToPDF/...) view 호환 자동.
+    8 SDK 메서드(createView/destroyView/addChildView/removeChildView/setTopView/setViewBounds/
+    setViewVisible/getChildViews) + view-created/view-destroyed 이벤트 + host destroy 시
+    자동 정리. Linux/Windows + Rust/Go/Node SDK는 17-B 후속.
 18. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
 19. **TypeScript 타입 자동 생성** — Tauri specta 동등 (개발자 경험)
 

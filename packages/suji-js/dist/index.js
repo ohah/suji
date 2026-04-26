@@ -193,6 +193,53 @@ export const windows = {
             coreCall({ cmd: "print_to_pdf", windowId, path });
         });
     },
+    // ── Phase 17-A: WebContentsView ──
+    // viewId는 windowId와 같은 풀이라 loadURL/executeJavaScript/openDevTools/setZoomFactor
+    // 등 모든 webContents API에 viewId를 그대로 넘기면 동작.
+    /** host 창 contentView 안에 새 view 합성 (Electron `WebContentsView`). 자동으로 host의
+     *  view_children top에 추가됨 — 이후 addChildView로 z-order 변경 가능. */
+    createView(opts) {
+        return coreCall({
+            cmd: "create_view",
+            hostId: opts.hostId,
+            url: opts.url,
+            name: opts.name,
+            x: opts.bounds?.x ?? 0,
+            y: opts.bounds?.y ?? 0,
+            width: opts.bounds?.width ?? 800,
+            height: opts.bounds?.height ?? 600,
+        });
+    },
+    /** view 파괴. host의 view_children에서 자동 제거 + `window:view-destroyed` 이벤트 */
+    destroyView(viewId) {
+        return coreCall({ cmd: "destroy_view", viewId });
+    },
+    /** view를 host children에 추가/재배치. index 생략 시 top. 같은 view 재호출 시 위치 갱신
+     *  (Electron WebContentsView idiom). host 이동은 미지원. */
+    addChildView(hostId, viewId, index) {
+        return coreCall({ cmd: "add_child_view", hostId, viewId, index });
+    },
+    /** view를 host children에서 분리 (destroy X). native에서 setHidden(true). 다시 addChildView
+     *  로 같은 host에 붙일 수 있음. */
+    removeChildView(hostId, viewId) {
+        return coreCall({ cmd: "remove_child_view", hostId, viewId });
+    },
+    /** addChildView(host, view, undefined) 편의 — Electron `setTopBrowserView` 동등 */
+    setTopView(hostId, viewId) {
+        return coreCall({ cmd: "set_top_view", hostId, viewId });
+    },
+    /** view 위치/크기 변경. host contentView 좌표계 (top-left). */
+    setViewBounds(viewId, bounds) {
+        return coreCall({ cmd: "set_view_bounds", viewId, ...bounds });
+    },
+    /** view 표시/숨김 토글. CEF host.was_hidden도 함께 호출 (렌더링/입력 일시정지) */
+    setViewVisible(viewId, visible) {
+        return coreCall({ cmd: "set_view_visible", viewId, visible });
+    },
+    /** host의 child view id들을 z-order 순서로 조회 (0=bottom, 마지막=top) */
+    getChildViews(hostId) {
+        return coreCall({ cmd: "get_child_views", hostId });
+    },
 };
 // ============================================
 // clipboard — 시스템 클립보드 (Electron `clipboard.readText/writeText`)
@@ -273,6 +320,29 @@ export const menu = {
     },
 };
 // ============================================
+// globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
+// ============================================
+// Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4". Trigger fires on
+// `globalShortcut:trigger {accelerator, click}` via `suji.on`. Linux/Windows are stubs.
+export const globalShortcut = {
+    async register(accelerator, click) {
+        const r = await coreCall({ cmd: "global_shortcut_register", accelerator, click });
+        return r.success === true;
+    },
+    async unregister(accelerator) {
+        const r = await coreCall({ cmd: "global_shortcut_unregister", accelerator });
+        return r.success === true;
+    },
+    async unregisterAll() {
+        const r = await coreCall({ cmd: "global_shortcut_unregister_all" });
+        return r.success === true;
+    },
+    async isRegistered(accelerator) {
+        const r = await coreCall({ cmd: "global_shortcut_is_registered", accelerator });
+        return r.registered === true;
+    },
+};
+// ============================================
 // shell — 외부 핸들러 호출 (Electron `shell.*`)
 // ============================================
 // 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.
@@ -306,7 +376,10 @@ export const fs = {
         return r.success === true;
     },
     async stat(path) {
-        return coreCall({ cmd: "fs_stat", path });
+        const r = await coreCall({ cmd: "fs_stat", path });
+        if (r.success !== true)
+            throw new Error(r.error ?? "fs_stat failed");
+        return r;
     },
     async mkdir(path, options = {}) {
         const r = await coreCall({ cmd: "fs_mkdir", path, recursive: options.recursive === true });
@@ -317,6 +390,18 @@ export const fs = {
         if (r.success !== true)
             throw new Error(r.error ?? "fs_readdir failed");
         return r.entries;
+    },
+    /** Remove `path`. `recursive` deletes directories; `force` ignores not-found (matches `node:fs.rm`). */
+    async rm(path, options = {}) {
+        const r = await coreCall({
+            cmd: "fs_rm",
+            path,
+            recursive: options.recursive === true,
+            force: options.force === true,
+        });
+        if (r.success !== true)
+            throw new Error(r.error ?? "fs_rm failed");
+        return true;
     },
 };
 /// Dialog 함수의 Electron 두-인자 오버로드 분해. 첫 인자가 number면 windowId(=sheet 부모),
