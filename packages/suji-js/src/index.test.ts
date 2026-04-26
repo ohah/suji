@@ -216,8 +216,20 @@ describe("globalShortcut", () => {
   });
 
   it("register returns false on success:false", async () => {
-    mockBridge.core.mockResolvedValueOnce({ success: false, error: "register" });
+    mockBridge.core.mockResolvedValueOnce({ success: false, error: "parse_failed" });
     expect(await globalShortcut.register("X", "y")).toBe(false);
+  });
+
+  it("register escapes JSON-special chars in accelerator/click", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    await globalShortcut.register('Cmd+"한글"', 'click\nwith\\ctrl');
+    expect(mockBridge.core).toHaveBeenCalledWith(
+      JSON.stringify({
+        cmd: "global_shortcut_register",
+        accelerator: 'Cmd+"한글"',
+        click: 'click\nwith\\ctrl',
+      }),
+    );
   });
 });
 

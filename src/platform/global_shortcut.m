@@ -36,7 +36,6 @@ typedef struct {
 static UInt32 virt_key_for(const char *name) {
     if (name == NULL || *name == 0) return UINT32_MAX;
 
-    // 단일 알파벳/숫자
     if (strlen(name) == 1) {
         char c = name[0];
         if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
@@ -80,7 +79,6 @@ static UInt32 virt_key_for(const char *name) {
         }
     }
 
-    // 함수 키 F1~F20
     if ((name[0] == 'F' || name[0] == 'f') && name[1] != 0) {
         int n = atoi(name + 1);
         switch (n) {
@@ -146,6 +144,7 @@ static ParsedAccel parse_accelerator(const char *acc) {
         while (*tok == ' ') tok++;
         char *end = tok + strlen(tok);
         while (end > tok && (*(end - 1) == ' ')) { end--; *end = 0; }
+        if (*tok == 0) { tok = strtok_r(NULL, "+", &saveptr); continue; }
 
         if (strcasecmp(tok, "Cmd") == 0 || strcasecmp(tok, "Command") == 0 ||
             strcasecmp(tok, "CmdOrCtrl") == 0 || strcasecmp(tok, "CommandOrControl") == 0 ||
@@ -158,6 +157,8 @@ static ParsedAccel parse_accelerator(const char *acc) {
         } else if (strcasecmp(tok, "Ctrl") == 0 || strcasecmp(tok, "Control") == 0) {
             out.modifiers |= controlKey;
         } else {
+            // 두 번째 비-modifier 토큰은 거부 ("Cmd+A+B" → invalid).
+            if (has_key) return (ParsedAccel){0};
             UInt32 vk = virt_key_for(tok);
             if (vk == UINT32_MAX) return out;
             out.virt_key = vk;
@@ -203,18 +204,28 @@ void suji_global_shortcut_set_callback(void (*cb)(const char *, const char *)) {
     ensure_event_handler();
 }
 
+// register status — main.zig가 caller 진단용 에러 문자열로 매핑.
+//   0  = success
+//  -1  = capacity full
+//  -2  = already registered (동일 accelerator)
+//  -3  = parse failure (빈 문자열 / invalid key / 다중 비-modifier 토큰)
+//  -4  = OS reject (RegisterEventHotKey 실패)
+//  -5  = accelerator string > SUJI_HOTKEY_STR_MAX (silent truncation 차단)
 int suji_global_shortcut_register(const char *accel, const char *click) {
-    if (!accel || !*accel) return 0;
-    if (g_hotkey_count >= SUJI_HOTKEY_MAX) return 0;
-    if (find_index(accel) >= 0) return 0;
+    if (!accel || !*accel) return -3;
+    if (strlen(accel) >= SUJI_HOTKEY_STR_MAX) return -5;
+    if (click && strlen(click) >= SUJI_HOTKEY_STR_MAX) return -5;
+    if (g_hotkey_count >= SUJI_HOTKEY_MAX) return -1;
+    if (find_index(accel) >= 0) return -2;
 
     ParsedAccel p = parse_accelerator(accel);
-    if (!p.valid) return 0;
+    if (!p.valid) return -3;
 
     EventHotKeyRef ref = NULL;
-    EventHotKeyID hkid = { .signature = 'sjsk', .id = g_next_hkid++ };
+    EventHotKeyID hkid = { .signature = 'sjsk', .id = g_next_hkid };
     OSStatus s = RegisterEventHotKey(p.virt_key, p.modifiers, hkid, GetApplicationEventTarget(), 0, &ref);
-    if (s != noErr || ref == NULL) return 0;
+    if (s != noErr || ref == NULL) return -4;
+    g_next_hkid++;
 
     HotKeyEntry *e = &g_hotkeys[g_hotkey_count++];
     e->ref = ref;
@@ -227,8 +238,7 @@ int suji_global_shortcut_register(const char *accel, const char *click) {
     } else {
         e->click[0] = 0;
     }
-    ensure_event_handler();
-    return 1;
+    return 0;
 }
 
 int suji_global_shortcut_unregister(const char *accel) {

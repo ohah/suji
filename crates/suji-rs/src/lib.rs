@@ -1121,6 +1121,15 @@ mod tests {
     }
 
     #[test]
+    fn global_shortcut_register_escapes_special_chars() {
+        // 한글 + " + \ + control char 모두 wire에서 round-trip되어야 함.
+        let req = crate::global_shortcut::register_request(r#"Cmd+"한글""#, "click\nwith\\ctrl");
+        let parsed: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(parsed["accelerator"], r#"Cmd+"한글""#);
+        assert_eq!(parsed["click"], "click\nwith\\ctrl");
+    }
+
+    #[test]
     fn fs_requests_escape_strings() {
         let stat: serde_json::Value =
             serde_json::from_str(&crate::fs::stat_request("/tmp/한글 \"a\"")).unwrap();

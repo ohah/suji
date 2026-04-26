@@ -1614,11 +1614,16 @@ fn coreError(response_buf: []u8, cmd: []const u8, err: []const u8) ?[]const u8 {
 const FS_MAX_TEXT_BYTES: usize = 8192;
 const FS_MAX_PATH_BYTES: usize = 4096;
 
-fn fsPathFromRequest(req_clean: []const u8, out: []u8) ?[]const u8 {
-    const raw = util.extractJsonString(req_clean, "path") orelse return null;
+/// `__core__` 핸들러 공통 — JSON에서 string field 추출 후 unescape. 빈 문자열은 거부.
+fn extractEscapedField(req_clean: []const u8, key: []const u8, out: []u8) ?[]const u8 {
+    const raw = util.extractJsonString(req_clean, key) orelse return null;
     const n = util.unescapeJsonStr(raw, out) orelse return null;
     if (n == 0) return null;
     return out[0..n];
+}
+
+fn fsPathFromRequest(req_clean: []const u8, out: []u8) ?[]const u8 {
+    return extractEscapedField(req_clean, "path", out);
 }
 
 fn fsKindName(kind: std.Io.File.Kind) []const u8 {
@@ -1846,38 +1851,43 @@ fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 // Global shortcut handlers
 // ============================================
 
-fn fsAcceleratorFromRequest(req_clean: []const u8, out: []u8) ?[]const u8 {
-    const raw = util.extractJsonString(req_clean, "accelerator") orelse return null;
-    const n = util.unescapeJsonStr(raw, out) orelse return null;
-    if (n == 0) return null;
-    return out[0..n];
+fn globalShortcutStatusToErrorCode(status: cef.GlobalShortcutStatus) []const u8 {
+    return switch (status) {
+        .ok => "",
+        .capacity => "capacity_full",
+        .duplicate => "already_registered",
+        .parse => "parse_failed",
+        .os_reject => "os_reject",
+        .too_long => "too_long",
+    };
 }
 
 fn handleGlobalShortcutRegister(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var accel_buf: [128]u8 = undefined;
-    const accel = fsAcceleratorFromRequest(req_clean, &accel_buf) orelse return coreError(response_buf, "global_shortcut_register", "accelerator");
+    const accel = extractEscapedField(req_clean, "accelerator", &accel_buf) orelse
+        return coreError(response_buf, "global_shortcut_register", "accelerator");
 
     var click_buf: [128]u8 = undefined;
-    const click_raw = util.extractJsonString(req_clean, "click") orelse "";
-    const click_n = util.unescapeJsonStr(click_raw, &click_buf) orelse return coreError(response_buf, "global_shortcut_register", "click");
-    const click = click_buf[0..click_n];
+    const click = extractEscapedField(req_clean, "click", &click_buf) orelse
+        return coreError(response_buf, "global_shortcut_register", "click");
 
-    const ok = cef.globalShortcutRegister(accel, click);
-    const code: []const u8 = if (ok) "" else "register";
-    if (!ok) return coreError(response_buf, "global_shortcut_register", code);
+    const status = cef.globalShortcutRegister(accel, click);
+    if (status != .ok) return coreError(response_buf, "global_shortcut_register", globalShortcutStatusToErrorCode(status));
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_register\",\"success\":true}}", .{}) catch null;
 }
 
 fn handleGlobalShortcutUnregister(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var accel_buf: [128]u8 = undefined;
-    const accel = fsAcceleratorFromRequest(req_clean, &accel_buf) orelse return coreError(response_buf, "global_shortcut_unregister", "accelerator");
+    const accel = extractEscapedField(req_clean, "accelerator", &accel_buf) orelse
+        return coreError(response_buf, "global_shortcut_unregister", "accelerator");
     const ok = cef.globalShortcutUnregister(accel);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_unregister\",\"success\":{}}}", .{ok}) catch null;
 }
 
 fn handleGlobalShortcutIsRegistered(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var accel_buf: [128]u8 = undefined;
-    const accel = fsAcceleratorFromRequest(req_clean, &accel_buf) orelse return coreError(response_buf, "global_shortcut_is_registered", "accelerator");
+    const accel = extractEscapedField(req_clean, "accelerator", &accel_buf) orelse
+        return coreError(response_buf, "global_shortcut_is_registered", "accelerator");
     const registered = cef.globalShortcutIsRegistered(accel);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_is_registered\",\"registered\":{}}}", .{registered}) catch null;
 }

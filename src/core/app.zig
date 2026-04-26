@@ -860,20 +860,22 @@ pub const menu = struct {
 /// `"Cmd+Shift+K"`, `"CommandOrControl+P"`, `"Alt+F4"` 등. 트리거 시 EventBus의
 /// `globalShortcut:trigger {accelerator, click}`로 수신.
 pub const globalShortcut = struct {
+    // escape는 worst-case 6배 expansion (`\u00xx`) 가능 → 128 input → 768 escape buffer.
+    // fields_buf는 두 escape (1536) + JSON wire 텍스트 + 마진.
     pub fn register(accelerator: []const u8, click: []const u8) ?[]const u8 {
-        var a_buf: [128]u8 = undefined;
-        var c_buf: [128]u8 = undefined;
+        var a_buf: [768]u8 = undefined;
+        var c_buf: [768]u8 = undefined;
         const a_n = util.escapeJsonStrFull(accelerator, &a_buf) orelse return null;
         const c_n = util.escapeJsonStrFull(click, &c_buf) orelse return null;
-        var fields_buf: [320]u8 = undefined;
+        var fields_buf: [1664]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\",\"click\":\"{s}\"", .{ a_buf[0..a_n], c_buf[0..c_n] }) catch return null;
         return coreCmd("global_shortcut_register", fields);
     }
 
     pub fn unregister(accelerator: []const u8) ?[]const u8 {
-        var a_buf: [128]u8 = undefined;
+        var a_buf: [768]u8 = undefined;
         const a_n = util.escapeJsonStrFull(accelerator, &a_buf) orelse return null;
-        var fields_buf: [160]u8 = undefined;
+        var fields_buf: [832]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\"", .{a_buf[0..a_n]}) catch return null;
         return coreCmd("global_shortcut_unregister", fields);
     }
@@ -883,9 +885,9 @@ pub const globalShortcut = struct {
     }
 
     pub fn isRegistered(accelerator: []const u8) ?[]const u8 {
-        var a_buf: [128]u8 = undefined;
+        var a_buf: [768]u8 = undefined;
         const a_n = util.escapeJsonStrFull(accelerator, &a_buf) orelse return null;
-        var fields_buf: [160]u8 = undefined;
+        var fields_buf: [832]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\"", .{a_buf[0..a_n]}) catch return null;
         return coreCmd("global_shortcut_is_registered", fields);
     }

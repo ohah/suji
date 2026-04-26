@@ -1020,6 +1020,19 @@ test "globalShortcut.*: __core__ Carbon Hot Key cmd 전송" {
     }.run);
 }
 
+test "globalShortcut.register: 한글/특수문자 escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.globalShortcut.register("Cmd+\"한글\"", "click\nwith\\ctrl");
+            const req = InvokeSpy.lastRequest();
+            // accelerator: Cmd+"한글" → escapeJsonStrFull → \"한글\"
+            try std.testing.expect(std.mem.indexOf(u8, req, "\"accelerator\":\"Cmd+\\\"한글\\\"\"") != null);
+            // click: 줄바꿈 → \n, 백슬래시 → \\
+            try std.testing.expect(std.mem.indexOf(u8, req, "\"click\":\"click\\nwith\\\\ctrl\"") != null);
+        }
+    }.run);
+}
+
 test "notification.isSupported: __core__ + notification_is_supported 전송" {
     try withInvokeCore(struct {
         fn run() !void {

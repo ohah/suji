@@ -1313,26 +1313,16 @@ pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, sil
     var id_buf: [64]u8 = undefined;
     var t_buf: [4096]u8 = undefined;
     var b_buf: [4096]u8 = undefined;
-    if (id.len + 1 > id_buf.len or title.len + 1 > t_buf.len or body.len + 1 > b_buf.len) return false;
-    @memcpy(id_buf[0..id.len], id);
-    id_buf[id.len] = 0;
-    @memcpy(t_buf[0..title.len], title);
-    t_buf[title.len] = 0;
-    @memcpy(b_buf[0..body.len], body);
-    b_buf[body.len] = 0;
-    const id_cstr: [*:0]const u8 = @ptrCast(&id_buf);
-    const t_cstr: [*:0]const u8 = @ptrCast(&t_buf);
-    const b_cstr: [*:0]const u8 = @ptrCast(&b_buf);
+    const id_cstr = writeCStr(id, &id_buf) orelse return false;
+    const t_cstr = writeCStr(title, &t_buf) orelse return false;
+    const b_cstr = writeCStr(body, &b_buf) orelse return false;
     return suji_notification_show(id_cstr, t_cstr, b_cstr, if (silent) 1 else 0) != 0;
 }
 
 pub fn notificationClose(id: []const u8) bool {
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
-    if (id.len + 1 > id_buf.len) return false;
-    @memcpy(id_buf[0..id.len], id);
-    id_buf[id.len] = 0;
-    const id_cstr: [*:0]const u8 = @ptrCast(&id_buf);
+    const id_cstr = writeCStr(id, &id_buf) orelse return false;
     suji_notification_close(id_cstr);
     return true;
 }
@@ -1360,20 +1350,39 @@ pub fn setGlobalShortcutEmitHandler(handler: GlobalShortcutEmitHandler) void {
     suji_global_shortcut_set_callback(&globalShortcutTriggerC);
 }
 
-fn writeCStr(slice: []const u8, buf: *[GLOBAL_SHORTCUT_STR_MAX]u8) ?[*:0]const u8 {
+/// Zig slice → null-terminated C string in caller-supplied buffer.
+/// 슬라이스 길이+1 > buf.len이면 null. notification/global_shortcut 등 .m extern 호출 공통.
+fn writeCStr(slice: []const u8, buf: []u8) ?[*:0]const u8 {
     if (slice.len + 1 > buf.len) return null;
     @memcpy(buf[0..slice.len], slice);
     buf[slice.len] = 0;
-    return @ptrCast(buf);
+    return @ptrCast(buf.ptr);
 }
 
-pub fn globalShortcutRegister(accelerator: []const u8, click: []const u8) bool {
-    if (!comptime is_macos) return false;
+pub const GlobalShortcutStatus = enum(i32) {
+    ok = 0,
+    capacity = -1,
+    duplicate = -2,
+    parse = -3,
+    os_reject = -4,
+    too_long = -5,
+};
+
+pub fn globalShortcutRegister(accelerator: []const u8, click: []const u8) GlobalShortcutStatus {
+    if (!comptime is_macos) return .os_reject;
     var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
     var click_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
-    const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return false;
-    const click_cstr = writeCStr(click, &click_buf) orelse return false;
-    return suji_global_shortcut_register(accel_cstr, click_cstr) != 0;
+    const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return .too_long;
+    const click_cstr = writeCStr(click, &click_buf) orelse return .too_long;
+    return switch (suji_global_shortcut_register(accel_cstr, click_cstr)) {
+        0 => .ok,
+        -1 => .capacity,
+        -2 => .duplicate,
+        -3 => .parse,
+        -4 => .os_reject,
+        -5 => .too_long,
+        else => .os_reject,
+    };
 }
 
 pub fn globalShortcutUnregister(accelerator: []const u8) bool {
@@ -1419,6 +1428,7 @@ extern "c" fn suji_notification_show(id: [*:0]const u8, title: [*:0]const u8, bo
 extern "c" fn suji_notification_close(id: [*:0]const u8) void;
 
 // global_shortcut.m — Carbon RegisterEventHotKey wrapper.
+// register status: 0=success, -1=capacity, -2=duplicate, -3=parse, -4=os_reject, -5=too_long.
 extern "c" fn suji_global_shortcut_set_callback(cb: *const fn ([*:0]const u8, [*:0]const u8) callconv(.c) void) void;
 extern "c" fn suji_global_shortcut_register(accelerator: [*:0]const u8, click: [*:0]const u8) i32;
 extern "c" fn suji_global_shortcut_unregister(accelerator: [*:0]const u8) i32;
