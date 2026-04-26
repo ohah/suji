@@ -1020,6 +1020,67 @@ test "globalShortcut.*: __core__ Carbon Hot Key cmd 전송" {
     }.run);
 }
 
+test "fs.statTyped: 응답 파싱 + FileType 매핑" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            // file
+            InvokeSpy.setStub("{\"from\":\"zig-core\",\"cmd\":\"fs_stat\",\"success\":true,\"type\":\"file\",\"size\":42,\"mtime\":1700000000000}");
+            const st = app_mod.fs.statTyped("/tmp/x").?;
+            try std.testing.expectEqual(app_mod.fs.FileType.file, st.type);
+            try std.testing.expectEqual(@as(u64, 42), st.size);
+            try std.testing.expectEqual(@as(i64, 1700000000000), st.mtime_ms);
+
+            // directory
+            InvokeSpy.setStub("{\"success\":true,\"type\":\"directory\",\"size\":0,\"mtime\":0}");
+            const dir = app_mod.fs.statTyped("/tmp/d").?;
+            try std.testing.expectEqual(app_mod.fs.FileType.directory, dir.type);
+
+            // symlink
+            InvokeSpy.setStub("{\"success\":true,\"type\":\"symlink\",\"size\":7,\"mtime\":1}");
+            const link = app_mod.fs.statTyped("/tmp/l").?;
+            try std.testing.expectEqual(app_mod.fs.FileType.symlink, link.type);
+
+            // unknown type → other
+            InvokeSpy.setStub("{\"success\":true,\"type\":\"socket\",\"size\":0,\"mtime\":0}");
+            const sock = app_mod.fs.statTyped("/tmp/s").?;
+            try std.testing.expectEqual(app_mod.fs.FileType.other, sock.type);
+
+            // success:false → null
+            InvokeSpy.setStub("{\"success\":false,\"error\":\"not_found\"}");
+            try std.testing.expect(app_mod.fs.statTyped("/missing") == null);
+
+            // success 필드 missing → null (operator precedence 회귀)
+            InvokeSpy.setStub("{\"type\":\"file\"}");
+            try std.testing.expect(app_mod.fs.statTyped("/no-success") == null);
+        }
+    }.run);
+}
+
+test "fs.parseEntries: raw JSON entries 배열 파싱" {
+    var buf: [16]app_mod.fs.DirEntry = undefined;
+    // 정상 케이스
+    const raw1 = "{\"success\":true,\"entries\":[{\"name\":\"a.txt\",\"type\":\"file\"},{\"name\":\"sub\",\"type\":\"directory\"}]}";
+    const n1 = app_mod.fs.parseEntries(raw1, &buf).?;
+    try std.testing.expectEqual(@as(usize, 2), n1);
+    try std.testing.expectEqualStrings("a.txt", buf[0].name);
+    try std.testing.expectEqual(app_mod.fs.FileType.file, buf[0].type);
+    try std.testing.expectEqualStrings("sub", buf[1].name);
+    try std.testing.expectEqual(app_mod.fs.FileType.directory, buf[1].type);
+
+    // 빈 배열
+    const raw2 = "{\"success\":true,\"entries\":[]}";
+    const n2 = app_mod.fs.parseEntries(raw2, &buf).?;
+    try std.testing.expectEqual(@as(usize, 0), n2);
+
+    // success:false → null
+    const raw3 = "{\"success\":false,\"error\":\"open\"}";
+    try std.testing.expect(app_mod.fs.parseEntries(raw3, &buf) == null);
+
+    // success missing → null (operator precedence 회귀)
+    const raw4 = "{\"entries\":[{\"name\":\"x\",\"type\":\"file\"}]}";
+    try std.testing.expect(app_mod.fs.parseEntries(raw4, &buf) == null);
+}
+
 test "globalShortcut.register: 한글/특수문자 escape" {
     try withInvokeCore(struct {
         fn run() !void {

@@ -3055,6 +3055,26 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     try std.testing.expect(std.mem.indexOf(u8, main_src, "if (std.mem.eql(u8, root, \"*\")) return true") != null);
     // ~ 확장은 config load 시 사전 처리 — 핫 패스 expandHome 제거.
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "expandHomeAtLoad") != null);
+
+    // Backend bypass 마커 contract — backendSpecialDispatch에서 set, fsSandboxCheck에서 check.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "g_in_backend_invoke = true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "if (g_in_backend_invoke) return null") != null);
+}
+
+test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 분기" {
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "app_name") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "buildAppCachePath") != null);
+    // OS 분기는 macOS/Linux/Windows 모두 명시.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "Library/Application Support") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "XDG_CONFIG_HOME") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "APPDATA") != null);
 }
 
 test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {

@@ -149,6 +149,33 @@ fn buildAppCachePath(buf: []u8, home: []const u8, app_name: []const u8) ?[]const
     return result;
 }
 
+test "buildAppCachePath: 현재 OS 표준 경로 + app_name 포함" {
+    var buf: [512]u8 = undefined;
+    const path = buildAppCachePath(&buf, "/Users/test", "MyApp").?;
+    // 모든 OS에서 home prefix + app_name + Cache는 공통.
+    try std.testing.expect(std.mem.indexOf(u8, path, "MyApp") != null);
+    try std.testing.expect(std.mem.endsWith(u8, path, "Cache"));
+    // OS별 분기 — 빌드 시점 OS만 검증.
+    switch (builtin.os.tag) {
+        .macos => {
+            try std.testing.expect(std.mem.startsWith(u8, path, "/Users/test/Library/Application Support/MyApp"));
+        },
+        .linux => {
+            // XDG 미설정 시 ~/.config; 설정 시 그 경로. test env에 XDG가 없을 가능성 높음.
+            try std.testing.expect(std.mem.indexOf(u8, path, "/MyApp/Cache") != null);
+        },
+        .windows => {
+            try std.testing.expect(std.mem.indexOf(u8, path, "MyApp\\Cache") != null);
+        },
+        else => {},
+    }
+}
+
+test "buildAppCachePath: 너무 긴 path는 null" {
+    var small_buf: [16]u8 = undefined;
+    try std.testing.expect(buildAppCachePath(&small_buf, "/Users/test", "VeryLongAppName") == null);
+}
+
 pub fn initialize(config: CefConfig) !void {
     if (!g_app_initialized) {
         _ = c.cef_api_hash(c.CEF_API_VERSION, 0);
