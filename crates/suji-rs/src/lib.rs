@@ -430,6 +430,57 @@ pub mod shell {
     }
 }
 
+pub mod tray {
+    use crate::{escape_json_full, invoke, serde_json};
+
+    /// 메뉴 항목 — separator 또는 click 이벤트 발화하는 일반 item.
+    pub enum MenuItem<'a> {
+        Item { label: &'a str, click: &'a str },
+        Separator,
+    }
+
+    /// 새 트레이 생성. 응답 JSON: `{"from","cmd","trayId":N}`. trayId=0이면 실패.
+    pub fn create(title: &str, tooltip: &str) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"tray_create","title":"{}","tooltip":"{}"}}"#,
+            escape_json_full(title), escape_json_full(tooltip),
+        ))
+    }
+
+    pub fn set_title(tray_id: u32, title: &str) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"tray_set_title","trayId":{},"title":"{}"}}"#,
+            tray_id, escape_json_full(title),
+        ))
+    }
+
+    pub fn set_tooltip(tray_id: u32, tooltip: &str) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"tray_set_tooltip","trayId":{},"tooltip":"{}"}}"#,
+            tray_id, escape_json_full(tooltip),
+        ))
+    }
+
+    /// 메뉴 설정 — items 배열을 serde_json으로 안전하게 직렬화.
+    /// 클릭 시 `tray:menu-click {trayId, click}` 이벤트 발화.
+    pub fn set_menu(tray_id: u32, items: &[MenuItem]) -> Option<String> {
+        let arr: Vec<serde_json::Value> = items.iter().map(|it| match it {
+            MenuItem::Separator => serde_json::json!({"type": "separator"}),
+            MenuItem::Item { label, click } => serde_json::json!({"label": label, "click": click}),
+        }).collect();
+        let req = serde_json::json!({
+            "cmd": "tray_set_menu",
+            "trayId": tray_id,
+            "items": arr,
+        }).to_string();
+        invoke("__core__", &req)
+    }
+
+    pub fn destroy(tray_id: u32) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"tray_destroy","trayId":{}}}"#, tray_id))
+    }
+}
+
 pub mod dialog {
     use crate::{escape_json_full, invoke, serde_json};
 

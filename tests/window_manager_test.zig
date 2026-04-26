@@ -2602,6 +2602,105 @@ test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpe
     try std.testing.expect(std.mem.indexOf(u8, main_src, "showsTagField") != null);
 }
 
+test "회귀: Tray API (Phase 5-B) — NSStatusItem + 메뉴 + click 라우팅 + 5 진입점" {
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+
+    // 5개 pub fn 노출.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn createTray(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setTrayTitle(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setTrayTooltip(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setTrayMenu(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn destroyTray(") != null);
+    // NSStatusBar / NSStatusItem + statusItemWithLength: + setMenu:.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSStatusBar") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "statusItemWithLength:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "removeStatusItem:") != null);
+    // SujiTrayTarget ObjC subclass + trayMenuClick: selector.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"SujiTrayTarget\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "trayMenuClick:") != null);
+    // Click 라우팅: NSMenuItem.tag(trayId) + representedObject(NSString click name).
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setRepresentedObject:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setTag:") != null);
+    // EventBus 연결 — main.zig가 setTrayEmitHandler로 콜백 등록.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setTrayEmitHandler(") != null);
+
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    // 5개 cmd 라우팅.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"tray_create\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"tray_set_title\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"tray_set_tooltip\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"tray_set_menu\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"tray_destroy\"") != null);
+    // emit 핸들러 등록 — dev/dist 양쪽.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.setTrayEmitHandler(&trayEmitHandler)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "tray:menu-click") != null);
+    // setMenu items 파싱 (separator vs item).
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "TraySetMenuJson") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"separator\"") != null);
+
+    // 4 SDK 노출 확인.
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const tray = struct") != null);
+
+    const rs_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod tray {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub fn set_menu(") != null);
+
+    const go_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/tray/tray.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_src);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func Create(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "type MenuItem struct") != null);
+
+    const node_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-node/src/index.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(node_src);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const tray =") != null);
+
+    const ts_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "export const tray =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "TrayMenuItem") != null);
+}
+
 test "회귀: 백엔드 SDK clipboard/shell/dialog 노출 — Zig/Rust/Go/Node 4개 모두" {
     // Zig SDK (src/core/app.zig).
     const app_src = try std.Io.Dir.cwd().readFileAlloc(

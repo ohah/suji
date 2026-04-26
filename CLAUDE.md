@@ -67,6 +67,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
 // suji.dialog.showErrorBox("Title", "content")
+// suji.tray.create("🚀 App", "tooltip") / setMenuRaw(id, "...items...") / destroy(id)
+//                                                                       (macOS NSStatusItem)
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -88,6 +90,7 @@ suji::export_handlers!(ping);
 // suji::dialog::show_message_box(MessageBoxOpts { message: "Q", ... })
 // suji::dialog::show_open_dialog(r#""properties":["openFile"]"#)
 // suji::dialog::show_error_box("Title", "content")
+// suji::tray::create("🚀", "tip") / set_menu(id, &[MenuItem::Item{...}, MenuItem::Separator]) / destroy(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -112,6 +115,8 @@ var _ = suji.Bind(&App{})
 // import "github.com/ohah/suji-go/dialog"
 // dialog.ShowMessageBox(dialog.MessageBoxOpts{Message:"Q", Buttons:[]string{"OK"}})
 // dialog.ShowOpenDialog(`"properties":["openFile"]`) / ShowErrorBox(t, c)
+// import "github.com/ohah/suji-go/tray"
+// tray.Create("🚀", "tip") / SetMenu(id, []tray.MenuItem{{Label:"Quit",Click:"quit"}}) / Destroy(id)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -199,6 +204,9 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
 // await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
 // await dialog.showErrorBox(title, content)
+// const { trayId } = await tray.create({ title:"🚀", tooltip:"..." })
+// await tray.setMenu(trayId, [{label:"Quit",click:"quit"},{type:"separator"}])
+// await tray.destroy(trayId) — suji.on('tray:menu-click', ({trayId,click}) => ...)
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.

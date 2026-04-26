@@ -524,6 +524,46 @@ export const shell = {
   },
 };
 
+// ============================================
+// tray — 시스템 트레이 (Electron `Tray`). frontend `@suji/api`와 동일 cmd.
+// 클릭은 `tray:menu-click {trayId, click}` 이벤트로 수신 (suji.on 사용).
+// ============================================
+
+export interface TrayMenuSeparator { type: 'separator'; }
+export interface TrayMenuItemSpec { label: string; click: string; }
+export type TrayMenuItem = TrayMenuItemSpec | TrayMenuSeparator;
+
+export interface TrayCreateOptions {
+  title?: string;
+  tooltip?: string;
+}
+
+export const tray = {
+  async create(options: TrayCreateOptions = {}): Promise<{ trayId: number }> {
+    return invoke<{ trayId: number }>('__core__', { cmd: 'tray_create', ...options });
+  },
+
+  async setTitle(trayId: number, title: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'tray_set_title', trayId, title });
+    return r.success === true;
+  },
+
+  async setTooltip(trayId: number, tooltip: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'tray_set_tooltip', trayId, tooltip });
+    return r.success === true;
+  },
+
+  async setMenu(trayId: number, items: TrayMenuItem[]): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'tray_set_menu', trayId, items });
+    return r.success === true;
+  },
+
+  async destroy(trayId: number): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'tray_destroy', trayId });
+    return r.success === true;
+  },
+};
+
 // Dialog 옵션 타입은 frontend `@suji/api`와 동일.
 export type MessageBoxStyle = 'none' | 'info' | 'warning' | 'error' | 'question';
 

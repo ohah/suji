@@ -713,6 +713,50 @@ pub const shell = struct {
     }
 };
 
+pub const tray = struct {
+    /// 트레이 생성. 응답: `{"from","cmd","trayId":N}`. trayId=0이면 실패 (비-macOS 등).
+    /// title/tooltip은 빈 문자열이면 미설정.
+    pub fn create(title: []const u8, tooltip: []const u8) ?[]const u8 {
+        var t_buf: [512]u8 = undefined;
+        var tt_buf: [1024]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
+        const tt_n = util.escapeJsonStrFull(tooltip, &tt_buf) orelse return null;
+        var fields_buf: [2048]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"title\":\"{s}\",\"tooltip\":\"{s}\"", .{ t_buf[0..t_n], tt_buf[0..tt_n] }) catch return null;
+        return coreCmd("tray_create", fields);
+    }
+
+    pub fn setTitle(tray_id: u32, title: []const u8) ?[]const u8 {
+        var t_buf: [512]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
+        var fields_buf: [640]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"trayId\":{d},\"title\":\"{s}\"", .{ tray_id, t_buf[0..t_n] }) catch return null;
+        return coreCmd("tray_set_title", fields);
+    }
+
+    pub fn setTooltip(tray_id: u32, tooltip: []const u8) ?[]const u8 {
+        var t_buf: [1024]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(tooltip, &t_buf) orelse return null;
+        var fields_buf: [1200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"trayId\":{d},\"tooltip\":\"{s}\"", .{ tray_id, t_buf[0..t_n] }) catch return null;
+        return coreCmd("tray_set_tooltip", fields);
+    }
+
+    /// 메뉴 설정 — items_json은 cmd 객체에 들어갈 raw JSON `"items":[...]`. caller가 빌드.
+    /// 예: `\"items\":[{\"label\":\"Settings\",\"click\":\"open-settings\"},{\"type\":\"separator\"}]`.
+    pub fn setMenuRaw(tray_id: u32, items_json: []const u8) ?[]const u8 {
+        var fields_buf: [8192]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"trayId\":{d},{s}", .{ tray_id, items_json }) catch return null;
+        return coreCmd("tray_set_menu", fields);
+    }
+
+    pub fn destroy(tray_id: u32) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"trayId\":{d}", .{tray_id}) catch return null;
+        return coreCmd("tray_destroy", fields);
+    }
+};
+
 pub const dialog = struct {
     /// 메시지 박스 — pre-built JSON fields(buttons 배열 등) 직접 전달.
     /// 응답: `{"from","cmd","response":N,"checkboxChecked":bool}`.

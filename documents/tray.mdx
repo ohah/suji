@@ -1,0 +1,147 @@
+---
+title: Tray (Phase 5-B)
+description: 시스템 트레이 아이콘 + 컨텍스트 메뉴 (Electron Tray) — 5 진입점 노출
+---
+
+# Tray
+
+Electron `Tray` 호환 — macOS 메뉴바, Linux/Windows 시스템 트레이 (현재 macOS만).
+Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
+
+## 플랫폼 지원
+
+| API | macOS | Linux | Windows |
+|---|---|---|---|
+| `tray.create` | ✅ NSStatusItem | stub (trayId:0) | stub |
+| `tray.setTitle/setTooltip` | ✅ | stub (false) | stub |
+| `tray.setMenu` | ✅ NSMenu | stub | stub |
+| `tray.destroy` | ✅ | stub | stub |
+| Click event | ✅ `tray:menu-click` | — | — |
+
+Linux/Windows는 향후 GTK `AppIndicator` / Win32 `Shell_NotifyIcon` plug-in. 현재 호출은
+`{trayId: 0}` 또는 `{success: false}` 즉시 반환.
+
+## v1 한계
+
+| 미지원 | 설명 |
+|---|---|
+| **아이콘 이미지** | `iconPath` / NSImage / template 미지원. v1은 `title` 텍스트만 — 이모지 가능 (예: `"🚀 Suji"`). v2에서 NSImage 로딩. |
+| **아이콘 자체 클릭 (`tray:click`)** | NSStatusItem은 메뉴 설정 시 클릭 → 자동 메뉴 표시. 메뉴 없는 클릭 hook은 별도 작업. |
+| **서브메뉴 / checkbox / radio** | NSMenu는 지원하나 v1은 평면 메뉴 + separator만. |
+| **오른쪽 클릭 구분** | NSStatusItem.button.action은 left/right 통합. |
+
+## API
+
+```ts
+import { tray } from '@suji/api';
+
+// 생성 — title은 메뉴바에 표시 (v1 아이콘 미지원이라 권장).
+const { trayId } = await tray.create({
+  title: '🚀 My App',
+  tooltip: 'My App is running',
+});
+
+// 메뉴 설정 — items 배열. 클릭 이벤트 이름은 자유.
+await tray.setMenu(trayId, [
+  { label: 'Show window',  click: 'show-main' },
+  { label: 'Reload',       click: 'reload-app' },
+  { type: 'separator' },
+  { label: 'Quit',         click: 'quit-app' },
+]);
+
+// 클릭 수신 — `tray:menu-click {trayId, click}`.
+suji.on('tray:menu-click', ({ trayId, click }) => {
+  if (click === 'quit-app') suji.quit();
+  if (click === 'show-main') {/* ... */}
+});
+
+// 텍스트 변경
+await tray.setTitle(trayId, '🎉 Update available');
+await tray.setTooltip(trayId, 'New version ready');
+
+// 정리
+await tray.destroy(trayId);
+```
+
+## Backend SDK
+
+### Zig (`suji.tray.*`)
+
+```zig
+const r = suji.tray.create("🚀 My App", "tooltip");
+// items_json은 caller가 빌드 (raw JSON):
+const items =
+    \\"items":[
+    \\  {"label":"Settings","click":"open-settings"},
+    \\  {"type":"separator"},
+    \\  {"label":"Quit","click":"quit"}
+    \\]
+;
+_ = suji.tray.setMenuRaw(1, items);
+_ = suji.tray.destroy(1);
+```
+
+### Rust (`suji::tray::*`)
+
+```rust
+use suji::tray::{self, MenuItem};
+let r = tray::create("🚀 My App", "tooltip");
+let _ = tray::set_menu(1, &[
+    MenuItem::Item { label: "Settings", click: "open-settings" },
+    MenuItem::Separator,
+    MenuItem::Item { label: "Quit", click: "quit" },
+]);
+let _ = tray::destroy(1);
+```
+
+### Go (`github.com/ohah/suji-go/tray`)
+
+```go
+import "github.com/ohah/suji-go/tray"
+tray.Create("🚀 My App", "tooltip")
+tray.SetMenu(1, []tray.MenuItem{
+    {Label: "Settings", Click: "open-settings"},
+    {Separator: true},
+    {Label: "Quit", Click: "quit"},
+})
+tray.Destroy(1)
+```
+
+### Node (`@suji/node`)
+
+```ts
+import { tray } from '@suji/node';
+const { trayId } = await tray.create({ title: '🚀 My App' });
+await tray.setMenu(trayId, [
+  { label: 'Settings', click: 'open-settings' },
+  { type: 'separator' },
+  { label: 'Quit', click: 'quit' },
+]);
+```
+
+## 동작 정밀
+
+### 라이프사이클
+- `create` → `NSStatusBar.systemStatusBar.statusItemWithLength:NSVariableStatusItemLength` →
+  반환된 NSStatusItem을 `[item retain]` (autorelease pool 종료 후에도 유지).
+- `destroy` → `[NSStatusBar removeStatusItem:item]` + `[item release]`.
+- 앱 종료 시 자동 cleanup 안 함 (의도) — caller가 destroy 안 부르면 메뉴바에서 자동 제거되지만 메모리는 leak. 실제론 process 종료로 모두 회수.
+
+### Click 라우팅
+- 각 NSMenuItem이 `tag = trayId` + `representedObject = NSString(click)` 보유.
+- `SujiTrayTarget.trayMenuClick:(NSMenuItem*)sender` selector가 두 값 추출 →
+  `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
+- NSApp UI thread에서만 호출 — BackendRegistry/EventBus 글로벌 안전.
+
+### JSON wire 안전성
+- `title/tooltip/click/label` 모두 `escapeJsonStrFull` (newline/tab 보존, control char `\u00XX`).
+- 한글/이모지/ZWJ 시퀀스 안전 통과.
+
+## E2E 한계
+
+OS 메뉴바 NSStatusItem은 puppeteer로 직접 클릭 불가. 자동화는:
+1. **회귀 가드** (`tests/window_manager_test.zig`) — 정적 ObjC selector / cmd / SDK 노출 검증.
+2. **응답 형식 검증** — IPC가 `{trayId: N}`, `{success: bool}` 응답하는지.
+3. **수동 검증 권장** — `tray.create` + `tray.setMenu` 후 메뉴바 직접 클릭.
+
+`tray:menu-click` 이벤트 검증은 `osascript` System Events API로 메뉴 항목 호출 가능하지만 Accessibility 권한 의존이라 RUN_DESTRUCTIVE 게이트 권장.

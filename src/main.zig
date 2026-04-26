@@ -593,6 +593,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     registry.setGlobal();
     registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
+    cef.setTrayEmitHandler(&trayEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -753,6 +754,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     registry.setGlobal();
     registry.setQuitHandler(&cef.quit);
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
+    cef.setTrayEmitHandler(&trayEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -1296,6 +1298,50 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return handleDialogShowSaveDialog(req_clean, response_buf);
     }
 
+    // Tray API — NSStatusItem.
+    if (std.mem.eql(u8, cmd, "tray_create")) {
+        const title = util.extractJsonString(req_clean, "title") orelse "";
+        const tooltip = util.extractJsonString(req_clean, "tooltip") orelse "";
+        var t_buf: [256]u8 = undefined;
+        var tt_buf: [512]u8 = undefined;
+        const t_n = util.unescapeJsonStr(title, &t_buf) orelse 0;
+        const tt_n = util.unescapeJsonStr(tooltip, &tt_buf) orelse 0;
+        const id = cef.createTray(t_buf[0..t_n], tt_buf[0..tt_n]);
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"tray_create\",\"trayId\":{d}}}",
+            .{id},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "tray_set_title")) {
+        const tray_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "trayId") orelse return null);
+        const title = util.extractJsonString(req_clean, "title") orelse "";
+        var t_buf: [512]u8 = undefined;
+        const t_n = util.unescapeJsonStr(title, &t_buf) orelse 0;
+        const ok = cef.setTrayTitle(tray_id, t_buf[0..t_n]);
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_title\",\"success\":{}}}", .{ok}) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "tray_set_tooltip")) {
+        const tray_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "trayId") orelse return null);
+        const tooltip = util.extractJsonString(req_clean, "tooltip") orelse "";
+        var t_buf: [1024]u8 = undefined;
+        const t_n = util.unescapeJsonStr(tooltip, &t_buf) orelse 0;
+        const ok = cef.setTrayTooltip(tray_id, t_buf[0..t_n]);
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_tooltip\",\"success\":{}}}", .{ok}) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "tray_set_menu")) {
+        return handleTraySetMenu(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "tray_destroy")) {
+        const tray_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "trayId") orelse return null);
+        const ok = cef.destroyTray(tray_id);
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_destroy\",\"success\":{}}}", .{ok}) catch return null;
+        return result;
+    }
+
     if (std.mem.eql(u8, cmd, "core_info")) {
         var out_pos: usize = 0;
         const out = response_buf;
@@ -1511,6 +1557,59 @@ fn handleDialogShowOpenDialog(req_clean: []const u8, response_buf: []u8) ?[]cons
         "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_open_dialog\",{s}",
         .{dialog_json[1..]}, // strip leading '{' from dialog_json, keep trailing '}'
     ) catch null;
+}
+
+// ============================================
+// Tray handlers — std.json으로 menu items 파싱
+// ============================================
+
+const TrayMenuItemJson = struct {
+    type: []const u8 = "",            // "separator"면 separator, 아니면 일반 item
+    label: []const u8 = "",
+    click: []const u8 = "",
+};
+
+const TraySetMenuJson = struct {
+    trayId: u32 = 0,
+    items: []const TrayMenuItemJson = &.{},
+};
+
+fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [16384]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(TraySetMenuJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+    };
+    defer parsed.deinit();
+    const opts = parsed.value;
+
+    var items = arena.alloc(cef.TrayMenuItem, opts.items.len) catch return null;
+    for (opts.items, 0..) |it, i| {
+        if (std.mem.eql(u8, it.type, "separator")) {
+            items[i] = .separator;
+        } else {
+            items[i] = .{ .item = .{ .label = it.label, .click = it.click } };
+        }
+    }
+
+    const ok = cef.setTrayMenu(opts.trayId, items);
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+/// cef.zig의 tray click → EventBus 라우팅. SujiTrayTarget.trayMenuClick:이 NSApp UI thread에서
+/// 호출되므로 BackendRegistry.global 안전 access.
+fn trayEmitHandler(tray_id: u32, click: []const u8) void {
+    const registry = suji.BackendRegistry.global orelse return;
+    const bus = registry.event_bus orelse return;
+    var data_buf: [512]u8 = undefined;
+    var click_esc: [256]u8 = undefined;
+    const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
+    const data = std.fmt.bufPrint(&data_buf, "{{\"trayId\":{d},\"click\":\"{s}\"}}", .{ tray_id, click_esc[0..click_n] }) catch return;
+    bus.emit("tray:menu-click", data);
 }
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {

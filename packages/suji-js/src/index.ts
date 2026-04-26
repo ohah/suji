@@ -364,6 +364,61 @@ export const clipboard = {
 };
 
 // ============================================
+// tray — 시스템 트레이 아이콘 (Electron `Tray`)
+// ============================================
+// 현재 macOS만 지원 (NSStatusItem). Linux/Windows는 stub — create는 trayId:0 반환.
+// v1: title/tooltip + 메뉴 only. icon path는 v2.
+
+export interface TrayMenuSeparator {
+  type: "separator";
+}
+
+export interface TrayMenuItemSpec {
+  /** 메뉴에 표시될 텍스트. */
+  label: string;
+  /** 클릭 시 emit될 이벤트 이름 — `tray:menu-click {trayId, click}` 페이로드의 click 필드. */
+  click: string;
+}
+
+export type TrayMenuItem = TrayMenuItemSpec | TrayMenuSeparator;
+
+export interface TrayCreateOptions {
+  /** 메뉴바에 표시될 텍스트 (icon 미지원 v1라 가시성 위해 권장). */
+  title?: string;
+  /** 마우스 호버 시 표시될 툴팁. */
+  tooltip?: string;
+}
+
+export const tray = {
+  /** 새 시스템 트레이 아이콘 생성. 반환된 trayId로 이후 update/destroy. */
+  async create(options: TrayCreateOptions = {}): Promise<{ trayId: number }> {
+    return coreCall<{ trayId: number }>({ cmd: "tray_create", ...options });
+  },
+
+  async setTitle(trayId: number, title: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "tray_set_title", trayId, title });
+    return r.success === true;
+  },
+
+  async setTooltip(trayId: number, tooltip: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "tray_set_tooltip", trayId, tooltip });
+    return r.success === true;
+  },
+
+  /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. items는 분리선/일반 항목 혼합 가능.
+   *  메뉴 항목 클릭은 `suji.on('tray:menu-click', ({trayId, click}) => ...)` 로 수신. */
+  async setMenu(trayId: number, items: TrayMenuItem[]): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "tray_set_menu", trayId, items });
+    return r.success === true;
+  },
+
+  async destroy(trayId: number): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "tray_destroy", trayId });
+    return r.success === true;
+  },
+};
+
+// ============================================
 // shell — 외부 핸들러 호출 (Electron `shell.*`)
 // ============================================
 // 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.

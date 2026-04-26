@@ -897,6 +897,200 @@ pub fn shellBeep() void {
 }
 
 // ============================================
+// Tray API — NSStatusItem (Electron `Tray`)
+// ============================================
+// NSStatusBar.systemStatusBar에 statusItem 추가. 메뉴 클릭 시 SujiTrayTarget.trayMenuClick:이
+// 호출되고, NSMenuItem.tag(trayId) + representedObject(NSString click name)로 라우팅해
+// `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
+//
+// 비-macOS는 모두 stub.
+
+pub const TrayMenuItem = union(enum) {
+    item: struct { label: []const u8, click: []const u8 },
+    separator,
+};
+
+const TrayEntry = struct {
+    status_item: *anyopaque, // NSStatusItem (retained)
+    menu: ?*anyopaque = null, // NSMenu (NSMenuItem retains representedObject NSString)
+};
+
+var g_trays: std.AutoHashMap(u32, TrayEntry) = undefined;
+var g_trays_initialized: bool = false;
+var g_next_tray_id: u32 = 1;
+var g_tray_target: ?*anyopaque = null;
+
+fn ensureTraysMap() void {
+    if (g_trays_initialized) return;
+    const native = g_cef_native orelse return;
+    g_trays = std.AutoHashMap(u32, TrayEntry).init(native.allocator);
+    g_trays_initialized = true;
+}
+
+/// SujiTrayTarget ObjC 클래스 + `trayMenuClick:` selector. NSMenuItem의 tag(trayId)와
+/// representedObject(NSString click name)를 읽어 EventBus에 emit.
+fn ensureTrayTarget() ?*anyopaque {
+    if (g_tray_target) |existing| return existing;
+    if (!comptime is_macos) return null;
+    const NSObject = getClass("NSObject") orelse return null;
+    const cls = objc.objc_allocateClassPair(NSObject, "SujiTrayTarget", 0) orelse
+        getClass("SujiTrayTarget") orelse return null;
+    const sel = objc.sel_registerName("trayMenuClick:");
+    _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&trayMenuClickImpl), "v@:@");
+    objc.objc_registerClassPair(cls);
+    const alloc = msgSend(cls, "alloc") orelse return null;
+    const instance = msgSend(alloc, "init") orelse return null;
+    g_tray_target = instance;
+    return instance;
+}
+
+/// NSMenuItem clicked → 이벤트 emit. main.zig가 콜백 등록한 g_event_emit 호출.
+fn trayMenuClickImpl(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callconv(.c) void {
+    const item = sender orelse return;
+    const tagFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+        @ptrCast(&objc.objc_msgSend);
+    const tray_id_signed = tagFn(item, @ptrCast(objc.sel_registerName("tag")));
+    if (tray_id_signed <= 0) return;
+    const tray_id: u32 = @intCast(tray_id_signed);
+
+    const repObjFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_str = repObjFn(item, @ptrCast(objc.sel_registerName("representedObject"))) orelse return;
+    const utf8Fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 =
+        @ptrCast(&objc.objc_msgSend);
+    const cstr = utf8Fn(ns_str, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return;
+    const click_name = std.mem.span(cstr);
+
+    if (g_tray_emit_handler) |emit| emit(tray_id, click_name);
+}
+
+/// main.zig가 등록 — tray click → EventBus emit 라우팅.
+pub const TrayEmitHandler = *const fn (tray_id: u32, click: []const u8) void;
+pub var g_tray_emit_handler: ?TrayEmitHandler = null;
+
+pub fn setTrayEmitHandler(handler: TrayEmitHandler) void {
+    g_tray_emit_handler = handler;
+}
+
+/// 새 tray 생성. title/tooltip은 빈 문자열이면 미설정 (icon 미지원 v1).
+/// 반환: trayId (failure 시 0).
+pub fn createTray(title: []const u8, tooltip: []const u8) u32 {
+    if (!comptime is_macos) return 0;
+    ensureTraysMap();
+    if (!g_trays_initialized) return 0;
+
+    const NSStatusBar = getClass("NSStatusBar") orelse return 0;
+    const bar = msgSend(NSStatusBar, "systemStatusBar") orelse return 0;
+    // NSVariableStatusItemLength = -1
+    const lenFn: *const fn (?*anyopaque, ?*anyopaque, f64) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const item = lenFn(bar, @ptrCast(objc.sel_registerName("statusItemWithLength:")), -1.0) orelse return 0;
+    // NSStatusBar가 retain하지만 명시적으로 한 번 더 retain — NSMenu/NSMenuItem 교체 시 안전.
+    _ = msgSend(item, "retain");
+
+    if (title.len > 0) applyTrayTitle(item, title);
+    if (tooltip.len > 0) applyTrayTooltip(item, tooltip);
+
+    const id = g_next_tray_id;
+    g_next_tray_id += 1;
+    g_trays.put(id, .{ .status_item = item }) catch {
+        // put 실패 → cleanup
+        msgSendVoid1(bar, "removeStatusItem:", item);
+        _ = msgSend(item, "release");
+        return 0;
+    };
+    return id;
+}
+
+/// statusItem.button.title = title.
+fn applyTrayTitle(item: *anyopaque, title: []const u8) void {
+    const button = msgSend(item, "button") orelse return;
+    const ns = nsStringFromSlice(title) orelse return;
+    msgSendVoid1(button, "setTitle:", ns);
+}
+
+/// statusItem.button.toolTip = tooltip.
+fn applyTrayTooltip(item: *anyopaque, tooltip: []const u8) void {
+    const button = msgSend(item, "button") orelse return;
+    const ns = nsStringFromSlice(tooltip) orelse return;
+    msgSendVoid1(button, "setToolTip:", ns);
+}
+
+pub fn setTrayTitle(tray_id: u32, title: []const u8) bool {
+    if (!comptime is_macos) return false;
+    if (!g_trays_initialized) return false;
+    const entry = g_trays.get(tray_id) orelse return false;
+    applyTrayTitle(entry.status_item, title);
+    return true;
+}
+
+pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
+    if (!comptime is_macos) return false;
+    if (!g_trays_initialized) return false;
+    const entry = g_trays.get(tray_id) orelse return false;
+    applyTrayTooltip(entry.status_item, tooltip);
+    return true;
+}
+
+/// items 배열로 NSMenu 빌드 + tray에 attach. 기존 menu가 있으면 NSMenuItem.representedObject
+/// (NSString) 자동 release (NSMenu deinit 연쇄).
+pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
+    if (!comptime is_macos) return false;
+    if (!g_trays_initialized) return false;
+    const entry_ptr = g_trays.getPtr(tray_id) orelse return false;
+    const target = ensureTrayTarget() orelse return false;
+
+    const NSMenu = getClass("NSMenu") orelse return false;
+    const NSMenuItem = getClass("NSMenuItem") orelse return false;
+    const menu_alloc = msgSend(NSMenu, "alloc") orelse return false;
+    const menu = msgSend(menu_alloc, "init") orelse return false;
+
+    const sel_action = objc.sel_registerName("trayMenuClick:");
+    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const setTagFn: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void =
+        @ptrCast(&objc.objc_msgSend);
+
+    for (items) |item| switch (item) {
+        .separator => {
+            const sep = msgSend(NSMenuItem, "separatorItem") orelse continue;
+            msgSendVoid1(menu, "addItem:", sep);
+        },
+        .item => |it| {
+            const ns_label = nsStringFromSlice(it.label) orelse continue;
+            const ns_click = nsStringFromSlice(it.click) orelse continue;
+            const empty = nsStringFromSlice("") orelse continue;
+            const m_alloc = msgSend(NSMenuItem, "alloc") orelse continue;
+            const m = initFn(m_alloc, @ptrCast(initSel), ns_label, @ptrCast(sel_action), empty) orelse continue;
+            msgSendVoid1(m, "setTarget:", target);
+            msgSendVoid1(m, "setRepresentedObject:", ns_click);
+            setTagFn(m, @ptrCast(objc.sel_registerName("setTag:")), @intCast(tray_id));
+            msgSendVoid1(menu, "addItem:", m);
+        },
+    };
+
+    msgSendVoid1(entry_ptr.status_item, "setMenu:", menu);
+    entry_ptr.menu = menu;
+    return true;
+}
+
+/// tray 제거. NSStatusBar에서 빼고 retain count 해제.
+pub fn destroyTray(tray_id: u32) bool {
+    if (!comptime is_macos) return false;
+    if (!g_trays_initialized) return false;
+    const entry = g_trays.get(tray_id) orelse return false;
+
+    const NSStatusBar = getClass("NSStatusBar") orelse return false;
+    if (msgSend(NSStatusBar, "systemStatusBar")) |bar| {
+        msgSendVoid1(bar, "removeStatusItem:", entry.status_item);
+    }
+    _ = msgSend(entry.status_item, "release");
+    _ = g_trays.remove(tray_id);
+    return true;
+}
+
+// ============================================
 // Dialog API — NSAlert / NSOpenPanel / NSSavePanel (Electron `dialog.*`)
 // ============================================
 // 두 가지 modal 모드:

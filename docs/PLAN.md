@@ -527,7 +527,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         - **새로 깔린 인프라**: `.m` 파일 컴파일 룰 (build.zig + `-fobjc-arc`) — 향후 ObjC block
               필요 API (Notification completion, NSAnimation, vibrancy 등) 재사용 가능.
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
-  - [ ] **Phase 5-B: Tray** (NSStatusItem) — 시스템 트레이 아이콘 + 메뉴. Electron `Tray`/`Menu` 호환.
+  - [x] **Phase 5-B: Tray v1** — NSStatusItem + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
+        (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
+        `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
+        representedObject 라우팅. v1 한계: 아이콘 이미지 미지원(텍스트만), tray:click 미지원,
+        서브메뉴/checkbox 없음. 회귀 테스트 1건. `documents/tray.mdx`.
   - [ ] **Phase 5-C: Notification** (NSUserNotificationCenter / UNUserNotificationCenter) —
         백엔드/프론트 양쪽에서 사용자 알림. 권한 요청 흐름 포함.
   - [ ] **Phase 5-D: 메뉴바 커스터마이즈 API** — 현재 macOS 기본 menu(App/File/Edit/View/Window)만.
