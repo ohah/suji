@@ -488,9 +488,48 @@ pub const CefNative = struct {
         }
     }
 
-    fn setViewBounds(_: ?*anyopaque, _: u64, _: window_mod.Bounds) void {}
-    fn setViewVisible(_: ?*anyopaque, _: u64, _: bool) void {}
-    fn reorderView(_: ?*anyopaque, _: u64, _: u64, _: u32) void {}
+    fn setViewBounds(ctx: ?*anyopaque, view_handle: u64, bounds: window_mod.Bounds) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (!is_macos) return;
+        const entry = self.browsers.get(view_handle) orelse return;
+        const view = entry.host_ns_view orelse return;
+        const super = msgSend(view, "superview") orelse return;
+        // 매 호출마다 super 현재 bounds로 Cocoa Y 재계산 — host 창 resize 후에도 정확히 매핑.
+        const rect = computeChildViewRect(super, bounds);
+        const setFrameSel = objc.sel_registerName("setFrame:");
+        const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) void =
+            @ptrCast(&objc.objc_msgSend);
+        setFrameFn(view, @ptrCast(setFrameSel), rect);
+    }
+
+    fn setViewVisible(ctx: ?*anyopaque, view_handle: u64, visible: bool) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (!is_macos) return;
+        const entry = self.browsers.get(view_handle) orelse return;
+        const view = entry.host_ns_view orelse return;
+        // NSView setHidden: + CEF browser host.was_hidden — Cocoa는 시각, CEF는 렌더링/입력 일시정지.
+        msgSendVoidBool(view, "setHidden:", !visible);
+        const br = entry.browser;
+        const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+        if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
+    }
+
+    /// host의 contentView 안에서 view의 z-order를 `index_in_host` 위치로 재배치.
+    /// host_handle은 시그니처 일관성용 (view_handle만으로 superview를 얻을 수 있음).
+    /// removeFromSuperview는 view의 retain count 1을 잠시 0으로 만들지 않음 — superview의
+    /// subviews 배열이 재배치 직전까지 retain 보유. 안전.
+    fn reorderView(ctx: ?*anyopaque, host_handle: u64, view_handle: u64, index_in_host: u32) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (!is_macos) return;
+        _ = host_handle;
+        const entry = self.browsers.get(view_handle) orelse return;
+        const view = entry.host_ns_view orelse return;
+        const super = msgSend(view, "superview") orelse return;
+        reorderSubview(super, view, index_in_host);
+    }
 
     fn assertUiThread() void {
         std.debug.assert(c.cef_currently_on(c.TID_UI) == 1);
@@ -4423,6 +4462,53 @@ fn allocChildNSView(super: *anyopaque, bounds: window_mod.Bounds) ?*anyopaque {
     msgSendVoid1(super, "addSubview:", view);
     _ = msgSend(view, "release");
     return view;
+}
+
+/// macOS NSWindowOrderingMode (NSInteger). NSWindow.h enum과 동일 — C 헤더 직접 참조 회피.
+const NS_WINDOW_ABOVE: i64 = 1;
+const NS_WINDOW_BELOW: i64 = -1;
+
+/// `[super addSubview:view positioned:place relativeTo:ref]`. ref가 null이면 super의
+/// 끝(top) 또는 처음(bottom) — Cocoa 기본 동작에 맡김.
+fn addSubviewPositioned(super: *anyopaque, view: *anyopaque, place: i64, ref: ?*anyopaque) void {
+    const sel = objc.sel_registerName("addSubview:positioned:relativeTo:");
+    const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, i64, ?*anyopaque) callconv(.c) void =
+        @ptrCast(&objc.objc_msgSend);
+    f(super, @ptrCast(sel), view, place, ref);
+}
+
+/// view를 super의 subviews에서 떼어내고 `index` 위치에 다시 부착. index >= count면 top.
+/// index가 0이면 첫 subview의 below(bottom)로, 그 외엔 subviews[index-1]의 above로 삽입.
+fn reorderSubview(super: *anyopaque, view: *anyopaque, index: u32) void {
+    _ = msgSend(view, "removeFromSuperview");
+    const subviews = msgSend(super, "subviews") orelse {
+        msgSendVoid1(super, "addSubview:", view);
+        return;
+    };
+    const countSel = objc.sel_registerName("count");
+    const countFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
+    const count = countFn(subviews, @ptrCast(countSel));
+
+    if (count == 0 or index >= count) {
+        msgSendVoid1(super, "addSubview:", view);
+        return;
+    }
+    const objAtSel = objc.sel_registerName("objectAtIndex:");
+    const objAtFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    if (index == 0) {
+        const ref = objAtFn(subviews, @ptrCast(objAtSel), 0) orelse {
+            msgSendVoid1(super, "addSubview:", view);
+            return;
+        };
+        addSubviewPositioned(super, view, NS_WINDOW_BELOW, ref);
+    } else {
+        const ref = objAtFn(subviews, @ptrCast(objAtSel), index - 1) orelse {
+            msgSendVoid1(super, "addSubview:", view);
+            return;
+        };
+        addSubviewPositioned(super, view, NS_WINDOW_ABOVE, ref);
+    }
 }
 
 /// top-left `bounds` → Cocoa bottom-left NSRect (super 좌표계).
