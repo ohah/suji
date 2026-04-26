@@ -525,7 +525,7 @@ export const shell = {
 };
 
 // ============================================
-// fs — 파일 시스템 API (Phase 5-F)
+// fs — 파일 시스템 API (text/stat/mkdir/readdir, Electron `fs.promises.*`)
 // ============================================
 
 export type FileType =
@@ -566,7 +566,9 @@ export const fs = {
   },
 
   async stat(path: string): Promise<FsStat> {
-    return invoke<FsStat>('__core__', { cmd: 'fs_stat', path });
+    const r = await invoke<FsStat & { error?: string }>('__core__', { cmd: 'fs_stat', path });
+    if (r.success !== true) throw new Error(r.error ?? 'fs_stat failed');
+    return r;
   },
 
   async mkdir(path: string, options: { recursive?: boolean } = {}): Promise<boolean> {

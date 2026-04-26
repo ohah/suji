@@ -1287,7 +1287,6 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
-    // File system API — std.fs/std.Io.Dir wrapper.
     if (std.mem.eql(u8, cmd, "fs_read_file")) {
         return handleFsReadFile(req_clean, response_buf);
     }
@@ -1587,16 +1586,13 @@ fn handleDialogShowErrorBox(req_clean: []const u8, response_buf: []u8) ?[]const 
     ) catch null;
 }
 
-// ============================================
-// File system handlers — std.fs/std.Io.Dir wrapper
-// ============================================
+/// `__core__` cmd handler 공용 에러 응답. 모든 핸들러가 같은 wire 포맷 사용.
+fn coreError(response_buf: []u8, cmd: []const u8, err: []const u8) ?[]const u8 {
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":false,\"error\":\"{s}\"}}", .{ cmd, err }) catch null;
+}
 
 const FS_MAX_TEXT_BYTES: usize = 8192;
 const FS_MAX_PATH_BYTES: usize = 4096;
-
-fn fsError(response_buf: []u8, cmd: []const u8, err: []const u8) ?[]const u8 {
-    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":false,\"error\":\"{s}\"}}", .{ cmd, err }) catch null;
-}
 
 fn fsPathFromRequest(req_clean: []const u8, out: []u8) ?[]const u8 {
     const raw = util.extractJsonString(req_clean, "path") orelse return null;
@@ -1623,14 +1619,18 @@ fn fsKindName(kind: std.Io.File.Kind) []const u8 {
 
 fn handleFsReadFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_read_file", "path");
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_read_file", "path");
 
-    const text = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, std.heap.page_allocator, .limited(FS_MAX_TEXT_BYTES)) catch
-        return fsError(response_buf, "fs_read_file", "read");
-    defer std.heap.page_allocator.free(text);
+    var text_buf: [FS_MAX_TEXT_BYTES]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&text_buf);
+    const text = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, fba.allocator(), .limited(FS_MAX_TEXT_BYTES)) catch |err| {
+        // FBA가 OOM을 던지는 케이스는 8KiB 초과가 유일 → too_large로 surface.
+        const code: []const u8 = if (err == error.OutOfMemory or err == error.StreamTooLong) "too_large" else "read";
+        return coreError(response_buf, "fs_read_file", code);
+    };
 
     var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
-    const esc_len = util.escapeJsonStrFull(text, &esc_buf) orelse return fsError(response_buf, "fs_read_file", "too_large");
+    const esc_len = util.escapeJsonStrFull(text, &esc_buf) orelse return coreError(response_buf, "fs_read_file", "too_large");
     return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"fs_read_file\",\"success\":true,\"text\":\"{s}\"}}",
@@ -1640,26 +1640,26 @@ fn handleFsReadFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 
 fn handleFsWriteFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_write_file", "path");
-    const raw_text = util.extractJsonString(req_clean, "text") orelse util.extractJsonString(req_clean, "data") orelse "";
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_write_file", "path");
+    const raw_text = util.extractJsonString(req_clean, "text") orelse "";
 
     var text_buf: [FS_MAX_TEXT_BYTES]u8 = undefined;
-    const text_len = util.unescapeJsonStr(raw_text, &text_buf) orelse return fsError(response_buf, "fs_write_file", "too_large");
+    const text_len = util.unescapeJsonStr(raw_text, &text_buf) orelse return coreError(response_buf, "fs_write_file", "too_large");
 
-    var file = std.Io.Dir.cwd().createFile(runtime.io, path, .{}) catch return fsError(response_buf, "fs_write_file", "write");
+    var file = std.Io.Dir.cwd().createFile(runtime.io, path, .{}) catch return coreError(response_buf, "fs_write_file", "write");
     defer file.close(runtime.io);
     var writer_buf: [4096]u8 = undefined;
     var fw = file.writer(runtime.io, &writer_buf);
-    fw.interface.writeAll(text_buf[0..text_len]) catch return fsError(response_buf, "fs_write_file", "write");
-    fw.interface.flush() catch return fsError(response_buf, "fs_write_file", "write");
+    fw.interface.writeAll(text_buf[0..text_len]) catch return coreError(response_buf, "fs_write_file", "write");
+    fw.interface.flush() catch return coreError(response_buf, "fs_write_file", "write");
 
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"fs_write_file\",\"success\":true}}", .{}) catch null;
 }
 
 fn handleFsStat(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_stat", "path");
-    const st = std.Io.Dir.cwd().statFile(runtime.io, path, .{}) catch return fsError(response_buf, "fs_stat", "not_found");
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_stat", "path");
+    const st = std.Io.Dir.cwd().statFile(runtime.io, path, .{}) catch return coreError(response_buf, "fs_stat", "not_found");
     return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"fs_stat\",\"success\":true,\"type\":\"{s}\",\"size\":{d},\"mtime\":{d}}}",
@@ -1669,13 +1669,16 @@ fn handleFsStat(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 
 fn handleFsMkdir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_mkdir", "path");
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_mkdir", "path");
     const recursive = util.extractJsonBool(req_clean, "recursive") orelse false;
     if (recursive) {
-        std.Io.Dir.cwd().createDirPath(runtime.io, path) catch return fsError(response_buf, "fs_mkdir", "mkdir");
+        // recursive=true는 createDirPath 자체가 idempotent (POSIX `mkdir -p`).
+        std.Io.Dir.cwd().createDirPath(runtime.io, path) catch return coreError(response_buf, "fs_mkdir", "mkdir");
     } else {
+        // POSIX mkdir(2) / Node `fs.mkdir(p)` 호환 — 이미 존재하면 명시적 exists 에러.
         std.Io.Dir.cwd().createDir(runtime.io, path, .default_dir) catch |err| {
-            if (err != error.PathAlreadyExists) return fsError(response_buf, "fs_mkdir", "mkdir");
+            const code: []const u8 = if (err == error.PathAlreadyExists) "exists" else "mkdir";
+            return coreError(response_buf, "fs_mkdir", code);
         };
     }
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"fs_mkdir\",\"success\":true}}", .{}) catch null;
@@ -1683,23 +1686,28 @@ fn handleFsMkdir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 
 fn handleFsReadDir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_readdir", "path");
-    var dir = std.Io.Dir.cwd().openDir(runtime.io, path, .{ .iterate = true }) catch return fsError(response_buf, "fs_readdir", "open");
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_readdir", "path");
+    var dir = std.Io.Dir.cwd().openDir(runtime.io, path, .{ .iterate = true }) catch return coreError(response_buf, "fs_readdir", "open");
     defer dir.close(runtime.io);
 
+    // 닫는 `]}}` 3바이트 + 안전 마진을 reserve해 partial JSON으로 잘리는 것을 방지.
+    const tail_reserve: usize = 8;
     var out_pos: usize = 0;
     out_pos += (std.fmt.bufPrint(response_buf[out_pos..], "{{\"from\":\"zig-core\",\"cmd\":\"fs_readdir\",\"success\":true,\"entries\":[", .{}) catch return null).len;
     var iter = dir.iterate();
     var first = true;
-    while (iter.next(runtime.io) catch return fsError(response_buf, "fs_readdir", "read")) |entry| {
+    while (iter.next(runtime.io) catch return coreError(response_buf, "fs_readdir", "read")) |entry| {
         var esc_name: [1024]u8 = undefined;
-        const n = util.escapeJsonStrFull(entry.name, &esc_name) orelse continue;
+        // entry name escape 실패 = 1024바이트 한도 초과. silent skip 대신 명시적 too_large.
+        const n = util.escapeJsonStrFull(entry.name, &esc_name) orelse return coreError(response_buf, "fs_readdir", "too_large");
         const sep: []const u8 = if (first) "" else ",";
+        const remaining = response_buf.len - out_pos;
+        if (remaining <= tail_reserve) return coreError(response_buf, "fs_readdir", "too_large");
         const part = std.fmt.bufPrint(
-            response_buf[out_pos..],
+            response_buf[out_pos .. response_buf.len - tail_reserve],
             "{s}{{\"name\":\"{s}\",\"type\":\"{s}\"}}",
             .{ sep, esc_name[0..n], fsKindName(entry.kind) },
-        ) catch return fsError(response_buf, "fs_readdir", "too_large");
+        ) catch return coreError(response_buf, "fs_readdir", "too_large");
         out_pos += part.len;
         first = false;
     }
@@ -1800,13 +1808,9 @@ fn handleMenuSetApplicationMenu(req_clean: []const u8, response_buf: []u8) ?[]co
     var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
     const arena = fba.allocator();
 
-    const items = parseMenuItemsFromRequest(arena, req_clean) catch return menuSetParseError(response_buf);
+    const items = parseMenuItemsFromRequest(arena, req_clean) catch return coreError(response_buf, "menu_set_application_menu", "parse");
     const ok = cef.setApplicationMenu(items);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":{}}}", .{ok}) catch null;
-}
-
-fn menuSetParseError(response_buf: []u8) ?[]const u8 {
-    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
 }
 
 fn parseMenuItemsFromRequest(arena: std.mem.Allocator, req_clean: []const u8) MenuParseError![]cef.ApplicationMenuItem {

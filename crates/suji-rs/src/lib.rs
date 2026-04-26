@@ -548,7 +548,7 @@ pub mod shell {
 }
 
 pub mod fs {
-    use crate::{escape_json_full, invoke, serde_json};
+    use crate::{invoke, serde_json};
 
     pub(crate) fn read_file_request(path: &str) -> String {
         serde_json::json!({
@@ -568,7 +568,11 @@ pub mod fs {
     }
 
     pub(crate) fn stat_request(path: &str) -> String {
-        format!(r#"{{"cmd":"fs_stat","path":"{}"}}"#, escape_json_full(path))
+        serde_json::json!({
+            "cmd": "fs_stat",
+            "path": path,
+        })
+        .to_string()
     }
 
     pub(crate) fn mkdir_request(path: &str, recursive: bool) -> String {
@@ -581,10 +585,11 @@ pub mod fs {
     }
 
     pub(crate) fn readdir_request(path: &str) -> String {
-        format!(
-            r#"{{"cmd":"fs_readdir","path":"{}"}}"#,
-            escape_json_full(path)
-        )
+        serde_json::json!({
+            "cmd": "fs_readdir",
+            "path": path,
+        })
+        .to_string()
     }
 
     /// Read UTF-8 text. Response JSON: `{"success":true,"text":"..."}`.
