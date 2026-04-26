@@ -24,10 +24,11 @@ static void (*g_notification_click_callback)(const char *notification_id) = NULL
 - (void)userNotificationCenter:(UNUserNotificationCenter *)center
     willPresentNotification:(UNNotification *)notification
     withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler {
+    UNNotificationPresentationOptions sound = notification.request.content.sound ? UNNotificationPresentationOptionSound : 0;
     if (@available(macOS 11.0, *)) {
-        completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionSound);
+        completionHandler(UNNotificationPresentationOptionBanner | sound);
     } else {
-        completionHandler(UNNotificationPresentationOptionAlert | UNNotificationPresentationOptionSound);
+        completionHandler(UNNotificationPresentationOptionAlert | sound);
     }
 }
 

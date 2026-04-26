@@ -53,9 +53,9 @@ html, body { background: transparent; }
 
 ## 알려진 한계
 
-**frameless 드래그 미동작**: `-webkit-app-region: drag` CSS는 HTML에 들어있지만 CEF Alloy 런타임에서 자동 라우팅되지 않아 **현재 frameless 창은 이동 불가**. 정식 해결은 CEF의 `cef_drag_handler_t.on_draggable_regions_changed` 콜백 + custom NSView hit-test wrapper — Phase 4 백로그 (PLAN.md 참조).
+**Linux/Windows frameless 제한**: macOS는 `-webkit-app-region: drag`가 native window drag로 라우팅된다. Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라 frameless drag도 후속 플랫폼 작업이 필요하다.
 
-지금은 데모로 frame/transparent/parent 시각 효과만 확인 가능. 실제 앱에서 frameless 창이 필요하면 백로그 처리 후 사용 권장.
+지금은 macOS에서 frame/transparent/parent와 frameless drag를 확인할 수 있다.
 
 ## 플랫폼
 
