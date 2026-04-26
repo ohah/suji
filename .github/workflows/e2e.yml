@@ -61,10 +61,13 @@ jobs:
           mkdir -p "$NODE_DIR"
           ASSET="libnode-${{ env.NODE_VERSION }}-macos-arm64.tar.gz"
           URL="https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$ASSET"
-          curl -fSL "$URL" -o /tmp/libnode.tar.gz 2>/dev/null && \
-            tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
-            echo "libnode installed: $NODE_DIR" || \
-            echo "libnode not available, skipping Node backend"
+          curl -fSL "$URL" -o /tmp/libnode.tar.gz
+          tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR"
+          # release tar에 libnode.dylib만 있고 versioned symlink 누락 — suji 바이너리는
+          # @rpath/libnode.137.dylib을 찾으므로 install_name 매칭용 symlink 생성.
+          ln -sf libnode.dylib "$NODE_DIR/libnode.137.dylib"
+          echo "libnode installed: $NODE_DIR"
+          ls -la "$NODE_DIR" | head
 
       - name: Build suji
         run: zig build
