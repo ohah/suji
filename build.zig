@@ -213,7 +213,9 @@ pub fn build(b: *std.Build) void {
         // macOS: CEF 프레임워크 로드 경로 수정 + GPU 라이브러리 심링크 + ad-hoc 코드서명
         const suji_bin = b.getInstallPath(.bin, "suji");
         const bin_dir = b.getInstallPath(.bin, "");
-        const entitlements = b.pathFromRoot("macos-entitlements.plist");
+        // dev binary는 ad-hoc 서명만 (entitlements 없이) — Mac App Sandbox 활성 plist는
+        // dev에서 trace trap 유발. bundle_macos가 production .app 만들 때 helper별
+        // entitlements 부착 (sandbox 활성).
 
         const fix_rpath = b.addSystemCommand(&.{
             "install_name_tool",                                                                                "-change",
@@ -239,11 +241,8 @@ pub fn build(b: *std.Build) void {
         }
 
         const codesign = b.addSystemCommand(&.{
-            "codesign",       "--force", "--sign", "-",
-            "--entitlements",
+            "codesign", "--force", "--sign", "-", "--deep",
         });
-        codesign.addArg(entitlements);
-        codesign.addArg("--deep");
         codesign.addArg(suji_bin);
         codesign.step.dependOn(prev_step);
         b.getInstallStep().dependOn(&codesign.step);

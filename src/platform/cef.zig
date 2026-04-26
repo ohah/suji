@@ -3486,10 +3486,8 @@ fn rhGetResponseHeaders(
     }
 }
 
-/// suji:// 응답에 추가하는 보안 헤더 묶음 — CSP 외 X-Content-Type-Options, X-Frame-Options.
-/// CEF의 response.set_header_by_name(name, value, overwrite=1) 사용.
 fn setSecurityHeaders(resp: *c.cef_response_t) void {
-    setRespHeader(resp, "Content-Security-Policy", g_csp_value);
+    if (g_csp_enabled) setRespHeader(resp, "Content-Security-Policy", g_csp_value);
     setRespHeader(resp, "X-Content-Type-Options", "nosniff");
     setRespHeader(resp, "X-Frame-Options", "SAMEORIGIN");
 }
@@ -3502,9 +3500,7 @@ fn setRespHeader(resp: *c.cef_response_t, name: []const u8, value: []const u8) v
     resp.set_header_by_name.?(resp, &name_str, &value_str, 1);
 }
 
-/// CSP value — config.security.csp에서 주입 받음. default는 suji:// scheme 안전 정책.
-/// 사용자가 설정 시 그 값으로 override.
-pub var g_csp_value: []const u8 =
+const DEFAULT_CSP =
     "default-src 'self' suji:; " ++
     "script-src 'self' suji: 'unsafe-inline'; " ++
     "style-src 'self' suji: 'unsafe-inline'; " ++
@@ -3512,8 +3508,46 @@ pub var g_csp_value: []const u8 =
     "connect-src 'self' suji: ws: wss: http: https:; " ++
     "font-src 'self' suji: data:;";
 
+/// `suji://` 응답에 적용되는 CSP. 기본은 DEFAULT_CSP. config.security.csp가 `"disabled"`면
+/// CSP 헤더 자체를 안 보냄 (escape hatch). 그 외 string은 user-supplied policy로 override.
+/// 처음 set 후 process lifetime 동안 유지 — main이 long-lived config 값을 주입하므로
+/// dangling X (config 자체가 process arena owned).
+pub var g_csp_value: []const u8 = DEFAULT_CSP;
+pub var g_csp_enabled: bool = true;
+
 pub fn setCspValue(value: []const u8) void {
-    if (value.len > 0) g_csp_value = value;
+    if (value.len == 0) return;
+    if (std.mem.eql(u8, value, "disabled")) {
+        g_csp_enabled = false;
+        return;
+    }
+    g_csp_value = value;
+    g_csp_enabled = true;
+}
+
+test "setCspValue: empty/disabled/custom 분기" {
+    const saved_value = g_csp_value;
+    const saved_enabled = g_csp_enabled;
+    defer {
+        g_csp_value = saved_value;
+        g_csp_enabled = saved_enabled;
+    }
+
+    // 빈 값 → no-op (default 유지)
+    g_csp_value = DEFAULT_CSP;
+    g_csp_enabled = true;
+    setCspValue("");
+    try std.testing.expectEqualStrings(DEFAULT_CSP, g_csp_value);
+    try std.testing.expect(g_csp_enabled);
+
+    // "disabled" sentinel → CSP 헤더 자체 disable (escape hatch)
+    setCspValue("disabled");
+    try std.testing.expect(!g_csp_enabled);
+
+    // custom policy → enable + override
+    setCspValue("default-src 'none'");
+    try std.testing.expect(g_csp_enabled);
+    try std.testing.expectEqualStrings("default-src 'none'", g_csp_value);
 }
 
 fn rhRead(

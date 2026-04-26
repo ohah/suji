@@ -232,7 +232,16 @@ fn fixMainBinaryRpath(allocator: std.mem.Allocator, app_name: []const u8, name: 
 fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, opts: BundleOptions) !void {
     std.debug.print("[suji] code signing...\n", .{});
 
-    // 1. CEF 프레임워크 — entitlements 없이 (framework는 receiver process가 inherit).
+    // entitlements 디렉토리는 5번 codesign 호출에서 같으니 한 번만 resolve.
+    var exe_buf: [1024]u8 = undefined;
+    const entitlements_dir: ?[]const u8 = blk: {
+        const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch break :blk null;
+        const exe_path = exe_buf[0..exe_len];
+        const exe_dir = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(exe_path) orelse "") orelse "") orelse "";
+        break :blk exe_dir;
+    };
+
+    // 1. CEF 프레임워크 — entitlements 없이 (receiver process가 inherit).
     const fw = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/Chromium Embedded Framework.framework", .{app_name});
     defer allocator.free(fw);
     try codesignNoEntitlements(allocator, fw);
@@ -247,40 +256,40 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     for (helpers) |h| {
         const helper = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/{s} Helper{s}.app", .{ app_name, name, h.suffix });
         defer allocator.free(helper);
-        try codesignWithEntitlements(allocator, helper, h.plist, opts);
+        try codesignWithEntitlements(allocator, helper, h.plist, opts, entitlements_dir);
     }
 
-    // 3. 메인 바이너리 — main.plist.
+    // 3. 메인 바이너리 + 4. 전체 앱 번들 — 둘 다 main.plist.
     const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
     defer allocator.free(exe);
-    try codesignWithEntitlements(allocator, exe, "main.plist", opts);
-
-    // 4. 전체 앱 번들 — 메인과 동일 entitlements 재사용.
-    try codesignWithEntitlements(allocator, app_name, "main.plist", opts);
+    try codesignWithEntitlements(allocator, exe, "main.plist", opts, entitlements_dir);
+    try codesignWithEntitlements(allocator, app_name, "main.plist", opts, entitlements_dir);
 }
 
 fn codesignNoEntitlements(allocator: std.mem.Allocator, path: []const u8) !void {
     try runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", path });
 }
 
-/// user_entitlements 지정 시 그것 모든 binary에 단독, 없으면 helper별 default plist
-/// (assets/entitlements/{plist_filename}). 다 실패하면 entitlements 없이 ad-hoc sign.
-fn codesignWithEntitlements(allocator: std.mem.Allocator, path: []const u8, plist_filename: []const u8, opts: BundleOptions) !void {
+/// user_entitlements 지정 시 그것 모든 binary에 단독, 없으면 entitlements_dir/<plist>.
+/// entitlements_dir이 null (executablePath 실패) 시 entitlements 없이 ad-hoc sign.
+fn codesignWithEntitlements(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    plist_filename: []const u8,
+    opts: BundleOptions,
+    entitlements_dir: ?[]const u8,
+) !void {
     if (opts.user_entitlements) |user_path| {
         runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", user_path, path }) catch {
             try codesignNoEntitlements(allocator, path);
         };
         return;
     }
-
-    var exe_buf: [1024]u8 = undefined;
-    const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch {
+    const dir = entitlements_dir orelse {
         try codesignNoEntitlements(allocator, path);
         return;
     };
-    const exe_path = exe_buf[0..exe_len];
-    const exe_dir = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(exe_path) orelse "") orelse "") orelse "";
-    const entitlements = try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ exe_dir, plist_filename });
+    const entitlements = try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ dir, plist_filename });
     defer allocator.free(entitlements);
 
     runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", entitlements, path }) catch {

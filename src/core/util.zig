@@ -241,6 +241,35 @@ pub fn extractJsonFloat(json: []const u8, key: []const u8) ?f64 {
     return std.fmt.parseFloat(f64, json[start..end]) catch null;
 }
 
+/// IPC cmd 이름 검증 — `[a-zA-Z0-9_]`만 허용. newline/quote/backslash injection 차단.
+/// 빈 문자열은 false. cmd 외 다른 식별자 (event channel name 등)에도 재사용 가능.
+pub fn isValidCmdName(cmd: []const u8) bool {
+    if (cmd.len == 0) return false;
+    for (cmd) |c| {
+        const ok = (c >= 'a' and c <= 'z') or
+            (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or
+            c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+test "isValidCmdName: 영숫자/언더스코어만 통과" {
+    try std.testing.expect(isValidCmdName("ping"));
+    try std.testing.expect(isValidCmdName("fs_read_file"));
+    try std.testing.expect(isValidCmdName("UPPER123"));
+    try std.testing.expect(isValidCmdName("_underscore"));
+    try std.testing.expect(!isValidCmdName(""));
+    try std.testing.expect(!isValidCmdName("ping\nbreak"));
+    try std.testing.expect(!isValidCmdName("ping\"quote"));
+    try std.testing.expect(!isValidCmdName("ping\\back"));
+    try std.testing.expect(!isValidCmdName("ping space"));
+    try std.testing.expect(!isValidCmdName("hyphen-cmd"));
+    try std.testing.expect(!isValidCmdName("dot.cmd"));
+    try std.testing.expect(!isValidCmdName("한글"));
+}
+
 /// `std.json.ObjectMap`에서 string field 추출 — type 미스매치/누락 시 null.
 pub fn jsonObjectGetString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
     const v = obj.get(key) orelse return null;

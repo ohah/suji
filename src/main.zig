@@ -1071,11 +1071,13 @@ fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: [
 ///
 /// cmd 분기는 `extractJsonString(req, "cmd")`로 정확 매치 — substring 매치는 새 cmd가
 /// 비슷한 이름으로 추가되거나 cmd 외 다른 필드에 같은 문자열이 있을 때 잘못 라우팅 위험.
+/// `__core__` IPC payload 한계. clipboard write 등 큰 payload 수용 (이전 4KB는 8KB
+/// 클립보드 쓰기에서 잘려 응답 비었음). 두 곳에서 같은 값 사용 (response check + req_buf).
+const MAX_CORE_PAYLOAD: usize = 32 * 1024;
+
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
-    // 32KB — clipboard write 등 큰 payload 수용. 이전 4KB는 8KB 클립보드 쓰기에서 잘려
-    // 응답 빈 string(undefined로 resolve)됨.
-    if (data.len > 32768) return coreError(response_buf, "__core__", "payload_too_large");
-    var req_buf: [32768]u8 = undefined;
+    if (data.len > MAX_CORE_PAYLOAD) return coreError(response_buf, "__core__", "payload_too_large");
+    var req_buf: [MAX_CORE_PAYLOAD]u8 = undefined;
     const req_clean: []const u8 = if (util.extractJsonString(data, "request")) |request_str|
         unescapeJson(request_str, &req_buf)
     else
@@ -1083,12 +1085,8 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
 
     const cmd = util.extractJsonString(req_clean, "cmd") orelse "";
     if (cmd.len == 0) return coreError(response_buf, "__core__", "missing_cmd");
-    // cmd는 영숫자/언더스코어만 허용 — IPC injection (newline/quote 등) 차단.
-    for (cmd) |c| {
-        const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
-            (c >= '0' and c <= '9') or c == '_';
-        if (!ok) return coreError(response_buf, "__core__", "invalid_cmd");
-    }
+    // IPC injection (newline/quote 등) 차단 — char allowlist는 util.isValidCmdName 단위 테스트로.
+    if (!util.isValidCmdName(cmd)) return coreError(response_buf, "__core__", "invalid_cmd");
 
     if (std.mem.eql(u8, cmd, "create_window")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1471,12 +1469,8 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return out[0..out_pos];
     }
 
-    // 알 수 없는 cmd — 표준 에러 응답. caller가 typo / version mismatch 진단 가능.
-    return std.fmt.bufPrint(
-        response_buf,
-        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":false,\"error\":\"unknown_cmd\"}}",
-        .{cmd},
-    ) catch null;
+    // typo / version mismatch 진단용 — coreError가 cmd echo 자동.
+    return coreError(response_buf, cmd, "unknown_cmd");
 }
 
 // ============================================
