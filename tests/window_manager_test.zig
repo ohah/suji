@@ -2963,7 +2963,9 @@ test "회귀: File System API (Phase 5-F) — core route + Zig/Rust/Go/Node/JS S
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_stat\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_mkdir\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_readdir\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_rm\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "handleFsReadFile") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "handleFsRm") != null);
 
     const app_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

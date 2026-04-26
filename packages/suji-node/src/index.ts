@@ -545,6 +545,7 @@ export interface FsStat {
   success: boolean;
   type: FileType;
   size: number;
+  /** Last modification time in milliseconds since UTC 1970-01-01 (compatible with `new Date(mtime)`). */
   mtime: number;
 }
 
@@ -580,6 +581,18 @@ export const fs = {
     const r = await invoke<{ success: boolean; entries: FsDirEntry[]; error?: string }>('__core__', { cmd: 'fs_readdir', path });
     if (r.success !== true) throw new Error(r.error ?? 'fs_readdir failed');
     return r.entries;
+  },
+
+  /** Remove `path`. `recursive` deletes directories; `force` ignores not-found (matches `node:fs.rm`). */
+  async rm(path: string, options: { recursive?: boolean; force?: boolean } = {}): Promise<boolean> {
+    const r = await invoke<{ success: boolean; error?: string }>('__core__', {
+      cmd: 'fs_rm',
+      path,
+      recursive: options.recursive === true,
+      force: options.force === true,
+    });
+    if (r.success !== true) throw new Error(r.error ?? 'fs_rm failed');
+    return true;
   },
 };
 

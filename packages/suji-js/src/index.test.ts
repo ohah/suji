@@ -179,6 +179,20 @@ describe("fs", () => {
 
     mockBridge.core.mockResolvedValueOnce({ success: true, entries: [{ name: "a.txt", type: "file" }] });
     expect(await sujiFs.readdir("/tmp")).toEqual([{ name: "a.txt", type: "file" }]);
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await sujiFs.rm("/tmp/x", { recursive: true, force: true })).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"fs_rm","path":"/tmp/x","recursive":true,"force":true}');
+  });
+
+  it("rm throws on failure", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false, error: "not_found" });
+    await expect(sujiFs.rm("/tmp/x")).rejects.toThrow("not_found");
+  });
+
+  it("stat throws on failure", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false, error: "not_found" });
+    await expect(sujiFs.stat("/missing")).rejects.toThrow("not_found");
   });
 });
 

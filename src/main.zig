@@ -1302,6 +1302,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "fs_readdir")) {
         return handleFsReadDir(req_clean, response_buf);
     }
+    if (std.mem.eql(u8, cmd, "fs_rm")) {
+        return handleFsRm(req_clean, response_buf);
+    }
 
     // Dialog API — NSAlert / NSOpenPanel / NSSavePanel.
     if (std.mem.eql(u8, cmd, "dialog_show_message_box")) {
@@ -1660,10 +1663,12 @@ fn handleFsStat(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_stat", "path");
     const st = std.Io.Dir.cwd().statFile(runtime.io, path, .{}) catch return coreError(response_buf, "fs_stat", "not_found");
+    // ns since epoch → ms — JS `Date(ms)` 호환 + 2^53 안전 범위 확보 (ns 그대로면 ~104일 후 손실).
+    const mtime_ms = @divFloor(st.mtime.nanoseconds, 1_000_000);
     return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"fs_stat\",\"success\":true,\"type\":\"{s}\",\"size\":{d},\"mtime\":{d}}}",
-        .{ fsKindName(st.kind), st.size, st.mtime.nanoseconds },
+        .{ fsKindName(st.kind), st.size, mtime_ms },
     ) catch null;
 }
 
@@ -1682,6 +1687,28 @@ fn handleFsMkdir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
         };
     }
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"fs_mkdir\",\"success\":true}}", .{}) catch null;
+}
+
+fn handleFsRm(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return coreError(response_buf, "fs_rm", "path");
+    const recursive = util.extractJsonBool(req_clean, "recursive") orelse false;
+    const force = util.extractJsonBool(req_clean, "force") orelse false;
+
+    const cwd = std.Io.Dir.cwd();
+    if (recursive) {
+        // deleteTree는 not-exist를 자체 swallow → force는 다른 에러 swallow에만 영향.
+        cwd.deleteTree(runtime.io, path) catch {
+            if (!force) return coreError(response_buf, "fs_rm", "rm");
+        };
+    } else {
+        cwd.deleteFile(runtime.io, path) catch |err| switch (err) {
+            error.FileNotFound => if (!force) return coreError(response_buf, "fs_rm", "not_found"),
+            error.IsDir => return coreError(response_buf, "fs_rm", "is_dir"),
+            else => return coreError(response_buf, "fs_rm", "rm"),
+        };
+    }
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"fs_rm\",\"success\":true}}", .{}) catch null;
 }
 
 fn handleFsReadDir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
@@ -1886,39 +1913,32 @@ fn nextNotificationId() u32 {
     return id;
 }
 
-/// cef.zig의 notification click → EventBus 라우팅. SujiNotificationDelegate가 NSApp UI
-/// thread에서 호출.
-fn notificationEmitHandler(notification_id: []const u8) void {
+/// cef.zig native click target이 NSApp UI thread에서 호출 → BackendRegistry.global 안전 access.
+/// data는 호출자가 std.fmt 포맷으로 미리 빌드한 JSON 페이로드.
+fn emitToBus(channel: []const u8, comptime fmt: []const u8, args: anytype) void {
     const registry = suji.BackendRegistry.global orelse return;
     const bus = registry.event_bus orelse return;
-    var data_buf: [256]u8 = undefined;
+    var data_buf: [512]u8 = undefined;
+    const data = std.fmt.bufPrint(&data_buf, fmt, args) catch return;
+    bus.emit(channel, data);
+}
+
+fn notificationEmitHandler(notification_id: []const u8) void {
     var id_esc: [128]u8 = undefined;
     const id_n = util.escapeJsonStrFull(notification_id, &id_esc) orelse return;
-    const data = std.fmt.bufPrint(&data_buf, "{{\"notificationId\":\"{s}\"}}", .{id_esc[0..id_n]}) catch return;
-    bus.emit("notification:click", data);
+    emitToBus("notification:click", "{{\"notificationId\":\"{s}\"}}", .{id_esc[0..id_n]});
 }
 
-/// cef.zig의 tray click → EventBus 라우팅. SujiTrayTarget.trayMenuClick:이 NSApp UI thread에서
-/// 호출되므로 BackendRegistry.global 안전 access.
 fn trayEmitHandler(tray_id: u32, click: []const u8) void {
-    const registry = suji.BackendRegistry.global orelse return;
-    const bus = registry.event_bus orelse return;
-    var data_buf: [512]u8 = undefined;
     var click_esc: [256]u8 = undefined;
     const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
-    const data = std.fmt.bufPrint(&data_buf, "{{\"trayId\":{d},\"click\":\"{s}\"}}", .{ tray_id, click_esc[0..click_n] }) catch return;
-    bus.emit("tray:menu-click", data);
+    emitToBus("tray:menu-click", "{{\"trayId\":{d},\"click\":\"{s}\"}}", .{ tray_id, click_esc[0..click_n] });
 }
 
-/// cef.zig의 app menu click → EventBus 라우팅.
 fn menuEmitHandler(click: []const u8) void {
-    const registry = suji.BackendRegistry.global orelse return;
-    const bus = registry.event_bus orelse return;
-    var data_buf: [512]u8 = undefined;
     var click_esc: [256]u8 = undefined;
     const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
-    const data = std.fmt.bufPrint(&data_buf, "{{\"click\":\"{s}\"}}", .{click_esc[0..click_n]}) catch return;
-    bus.emit("menu:click", data);
+    emitToBus("menu:click", "{{\"click\":\"{s}\"}}", .{click_esc[0..click_n]});
 }
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {

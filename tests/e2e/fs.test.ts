@@ -20,11 +20,8 @@ const FIXTURE_BASE = `/tmp/suji-fs-e2e-${process.pid}`;
 const FIXTURE_DIR = `${FIXTURE_BASE}/nested`;
 const FIXTURE_FILE = `${FIXTURE_DIR}/한글 file.txt`;
 
-async function shellRun(cmd: string, args: string[]): Promise<{ exitCode: number }> {
-  const proc = Bun.spawn([cmd, ...args]);
-  await proc.exited;
-  return { exitCode: proc.exitCode ?? 0 };
-}
+const cleanupFixture = () =>
+  core({ cmd: "fs_rm", path: FIXTURE_BASE, recursive: true, force: true });
 
 beforeAll(async () => {
   browser = await puppeteer.connect({
@@ -37,11 +34,11 @@ beforeAll(async () => {
   page = pages[0];
   page.setDefaultTimeout(30000);
 
-  await shellRun("rm", ["-rf", FIXTURE_BASE]);
+  await cleanupFixture();
 });
 
 afterAll(async () => {
-  await shellRun("rm", ["-rf", FIXTURE_BASE]);
+  await cleanupFixture();
   await browser?.disconnect();
 });
 
@@ -91,5 +88,51 @@ describe("fs core commands", () => {
     const r = await core<{ success: boolean; error: string }>({ cmd: "fs_stat", path: "" });
     expect(r.success).toBe(false);
     expect(r.error).toBe("path");
+  });
+
+  test("rm: file removal + recursive tree + force not-found", async () => {
+    const target_dir = `${FIXTURE_BASE}/rm-test`;
+    const target_file = `${target_dir}/x.txt`;
+    await core({ cmd: "fs_mkdir", path: target_dir, recursive: true });
+    await core({ cmd: "fs_write_file", path: target_file, text: "x" });
+
+    const rm_file = await core<{ success: boolean }>({ cmd: "fs_rm", path: target_file, recursive: false, force: false });
+    expect(rm_file.success).toBe(true);
+
+    const rm_missing_strict = await core<{ success: boolean; error: string }>({
+      cmd: "fs_rm",
+      path: target_file,
+      recursive: false,
+      force: false,
+    });
+    expect(rm_missing_strict.success).toBe(false);
+    expect(rm_missing_strict.error).toBe("not_found");
+
+    const rm_missing_force = await core<{ success: boolean }>({
+      cmd: "fs_rm",
+      path: target_file,
+      recursive: false,
+      force: true,
+    });
+    expect(rm_missing_force.success).toBe(true);
+
+    const rm_tree = await core<{ success: boolean }>({ cmd: "fs_rm", path: target_dir, recursive: true, force: false });
+    expect(rm_tree.success).toBe(true);
+
+    const st = await core<{ success: boolean; error: string }>({ cmd: "fs_stat", path: target_dir });
+    expect(st.success).toBe(false);
+  });
+
+  test("mkdir non-recursive on existing returns exists error", async () => {
+    const dir = `${FIXTURE_BASE}/mkdir-test`;
+    await core({ cmd: "fs_mkdir", path: dir, recursive: true });
+
+    const dup = await core<{ success: boolean; error: string }>({ cmd: "fs_mkdir", path: dir, recursive: false });
+    expect(dup.success).toBe(false);
+    expect(dup.error).toBe("exists");
+
+    // recursive=true는 idempotent
+    const idem = await core<{ success: boolean }>({ cmd: "fs_mkdir", path: dir, recursive: true });
+    expect(idem.success).toBe(true);
   });
 });

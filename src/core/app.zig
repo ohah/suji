@@ -752,6 +752,16 @@ pub const fs = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
         return coreCmd("fs_readdir", fields);
     }
+
+    /// `recursive=true`이면 디렉토리도 트리 삭제. `force=true`이면 not-exist를 성공으로 처리
+    /// (Node `fs.rm({recursive,force})` 호환).
+    pub fn rm(path: []const u8, recursive: bool, force: bool) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\",\"recursive\":{},\"force\":{}", .{ p_buf[0..p_n], recursive, force }) catch return null;
+        return coreCmd("fs_rm", fields);
+    }
 };
 
 pub const notification = struct {

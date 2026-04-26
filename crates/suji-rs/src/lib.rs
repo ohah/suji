@@ -592,6 +592,16 @@ pub mod fs {
         .to_string()
     }
 
+    pub(crate) fn rm_request(path: &str, recursive: bool, force: bool) -> String {
+        serde_json::json!({
+            "cmd": "fs_rm",
+            "path": path,
+            "recursive": recursive,
+            "force": force,
+        })
+        .to_string()
+    }
+
     /// Read UTF-8 text. Response JSON: `{"success":true,"text":"..."}`.
     pub fn read_file(path: &str) -> Option<String> {
         invoke("__core__", &read_file_request(path))
@@ -602,7 +612,8 @@ pub mod fs {
         invoke("__core__", &write_file_request(path, text))
     }
 
-    /// File metadata. Response JSON: `{"success":true,"type":"file","size":N,"mtime":N}`.
+    /// File metadata. Response JSON: `{"success":true,"type":"file","size":N,"mtime":N_ms}`.
+    /// `mtime` is milliseconds since UTC epoch (compatible with `Date.now()`).
     pub fn stat(path: &str) -> Option<String> {
         invoke("__core__", &stat_request(path))
     }
@@ -613,6 +624,12 @@ pub mod fs {
 
     pub fn readdir(path: &str) -> Option<String> {
         invoke("__core__", &readdir_request(path))
+    }
+
+    /// Remove a path. `recursive=true` for directory tree, `force=true` to ignore not-found
+    /// (Node `fs.rm({recursive,force})` semantics).
+    pub fn rm(path: &str, recursive: bool, force: bool) -> Option<String> {
+        invoke("__core__", &rm_request(path, recursive, force))
     }
 }
 
@@ -1027,6 +1044,12 @@ mod tests {
             serde_json::from_str(&crate::fs::mkdir_request("/tmp/dir", true)).unwrap();
         assert_eq!(mkdir["cmd"], "fs_mkdir");
         assert_eq!(mkdir["recursive"], true);
+
+        let rm: serde_json::Value =
+            serde_json::from_str(&crate::fs::rm_request("/tmp/x", true, false)).unwrap();
+        assert_eq!(rm["cmd"], "fs_rm");
+        assert_eq!(rm["recursive"], true);
+        assert_eq!(rm["force"], false);
     }
 
     #[test]

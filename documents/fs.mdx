@@ -17,12 +17,13 @@ Zig/Rust/Go/Node 백엔드 SDK 모두 같은 `__core__` cmd를 사용한다.
 |---|---|---|
 | `fs.readFile(path)` | `fs_read_file` | `{success:true,text}` |
 | `fs.writeFile(path, text)` | `fs_write_file` | `{success:true}` |
-| `fs.stat(path)` | `fs_stat` | `{success:true,type,size,mtime}` |
+| `fs.stat(path)` | `fs_stat` | `{success:true,type,size,mtime}` (mtime: ms since epoch) |
 | `fs.mkdir(path, {recursive})` | `fs_mkdir` | `{success:true}` |
 | `fs.readdir(path)` | `fs_readdir` | `{success:true,entries:[{name,type}]}` |
+| `fs.rm(path, {recursive,force})` | `fs_rm` | `{success:true}` (Node `fs.rm` 호환) |
 
-실패 응답은 `{success:false,error}` 형태다. `readFile/writeFile`은 단일 IPC payload 한도 안에서
-동작하므로 큰 파일은 아직 대상이 아니다.
+실패 응답은 `{success:false,error}` 형태다. `readFile/writeFile`은 8 KiB 한도 안에서 동작하며
+초과 시 `error:"too_large"`. 큰 파일은 아직 대상이 아니다.
 
 ## Frontend JS
 
@@ -35,6 +36,7 @@ await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
 const text = await fs.readFile('/tmp/suji/hello.txt');
 const stat = await fs.stat('/tmp/suji/hello.txt');
 const entries = await fs.readdir('/tmp/suji');
+await fs.rm('/tmp/suji', { recursive: true, force: true });
 ```
 
 ## Backend SDK

@@ -16,6 +16,7 @@ func TestBuildFsRequests(t *testing.T) {
 		{"stat", buildStatRequest("/tmp/a.txt"), "fs_stat"},
 		{"mkdir", buildMkdirRequest("/tmp/dir", true), "fs_mkdir"},
 		{"readdir", buildReadDirRequest("/tmp/dir"), "fs_readdir"},
+		{"rm", buildRmRequest("/tmp/x", true, true), "fs_rm"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

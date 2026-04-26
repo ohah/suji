@@ -990,6 +990,11 @@ test "fs.*: __core__ 파일 시스템 cmd 전송" {
 
             _ = app_mod.fs.readdir("/tmp");
             try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_readdir\"") != null);
+
+            _ = app_mod.fs.rm("/tmp/suji.txt", true, false);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_rm\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"recursive\":true") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"force\":false") != null);
         }
     }.run);
 }
