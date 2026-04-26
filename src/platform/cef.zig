@@ -26,6 +26,7 @@ const runtime = @import("runtime");
 const window_mod = @import("window");
 const window_ipc = @import("window_ipc");
 const logger = @import("logger");
+const util = @import("util");
 
 const log = logger.module("cef");
 
@@ -44,6 +45,10 @@ const objc = if (is_macos) struct {
         imp: *const fn () callconv(.c) void,
         types: [*:0]const u8,
     ) u8;
+    pub extern "c" fn objc_allocateClassPair(superclass: ?*anyopaque, name: [*:0]const u8, extra_bytes: usize) ?*anyopaque;
+    pub extern "c" fn objc_registerClassPair(cls: ?*anyopaque) void;
+    /// AppKit 시스템 비프 (NSGraphics.h). Cocoa 프레임워크 링크로 자동 가용.
+    pub extern "c" fn NSBeep() void;
 } else struct {};
 
 // ============================================
@@ -182,6 +187,11 @@ pub fn initialize(config: CefConfig) !void {
 var g_devtools_client: c.cef_client_t = undefined;
 var g_browser: ?*c.cef_browser_t = null; // 브라우저 참조 (이벤트 푸시용)
 
+/// CEF process_message 페이로드 버퍼 한도 (renderer ↔ browser IPC). Clipboard write_text 같은
+/// 큰 payload(최대 16KB text + JSON escape overhead)를 수용. 이전엔 8192라 8KB 텍스트도
+/// 잘려 응답 undefined.
+const CEF_IPC_BUF_LEN: usize = 65536;
+
 /// 전역 CEF 핸들러 초기화 (idempotent). CefNative.init에서 호출.
 /// life_span_handler / keyboard_handler / devtools client — 모든 브라우저가 공유.
 var g_handlers_initialized: bool = false;
@@ -192,6 +202,9 @@ fn ensureGlobalHandlers() void {
     zeroCefStruct(c.cef_client_t, &g_devtools_client);
     initBaseRefCounted(&g_devtools_client.base);
     g_devtools_client.get_keyboard_handler = &getKeyboardHandler;
+    // life_span_handler — DevTools browser의 onAfterCreated/onBeforeClose 콜백.
+    // 없으면 DevTools browser 생성/소멸이 우리에게 안 보여 inspectee 매핑 등록/정리 X.
+    g_devtools_client.get_life_span_handler = &getLifeSpanHandler;
     g_handlers_initialized = true;
 }
 
@@ -732,6 +745,587 @@ pub fn evalJs(target: ?u32, js: [:0]const u8) void {
     }
 }
 
+// ============================================
+// Clipboard API — NSPasteboard generalPasteboard
+// ============================================
+// public.utf8-plain-text UTI를 사용해 plain text만 read/write (Electron `clipboard.readText/writeText`).
+// 비-macOS는 모두 no-op (readText는 빈 문자열, write/clear는 false 반환).
+
+const PASTEBOARD_TYPE_STRING: [*:0]const u8 = "public.utf8-plain-text";
+
+/// 클립보드 텍스트 최대 길이 (null terminator 포함). main.zig IPC handler가 동일 cap을
+/// 사용하므로 여기 한도를 넘는 입력은 caller 단에서 이미 잘려 있음.
+const CLIPBOARD_MAX_TEXT: usize = 16384;
+
+/// 시스템 클립보드에서 plain text 읽기 — buf에 복사 후 slice 반환. 비어 있거나
+/// non-text content면 빈 슬라이스. buf보다 긴 텍스트는 잘림.
+pub fn clipboardReadText(buf: []u8) []const u8 {
+    if (!comptime is_macos) return buf[0..0];
+    const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return buf[0..0];
+    const NSString = getClass("NSString") orelse return buf[0..0];
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_STRING) orelse return buf[0..0];
+    const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_str = stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) orelse return buf[0..0];
+    const utf8Fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 =
+        @ptrCast(&objc.objc_msgSend);
+    const cstr = utf8Fn(ns_str, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return buf[0..0];
+    const len = std.mem.span(cstr).len;
+    const copy_len = @min(len, buf.len);
+    @memcpy(buf[0..copy_len], cstr[0..copy_len]);
+    return buf[0..copy_len];
+}
+
+/// 시스템 클립보드에 plain text 쓰기. clear 후 setString:forType: 호출. 성공 시 true.
+pub fn clipboardWriteText(text: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    _ = msgSend(pb, "clearContents");
+
+    // stringWithUTF8String은 null-terminated 요구 — 스택 버퍼로 복사.
+    var stack_buf: [CLIPBOARD_MAX_TEXT]u8 = undefined;
+    if (text.len + 1 > stack_buf.len) return false;
+    @memcpy(stack_buf[0..text.len], text);
+    stack_buf[text.len] = 0;
+    const cstr: [*:0]const u8 = @ptrCast(&stack_buf);
+
+    const NSString = getClass("NSString") orelse return false;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_text = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr) orelse return false;
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_STRING) orelse return false;
+    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_text, ns_type) != 0;
+}
+
+/// 시스템 클립보드 비우기 (clearContents).
+pub fn clipboardClear() void {
+    if (!comptime is_macos) return;
+    const NSPasteboard = getClass("NSPasteboard") orelse return;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return;
+    _ = msgSend(pb, "clearContents");
+}
+
+// ============================================
+// Shell API — NSWorkspace + NSBeep (Electron `shell.*`)
+// ============================================
+// 비-macOS는 모두 false / no-op (시스템 핸들러 미연결).
+
+/// URL 또는 path 길이 한도 (null terminator 포함). 4KB는 macOS NSString이 무난하게 처리 가능.
+const SHELL_MAX_PATH: usize = 4096;
+
+/// `[ns_obj utf8String]`을 caller 스택 버퍼에 복사 — 공통 패턴(NSString-from-Zig-slice).
+/// 성공 시 NSString*, 실패 시 null. text 길이가 한도 초과면 null.
+fn nsStringFromSlice(text: []const u8) ?*anyopaque {
+    if (text.len + 1 > SHELL_MAX_PATH) return null;
+    var stack_buf: [SHELL_MAX_PATH]u8 = undefined;
+    @memcpy(stack_buf[0..text.len], text);
+    stack_buf[text.len] = 0;
+    const cstr: [*:0]const u8 = @ptrCast(&stack_buf);
+    const NSString = getClass("NSString") orelse return null;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    return strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr);
+}
+
+/// 시스템 기본 핸들러로 URL 열기 (Electron `shell.openExternal`). http(s) → 기본 브라우저,
+/// mailto: → 메일 앱 등. URL syntax invalid 또는 scheme 누락이면 false (LaunchServices에
+/// 보내면 -50 OS dialog 발생하므로 사전 차단).
+pub fn shellOpenExternal(url: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const ns_url_str = nsStringFromSlice(url) orelse return false;
+    const NSURL = getClass("NSURL") orelse return false;
+    const urlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_url = urlFn(NSURL, @ptrCast(objc.sel_registerName("URLWithString:")), ns_url_str) orelse return false;
+
+    // scheme 검사 — URLWithString은 relative URL("noschemejustwords")도 통과시키지만
+    // openURL:에 넘기면 macOS가 "해당 프로그램을 열 수 없습니다 (-50)" 시스템 알림.
+    const scheme = msgSend(ns_url, "scheme") orelse return false;
+    const utf8Fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 =
+        @ptrCast(&objc.objc_msgSend);
+    const scheme_cstr = utf8Fn(scheme, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return false;
+    if (std.mem.span(scheme_cstr).len == 0) return false;
+
+    const NSWorkspace = getClass("NSWorkspace") orelse return false;
+    const ws = msgSend(NSWorkspace, "sharedWorkspace") orelse return false;
+    const openFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return openFn(ws, @ptrCast(objc.sel_registerName("openURL:")), ns_url) != 0;
+}
+
+/// Finder에서 항목 reveal — 부모 폴더가 열리고 해당 파일/폴더 선택 (Electron `shell.showItemInFolder`).
+/// 존재하지 않는 경로는 NSFileManager.fileExistsAtPath: 사전 검증으로 차단 (없는 경로를
+/// activateFileViewerSelectingURLs:에 넘기면 macOS -50 dialog). 존재하면 file:// URL로
+/// modern API `activateFileViewerSelectingURLs:` 호출 (deprecated `selectFile:inFileViewerRootedAtPath:`
+/// 대체).
+pub fn shellShowItemInFolder(path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const ns_path = nsStringFromSlice(path) orelse return false;
+
+    const NSFileManager = getClass("NSFileManager") orelse return false;
+    const fm = msgSend(NSFileManager, "defaultManager") orelse return false;
+    const existsFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    if (existsFn(fm, @ptrCast(objc.sel_registerName("fileExistsAtPath:")), ns_path) == 0) return false;
+
+    const NSURL = getClass("NSURL") orelse return false;
+    const fileUrlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_url = fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path) orelse return false;
+
+    const NSArray = getClass("NSArray") orelse return false;
+    const arrayFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_arr = arrayFn(NSArray, @ptrCast(objc.sel_registerName("arrayWithObject:")), ns_url) orelse return false;
+
+    const NSWorkspace = getClass("NSWorkspace") orelse return false;
+    const ws = msgSend(NSWorkspace, "sharedWorkspace") orelse return false;
+    msgSendVoid1(ws, "activateFileViewerSelectingURLs:", ns_arr);
+    return true;
+}
+
+/// 시스템 비프음 (Electron `shell.beep`). NSBeep — AppKit C symbol.
+pub fn shellBeep() void {
+    if (!comptime is_macos) return;
+    objc.NSBeep();
+}
+
+// ============================================
+// Dialog API — NSAlert / NSOpenPanel / NSSavePanel (Electron `dialog.*`)
+// ============================================
+// 두 가지 modal 모드:
+//   1. **Sheet** — `parent_window` 지정 시 부모 창 타이틀바에서 슬라이드 (Electron 기본).
+//      ObjC block(^) completion handler 필요 → src/platform/dialog.m이 wrap.
+//      그 창만 입력 차단, 다른 창은 정상 동작.
+//   2. **Free-floating** — `parent_window` null이면 runModal로 화면 중앙 독립 창.
+//      앱 전체 입력 차단. Electron의 두-인자 호출 없이 부른 케이스.
+//
+// 비-macOS는 모두 stub (canceled:true / response:0). 향후 GTK/Win32 plug-in.
+
+// dialog.m C 함수 (sheet path). nested run loop로 동기화.
+extern "c" fn suji_run_sheet_alert(parent_window: ?*anyopaque, alert: ?*anyopaque) i64;
+extern "c" fn suji_run_sheet_save_panel(parent_window: ?*anyopaque, panel: ?*anyopaque) i64;
+
+/// CEF browser native_handle → NSWindow 포인터 lookup. main.zig가 windowId(WM)를
+/// browser handle로 변환 후 호출.
+pub fn nsWindowForBrowserHandle(handle: u64) ?*anyopaque {
+    if (!comptime is_macos) return null;
+    const native = g_cef_native orelse return null;
+    const entry = native.browsers.get(handle) orelse return null;
+    return entry.ns_window;
+}
+
+pub const MAX_DIALOG_BUTTONS: usize = 16;
+pub const MAX_DIALOG_PATHS: usize = 64;
+
+pub const MessageBoxStyle = enum { none, info, warning, err, question };
+
+pub const MessageBoxOpts = struct {
+    style: MessageBoxStyle = .none,
+    title: []const u8 = "",
+    message: []const u8 = "",
+    detail: []const u8 = "",
+    buttons: []const []const u8 = &.{},
+    default_id: ?usize = null,
+    cancel_id: ?usize = null,
+    checkbox_label: []const u8 = "",
+    checkbox_checked: bool = false,
+    /// 부모 창 NSWindow 포인터 — null이면 free-floating runModal, 있으면 sheet.
+    parent_window: ?*anyopaque = null,
+};
+
+pub const MessageBoxResult = struct {
+    response: usize = 0,
+    checkbox_checked: bool = false,
+};
+
+pub const FileFilter = struct {
+    name: []const u8 = "",
+    extensions: []const []const u8 = &.{},
+};
+
+pub const OpenDialogOpts = struct {
+    title: []const u8 = "",
+    default_path: []const u8 = "",
+    button_label: []const u8 = "",
+    message: []const u8 = "",
+    can_choose_files: bool = true,
+    can_choose_directories: bool = false,
+    allows_multiple_selection: bool = false,
+    shows_hidden_files: bool = false,
+    can_create_directories: bool = true,
+    no_resolve_aliases: bool = false,
+    treat_packages_as_dirs: bool = false,
+    filters: []const FileFilter = &.{},
+    /// 부모 창 NSWindow 포인터 — null이면 free-floating, 있으면 sheet.
+    parent_window: ?*anyopaque = null,
+};
+
+pub const SaveDialogOpts = struct {
+    title: []const u8 = "",
+    default_path: []const u8 = "",
+    button_label: []const u8 = "",
+    message: []const u8 = "",
+    name_field_label: []const u8 = "",
+    shows_hidden_files: bool = false,
+    can_create_directories: bool = true,
+    show_overwrite_confirmation: bool = true,
+    /// macOS Finder 태그 입력 필드 (NSSavePanel.setShowsTagField:). 기본 false.
+    shows_tag_field: bool = false,
+    filters: []const FileFilter = &.{},
+    /// 부모 창 NSWindow 포인터 — null이면 free-floating, 있으면 sheet.
+    parent_window: ?*anyopaque = null,
+};
+
+/// NSAlert 메시지 박스. macOS HIG 기본: 첫 버튼 = default(Enter), 마지막 버튼 = Cancel(ESC).
+/// `default_id`/`cancel_id`로 명시적 변경.
+pub fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
+    if (!comptime is_macos) return .{};
+    const NSAlert = getClass("NSAlert") orelse return .{};
+    const alloc = msgSend(NSAlert, "alloc") orelse return .{};
+    const alert = msgSend(alloc, "init") orelse return .{};
+
+    if (opts.message.len > 0) {
+        if (nsStringFromSlice(opts.message)) |ns| msgSendVoid1(alert, "setMessageText:", ns);
+    }
+    if (opts.detail.len > 0) {
+        if (nsStringFromSlice(opts.detail)) |ns| msgSendVoid1(alert, "setInformativeText:", ns);
+    }
+
+    // NSAlertStyle: warning=0, info=1, critical=2. question/none → warning(0).
+    const style: u64 = switch (opts.style) {
+        .info => 1,
+        .err => 2,
+        .none, .warning, .question => 0,
+    };
+    const setStyleFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void =
+        @ptrCast(&objc.objc_msgSend);
+    setStyleFn(alert, @ptrCast(objc.sel_registerName("setAlertStyle:")), style);
+
+    if (opts.title.len > 0) {
+        if (msgSend(alert, "window")) |win| {
+            if (nsStringFromSlice(opts.title)) |ns| msgSendVoid1(win, "setTitle:", ns);
+        }
+    }
+
+    // 버튼 추가 — 빈 배열이면 기본 "OK".
+    var added_buttons: [MAX_DIALOG_BUTTONS]?*anyopaque = [_]?*anyopaque{null} ** MAX_DIALOG_BUTTONS;
+    const button_titles: []const []const u8 = if (opts.buttons.len > 0) opts.buttons else &.{"OK"};
+    const button_count: usize = @min(button_titles.len, MAX_DIALOG_BUTTONS);
+    const addBtnFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    for (button_titles[0..button_count], 0..) |btn_title, i| {
+        const ns = nsStringFromSlice(btn_title) orelse continue;
+        added_buttons[i] = addBtnFn(alert, @ptrCast(objc.sel_registerName("addButtonWithTitle:")), ns);
+    }
+
+    // default_id 지정 — NSAlert는 기본적으로 첫 버튼이 default (Enter). 다른 index를
+    // default로 만들려면 첫 버튼의 keyEquivalent를 지우고 대상에 "\r" 설정.
+    if (opts.default_id) |def_idx| {
+        if (def_idx < button_count) {
+            if (def_idx != 0) {
+                if (added_buttons[0]) |b0| {
+                    if (nsStringFromSlice("")) |empty| msgSendVoid1(b0, "setKeyEquivalent:", empty);
+                }
+            }
+            if (added_buttons[def_idx]) |btn| {
+                if (nsStringFromSlice("\r")) |ret| msgSendVoid1(btn, "setKeyEquivalent:", ret);
+            }
+        }
+    }
+    // cancel_id 지정 — ESC 매핑.
+    if (opts.cancel_id) |can_idx| {
+        if (can_idx < button_count) {
+            if (added_buttons[can_idx]) |btn| {
+                if (nsStringFromSlice("\x1b")) |esc| msgSendVoid1(btn, "setKeyEquivalent:", esc);
+            }
+        }
+    }
+
+    // Suppression button (체크박스) — checkbox_label 있을 때만.
+    if (opts.checkbox_label.len > 0) {
+        msgSendVoidBool(alert, "setShowsSuppressionButton:", true);
+        if (msgSend(alert, "suppressionButton")) |sb| {
+            if (nsStringFromSlice(opts.checkbox_label)) |ns| msgSendVoid1(sb, "setTitle:", ns);
+            const setStateFn: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void =
+                @ptrCast(&objc.objc_msgSend);
+            setStateFn(sb, @ptrCast(objc.sel_registerName("setState:")), if (opts.checkbox_checked) 1 else 0);
+        }
+    }
+
+    // parent_window 지정 → sheet path (.m). 없으면 free-floating runModal.
+    const ns_response: i64 = if (opts.parent_window) |parent|
+        suji_run_sheet_alert(parent, alert)
+    else blk: {
+        const runModalFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+            @ptrCast(&objc.objc_msgSend);
+        break :blk runModalFn(alert, @ptrCast(objc.sel_registerName("runModal")));
+    };
+    // NSAlertFirstButtonReturn = 1000.
+    const NS_ALERT_FIRST_BTN: i64 = 1000;
+    const idx_signed: i64 = ns_response - NS_ALERT_FIRST_BTN;
+    const response_idx: usize = if (idx_signed < 0 or idx_signed >= @as(i64, @intCast(button_count)))
+        0
+    else
+        @intCast(idx_signed);
+
+    var checkbox_state: bool = opts.checkbox_checked;
+    if (opts.checkbox_label.len > 0) {
+        if (msgSend(alert, "suppressionButton")) |sb| {
+            const stateFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+                @ptrCast(&objc.objc_msgSend);
+            const state = stateFn(sb, @ptrCast(objc.sel_registerName("state")));
+            checkbox_state = (state != 0);
+        }
+    }
+
+    return .{ .response = response_idx, .checkbox_checked = checkbox_state };
+}
+
+/// 단순 에러 popup — NSAlert critical style + 단일 OK 버튼 (Electron `dialog.showErrorBox`).
+pub fn showErrorBox(title: []const u8, content: []const u8) void {
+    if (!comptime is_macos) return;
+    _ = showMessageBox(.{
+        .style = .err,
+        .title = title,
+        .message = content,
+        .buttons = &.{"OK"},
+    });
+}
+
+/// NSOpenPanel — 파일/폴더 선택. 결과는 response_buf에 JSON으로 직접 씀.
+/// 형식: `{"canceled":bool,"filePaths":["/p1","/p2"]}`.
+/// 호출자(main.zig)가 from/cmd 래핑.
+pub fn showOpenDialog(opts: OpenDialogOpts, response_buf: []u8) []const u8 {
+    if (!comptime is_macos) return writeCanceledResponse(response_buf, true);
+    const NSOpenPanel = getClass("NSOpenPanel") orelse return writeCanceledResponse(response_buf, true);
+    const panel = msgSend(NSOpenPanel, "openPanel") orelse return writeCanceledResponse(response_buf, true);
+
+    applySavePanelCommon(panel, .{
+        .title = opts.title,
+        .default_path = opts.default_path,
+        .button_label = opts.button_label,
+        .message = opts.message,
+        .shows_hidden_files = opts.shows_hidden_files,
+        .can_create_directories = opts.can_create_directories,
+        .filters = opts.filters,
+    });
+
+    msgSendVoidBool(panel, "setCanChooseFiles:", opts.can_choose_files);
+    msgSendVoidBool(panel, "setCanChooseDirectories:", opts.can_choose_directories);
+    msgSendVoidBool(panel, "setAllowsMultipleSelection:", opts.allows_multiple_selection);
+    msgSendVoidBool(panel, "setResolvesAliases:", !opts.no_resolve_aliases);
+    msgSendVoidBool(panel, "setTreatsFilePackagesAsDirectories:", opts.treat_packages_as_dirs);
+
+    const result: i64 = if (opts.parent_window) |parent|
+        suji_run_sheet_save_panel(parent, panel)
+    else blk: {
+        const runModalFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+            @ptrCast(&objc.objc_msgSend);
+        break :blk runModalFn(panel, @ptrCast(objc.sel_registerName("runModal")));
+    };
+    // NSModalResponseOK = 1, NSModalResponseCancel = 0.
+    if (result != 1) return writeCanceledResponse(response_buf, true);
+
+    const urls = msgSend(panel, "URLs") orelse return writeCanceledResponse(response_buf, true);
+    return writeOpenResponse(response_buf, urls);
+}
+
+/// NSSavePanel — 저장 경로 선택.
+/// 형식: `{"canceled":bool,"filePath":"/path/file.ext"}`.
+pub fn showSaveDialog(opts: SaveDialogOpts, response_buf: []u8) []const u8 {
+    if (!comptime is_macos) return writeSaveCanceledResponse(response_buf, true);
+    const NSSavePanel = getClass("NSSavePanel") orelse return writeSaveCanceledResponse(response_buf, true);
+    const panel = msgSend(NSSavePanel, "savePanel") orelse return writeSaveCanceledResponse(response_buf, true);
+
+    applySavePanelCommon(panel, .{
+        .title = opts.title,
+        .default_path = opts.default_path,
+        .button_label = opts.button_label,
+        .message = opts.message,
+        .shows_hidden_files = opts.shows_hidden_files,
+        .can_create_directories = opts.can_create_directories,
+        .filters = opts.filters,
+    });
+
+    if (opts.name_field_label.len > 0) {
+        if (nsStringFromSlice(opts.name_field_label)) |ns| msgSendVoid1(panel, "setNameFieldLabel:", ns);
+    }
+    msgSendVoidBool(panel, "setShowsTagField:", opts.shows_tag_field);
+    // overwrite confirmation은 NSSavePanel 기본 ON (allowsOtherFileTypes와 별도). API 노출 없어서
+    // 옵션 무시 — 기본 동작 유지.
+
+    const result: i64 = if (opts.parent_window) |parent|
+        suji_run_sheet_save_panel(parent, panel)
+    else blk: {
+        const runModalFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) i64 =
+            @ptrCast(&objc.objc_msgSend);
+        break :blk runModalFn(panel, @ptrCast(objc.sel_registerName("runModal")));
+    };
+    if (result != 1) return writeSaveCanceledResponse(response_buf, true);
+
+    const url = msgSend(panel, "URL") orelse return writeSaveCanceledResponse(response_buf, true);
+    var path_buf: [4096]u8 = undefined;
+    const path = nsUrlToPath(url, &path_buf);
+    return writeSaveSuccessResponse(response_buf, path);
+}
+
+const SavePanelCommonOpts = struct {
+    title: []const u8,
+    default_path: []const u8,
+    button_label: []const u8,
+    message: []const u8,
+    shows_hidden_files: bool,
+    can_create_directories: bool,
+    filters: []const FileFilter,
+};
+
+/// NSSavePanel 계열(Open/Save) 공통 옵션 적용. setDirectoryURL/setNameFieldStringValue는
+/// default_path가 디렉토리/파일에 따라 동작이 다름 — 슬래시로 끝나거나 기존 디렉토리면
+/// directoryURL, 아니면 (디렉토리, 파일명) 분리.
+fn applySavePanelCommon(panel: *anyopaque, opts: SavePanelCommonOpts) void {
+    if (opts.title.len > 0) {
+        if (nsStringFromSlice(opts.title)) |ns| msgSendVoid1(panel, "setTitle:", ns);
+    }
+    if (opts.message.len > 0) {
+        if (nsStringFromSlice(opts.message)) |ns| msgSendVoid1(panel, "setMessage:", ns);
+    }
+    if (opts.button_label.len > 0) {
+        if (nsStringFromSlice(opts.button_label)) |ns| msgSendVoid1(panel, "setPrompt:", ns);
+    }
+    msgSendVoidBool(panel, "setShowsHiddenFiles:", opts.shows_hidden_files);
+    msgSendVoidBool(panel, "setCanCreateDirectories:", opts.can_create_directories);
+
+    if (opts.default_path.len > 0) applyDefaultPath(panel, opts.default_path);
+    if (opts.filters.len > 0) applyFileFilters(panel, opts.filters);
+}
+
+fn applyDefaultPath(panel: *anyopaque, default_path: []const u8) void {
+    // path 끝이 '/'면 directory만, 아니면 마지막 segment를 파일명으로 분리.
+    const ends_with_slash = default_path.len > 0 and default_path[default_path.len - 1] == '/';
+    if (ends_with_slash) {
+        setDirectoryURLFromPath(panel, default_path[0 .. default_path.len - 1]);
+        return;
+    }
+    if (std.mem.lastIndexOfScalar(u8, default_path, '/')) |slash_idx| {
+        const dir = default_path[0..slash_idx];
+        const name = default_path[slash_idx + 1 ..];
+        if (dir.len > 0) setDirectoryURLFromPath(panel, dir);
+        if (name.len > 0) {
+            if (nsStringFromSlice(name)) |ns| msgSendVoid1(panel, "setNameFieldStringValue:", ns);
+        }
+    } else {
+        // 슬래시 없음 — 그냥 파일명으로 취급.
+        if (nsStringFromSlice(default_path)) |ns| msgSendVoid1(panel, "setNameFieldStringValue:", ns);
+    }
+}
+
+fn setDirectoryURLFromPath(panel: *anyopaque, dir_path: []const u8) void {
+    const ns_dir = nsStringFromSlice(dir_path) orelse return;
+    const NSURL = getClass("NSURL") orelse return;
+    const fileUrlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const url = fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_dir) orelse return;
+    msgSendVoid1(panel, "setDirectoryURL:", url);
+}
+
+fn applyFileFilters(panel: *anyopaque, filters: []const FileFilter) void {
+    // setAllowedFileTypes:는 macOS 12에서 deprecated이지만 여전히 동작 — UTType 기반 신규 API
+    // (setAllowedContentTypes:)는 추후 작업. 모든 필터의 extension을 평탄화해 단일 NSArray로 전달.
+    const NSMutableArray = getClass("NSMutableArray") orelse return;
+    const arr = msgSend(NSMutableArray, "array") orelse return;
+    const addObjFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void =
+        @ptrCast(&objc.objc_msgSend);
+    var added: usize = 0;
+    for (filters) |f| {
+        for (f.extensions) |ext| {
+            // "*" 또는 빈 문자열은 무시 — 모든 파일 허용 의미라 setAllowedFileTypes 자체를 안 부름이 맞음.
+            if (ext.len == 0 or std.mem.eql(u8, ext, "*")) continue;
+            if (nsStringFromSlice(ext)) |ns| {
+                addObjFn(arr, @ptrCast(objc.sel_registerName("addObject:")), ns);
+                added += 1;
+            }
+        }
+    }
+    if (added > 0) msgSendVoid1(panel, "setAllowedFileTypes:", arr);
+}
+
+fn nsUrlToPath(ns_url: *anyopaque, buf: []u8) []const u8 {
+    const path_ns = msgSend(ns_url, "path") orelse return buf[0..0];
+    const utf8Fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 =
+        @ptrCast(&objc.objc_msgSend);
+    const cstr = utf8Fn(path_ns, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return buf[0..0];
+    const len = std.mem.span(cstr).len;
+    const copy_len = @min(len, buf.len);
+    @memcpy(buf[0..copy_len], cstr[0..copy_len]);
+    return buf[0..copy_len];
+}
+
+fn writeCanceledResponse(buf: []u8, canceled: bool) []const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"canceled\":{},\"filePaths\":[]}}",
+        .{canceled},
+    ) catch buf[0..0];
+}
+
+fn writeSaveCanceledResponse(buf: []u8, canceled: bool) []const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"canceled\":{},\"filePath\":\"\"}}",
+        .{canceled},
+    ) catch buf[0..0];
+}
+
+fn writeSaveSuccessResponse(buf: []u8, path: []const u8) []const u8 {
+    var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
+    const esc_len = util.escapeJsonStrFull(path, &esc_buf) orelse return writeSaveCanceledResponse(buf, true);
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"canceled\":false,\"filePath\":\"{s}\"}}",
+        .{esc_buf[0..esc_len]},
+    ) catch writeSaveCanceledResponse(buf, true);
+}
+
+/// NSArray<NSURL *> → JSON paths array. 응답 버퍼 부족하면 한도까지만.
+fn writeOpenResponse(buf: []u8, urls: *anyopaque) []const u8 {
+    const countFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize =
+        @ptrCast(&objc.objc_msgSend);
+    const count = countFn(urls, @ptrCast(objc.sel_registerName("count")));
+
+    var w: usize = 0;
+    const header = std.fmt.bufPrint(buf[w..], "{{\"canceled\":false,\"filePaths\":[", .{}) catch return writeCanceledResponse(buf, true);
+    w += header.len;
+
+    const objAtFn: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    var path_buf: [4096]u8 = undefined;
+    var esc_buf: [4096]u8 = undefined;
+    var written_count: usize = 0;
+    const max_paths = @min(count, MAX_DIALOG_PATHS);
+    var i: usize = 0;
+    while (i < max_paths) : (i += 1) {
+        const url = objAtFn(urls, @ptrCast(objc.sel_registerName("objectAtIndex:")), i) orelse continue;
+        const path = nsUrlToPath(url, &path_buf);
+        const esc_len = util.escapeJsonStrFull(path, &esc_buf) orelse continue;
+
+        const sep: []const u8 = if (written_count == 0) "\"" else ",\"";
+        const part = std.fmt.bufPrint(buf[w..], "{s}{s}\"", .{ sep, esc_buf[0..esc_len] }) catch break;
+        w += part.len;
+        written_count += 1;
+    }
+
+    const tail = std.fmt.bufPrint(buf[w..], "]}}", .{}) catch return writeCanceledResponse(buf, true);
+    w += tail.len;
+    return buf[0..w];
+}
+
 /// 메시지 루프 실행 (블로킹)
 pub fn run() void {
     if (comptime is_macos) activateNSApp();
@@ -741,12 +1335,42 @@ pub fn run() void {
 
 /// CEF 종료
 pub fn shutdown() void {
+    // c.cef_shutdown은 메시지 루프 drain 중 잔여 OnBeforeClose 콜백을 발화시킬 수 있음 —
+    // 그 시점에 devtools_to_inspectee가 살아있어야 안전한 lookup/remove 가능.
     c.cef_shutdown();
+    if (devtools_map_initialized) {
+        devtools_map_initialized = false;
+        devtools_to_inspectee.deinit();
+    }
+    pending_devtools_inspectee = null;
     std.debug.print("[suji] CEF shutdown\n", .{});
 }
 
-/// 메시지 루프 종료 요청. 현재 콜백 완료 후 run()이 반환.
+/// 메시지 루프 종료 요청. 매핑된 DevTools와 등록된 모든 창을 force-close 후 quit.
+///
+/// DevTools 떠 있을 때 cef_quit_message_loop만 호출하면 macOS NSApp 런루프가
+/// DevTools pending 이벤트에 매여 quit이 늦거나 무시됨. close_browser(1)은 force라
+/// cancelable `window:close` 이벤트는 발화 X — 명시적 quit 요청이라 의도적.
 pub fn quit() void {
+    if (devtools_map_initialized) {
+        var it = devtools_to_inspectee.iterator();
+        while (it.next()) |entry| {
+            const native = g_cef_native orelse break;
+            const be = native.browsers.get(entry.value_ptr.*) orelse continue;
+            const host = devtoolsHost(be.browser) orelse continue;
+            if (host.has_dev_tools.?(host) == 1) host.close_dev_tools.?(host);
+        }
+    }
+
+    if (g_cef_native) |native| {
+        var it = native.browsers.iterator();
+        while (it.next()) |entry| {
+            const br = entry.value_ptr.*.browser;
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br)) orelse continue;
+            host.close_browser.?(host, 1);
+        }
+    }
+
     c.cef_quit_message_loop();
 }
 
@@ -1047,12 +1671,12 @@ fn handleBrowserInvoke(
     var ch_buf: [256]u8 = undefined;
     const channel = getArgString(args, 1, &ch_buf);
 
-    var data_buf: [8192]u8 = undefined;
+    var data_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
 
     // Phase 2.5 — wire 레벨 sender 컨텍스트(__window/__window_name/__window_url/__window_main_frame)
     // 자동 주입. 이미 __window가 박혀있는 요청(cross-hop)은 보존.
-    var injected_buf: [8192]u8 = undefined;
+    var injected_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     var url_extract_buf: [2048]u8 = undefined;
     const data_to_backend: []const u8 = blk: {
         const br = browser orelse break :blk data;
@@ -1115,7 +1739,7 @@ fn handleBrowserEmit(msg: *c._cef_process_message_t) i32 {
     var ev_buf: [256]u8 = undefined;
     const event = getArgString(args, 0, &ev_buf);
 
-    var data_buf: [8192]u8 = undefined;
+    var data_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     const data = getArgString(args, 1, &data_buf);
 
     // 3번째 인자 — 선택적 target window id. 없으면(0/미설정) 브로드캐스트.
@@ -1159,20 +1783,16 @@ fn onAfterCreated(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) 
     const br = browser orelse return;
     const id: u64 = @intCast(br.get_identifier.?(br));
 
-    // pending이 있으면 이 browser가 직전 openDevTools가 띄운 DevTools — 매핑.
-    // DevTools는 g_browser/BrowserEntry에 등록 안 함 (사용자 창이 아님).
     if (pending_devtools_inspectee) |inspectee| {
         ensureDevToolsMap();
         devtools_to_inspectee.put(id, inspectee) catch {};
         pending_devtools_inspectee = null;
-        std.debug.print("[suji] DevTools browser created: id={d} → inspectee {d}\n", .{ id, inspectee });
         return;
     }
 
     if (g_browser == null) {
         g_browser = browser;
     }
-    std.debug.print("[suji] CEF browser after_created: id={d}\n", .{id});
 }
 
 /// CEF가 browser close 요청을 처리할지 물어보는 훅.
@@ -1213,8 +1833,18 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
 
     if (g_cef_native) |cn| cn.purge(handle);
 
-    // DevTools 닫히면 매핑 제거 — 같은 id가 새 browser에 재할당될 때 stale 매핑 차단.
+    // DevTools 닫히면 (1) inspectee 창에 키 포커스 복귀, (2) 매핑 제거.
+    // makeKey는 다음 런루프 틱에 지연 실행해야 함 — onBeforeClose는 NSWindow close
+    // 시퀀스 중간에 호출되고 AppKit이 그 후에도 비동기로 키 창을 재할당해 우리 호출이
+    // 덮어써짐. performSelector:withObject:afterDelay:0이 다음 틱에 makeKey 예약.
     if (devtools_map_initialized) {
+        if (devtools_to_inspectee.get(handle)) |inspectee_id| {
+            if (g_cef_native) |native| {
+                if (native.browsers.get(inspectee_id)) |entry| {
+                    if (entry.ns_window) |ns_win| deferMakeKeyAndOrderFront(ns_win);
+                }
+            }
+        }
         _ = devtools_to_inspectee.remove(handle);
     }
 
@@ -1283,16 +1913,25 @@ fn onPreKeyEvent(
     const key = ev.windows_key_code;
 
     // F12 / Cmd+Shift+I / Cmd+Option+I — DevTools 토글.
-    // 단축키를 누른 창(br)을 대상으로 — 멀티윈도우에서도 각 창마다 자기 DevTools.
     const is_devtools_key = (key == 123) or (cmd and key == 'I' and (shift or alt));
     if (is_devtools_key) {
+        markShortcut(is_keyboard_shortcut);
+        // sender가 DevTools front-end면 recursive open(=DevTools의 DevTools) 차단 +
+        // 사용자 의도 = "DevTools 닫기" → inspectee.host.close_dev_tools.
+        const sender_id: u64 = @intCast(br.get_identifier.?(br));
+        if (lookupDevToolsInspectee(sender_id)) |inspectee_id| {
+            if (g_cef_native) |native| {
+                if (native.browsers.get(inspectee_id)) |entry| closeDevTools(entry.browser);
+            }
+            return 1;
+        }
         toggleDevTools(br);
         return 1;
     }
 
     // F5 / Shift+F5 — Reload (Electron 호환, DevTools 안에서 누르면 inspectee reload).
-    // macOS는 F5 키가 흔치 않지만 외부 키보드/Linux/Windows 호환.
     if (key == 116) {
+        markShortcut(is_keyboard_shortcut);
         reloadInspecteeOrSelf(br, shift);
         return 1;
     }
@@ -1301,12 +1940,14 @@ fn onPreKeyEvent(
 
     // Cmd+R — Reload (DevTools 안이면 inspectee reload — Electron 호환).
     if (key == 'R' and !shift) {
+        markShortcut(is_keyboard_shortcut);
         reloadInspecteeOrSelf(br, false);
         return 1;
     }
 
     // Cmd+Shift+R — Hard Reload (cache 무시).
     if (key == 'R' and shift) {
+        markShortcut(is_keyboard_shortcut);
         reloadInspecteeOrSelf(br, true);
         return 1;
     }
@@ -1335,9 +1976,10 @@ fn onPreKeyEvent(
         return 1;
     }
 
-    // Cmd+Q — 앱 종료
+    // Cmd+Q — 앱 종료. 일반적으로는 NSApp 메뉴 key equivalent가 먼저 매치되어
+    // SujiQuitTarget.sujiQuit:이 발화 → 여긴 도달 X. 폴백으로 동일 quit() 호출.
     if (key == 'Q') {
-        c.cef_quit_message_loop();
+        quit();
         return 1;
     }
 
@@ -1378,6 +2020,13 @@ fn onPreKeyEvent(
 
 fn devtoolsHost(browser: *c.cef_browser_t) ?*c.cef_browser_host_t {
     return asPtr(c.cef_browser_host_t, browser.get_host.?(browser));
+}
+
+/// CEF에 "이 키는 keyboard shortcut이라 default browser command 발동 막아라" 알림.
+/// OnPreKeyEvent return 1만으로는 CEF가 자체 reload(Cmd+R) 같은 default 처리를
+/// 별도로 발동시킬 수 있어 우리 헬퍼와 충돌 가능. is_keyboard_shortcut.* = 1로 차단.
+fn markShortcut(is_keyboard_shortcut: ?*i32) void {
+    if (is_keyboard_shortcut) |sc| sc.* = 1;
 }
 
 /// reload 키(F5/Cmd+R)는 sender browser를 reload하는 게 기본인데, sender가 DevTools
@@ -1459,7 +2108,9 @@ fn openDevTools(browser: *c.cef_browser_t) void {
 fn closeDevTools(browser: *c.cef_browser_t) void {
     const host = devtoolsHost(browser) orelse return;
     if (host.has_dev_tools.?(host) != 1) return; // 이미 닫혀있으면 no-op
-    // 매핑 정리는 onBeforeClose가 처리 (DevTools browser id를 그쪽에서 알 수 있음).
+    // 매핑 정리 + inspectee focus 복귀는 onBeforeClose가 처리 — close_dev_tools가
+    // 비동기라 여기서 즉시 makeKeyAndOrderFront 호출하면 OS의 close-time focus
+    // 재할당에 덮어쓰임. DevTools browser의 onBeforeClose 콜백이 close 완료 시점.
     host.close_dev_tools.?(host);
 }
 
@@ -1681,7 +2332,7 @@ fn v8HandleInvoke(
 
     var channel_buf: [256]u8 = undefined;
     var channel: []const u8 = "";
-    var request_buf: [8192]u8 = undefined;
+    var request_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     var request: []const u8 = "{}";
 
     if (argc >= 2) {
@@ -1749,7 +2400,7 @@ fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
     const event_userfree = event_v8.get_string_value.?(event_v8);
     const event = cefUserfreeToUtf8(event_userfree, &event_buf);
 
-    var data_buf: [8192]u8 = undefined;
+    var data_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     var data: []const u8 = "{}";
     if (argc >= 2) {
         const data_v8 = argv[1];
@@ -1868,7 +2519,7 @@ fn handleRendererEvent(msg: *c._cef_process_message_t) i32 {
     var event_buf: [256]u8 = undefined;
     const event = getArgString(args, 0, &event_buf);
 
-    var data_buf: [8192]u8 = undefined;
+    var data_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     const data = getArgString(args, 1, &data_buf);
 
     // 저장된 렌더러 컨텍스트 사용 (onContextCreated에서 저장)
@@ -2294,7 +2945,7 @@ fn setupMainMenu(app: ?*anyopaque) void {
     addMenuItemWithModifier(app_menu, "Hide Others", "hideOtherApplications:", "h", true);
     addMenuItem(app_menu, "Show All", "unhideAllApplications:", "");
     addSeparator(app_menu);
-    addMenuItem(app_menu, "Quit Suji", "terminate:", "q");
+    addQuitMenuItem(app_menu);
     addSubmenuItem(menubar, "", app_menu);
 
     // 2. File 메뉴
@@ -2443,6 +3094,22 @@ fn addMenuItem(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key:
     msgSendVoid1(menu, "addItem:", item);
 }
 
+fn addQuitMenuItem(menu: *anyopaque) void {
+    const target = ensureQuitTarget() orelse return;
+    const NSMenuItem = getClass("NSMenuItem") orelse return;
+    const NSString = getClass("NSString") orelse return;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), "Quit Suji");
+    const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), "q");
+
+    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
+    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName("sujiQuit:")), ns_key) orelse return;
+    msgSendVoid1(item, "setTarget:", target);
+    msgSendVoid1(menu, "addItem:", item);
+}
+
 fn addSeparator(menu: *anyopaque) void {
     const NSMenuItem = getClass("NSMenuItem") orelse return;
     const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
@@ -2453,6 +3120,17 @@ fn msgSendVoid1(target: ?*anyopaque, sel_name: [:0]const u8, arg: ?*anyopaque) v
     const sel = objc.sel_registerName(sel_name.ptr);
     const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     func(target, @ptrCast(sel), arg);
+}
+
+/// `[ns_win performSelector:@selector(makeKeyAndOrderFront:) withObject:nil afterDelay:0]`.
+/// onBeforeClose 시점엔 AppKit이 close-time 비동기 focus 재할당을 미루고 있어
+/// 즉시 makeKey가 덮어써짐 — afterDelay:0으로 다음 런루프 틱에 예약하면 안정.
+fn deferMakeKeyAndOrderFront(ns_win: *anyopaque) void {
+    const sel_perform = objc.sel_registerName("performSelector:withObject:afterDelay:");
+    const sel_make_key = objc.sel_registerName("makeKeyAndOrderFront:");
+    const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, f64) callconv(.c) void =
+        @ptrCast(&objc.objc_msgSend);
+    f(ns_win, @ptrCast(sel_perform), @ptrCast(sel_make_key), null, 0.0);
 }
 
 /// BOOL 인자(u8 0/1) 버전 — setOpaque:/setHasShadow: 등 Objective-C BOOL setter용.
@@ -2511,13 +3189,60 @@ fn createMacWindow(opts: WindowInitOpts) MacWindowHandles {
 
 /// NSWindow.alloc + initWithContentRect:styleMask:backing:defer:.
 /// frame=false면 borderless(0). frame=true면 titled+closable+miniaturizable[+resizable].
-/// borderless는 별도 키보드/마우스 처리 + drag region을 사용자가 직접 만들어야 함 (Phase 4 백로그).
+/// borderless 창도 키 이벤트를 받도록 NSWindow subclass `SujiKeyableWindow`를 사용 —
+/// 기본 NSWindow.canBecomeKeyWindow는 borderless에서 NO 반환이라 frameless 창에 키 안 옴.
 fn allocMacWindow(opts: WindowInitOpts) ?*anyopaque {
-    const NSWindow = getClass("NSWindow") orelse return null;
-    const window_alloc = msgSend(NSWindow, "alloc") orelse return null;
+    const cls = ensureSujiKeyableWindowClass() orelse return null;
+    const window_alloc = msgSend(cls, "alloc") orelse return null;
     const initSel = objc.sel_registerName("initWithContentRect:styleMask:backing:defer:");
     const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u64, u64, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     return initFn(window_alloc, @ptrCast(initSel), resolveInitialFrame(opts), computeStyleMask(opts), 2, 0);
+}
+
+/// NSWindow subclass로 borderless(frame=false) 창의 canBecomeKeyWindow를 YES override.
+/// 그래야 frameless 창에 키 이벤트(F12/Cmd+R 등)가 들어옴 — 기본 NSWindow는 borderless면
+/// canBecomeKeyWindow=NO라 키 입력 무시. titled 창은 super가 이미 YES 반환이라 영향 X.
+var g_keyable_window_class: ?*anyopaque = null;
+fn ensureSujiKeyableWindowClass() ?*anyopaque {
+    if (g_keyable_window_class) |existing| return existing;
+    const ns_window = getClass("NSWindow") orelse return null;
+    const cls = objc.objc_allocateClassPair(ns_window, "SujiKeyableWindow", 0) orelse {
+        // 이미 등록된 경우 — 동일 이름으로 다시 alloc하면 null. 기존 클래스 가져옴.
+        return getClass("SujiKeyableWindow");
+    };
+    const sel = objc.sel_registerName("canBecomeKeyWindow");
+    _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&returnYesBOOL), "c@:");
+    objc.objc_registerClassPair(cls);
+    g_keyable_window_class = cls;
+    return cls;
+}
+
+fn returnYesBOOL(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) u8 {
+    return 1;
+}
+
+/// Quit 메뉴/Cmd+Q action 타깃. 기본 NSApplication의 `terminate:`를 부르면 CEF가
+/// NSApplicationWillTerminate 옵저버에서 SIGTRAP — 그래서 자체 selector로 우회해
+/// `cef.quit()`(close_browser→cef_quit_message_loop)을 호출, run() 정상 반환 후
+/// main.zig가 cef.shutdown까지 정렬 처리.
+var g_quit_target: ?*anyopaque = null;
+
+fn sujiQuitImpl(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+    quit();
+}
+
+fn ensureQuitTarget() ?*anyopaque {
+    if (g_quit_target) |existing| return existing;
+    const NSObject = getClass("NSObject") orelse return null;
+    const cls = objc.objc_allocateClassPair(NSObject, "SujiQuitTarget", 0) orelse
+        getClass("SujiQuitTarget") orelse return null;
+    const sel = objc.sel_registerName("sujiQuit:");
+    _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&sujiQuitImpl), "v@:@");
+    objc.objc_registerClassPair(cls);
+    const alloc = msgSend(cls, "alloc") orelse return null;
+    const instance = msgSend(alloc, "init") orelse return null;
+    g_quit_target = instance;
+    return instance;
 }
 
 /// NSWindowStyleMask: titled(1)+closable(2)+miniaturizable(4)+resizable(8).

@@ -338,6 +338,239 @@ export const windows = {
   },
 };
 
+// ============================================
+// clipboard — 시스템 클립보드 (Electron `clipboard.readText/writeText`)
+// ============================================
+// 현재 macOS만 지원 (NSPasteboard). Linux/Windows는 graceful no-op (read는 빈 문자열).
+
+export const clipboard = {
+  /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
+  async readText(): Promise<string> {
+    const r = await coreCall<{ text: string }>({ cmd: "clipboard_read_text" });
+    return r.text ?? "";
+  },
+
+  /** 클립보드에 plain text 쓰기. 성공 시 true. */
+  async writeText(text: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_text", text });
+    return r.success === true;
+  },
+
+  /** 클립보드 비우기. */
+  async clear(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_clear" });
+    return r.success === true;
+  },
+};
+
+// ============================================
+// shell — 외부 핸들러 호출 (Electron `shell.*`)
+// ============================================
+// 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.
+
+export const shell = {
+  /** URL을 시스템 기본 핸들러로 열기 (http(s) → 브라우저, mailto: → 메일 앱 등).
+   *  잘못된 URL syntax면 false. */
+  async openExternal(url: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "shell_open_external", url });
+    return r.success === true;
+  },
+
+  /** Finder/탐색기에서 파일/폴더 reveal — 부모 폴더 열리고 항목 선택. 경로 없으면 false. */
+  async showItemInFolder(path: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "shell_show_item_in_folder", path });
+    return r.success === true;
+  },
+
+  /** 시스템 비프음. */
+  async beep(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "shell_beep" });
+    return r.success === true;
+  },
+};
+
+// ============================================
+// dialog — Native modal dialogs (Electron `dialog.*`)
+// ============================================
+// macOS만 지원 (NSOpenPanel/NSSavePanel/NSAlert). Linux/Windows에선 stub —
+// canceled:true / response:0 반환.
+//
+// 모든 dialog는 Promise. 내부적으로 `runModal` 동기 호출이라 modal 동안 부모 창 입력 차단.
+
+export type MessageBoxStyle = "none" | "info" | "warning" | "error" | "question";
+
+export interface MessageBoxOptions {
+  /** 아이콘 / 시스템 사운드 결정. 기본 "none". */
+  type?: MessageBoxStyle;
+  /** 창 타이틀. */
+  title?: string;
+  /** 주 메시지 (필수에 가까움 — 빈 값이면 macOS가 자동 텍스트). */
+  message: string;
+  /** 보조 메시지 (작은 폰트). */
+  detail?: string;
+  /** 버튼 레이블 배열. 빈 배열이면 ["OK"]. */
+  buttons?: string[];
+  /** Enter로 활성화될 버튼 index (기본: 첫 번째). */
+  defaultId?: number;
+  /** ESC로 활성화될 버튼 index. */
+  cancelId?: number;
+  /** suppression checkbox 레이블. 빈 문자열이면 체크박스 비활성. */
+  checkboxLabel?: string;
+  /** 체크박스 초기 상태. */
+  checkboxChecked?: boolean;
+}
+
+export interface FileFilter {
+  /** 필터 그룹 표시명 (현재 macOS UI에는 미반영 — 모든 extensions가 통합 허용). */
+  name: string;
+  /** 허용 확장자 (점 없이): `["jpg", "png"]`. `"*"`은 모든 파일. */
+  extensions: string[];
+}
+
+export type OpenDialogProperty =
+  | "openFile"
+  | "openDirectory"
+  | "multiSelections"
+  | "showHiddenFiles"
+  | "createDirectory"
+  | "noResolveAliases"
+  | "treatPackageAsDirectory";
+
+export interface OpenDialogOptions {
+  title?: string;
+  /** 초기 디렉토리 (또는 파일명 포함 경로 — 마지막 segment가 파일명으로 들어감). */
+  defaultPath?: string;
+  /** 확인 버튼 레이블 ("Open" 대신). */
+  buttonLabel?: string;
+  /** 다이얼로그 상단 메시지 (macOS 한정 표시). */
+  message?: string;
+  filters?: FileFilter[];
+  /** 기본: ["openFile"]. */
+  properties?: OpenDialogProperty[];
+}
+
+export type SaveDialogProperty =
+  | "showHiddenFiles"
+  | "createDirectory"
+  | "treatPackageAsDirectory";
+
+export interface SaveDialogOptions {
+  title?: string;
+  defaultPath?: string;
+  buttonLabel?: string;
+  message?: string;
+  /** 파일명 입력란의 레이블. */
+  nameFieldLabel?: string;
+  /** macOS Finder 태그 입력 필드 표시. */
+  showsTagField?: boolean;
+  filters?: FileFilter[];
+  properties?: SaveDialogProperty[];
+}
+
+/// Dialog 함수의 Electron 두-인자 오버로드 분해. 첫 인자가 number면 windowId(=sheet 부모),
+/// 아니면 options 단일 인자로 free-floating modal.
+function splitDialogArgs<T extends object>(
+  arg1: T | number,
+  arg2: T | undefined,
+): { windowId?: number; options: T } {
+  if (typeof arg1 === "number") {
+    return { windowId: arg1, options: (arg2 ?? ({} as T)) as T };
+  }
+  return { options: arg1 };
+}
+
+export const dialog = {
+  /** 메시지 박스. 첫 인자에 windowId(number) 주면 sheet — 그 창에 부착. 없으면 free-floating.
+   *  반환: 사용자가 클릭한 버튼 index + checkbox 상태. */
+  async showMessageBox(
+    arg1: MessageBoxOptions | number,
+    arg2?: MessageBoxOptions,
+  ): Promise<{ response: number; checkboxChecked: boolean }> {
+    const { windowId, options } = splitDialogArgs(arg1, arg2);
+    return coreCall<{ response: number; checkboxChecked: boolean }>({
+      cmd: "dialog_show_message_box",
+      ...(windowId !== undefined ? { windowId } : {}),
+      ...options,
+    });
+  },
+
+  /** 단순 에러 popup (NSAlert critical style + OK 버튼). 응답 없음 — Electron 동등. */
+  async showErrorBox(title: string, content: string): Promise<void> {
+    await coreCall({ cmd: "dialog_show_error_box", title, content });
+  },
+
+  /** 파일/폴더 선택. 첫 인자 windowId면 sheet. 취소면 `{canceled:true, filePaths:[]}`. */
+  async showOpenDialog(
+    arg1: OpenDialogOptions | number = {},
+    arg2?: OpenDialogOptions,
+  ): Promise<{ canceled: boolean; filePaths: string[] }> {
+    const { windowId, options } = splitDialogArgs(arg1, arg2);
+    return coreCall<{ canceled: boolean; filePaths: string[] }>({
+      cmd: "dialog_show_open_dialog",
+      ...(windowId !== undefined ? { windowId } : {}),
+      ...options,
+    });
+  },
+
+  /** 저장 경로 선택. 첫 인자 windowId면 sheet. 취소면 `{canceled:true, filePath:""}`. */
+  async showSaveDialog(
+    arg1: SaveDialogOptions | number = {},
+    arg2?: SaveDialogOptions,
+  ): Promise<{ canceled: boolean; filePath: string }> {
+    const { windowId, options } = splitDialogArgs(arg1, arg2);
+    return coreCall<{ canceled: boolean; filePath: string }>({
+      cmd: "dialog_show_save_dialog",
+      ...(windowId !== undefined ? { windowId } : {}),
+      ...options,
+    });
+  },
+
+  // ── Sync 변종 — Electron 호환. modal 동안 부모 창 입력 차단되는 건 async와 동일.
+  // JS 측 응답 shape만 다름: number / string[] | undefined / string | undefined.
+
+  /** Sync 변종 — `response: number`만 반환. windowId 첫 인자 지원. */
+  async showMessageBoxSync(
+    arg1: MessageBoxOptions | number,
+    arg2?: MessageBoxOptions,
+  ): Promise<number> {
+    const { windowId, options } = splitDialogArgs(arg1, arg2);
+    const r = await coreCall<{ response: number }>({
+      cmd: "dialog_show_message_box",
+      ...(windowId !== undefined ? { windowId } : {}),
+      ...options,
+    });
+    return r.response;
+  },
+
+  /** Sync 변종 — 취소면 `undefined`, 아니면 `string[]`. windowId 첫 인자 지원. */
+  async showOpenDialogSync(
+    arg1: OpenDialogOptions | number = {},
+    arg2?: OpenDialogOptions,
+  ): Promise<string[] | undefined> {
+    const { windowId, options } = splitDialogArgs(arg1, arg2);
+    const r = await coreCall<{ canceled: boolean; filePaths: string[] }>({
+      cmd: "dialog_show_open_dialog",
+      ...(windowId !== undefined ? { windowId } : {}),
+      ...options,
+    });
+    return r.canceled ? undefined : r.filePaths;
+  },
+
+  /** Sync 변종 — 취소면 `undefined`, 아니면 `string`. windowId 첫 인자 지원. */
+  async showSaveDialogSync(
+    arg1: SaveDialogOptions | number = {},
+    arg2?: SaveDialogOptions,
+  ): Promise<string | undefined> {
+    const { windowId, options } = splitDialogArgs(arg1, arg2);
+    const r = await coreCall<{ canceled: boolean; filePath: string }>({
+      cmd: "dialog_show_save_dialog",
+      ...(windowId !== undefined ? { windowId } : {}),
+      ...options,
+    });
+    return r.canceled ? undefined : r.filePath;
+  },
+};
+
 /**
  * 여러 백엔드에 동시 요청
  */

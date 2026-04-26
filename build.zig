@@ -124,6 +124,14 @@ pub fn build(b: *std.Build) void {
         root_module.linkFramework("Chromium Embedded Framework", .{});
         root_module.linkSystemLibrary("objc", .{});
         root_module.linkFramework("Cocoa", .{});
+        // dialog.m — sheet completion handler (^block) wrapper. ARC 필수 — `__bridge` 캐스트
+        // 안전성 + completion handler block 자동 autorelease.
+        // Zig는 ObjC block을 직접 못 만들어서 .m 파일 통해 NSAlert/NSSavePanel
+        // beginSheetModalForWindow:completionHandler: 호출.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/dialog.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");

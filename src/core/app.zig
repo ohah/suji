@@ -652,16 +652,117 @@ pub const windows = struct {
         return coreCmd("set_bounds", fields);
     }
 
-    /// internal: cmd + payload fields → "__core__" 채널로 invoke.
-    fn coreCmd(cmd: []const u8, fields_json: []const u8) ?[]const u8 {
-        var buf: [JS_CODE_STACK_BUF + 256]u8 = undefined;
-        const sep: []const u8 = if (fields_json.len > 0) "," else "";
-        const req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"{s}\"{s}{s}}}", .{ cmd, sep, fields_json }) catch return null;
-        return callBackend("__core__", req);
-    }
-
     /// JS code escape용 stack 버퍼 — cef.zig executeJavascript와 동일 임계값.
     const JS_CODE_STACK_BUF: usize = 4096;
+};
+
+/// internal: cmd + payload fields → "__core__" 채널로 invoke. windows/clipboard/shell/dialog
+/// 네 namespace 공통.
+fn coreCmd(cmd: []const u8, fields_json: []const u8) ?[]const u8 {
+    var buf: [util.MAX_REQUEST]u8 = undefined;
+    const sep: []const u8 = if (fields_json.len > 0) "," else "";
+    const req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"{s}\"{s}{s}}}", .{ cmd, sep, fields_json }) catch return null;
+    return callBackend("__core__", req);
+}
+
+// ============================================
+// Clipboard / Shell / Dialog — frontend `@suji/api`와 동일 cmd 사용.
+// 응답은 raw JSON string — caller가 std.json으로 파싱.
+// ============================================
+
+pub const clipboard = struct {
+    /// 시스템 클립보드 plain text 읽기. 응답: `{"from","cmd","text":"..."}`.
+    pub fn readText() ?[]const u8 {
+        return coreCmd("clipboard_read_text", "");
+    }
+
+    /// 시스템 클립보드 plain text 쓰기. 응답: `{"from","cmd","success":bool}`.
+    pub fn writeText(text: []const u8) ?[]const u8 {
+        var t_buf: [16384]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(text, &t_buf) orelse return null;
+        var fields_buf: [16400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"text\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
+        return coreCmd("clipboard_write_text", fields);
+    }
+
+    pub fn clear() ?[]const u8 {
+        return coreCmd("clipboard_clear", "");
+    }
+};
+
+pub const shell = struct {
+    /// 시스템 기본 핸들러로 URL 열기. 응답: `{"from","cmd","success":bool}`.
+    pub fn openExternal(url: []const u8) ?[]const u8 {
+        var u_buf: [4096]u8 = undefined;
+        const u_n = util.escapeJsonStrFull(url, &u_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"url\":\"{s}\"", .{u_buf[0..u_n]}) catch return null;
+        return coreCmd("shell_open_external", fields);
+    }
+
+    pub fn showItemInFolder(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("shell_show_item_in_folder", fields);
+    }
+
+    pub fn beep() ?[]const u8 {
+        return coreCmd("shell_beep", "");
+    }
+};
+
+pub const dialog = struct {
+    /// 메시지 박스 — pre-built JSON fields(buttons 배열 등) 직접 전달.
+    /// 응답: `{"from","cmd","response":N,"checkboxChecked":bool}`.
+    /// 단순 버전은 messageBoxSimple 사용.
+    pub fn showMessageBox(fields_json: []const u8) ?[]const u8 {
+        return coreCmd("dialog_show_message_box", fields_json);
+    }
+
+    /// 단축: type/message + 버튼 배열만 받아 자동으로 fields_json 빌드.
+    /// type: "none"/"info"/"warning"/"error"/"question". buttons는 NS-1 개 stack-alloc 안전.
+    pub fn messageBoxSimple(msg_type: []const u8, message: []const u8, buttons: []const []const u8) ?[]const u8 {
+        var t_buf: [32]u8 = undefined;
+        var m_buf: [4096]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(msg_type, &t_buf) orelse return null;
+        const m_n = util.escapeJsonStrFull(message, &m_buf) orelse return null;
+        var fields_buf: [8192]u8 = undefined;
+        var w: usize = 0;
+        const head = std.fmt.bufPrint(fields_buf[w..], "\"type\":\"{s}\",\"message\":\"{s}\",\"buttons\":[", .{ t_buf[0..t_n], m_buf[0..m_n] }) catch return null;
+        w += head.len;
+        var b_buf: [256]u8 = undefined;
+        for (buttons, 0..) |btn, i| {
+            const b_n = util.escapeJsonStrFull(btn, &b_buf) orelse return null;
+            const sep: []const u8 = if (i == 0) "\"" else ",\"";
+            const part = std.fmt.bufPrint(fields_buf[w..], "{s}{s}\"", .{ sep, b_buf[0..b_n] }) catch return null;
+            w += part.len;
+        }
+        const tail = std.fmt.bufPrint(fields_buf[w..], "]", .{}) catch return null;
+        w += tail.len;
+        return showMessageBox(fields_buf[0..w]);
+    }
+
+    pub fn showErrorBox(title: []const u8, content: []const u8) ?[]const u8 {
+        var t_buf: [512]u8 = undefined;
+        var c_buf: [4096]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
+        const c_n = util.escapeJsonStrFull(content, &c_buf) orelse return null;
+        var fields_buf: [4800]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"title\":\"{s}\",\"content\":\"{s}\"", .{ t_buf[0..t_n], c_buf[0..c_n] }) catch return null;
+        return coreCmd("dialog_show_error_box", fields);
+    }
+
+    /// 파일 열기 dialog — pre-built fields. 응답: `{"from","cmd","canceled":bool,"filePaths":[...]}`.
+    pub fn showOpenDialog(fields_json: []const u8) ?[]const u8 {
+        return coreCmd("dialog_show_open_dialog", fields_json);
+    }
+
+    /// 파일 저장 dialog — pre-built fields. 응답: `{"from","cmd","canceled":bool,"filePath":"..."}`.
+    pub fn showSaveDialog(fields_json: []const u8) ?[]const u8 {
+        return coreCmd("dialog_show_save_dialog", fields_json);
+    }
 };
 
 /// 다른 백엔드 호출 (invoke)

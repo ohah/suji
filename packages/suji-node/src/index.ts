@@ -481,3 +481,129 @@ export const windows = {
     });
   },
 };
+
+// ============================================
+// Clipboard / Shell / Dialog — Electron parity. Frontend `@suji/api`와 동일 cmd.
+// 모두 invoke('__core__', ...) 경유 — IPC가 cef.zig handler로 라우팅.
+// ============================================
+
+export const clipboard = {
+  /** 시스템 클립보드 plain text 읽기. */
+  async readText(): Promise<string> {
+    const r = await invoke<{ text: string }>('__core__', { cmd: 'clipboard_read_text' });
+    return r.text ?? '';
+  },
+
+  /** 시스템 클립보드 plain text 쓰기. */
+  async writeText(text: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_text', text });
+    return r.success === true;
+  },
+
+  async clear(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_clear' });
+    return r.success === true;
+  },
+};
+
+export const shell = {
+  /** URL을 시스템 기본 핸들러로 (http(s) → 브라우저, mailto: → 메일 앱 등). */
+  async openExternal(url: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_open_external', url });
+    return r.success === true;
+  },
+
+  async showItemInFolder(path: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_show_item_in_folder', path });
+    return r.success === true;
+  },
+
+  async beep(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_beep' });
+    return r.success === true;
+  },
+};
+
+// Dialog 옵션 타입은 frontend `@suji/api`와 동일.
+export type MessageBoxStyle = 'none' | 'info' | 'warning' | 'error' | 'question';
+
+export interface MessageBoxOptions {
+  windowId?: number;        // 지정 시 sheet (해당 창 attach), 없으면 free-floating.
+  type?: MessageBoxStyle;
+  title?: string;
+  message: string;
+  detail?: string;
+  buttons?: string[];
+  defaultId?: number;
+  cancelId?: number;
+  checkboxLabel?: string;
+  checkboxChecked?: boolean;
+}
+
+export interface FileFilter {
+  name: string;
+  extensions: string[];
+}
+
+export type OpenDialogProperty =
+  | 'openFile' | 'openDirectory' | 'multiSelections' | 'showHiddenFiles'
+  | 'createDirectory' | 'noResolveAliases' | 'treatPackageAsDirectory';
+
+export interface OpenDialogOptions {
+  windowId?: number;
+  title?: string;
+  defaultPath?: string;
+  buttonLabel?: string;
+  message?: string;
+  filters?: FileFilter[];
+  properties?: OpenDialogProperty[];
+}
+
+export type SaveDialogProperty =
+  | 'showHiddenFiles' | 'createDirectory' | 'treatPackageAsDirectory';
+
+export interface SaveDialogOptions {
+  windowId?: number;
+  title?: string;
+  defaultPath?: string;
+  buttonLabel?: string;
+  message?: string;
+  nameFieldLabel?: string;
+  showsTagField?: boolean;
+  filters?: FileFilter[];
+  properties?: SaveDialogProperty[];
+}
+
+export const dialog = {
+  /** 메시지 박스. windowId 지정 시 sheet, 아니면 free-floating. */
+  showMessageBox(
+    options: MessageBoxOptions,
+  ): Promise<{ response: number; checkboxChecked: boolean }> {
+    return invoke<{ response: number; checkboxChecked: boolean }>('__core__', {
+      cmd: 'dialog_show_message_box',
+      ...options,
+    });
+  },
+
+  async showErrorBox(title: string, content: string): Promise<void> {
+    await invoke('__core__', { cmd: 'dialog_show_error_box', title, content });
+  },
+
+  showOpenDialog(
+    options: OpenDialogOptions = {},
+  ): Promise<{ canceled: boolean; filePaths: string[] }> {
+    return invoke<{ canceled: boolean; filePaths: string[] }>('__core__', {
+      cmd: 'dialog_show_open_dialog',
+      ...options,
+    });
+  },
+
+  showSaveDialog(
+    options: SaveDialogOptions = {},
+  ): Promise<{ canceled: boolean; filePath: string }> {
+    return invoke<{ canceled: boolean; filePath: string }>('__core__', {
+      cmd: 'dialog_show_save_dialog',
+      ...options,
+    });
+  },
+};

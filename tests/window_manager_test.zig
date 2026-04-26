@@ -2324,6 +2324,57 @@ test "회귀: onAfterCreated가 pending hand-off로 DevTools 매핑 + onBeforeCl
     try std.testing.expect(std.mem.indexOf(u8, bc_body, "devtools_to_inspectee.remove") != null);
 }
 
+test "회귀: onBeforeClose가 inspectee NSWindow를 makeKeyAndOrderFront — DevTools 닫힐 때 부모 창 키 포커스 복귀" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const bc_marker = "fn onBeforeClose(";
+    const bc_start = std.mem.indexOf(u8, source, bc_marker) orelse return error.OnBeforeCloseNotFound;
+    const bc_end = std.mem.indexOfPos(u8, source, bc_start + bc_marker.len, "\nfn ") orelse source.len;
+    const bc_body = source[bc_start..bc_end];
+
+    // onBeforeClose에서 매핑 lookup → inspectee NSWindow에 makeKey 지연 호출.
+    // 즉시 호출은 AppKit close-time 비동기 focus 재할당에 덮어써짐 → deferMakeKeyAndOrderFront가
+    // performSelector:afterDelay:0으로 다음 런루프 틱에 예약.
+    try std.testing.expect(std.mem.indexOf(u8, bc_body, "devtools_to_inspectee.get(handle)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bc_body, "deferMakeKeyAndOrderFront") != null);
+    // remove는 lookup 이후에 와야 — get에 hashmap 키가 살아 있어야 lookup 성공.
+    const get_pos = std.mem.indexOf(u8, bc_body, "devtools_to_inspectee.get(handle)") orelse return error.GetMissing;
+    const remove_pos = std.mem.indexOf(u8, bc_body, "devtools_to_inspectee.remove") orelse return error.RemoveMissing;
+    try std.testing.expect(get_pos < remove_pos);
+}
+
+test "회귀: cef.quit()은 cef_quit_message_loop 전에 모든 DevTools/browser를 close — DevTools 떠 있어도 quit 동작" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "pub fn quit() void {";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.QuitNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\n}") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // DevTools 매핑 iterate + close_dev_tools.
+    try std.testing.expect(std.mem.indexOf(u8, body, "devtools_to_inspectee.iterator") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "close_dev_tools") != null);
+    // 모든 사용자 browser에 close_browser(force=1).
+    try std.testing.expect(std.mem.indexOf(u8, body, "browsers.iterator") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "close_browser") != null);
+    // 마지막에 cef_quit_message_loop.
+    const close_browser_pos = std.mem.indexOf(u8, body, "close_browser") orelse return error.CloseBrowserMissing;
+    const quit_loop_pos = std.mem.indexOf(u8, body, "cef_quit_message_loop") orelse return error.QuitLoopMissing;
+    try std.testing.expect(close_browser_pos < quit_loop_pos);
+}
+
 test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -2346,6 +2397,474 @@ test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
     // 회귀 가드: 싱글 글로벌 참조 사용 금지.
     try std.testing.expect(std.mem.indexOf(u8, body, "toggleDevTools(g_browser") == null);
     try std.testing.expect(std.mem.indexOf(u8, body, "toggleDevTools(main_browser") == null);
+}
+
+test "회귀: Cmd+Q는 NSApp.terminate: 우회 — SujiQuitTarget.sujiQuit: → cef.quit()" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // [NSApp terminate:]은 NSApplicationWillTerminate 옵저버에서 CEF SIGTRAP. 절대 사용 금지.
+    // Quit 메뉴는 sujiQuit: action + SujiQuitTarget instance를 setTarget:으로 바인딩.
+    try std.testing.expect(std.mem.indexOf(u8, source, "\"SujiQuitTarget\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "sujiQuit:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "ensureQuitTarget") != null);
+
+    // setupMainMenu는 addQuitMenuItem(app_menu)만 호출 — terminate: 직접 등록 금지.
+    const menu_marker = "fn setupMainMenu(";
+    const menu_start = std.mem.indexOf(u8, source, menu_marker) orelse return error.SetupMainMenuNotFound;
+    const menu_end = std.mem.indexOfPos(u8, source, menu_start + menu_marker.len, "\nfn ") orelse source.len;
+    const menu_body = source[menu_start..menu_end];
+    try std.testing.expect(std.mem.indexOf(u8, menu_body, "addQuitMenuItem(app_menu)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, menu_body, "\"terminate:\"") == null);
+
+    // sujiQuitImpl은 quit() 호출 (cef_quit_message_loop 직접 호출 금지 — 그러면
+    // close_browser/close_dev_tools 사전 정리 우회).
+    const impl_marker = "fn sujiQuitImpl(";
+    const impl_start = std.mem.indexOf(u8, source, impl_marker) orelse return error.SujiQuitImplNotFound;
+    const impl_end = std.mem.indexOfPos(u8, source, impl_start + impl_marker.len, "\nfn ") orelse source.len;
+    const impl_body = source[impl_start..impl_end];
+    try std.testing.expect(std.mem.indexOf(u8, impl_body, "quit()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, impl_body, "cef_quit_message_loop") == null);
+
+    // onPreKeyEvent의 Cmd+Q 폴백도 quit() 호출 (cef_quit_message_loop 직접 호출 금지).
+    const kbd_marker = "fn onPreKeyEvent(";
+    const kbd_start = std.mem.indexOf(u8, source, kbd_marker) orelse return error.OnPreKeyEventNotFound;
+    const kbd_end = std.mem.indexOfPos(u8, source, kbd_start + kbd_marker.len, "\nfn ") orelse source.len;
+    const kbd_body = source[kbd_start..kbd_end];
+    const q_pos = std.mem.indexOf(u8, kbd_body, "key == 'Q'") orelse return error.CmdQNotFound;
+    const after_q = kbd_body[q_pos..];
+    const next_branch = std.mem.indexOf(u8, after_q, "\n    if (") orelse after_q.len;
+    const q_branch = after_q[0..next_branch];
+    try std.testing.expect(std.mem.indexOf(u8, q_branch, "quit()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, q_branch, "cef_quit_message_loop") == null);
+}
+
+test "회귀: cef.shutdown — c.cef_shutdown 후 devtools_to_inspectee.deinit + pending 리셋" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "pub fn shutdown() void {";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.ShutdownNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\n}") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // c.cef_shutdown이 deinit보다 먼저 — drain 중 callback이 map에 안전 access.
+    const cef_shutdown_pos = std.mem.indexOf(u8, body, "c.cef_shutdown()") orelse return error.CefShutdownMissing;
+    const deinit_pos = std.mem.indexOf(u8, body, "devtools_to_inspectee.deinit()") orelse return error.DeinitMissing;
+    try std.testing.expect(cef_shutdown_pos < deinit_pos);
+
+    // flag 리셋이 deinit 앞에 와야 freed-map + flag-true 윈도우 차단.
+    const flag_pos = std.mem.indexOf(u8, body, "devtools_map_initialized = false") orelse return error.FlagResetMissing;
+    try std.testing.expect(flag_pos < deinit_pos);
+
+    // pending도 null로 리셋 — 대칭 정리.
+    try std.testing.expect(std.mem.indexOf(u8, body, "pending_devtools_inspectee = null") != null);
+}
+
+test "회귀: SujiKeyableWindow subclass — borderless 창도 키 이벤트 받도록 canBecomeKeyWindow 오버라이드" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // 클래스 등록 + canBecomeKeyWindow 오버라이드.
+    try std.testing.expect(std.mem.indexOf(u8, source, "\"SujiKeyableWindow\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "canBecomeKeyWindow") != null);
+    try std.testing.expect(std.mem.indexOf(u8, source, "ensureSujiKeyableWindowClass") != null);
+
+    // allocMacWindow가 NSWindow 직접 alloc 대신 SujiKeyableWindow 사용.
+    const alloc_marker = "fn allocMacWindow(";
+    const alloc_start = std.mem.indexOf(u8, source, alloc_marker) orelse return error.AllocMacWindowNotFound;
+    const alloc_end = std.mem.indexOfPos(u8, source, alloc_start + alloc_marker.len, "\nfn ") orelse source.len;
+    const alloc_body = source[alloc_start..alloc_end];
+    try std.testing.expect(std.mem.indexOf(u8, alloc_body, "ensureSujiKeyableWindowClass") != null);
+    try std.testing.expect(std.mem.indexOf(u8, alloc_body, "getClass(\"NSWindow\")") == null);
+}
+
+test "회귀: g_devtools_client는 life_span_handler 필수 — 없으면 DevTools 매핑 등록 X" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "fn ensureGlobalHandlers(";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.EnsureGlobalHandlersNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // DevTools client에 keyboard + life_span 둘 다 필수.
+    try std.testing.expect(std.mem.indexOf(u8, body, "g_devtools_client.get_keyboard_handler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "g_devtools_client.get_life_span_handler") != null);
+}
+
+test "회귀: onPreKeyEvent에서 sender가 DevTools면 closeDevTools(inspectee) — recursive open 차단" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "fn onPreKeyEvent(";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.OnPreKeyEventNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // is_devtools_key 분기 안에서 sender가 매핑돼있으면(=DevTools front-end)
+    // closeDevTools(entry.browser) 호출 후 return 1 — toggleDevTools(br) 도달 X.
+    const dt_marker = "is_devtools_key";
+    const dt_start = std.mem.indexOf(u8, body, dt_marker) orelse return error.DevToolsKeyMissing;
+    const dt_branch_end = std.mem.indexOfPos(u8, body, dt_start, "    if (key == 116)") orelse body.len;
+    const dt_branch = body[dt_start..dt_branch_end];
+
+    try std.testing.expect(std.mem.indexOf(u8, dt_branch, "lookupDevToolsInspectee(sender_id)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dt_branch, "closeDevTools(entry.browser)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dt_branch, "toggleDevTools(br)") != null);
+
+    // closeDevTools가 toggleDevTools보다 먼저 — sender DevTools 분기 우선.
+    const close_pos = std.mem.indexOf(u8, dt_branch, "closeDevTools(entry.browser)") orelse return error.CloseMissing;
+    const toggle_pos = std.mem.indexOf(u8, dt_branch, "toggleDevTools(br)") orelse return error.ToggleMissing;
+    try std.testing.expect(close_pos < toggle_pos);
+}
+
+test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpenPanel/NSSavePanel" {
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+
+    // 4개 pub fn (showMessageBox / showErrorBox / showOpenDialog / showSaveDialog).
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showMessageBox(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showErrorBox(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showOpenDialog(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showSaveDialog(") != null);
+
+    // ObjC 클래스 사용.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSAlert") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSOpenPanel") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSSavePanel") != null);
+    // runModal 동기 호출 패턴.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"runModal\"") != null);
+    // setMessageText/setInformativeText/addButtonWithTitle.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setMessageText:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "addButtonWithTitle:") != null);
+    // suppression button (checkbox).
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setShowsSuppressionButton:") != null);
+    // 응답 형식 — Electron 매칭 ("canceled" + "filePaths"/"filePath").
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"canceled\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"filePaths\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"filePath\":") != null);
+
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    // 4개 cmd 라우팅.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"dialog_show_message_box\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"dialog_show_error_box\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"dialog_show_open_dialog\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"dialog_show_save_dialog\"") != null);
+    // std.json 기반 옵션 파싱 + ignore_unknown_fields (forward-compat).
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "std.json.parseFromSlice") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "ignore_unknown_fields = true") != null);
+    // properties string array → flag mapping.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"openFile\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"openDirectory\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"multiSelections\"") != null);
+
+    // showsTagField — Electron API 매칭.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setShowsTagField:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "shows_tag_field") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "showsTagField") != null);
+}
+
+test "회귀: 백엔드 SDK clipboard/shell/dialog 노출 — Zig/Rust/Go/Node 4개 모두" {
+    // Zig SDK (src/core/app.zig).
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const clipboard = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const shell = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const dialog = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "\"clipboard_read_text\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "\"shell_open_external\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "\"dialog_show_message_box\"") != null);
+
+    // Rust SDK.
+    const rs_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod clipboard {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod shell {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod dialog {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "fn read_text()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "fn open_external(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "MessageBoxOpts") != null);
+    // escape_json_full — \n/\t 보존.
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "fn escape_json_full(") != null);
+
+    // Go SDK — 3개 패키지 디렉토리 존재 + 함수 export.
+    const go_clip = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/clipboard/clipboard.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_clip);
+    try std.testing.expect(std.mem.indexOf(u8, go_clip, "func ReadText()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_clip, "func WriteText(") != null);
+
+    const go_shell = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/shell/shell.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_shell);
+    try std.testing.expect(std.mem.indexOf(u8, go_shell, "func OpenExternal(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_shell, "func Beep()") != null);
+
+    const go_dialog = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/dialog/dialog.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_dialog);
+    try std.testing.expect(std.mem.indexOf(u8, go_dialog, "func ShowMessageBox(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_dialog, "type MessageBoxOpts struct") != null);
+
+    // Node SDK.
+    const node_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-node/src/index.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(node_src);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const clipboard =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const shell =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const dialog =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "MessageBoxOptions") != null);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "OpenDialogOptions") != null);
+}
+
+test "회귀: Sheet modal — .m 파일 + extern decl + parent_window 옵션 + windowId 라우팅" {
+    // 1. dialog.m 파일 존재 + ObjC block completion handler 사용.
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/dialog.m",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(m_src);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "beginSheetModalForWindow:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "completionHandler:^") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_run_sheet_alert") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_run_sheet_save_panel") != null);
+    // nested run loop pattern.
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "nextEventMatchingMask:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "sendEvent:") != null);
+
+    // 2. build.zig에 .m 컴파일 룰 (ARC).
+    const build_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(128 * 1024),
+    );
+    defer std.testing.allocator.free(build_src);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/dialog.m") != null);
+    // ARC 필수 — __bridge 캐스트 + completion handler block 자동 autorelease.
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "-fobjc-arc") != null);
+
+    // 3. cef.zig에 extern decl + parent_window 옵션 + nsWindowForBrowserHandle.
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "extern \"c\" fn suji_run_sheet_alert(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "extern \"c\" fn suji_run_sheet_save_panel(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "parent_window: ?*anyopaque") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn nsWindowForBrowserHandle(") != null);
+    // sheet vs free-floating 분기 — opts.parent_window |parent| 체크.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "opts.parent_window") != null);
+
+    // 4. main.zig에 windowId JSON 필드 + dialogParentNSWindow 헬퍼.
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowId: ?u32") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "dialogParentNSWindow") != null);
+
+    // 5. JS API에 Electron 두-인자 오버로드.
+    const ts_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "splitDialogArgs") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "MessageBoxOptions | number") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "OpenDialogOptions | number") != null);
+}
+
+test "회귀: Dialog Sync 변종 — JS API의 showMessageBoxSync/showOpenDialogSync/showSaveDialogSync 노출" {
+    const ts_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src);
+
+    // 3개 sync 변종 노출 — Electron API 호환성.
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "showMessageBoxSync") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "showOpenDialogSync") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "showSaveDialogSync") != null);
+    // 응답 shape 변환 — sync는 raw value 반환 (number / string[] | undefined / string | undefined).
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "Promise<number>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "Promise<string[] | undefined>") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "Promise<string | undefined>") != null);
+}
+
+test "회귀: Shell API — cef.zig pub fn + main.zig 라우팅 + NSWorkspace/NSBeep 사용" {
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+
+    // 3개 pub fn 노출.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn shellOpenExternal(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn shellShowItemInFolder(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn shellBeep() void") != null);
+    // NSWorkspace + NSURL 사용. modern API (activateFileViewerSelectingURLs:) 채택,
+    // deprecated selectFile:inFileViewerRootedAtPath: 사용 금지.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSWorkspace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "URLWithString:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "activateFileViewerSelectingURLs:") != null);
+    // deprecated selector를 sel_registerName 인자로 등록하면 안 됨 (doc comment에서의
+    // 언급은 허용 — 왜 안 쓰는지 설명).
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "sel_registerName(\"selectFile:") == null);
+    // 사전 검증 — scheme 검사(openExternal) + fileExistsAtPath:(showItemInFolder)로
+    // LaunchServices에 invalid 입력 보내 -50 OS dialog 띄우지 않도록 차단.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "fileExistsAtPath:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"scheme\"") != null);
+    // NSBeep extern.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub extern \"c\" fn NSBeep") != null);
+
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    // 3개 cmd 라우팅.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_open_external\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_show_item_in_folder\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_beep\"") != null);
+}
+
+test "회귀: Clipboard API — cef.zig pub fn + main.zig 라우팅 + JSON escape 사용" {
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+
+    // 3개 pub fn 노출.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn clipboardReadText(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn clipboardWriteText(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn clipboardClear() void") != null);
+    // public.utf8-plain-text UTI 사용.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "public.utf8-plain-text") != null);
+    // NSPasteboard generalPasteboard 사용.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "generalPasteboard") != null);
+
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    // 3개 cmd 라우팅.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"clipboard_read_text\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"clipboard_write_text\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"clipboard_clear\"") != null);
+    // read는 escapeJsonStrFull 거쳐 응답 (newline/tab 보존).
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "escapeJsonStrFull") != null);
+    // write는 unescapeJsonStr로 raw → 실제 바이트 복원 후 NSPasteboard 전달.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "unescapeJsonStr") != null);
+}
+
+test "회귀: deferMakeKeyAndOrderFront — performSelector:afterDelay:0으로 다음 런루프 틱 예약" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const fn_marker = "fn deferMakeKeyAndOrderFront(";
+    const fn_start = std.mem.indexOf(u8, source, fn_marker) orelse return error.DeferFnNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    // performSelector:withObject:afterDelay: 셀렉터 등록 + makeKeyAndOrderFront: 셀렉터를
+    // 인자로 전달. afterDelay:0.0으로 다음 틱 예약.
+    try std.testing.expect(std.mem.indexOf(u8, body, "performSelector:withObject:afterDelay:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "makeKeyAndOrderFront:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "0.0") != null);
 }
 
 // ============================================

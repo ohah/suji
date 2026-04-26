@@ -1039,7 +1039,9 @@ fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: [
 /// cmd 분기는 `extractJsonString(req, "cmd")`로 정확 매치 — substring 매치는 새 cmd가
 /// 비슷한 이름으로 추가되거나 cmd 외 다른 필드에 같은 문자열이 있을 때 잘못 라우팅 위험.
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
-    var req_buf: [4096]u8 = undefined;
+    // 32KB — clipboard write 등 큰 payload 수용. 이전 4KB는 8KB 클립보드 쓰기에서 잘려
+    // 응답 빈 string(undefined로 resolve)됨.
+    var req_buf: [32768]u8 = undefined;
     const req_clean: []const u8 = if (util.extractJsonString(data, "request")) |request_str|
         unescapeJson(request_str, &req_buf)
     else
@@ -1201,6 +1203,90 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
+    // Clipboard API — NSPasteboard plain text.
+    if (std.mem.eql(u8, cmd, "clipboard_read_text")) {
+        var raw_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const text = cef.clipboardReadText(&raw_buf);
+        var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const esc_len = util.escapeJsonStrFull(text, &esc_buf) orelse return null;
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_text\",\"text\":\"{s}\"}}",
+            .{esc_buf[0..esc_len]},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_write_text")) {
+        const raw = util.extractJsonString(req_clean, "text") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        // 한도 초과면 graceful false (caller가 boolean 응답 기대 — null 반환은 raw string으로
+        // 떨어져 r.success undefined 됨).
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.clipboardWriteText(unesc_buf[0..unesc_len])
+        else
+            false;
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_text\",\"success\":{}}}",
+            .{ok},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_clear")) {
+        cef.clipboardClear();
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_clear\",\"success\":true}}", .{}) catch return null;
+        return result;
+    }
+
+    // Shell API — NSWorkspace 기본 핸들러 / NSBeep.
+    if (std.mem.eql(u8, cmd, "shell_open_external")) {
+        const raw = util.extractJsonString(req_clean, "url") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.shellOpenExternal(unesc_buf[0..unesc_len])
+        else
+            false;
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"shell_open_external\",\"success\":{}}}",
+            .{ok},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "shell_show_item_in_folder")) {
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.shellShowItemInFolder(unesc_buf[0..unesc_len])
+        else
+            false;
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"shell_show_item_in_folder\",\"success\":{}}}",
+            .{ok},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "shell_beep")) {
+        cef.shellBeep();
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"shell_beep\",\"success\":true}}", .{}) catch return null;
+        return result;
+    }
+
+    // Dialog API — NSAlert / NSOpenPanel / NSSavePanel.
+    if (std.mem.eql(u8, cmd, "dialog_show_message_box")) {
+        return handleDialogShowMessageBox(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "dialog_show_error_box")) {
+        return handleDialogShowErrorBox(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "dialog_show_open_dialog")) {
+        return handleDialogShowOpenDialog(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "dialog_show_save_dialog")) {
+        return handleDialogShowSaveDialog(req_clean, response_buf);
+    }
+
     if (std.mem.eql(u8, cmd, "core_info")) {
         var out_pos: usize = 0;
         const out = response_buf;
@@ -1220,6 +1306,242 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     const result = "{\"from\":\"zig-core\",\"msg\":\"hello from zig\"}";
     @memcpy(response_buf[0..result.len], result);
     return response_buf[0..result.len];
+}
+
+// ============================================
+// Dialog handlers — std.json으로 옵션 파싱 후 cef.zig 호출
+// ============================================
+
+/// std.json parse용 stack-FBA arena. 디알로그 옵션 한 회 파싱에 충분 (32KB).
+const DIALOG_PARSE_ARENA: usize = 32768;
+
+/// JSON 형식: {"type","title","message","detail","buttons":[],"defaultId","cancelId",
+///             "checkboxLabel","checkboxChecked","windowId"}
+/// windowId 지정 시 sheet, 없으면 free-floating.
+const MessageBoxJson = struct {
+    type: []const u8 = "none",
+    title: []const u8 = "",
+    message: []const u8 = "",
+    detail: []const u8 = "",
+    buttons: []const []const u8 = &.{},
+    defaultId: ?usize = null,
+    cancelId: ?usize = null,
+    checkboxLabel: []const u8 = "",
+    checkboxChecked: bool = false,
+    windowId: ?u32 = null,
+};
+
+const FileFilterJson = struct {
+    name: []const u8 = "",
+    extensions: []const []const u8 = &.{},
+};
+
+const OpenDialogJson = struct {
+    title: []const u8 = "",
+    defaultPath: []const u8 = "",
+    buttonLabel: []const u8 = "",
+    message: []const u8 = "",
+    filters: []const FileFilterJson = &.{},
+    properties: []const []const u8 = &.{},
+    windowId: ?u32 = null,
+};
+
+const SaveDialogJson = struct {
+    title: []const u8 = "",
+    defaultPath: []const u8 = "",
+    buttonLabel: []const u8 = "",
+    message: []const u8 = "",
+    nameFieldLabel: []const u8 = "",
+    showsTagField: bool = false,
+    filters: []const FileFilterJson = &.{},
+    properties: []const []const u8 = &.{},
+    windowId: ?u32 = null,
+};
+
+const ErrorBoxJson = struct {
+    title: []const u8 = "",
+    content: []const u8 = "",
+};
+
+/// std.json properties 배열 → 부울 플래그 테이블. Electron OpenDialog properties:
+///   openFile / openDirectory / multiSelections / showHiddenFiles / createDirectory
+///   noResolveAliases / treatPackageAsDirectory
+fn hasProp(props: []const []const u8, name: []const u8) bool {
+    for (props) |p| {
+        if (std.mem.eql(u8, p, name)) return true;
+    }
+    return false;
+}
+
+/// windowId(u32 WM id) → NSWindow 포인터. 못 찾으면 null → free-floating fallback.
+/// stale/잘못된 windowId가 무성하게 묻히지 않도록 명시 lookup 실패는 warn 로그.
+fn dialogParentNSWindow(window_id: ?u32) ?*anyopaque {
+    const id = window_id orelse return null;
+    const wm = window_mod.WindowManager.global orelse return null;
+    const win = wm.get(id) orelse {
+        std.log.warn("dialog: windowId={d} not found in WindowManager — sheet fallback to free-floating", .{id});
+        return null;
+    };
+    const ns_win = cef.nsWindowForBrowserHandle(win.native_handle);
+    if (ns_win == null) {
+        std.log.warn("dialog: windowId={d} (browser handle={d}) has no NSWindow — sheet fallback to free-floating", .{ id, win.native_handle });
+    }
+    return ns_win;
+}
+
+fn parseStyleString(s: []const u8) cef.MessageBoxStyle {
+    if (std.mem.eql(u8, s, "info")) return .info;
+    if (std.mem.eql(u8, s, "warning")) return .warning;
+    if (std.mem.eql(u8, s, "error")) return .err;
+    if (std.mem.eql(u8, s, "question")) return .question;
+    return .none;
+}
+
+/// FileFilterJson [] → cef.FileFilter [] 변환. arena 위에 alloc.
+fn convertFilters(arena: std.mem.Allocator, src: []const FileFilterJson) ![]cef.FileFilter {
+    var result = try arena.alloc(cef.FileFilter, src.len);
+    for (src, 0..) |f, i| {
+        result[i] = .{ .name = f.name, .extensions = f.extensions };
+    }
+    return result;
+}
+
+fn handleDialogShowMessageBox(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(MessageBoxJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_message_box\",\"response\":0,\"checkboxChecked\":false,\"error\":\"parse\"}}",
+            .{},
+        ) catch null;
+    };
+    defer parsed.deinit();
+    const opts = parsed.value;
+
+    const r = cef.showMessageBox(.{
+        .style = parseStyleString(opts.type),
+        .title = opts.title,
+        .message = opts.message,
+        .detail = opts.detail,
+        .buttons = opts.buttons,
+        .default_id = opts.defaultId,
+        .cancel_id = opts.cancelId,
+        .checkbox_label = opts.checkboxLabel,
+        .checkbox_checked = opts.checkboxChecked,
+        .parent_window = dialogParentNSWindow(opts.windowId),
+    });
+
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_message_box\",\"response\":{d},\"checkboxChecked\":{}}}",
+        .{ r.response, r.checkbox_checked },
+    ) catch null;
+}
+
+fn handleDialogShowErrorBox(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(ErrorBoxJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_error_box\",\"success\":false}}", .{}) catch null;
+    defer parsed.deinit();
+
+    cef.showErrorBox(parsed.value.title, parsed.value.content);
+
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_error_box\",\"success\":true}}",
+        .{},
+    ) catch null;
+}
+
+fn handleDialogShowOpenDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(OpenDialogJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_open_dialog\",\"canceled\":true,\"filePaths\":[],\"error\":\"parse\"}}",
+            .{},
+        ) catch null;
+    };
+    defer parsed.deinit();
+    const opts = parsed.value;
+
+    const filters = convertFilters(arena, opts.filters) catch &[_]cef.FileFilter{};
+    var dialog_buf: [util.MAX_RESPONSE]u8 = undefined;
+    const dialog_json = cef.showOpenDialog(.{
+        .title = opts.title,
+        .default_path = opts.defaultPath,
+        .button_label = opts.buttonLabel,
+        .message = opts.message,
+        .can_choose_files = hasProp(opts.properties, "openFile") or !hasProp(opts.properties, "openDirectory"),
+        .can_choose_directories = hasProp(opts.properties, "openDirectory"),
+        .allows_multiple_selection = hasProp(opts.properties, "multiSelections"),
+        .shows_hidden_files = hasProp(opts.properties, "showHiddenFiles"),
+        .can_create_directories = hasProp(opts.properties, "createDirectory") or !hasProp(opts.properties, "openDirectory"),
+        .no_resolve_aliases = hasProp(opts.properties, "noResolveAliases"),
+        .treat_packages_as_dirs = hasProp(opts.properties, "treatPackageAsDirectory"),
+        .filters = filters,
+        .parent_window = dialogParentNSWindow(opts.windowId),
+    }, &dialog_buf);
+
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_open_dialog\",{s}",
+        .{dialog_json[1..]}, // strip leading '{' from dialog_json, keep trailing '}'
+    ) catch null;
+}
+
+fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(SaveDialogJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_save_dialog\",\"canceled\":true,\"filePath\":\"\",\"error\":\"parse\"}}",
+            .{},
+        ) catch null;
+    };
+    defer parsed.deinit();
+    const opts = parsed.value;
+
+    const filters = convertFilters(arena, opts.filters) catch &[_]cef.FileFilter{};
+    var dialog_buf: [util.MAX_RESPONSE]u8 = undefined;
+    const dialog_json = cef.showSaveDialog(.{
+        .title = opts.title,
+        .default_path = opts.defaultPath,
+        .button_label = opts.buttonLabel,
+        .message = opts.message,
+        .name_field_label = opts.nameFieldLabel,
+        .shows_hidden_files = hasProp(opts.properties, "showHiddenFiles"),
+        .can_create_directories = !hasProp(opts.properties, "createDirectory") or hasProp(opts.properties, "createDirectory"),
+        .show_overwrite_confirmation = !hasProp(opts.properties, "noOverwriteConfirmation"),
+        .shows_tag_field = opts.showsTagField,
+        .filters = filters,
+        .parent_window = dialogParentNSWindow(opts.windowId),
+    }, &dialog_buf);
+
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"dialog_show_save_dialog\",{s}",
+        .{dialog_json[1..]},
+    ) catch null;
 }
 
 // JSON 필드 추출은 core/util.zig(util.extractJsonString / util.extractJsonInt) 사용

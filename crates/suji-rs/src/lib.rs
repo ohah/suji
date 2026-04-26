@@ -351,6 +351,141 @@ pub mod windows {
     }
 }
 
+// ============================================
+// clipboard / shell / dialog — frontend `@suji/api`와 동일 cmd 사용.
+// 응답은 raw JSON String — caller가 serde_json::from_str로 파싱.
+// ============================================
+
+/// Full JSON escape — `\n`/`\t`/`\r`은 escape sequence로 보존 (windows::escape_json은
+/// drop 처리). 클립보드 / dialog 메시지처럼 줄바꿈/탭 의미가 있는 payload용.
+fn escape_json_full(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 8);
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\x08' => out.push_str("\\b"),
+            '\x0c' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+pub mod clipboard {
+    use crate::{escape_json_full, invoke};
+
+    /// 시스템 클립보드 plain text 읽기. 응답 JSON: `{"from","cmd","text":"..."}`.
+    pub fn read_text() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_read_text"}"#)
+    }
+
+    /// 시스템 클립보드 plain text 쓰기. 응답: `{"from","cmd","success":bool}`.
+    pub fn write_text(text: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"clipboard_write_text","text":"{}"}}"#, escape_json_full(text)),
+        )
+    }
+
+    pub fn clear() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_clear"}"#)
+    }
+}
+
+pub mod shell {
+    use crate::{escape_json_full, invoke};
+
+    pub fn open_external(url: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"shell_open_external","url":"{}"}}"#, escape_json_full(url)),
+        )
+    }
+
+    pub fn show_item_in_folder(path: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"shell_show_item_in_folder","path":"{}"}}"#, escape_json_full(path)),
+        )
+    }
+
+    pub fn beep() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"shell_beep"}"#)
+    }
+}
+
+pub mod dialog {
+    use crate::{escape_json_full, invoke, serde_json};
+
+    /// MessageBox 옵션 — Electron 호환 필드. window_id로 sheet, 없으면 free-floating.
+    /// raw fields_json 직접 넘기는 [`show_message_box_raw`]도 노출 — 정교 케이스용.
+    #[derive(Default)]
+    pub struct MessageBoxOpts<'a> {
+        pub window_id: Option<u32>,
+        pub r#type: Option<&'a str>,           // "info" | "warning" | "error" | "question" | "none"
+        pub title: Option<&'a str>,
+        pub message: &'a str,
+        pub detail: Option<&'a str>,
+        pub buttons: Vec<&'a str>,
+        pub default_id: Option<usize>,
+        pub cancel_id: Option<usize>,
+        pub checkbox_label: Option<&'a str>,
+        pub checkbox_checked: bool,
+    }
+
+    pub fn show_message_box(opts: MessageBoxOpts) -> Option<String> {
+        let mut req = serde_json::Map::new();
+        req.insert("cmd".into(), serde_json::Value::String("dialog_show_message_box".into()));
+        req.insert("message".into(), serde_json::Value::String(opts.message.into()));
+        if let Some(id) = opts.window_id { req.insert("windowId".into(), serde_json::Value::from(id)); }
+        if let Some(t) = opts.r#type { req.insert("type".into(), serde_json::Value::String(t.into())); }
+        if let Some(t) = opts.title { req.insert("title".into(), serde_json::Value::String(t.into())); }
+        if let Some(d) = opts.detail { req.insert("detail".into(), serde_json::Value::String(d.into())); }
+        if !opts.buttons.is_empty() {
+            req.insert("buttons".into(), serde_json::Value::Array(
+                opts.buttons.iter().map(|s| serde_json::Value::String((*s).into())).collect(),
+            ));
+        }
+        if let Some(d) = opts.default_id { req.insert("defaultId".into(), serde_json::Value::from(d)); }
+        if let Some(c) = opts.cancel_id { req.insert("cancelId".into(), serde_json::Value::from(c)); }
+        if let Some(c) = opts.checkbox_label { req.insert("checkboxLabel".into(), serde_json::Value::String(c.into())); }
+        if opts.checkbox_checked { req.insert("checkboxChecked".into(), serde_json::Value::Bool(true)); }
+        invoke("__core__", &serde_json::Value::Object(req).to_string())
+    }
+
+    /// raw JSON fields. 정교한 옵션 조합 (filters 등)이 필요할 때.
+    pub fn show_message_box_raw(fields_json: &str) -> Option<String> {
+        invoke("__core__", &format!(r#"{{"cmd":"dialog_show_message_box",{}}}"#, fields_json))
+    }
+
+    pub fn show_error_box(title: &str, content: &str) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"dialog_show_error_box","title":"{}","content":"{}"}}"#,
+            escape_json_full(title), escape_json_full(content),
+        ))
+    }
+
+    /// raw fields. 옵션은 `{"properties":["openFile"],"filters":[...]}` 등.
+    pub fn show_open_dialog(fields_json: &str) -> Option<String> {
+        if fields_json.is_empty() {
+            return invoke("__core__", r#"{"cmd":"dialog_show_open_dialog"}"#);
+        }
+        invoke("__core__", &format!(r#"{{"cmd":"dialog_show_open_dialog",{}}}"#, fields_json))
+    }
+
+    pub fn show_save_dialog(fields_json: &str) -> Option<String> {
+        if fields_json.is_empty() {
+            return invoke("__core__", r#"{"cmd":"dialog_show_save_dialog"}"#);
+        }
+        invoke("__core__", &format!(r#"{{"cmd":"dialog_show_save_dialog",{}}}"#, fields_json))
+    }
+}
+
 /// 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
 /// Electron `process.platform` 대응 (단 Suji는 `"darwin"` 대신 `"macos"`).
 pub fn platform() -> &'static str {
