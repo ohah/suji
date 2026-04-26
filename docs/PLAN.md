@@ -1245,11 +1245,15 @@ suji build → 결과물:
 |------|----------|-------|------|
 | **fs sandbox (frontend path 화이트리스트)** | `webPreferences.sandbox` + nodeIntegration:false | allowlist | ✅ `fs.allowedRoots` config + `..` traversal 가드 + boundary check + backend bypass |
 | **앱별 cache 격리** | `app.getPath('userData')` | 자동 | ✅ OS 표준 (macOS Application Support / Linux XDG / Windows APPDATA) — 앱 이름별 자동 격리 |
-| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs만 — 다른 API (network/shell/etc) Phase 7 |
-| CSP (Content Security Policy) | 수동 설정 | 빌트인 | ❌ (Phase 7) |
-| IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ❌ (Phase 7) |
+| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs만 — network/shell/dialog allowlist는 Phase 7+ |
+| CSP (Content Security Policy) | 수동 설정 | 빌트인 | ✅ `suji://` 응답에 default CSP + X-Content-Type-Options + X-Frame-Options. `config.security.csp` override + `"disabled"` escape |
+| IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ✅ payload size 32KB · cmd char allowlist (injection 차단) · missing/invalid/unknown_cmd 표준 에러 |
 | macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin) + `app.entitlements` override |
-| Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ❌ (Phase 7) |
+| Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ❌ (Phase 7+) |
+| contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
+| `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |
+| webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ❌ (CEF resource handler 확장) |
+| safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | ❌ (macOS Keychain / Win DPAPI / Linux libsecret) |
 
 ### 앱 배포 & 패키징
 
@@ -1275,11 +1279,24 @@ suji build → 결과물:
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
-| 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | ❌ (Zig `std.process.Child` 노출만 하면 됨) |
-| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ (Zig `std.http` 있음 — 노출만) |
-| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ |
+| 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | ❌ (Zig `std.process.Child` 노출만 — 분량 소) |
+| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ (Zig `std.http` 노출만 — 분량 소) |
+| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ (분량 중 — sqlite plugin) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
-| 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ❌ |
+| 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ❌ (분량 소) |
+
+### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
+
+| 기능 | Electron | Tauri | Suji |
+|------|----------|-------|------|
+| 디스플레이 정보 | `screen.getAllDisplays` / `getPrimaryDisplay` | -- | ❌ (분량 소 — NSScreen / GdkDisplay / EnumDisplayMonitors) |
+| 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | ❌ (분량 소 — IOPMSchedulePowerEvent / DBus / WM_POWERBROADCAST) |
+| 슬립 차단 | `powerSaveBlocker.start` | -- | ❌ (분량 소 — IOPMAssertion / DBus inhibit / SetThreadExecutionState) |
+| 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | ❌ (분량 중 — CGWindowListCopyWindowInfo + ScreenCaptureKit) |
+| 크래시 리포터 | `crashReporter.start` | -- | ❌ (분량 중 — Apple Crashpad/Breakpad 연동) |
+| 인앱 결제 | `inAppPurchase` (Mac App Store) | -- | ❌ (분량 대 — App Store 의존) |
+| Mac dock badge | `app.dock.setBadge` | -- | ❌ (분량 소 — NSDockTile setBadgeLabel) |
+| 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | 🟡 `globalShortcut`로 가능, 전용 API 없음 |
 
 ### 개발자 경험 (DX)
 
@@ -1308,12 +1325,19 @@ suji build → 결과물:
 5. ✅ **파일 시스템 API** — Phase 5-F 완료. 백엔드/프론트 공통 `fs` wrapper + E2E
 6. ✅ **글로벌 단축키** — Phase 5-E 완료. macOS Carbon Hot Key (권한 불필요) + 5 SDK + accelerator 파싱
 7. ✅ **라이프사이클 이벤트** — Phase 5 완료. resize/focus/blur/move (macOS NSWindowDelegate 자동 부착)
-8. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께 처리
-9. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
-10. **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
-11. **보안 모델** (Phase 7: contextIsolation, CSP, IPC 검증) — 프로덕션 사용 전 필수
-12. **자동 업데이트** — 배포 후 유지보수에 필수
-13. **CLI 배포** (npx/Homebrew/curl) — CLAUDE.md "예정"
+8. ✅ **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
+9. ✅ **보안 모델** (Phase 7: fs sandbox + cache 격리 + IPC 검증 + CSP + contextIsolation audit) — Phase 7 핵심 완료
+10. **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — 진입 장벽 즉각 해소
+11. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께
+12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
+13. **자동 업데이트** — 배포 후 유지보수에 필수
+14. **`child_process` / HTTP / SQLite SDK** — 흔한 use case (Zig std.process.Child / std.http 노출만 — 분량 소)
+15. **`safeStorage` (Keychain 암호화)** — 사용자 인증 토큰/secret 저장 (macOS Keychain / Win DPAPI / Linux libsecret)
+16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge) — 분량 소 each
+17. **`windows.createView` (BrowserView 동등)** — 한 창 multi-content 합성 (멀티탭 브라우저 앱 use case 명확할 때)
+18. **iframe sandbox / origin allowlist** — untrusted 외부 콘텐츠 띄울 때 Phase 7+
+19. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
+20. **TypeScript 타입 자동 생성** — Tauri specta 동등 (개발자 경험)
 
 ---
 
