@@ -617,8 +617,8 @@ pub const WindowManager = struct {
     }
 
     /// `view-destroyed` 이벤트에 필요한 식별 정보. host 정리 시 자동으로 함께 destroy된
-    /// view들을 caller가 lock 풀린 후 emit하기 위해 수집.
-    pub const DestroyedView = struct { view_id: u32, host_id: u32 };
+    /// view들을 caller가 lock 풀린 후 emit하기 위해 수집. 모듈 내부 사용만.
+    const DestroyedView = struct { view_id: u32, host_id: u32 };
 
     /// host에 부착된 모든 child view를 destroyed 마킹 + native.destroyView 호출 +
     /// view_children entry/by_name 정리. 정리된 view 정보는 `out`에 append (호출자가
@@ -1121,84 +1121,78 @@ pub const WindowManager = struct {
     /// 추가됨 — 이후 addChildView로 z-order 변경 가능.
     pub fn createView(self: *WindowManager, opts: CreateViewOptions) Error!u32 {
         if (opts.name) |n| {
-            // 빈 문자열은 createViewLocked에서 정규화. 길이/JSON-safety만 사전 검증.
             if (n.len > 0 and !isValidName(n)) return Error.InvalidName;
         }
 
         const id = blk: {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            break :blk try self.createViewLocked(opts);
+
+            const requested_name: ?[]const u8 = if (opts.name) |n|
+                (if (n.len == 0) null else n)
+            else
+                null;
+
+            const host = try self.getLiveWindowLocked(opts.host_window_id);
+
+            // 사전 capacity 확보 — put 단계의 부분 성공 방지.
+            self.windows.ensureUnusedCapacity(1) catch return Error.OutOfMemory;
+            const gop = self.view_children.getOrPut(opts.host_window_id) catch return Error.OutOfMemory;
+            const inserted_new_list = !gop.found_existing;
+            if (inserted_new_list) gop.value_ptr.* = .empty;
+            // 실패 경로에서 빈 entry가 view_children에 남지 않도록 정리. main thread 전제라 lock과의
+            // 순서 race X.
+            errdefer if (inserted_new_list) {
+                if (self.view_children.fetchRemove(opts.host_window_id)) |kv| {
+                    var v = kv.value;
+                    v.deinit(self.allocator);
+                }
+            };
+            const list_ptr = gop.value_ptr;
+            list_ptr.ensureUnusedCapacity(self.allocator, 1) catch return Error.OutOfMemory;
+
+            const handle = self.native.createView(host.native_handle, &opts) catch return Error.NativeCreateFailed;
+            errdefer self.native.destroyView(handle);
+
+            const view = self.allocator.create(Window) catch return Error.OutOfMemory;
+            errdefer self.allocator.destroy(view);
+
+            // Window.title은 항상 owned slice로 둔다 (.view는 표시되지 않지만 free 일관성을 위해 빈 문자열 dupe).
+            const owned_title = self.allocator.dupe(u8, "") catch return Error.OutOfMemory;
+            errdefer self.allocator.free(owned_title);
+
+            const owned_name: ?[]const u8 = if (requested_name) |n|
+                (self.allocator.dupe(u8, n) catch return Error.OutOfMemory)
+            else
+                null;
+            errdefer if (owned_name) |n| self.allocator.free(n);
+
+            const new_id = self.next_id;
+            self.next_id += 1;
+
+            view.* = .{
+                .id = new_id,
+                .kind = .view,
+                .native_handle = handle,
+                .name = owned_name,
+                .title = owned_title,
+                .bounds = opts.bounds,
+                .parent_id = null,
+                .host_window_id = opts.host_window_id,
+                .state = .{},
+                .visible_in_host = true,
+            };
+
+            self.windows.putAssumeCapacity(new_id, view);
+            list_ptr.appendAssumeCapacity(new_id);
+            break :blk new_id;
         };
+
         if (self.sink) |s| {
             var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const payload = buildViewPayload(&buf, id, opts.host_window_id);
             s.emit(events.view_created, payload);
         }
-        return id;
-    }
-
-    /// `createView`의 lock 보유 본체. caller가 lock 획득/해제 + name 검증 + 이벤트 발화 담당.
-    fn createViewLocked(self: *WindowManager, opts: CreateViewOptions) Error!u32 {
-        const requested_name: ?[]const u8 = if (opts.name) |n|
-            (if (n.len == 0) null else n)
-        else
-            null;
-
-        const host = try self.getLiveWindowLocked(opts.host_window_id);
-
-        // 사전 capacity 확보 — put 단계의 부분 성공 방지.
-        self.windows.ensureUnusedCapacity(1) catch return Error.OutOfMemory;
-        const gop = self.view_children.getOrPut(opts.host_window_id) catch return Error.OutOfMemory;
-        const inserted_new_list = !gop.found_existing;
-        if (inserted_new_list) gop.value_ptr.* = .empty;
-        // 실패 경로에서 빈 entry가 view_children에 남지 않도록 정리 — defer 순서: lock unlock
-        // 이전에 실행되도록 lockUncancelable 직후에 errdefer를 두는 게 이상적이지만 lock 정리
-        // 자체를 defer 한 줄로 처리한 흐름과 맞물려 단순화: main thread 전제이므로 lock 풀린
-        // 후 fetchRemove로 정리해도 race X.
-        errdefer if (inserted_new_list) {
-            if (self.view_children.fetchRemove(opts.host_window_id)) |kv| {
-                var v = kv.value;
-                v.deinit(self.allocator);
-            }
-        };
-        const list_ptr = gop.value_ptr;
-        list_ptr.ensureUnusedCapacity(self.allocator, 1) catch return Error.OutOfMemory;
-
-        const handle = self.native.createView(host.native_handle, &opts) catch return Error.NativeCreateFailed;
-        errdefer self.native.destroyView(handle);
-
-        const view = self.allocator.create(Window) catch return Error.OutOfMemory;
-        errdefer self.allocator.destroy(view);
-
-        // Window.title은 항상 owned slice로 둔다 (.view는 표시되지 않지만 free 일관성을 위해 빈 문자열 dupe).
-        const owned_title = self.allocator.dupe(u8, "") catch return Error.OutOfMemory;
-        errdefer self.allocator.free(owned_title);
-
-        const owned_name: ?[]const u8 = if (requested_name) |n|
-            (self.allocator.dupe(u8, n) catch return Error.OutOfMemory)
-        else
-            null;
-        errdefer if (owned_name) |n| self.allocator.free(n);
-
-        const id = self.next_id;
-        self.next_id += 1;
-
-        view.* = .{
-            .id = id,
-            .kind = .view,
-            .native_handle = handle,
-            .name = owned_name,
-            .title = owned_title,
-            .bounds = opts.bounds,
-            .parent_id = null,
-            .host_window_id = opts.host_window_id,
-            .state = .{},
-            .visible_in_host = true,
-        };
-
-        self.windows.putAssumeCapacity(id, view);
-        list_ptr.appendAssumeCapacity(id);
         return id;
     }
 
