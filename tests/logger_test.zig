@@ -144,7 +144,10 @@ test "cleanupOldLogs retention_days=0 is no-op" {
 }
 
 test "cleanupOldLogs ignores non-suji files" {
-    var tmp = std.testing.tmpDir(.{});
+    // .iterate=true 필수 — cleanupOldLogs 내부 dir.iterate()가 권한 없는 dir이면
+    // Linux BADF / Windows ACCESS_DENIED panic. retention_days=0 케이스는 early return해서
+    // iterate 안 타므로 default(.{}) 가능.
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
 
     var other = try tmp.dir.createFile(io, "other.log", .{});
