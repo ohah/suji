@@ -631,6 +631,76 @@ pub mod fs {
     pub fn rm(path: &str, recursive: bool, force: bool) -> Option<String> {
         invoke("__core__", &rm_request(path, recursive, force))
     }
+
+    /// File type — fs.statTyped / fs.readdirTyped 결과 타입.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum FileType {
+        File,
+        Directory,
+        Symlink,
+        Other,
+    }
+
+    impl FileType {
+        pub(crate) fn from_str(s: &str) -> Self {
+            match s {
+                "file" => FileType::File,
+                "directory" => FileType::Directory,
+                "symlink" => FileType::Symlink,
+                _ => FileType::Other,
+            }
+        }
+    }
+
+    /// `fs.stat`의 typed 결과. mtime_ms는 epoch ms (JS `Date(mtime)`).
+    #[derive(Debug, Clone)]
+    pub struct Stat {
+        pub r#type: FileType,
+        pub size: u64,
+        pub mtime_ms: i64,
+    }
+
+    /// `fs.readdir` 한 entry.
+    #[derive(Debug, Clone)]
+    pub struct DirEntry {
+        pub name: String,
+        pub r#type: FileType,
+    }
+
+    /// `stat`의 typed wrapper. 실패 시 None (path 거부 / not_found / sandbox forbidden).
+    pub fn stat_typed(path: &str) -> Option<Stat> {
+        let raw = stat(path)?;
+        let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        if !v.get("success")?.as_bool()? {
+            return None;
+        }
+        Some(Stat {
+            r#type: FileType::from_str(v.get("type")?.as_str()?),
+            size: v.get("size")?.as_u64()?,
+            mtime_ms: v.get("mtime")?.as_i64()?,
+        })
+    }
+
+    /// `readdir`의 typed wrapper. 실패 시 None.
+    pub fn readdir_typed(path: &str) -> Option<Vec<DirEntry>> {
+        let raw = readdir(path)?;
+        let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        if !v.get("success")?.as_bool()? {
+            return None;
+        }
+        let entries = v.get("entries")?.as_array()?;
+        Some(
+            entries
+                .iter()
+                .filter_map(|e| {
+                    Some(DirEntry {
+                        name: e.get("name")?.as_str()?.to_string(),
+                        r#type: FileType::from_str(e.get("type")?.as_str()?),
+                    })
+                })
+                .collect(),
+        )
+    }
 }
 
 pub mod notification {
@@ -1098,6 +1168,15 @@ mod tests {
         assert_eq!(rm["cmd"], "fs_rm");
         assert_eq!(rm["recursive"], true);
         assert_eq!(rm["force"], false);
+    }
+
+    #[test]
+    fn fs_file_type_from_str_maps_known_kinds() {
+        assert_eq!(crate::fs::FileType::from_str("file"), crate::fs::FileType::File);
+        assert_eq!(crate::fs::FileType::from_str("directory"), crate::fs::FileType::Directory);
+        assert_eq!(crate::fs::FileType::from_str("symlink"), crate::fs::FileType::Symlink);
+        assert_eq!(crate::fs::FileType::from_str("socket"), crate::fs::FileType::Other);
+        assert_eq!(crate::fs::FileType::from_str("unknown"), crate::fs::FileType::Other);
     }
 
     #[test]

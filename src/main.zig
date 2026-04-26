@@ -1702,6 +1702,81 @@ test "pathHasRootBoundary: separator boundary 가드 (prefix-extension 차단)" 
     try std.testing.expect(!pathHasRootBoundary("C:\\foo\\barX", "C:\\foo\\bar"));
 }
 
+test "isPathAllowedForFrontend: 종합 시나리오" {
+    // g_config은 process global이라 test 사이 reset 필요.
+    const saved = g_config;
+    defer g_config = saved;
+
+    // 1) g_config null → 차단 (config 미설정)
+    g_config = null;
+    try std.testing.expect(!isPathAllowedForFrontend("/any/path"));
+
+    // 2) allowedRoots empty → 차단 (default safe)
+    var cfg_empty = suji.Config{};
+    cfg_empty.fs.allowed_roots = &.{};
+    g_config = &cfg_empty;
+    try std.testing.expect(!isPathAllowedForFrontend("/any/path"));
+
+    // 3) wildcard ["*"] → 일반 path 허용, .. 거부
+    var cfg_wild = suji.Config{};
+    const wild_roots = [_][:0]const u8{"*"};
+    cfg_wild.fs.allowed_roots = &wild_roots;
+    g_config = &cfg_wild;
+    try std.testing.expect(isPathAllowedForFrontend("/etc/hosts"));
+    try std.testing.expect(isPathAllowedForFrontend("/Users/x/safe"));
+    try std.testing.expect(!isPathAllowedForFrontend("/foo/../etc/passwd")); // .. 항상 차단
+
+    // 4) specific root → boundary 가드 검증 (prefix-extension attack)
+    var cfg_specific = suji.Config{};
+    const spec_roots = [_][:0]const u8{"/Users/x/myapp"};
+    cfg_specific.fs.allowed_roots = &spec_roots;
+    g_config = &cfg_specific;
+    try std.testing.expect(isPathAllowedForFrontend("/Users/x/myapp"));
+    try std.testing.expect(isPathAllowedForFrontend("/Users/x/myapp/data.txt"));
+    try std.testing.expect(!isPathAllowedForFrontend("/Users/x/myapp_secret/data")); // prefix-extension
+    try std.testing.expect(!isPathAllowedForFrontend("/Users/x/other"));
+
+    // 5) mixed ["*", "/specific"] → wildcard로 모두 허용
+    var cfg_mixed = suji.Config{};
+    const mixed_roots = [_][:0]const u8{ "*", "/Users/x/myapp" };
+    cfg_mixed.fs.allowed_roots = &mixed_roots;
+    g_config = &cfg_mixed;
+    try std.testing.expect(isPathAllowedForFrontend("/anywhere"));
+    try std.testing.expect(!isPathAllowedForFrontend("/foo/../etc")); // .. 차단
+
+    // 6) 정상 파일명에 .. 포함 → 통과 (false positive 회귀)
+    g_config = &cfg_wild;
+    try std.testing.expect(isPathAllowedForFrontend("/foo/my..file.txt"));
+    try std.testing.expect(isPathAllowedForFrontend("/foo/archive..bak"));
+}
+
+test "fsSandboxCheck: g_in_backend_invoke 마커는 sandbox 우회" {
+    const saved_cfg = g_config;
+    const saved_marker = g_in_backend_invoke;
+    defer {
+        g_config = saved_cfg;
+        g_in_backend_invoke = saved_marker;
+    }
+
+    // sandbox 차단 config (empty roots = forbidden)
+    var cfg = suji.Config{};
+    cfg.fs.allowed_roots = &.{};
+    g_config = &cfg;
+
+    var resp_buf: [256]u8 = undefined;
+
+    // Frontend 흐름 — 차단 (forbidden 에러 반환).
+    g_in_backend_invoke = false;
+    const fe = fsSandboxCheck(&resp_buf, "fs_test", "/any/path");
+    try std.testing.expect(fe != null);
+    try std.testing.expect(std.mem.indexOf(u8, fe.?, "\"error\":\"forbidden\"") != null);
+
+    // Backend 흐름 — 우회 (null 반환 = 검사 통과).
+    g_in_backend_invoke = true;
+    const be = fsSandboxCheck(&resp_buf, "fs_test", "/any/path");
+    try std.testing.expect(be == null);
+}
+
 fn fsSandboxCheck(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
     if (g_in_backend_invoke) return null;
     if (isPathAllowedForFrontend(path)) return null;

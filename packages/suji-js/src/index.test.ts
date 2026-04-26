@@ -170,8 +170,13 @@ describe("fs", () => {
     expect(await sujiFs.writeFile("/tmp/a.txt", "hello\nworld")).toBe(true);
     expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"fs_write_file","path":"/tmp/a.txt","text":"hello\\nworld"}');
 
-    mockBridge.core.mockResolvedValueOnce({ success: true, type: "file", size: 5, mtime: 1 });
-    expect((await sujiFs.stat("/tmp/a.txt")).type).toBe("file");
+    mockBridge.core.mockResolvedValueOnce({ success: true, type: "file", size: 5, mtime: 1700000000000 });
+    const st = await sujiFs.stat("/tmp/a.txt");
+    expect(st.type).toBe("file");
+    expect(st.size).toBe(5);
+    // mtime은 ms (Date 호환) — 13자리 이하.
+    expect(st.mtime).toBe(1700000000000);
+    expect(String(st.mtime).length).toBeLessThanOrEqual(13);
 
     mockBridge.core.mockResolvedValueOnce({ success: true });
     expect(await sujiFs.mkdir("/tmp/dir", { recursive: true })).toBe(true);

@@ -3061,6 +3061,46 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     try std.testing.expect(std.mem.indexOf(u8, main_src, "if (g_in_backend_invoke) return null") != null);
 }
 
+test "회귀: 4 backend SDK fs typed wrapper (statTyped/readdirTyped)" {
+    const rs_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub fn stat_typed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub fn readdir_typed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub enum FileType") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub struct Stat ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub struct DirEntry") != null);
+
+    const go_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/fs/fs.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_src);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func StatTyped") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func ReadDirTyped") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "type FileType") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "type FileStat struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "type DirEntry struct") != null);
+
+    // Zig SDK fs.statTyped / parseEntries는 src/core/app.zig에 있음.
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub fn statTyped") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub fn parseEntries") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const FileType = enum") != null);
+}
+
 test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 분기" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

@@ -31,6 +31,25 @@ func TestBuildFsRequests(t *testing.T) {
 	}
 }
 
+func TestParseFileType(t *testing.T) {
+	cases := []struct {
+		in   string
+		want FileType
+	}{
+		{"file", TypeFile},
+		{"directory", TypeDirectory},
+		{"symlink", TypeSymlink},
+		{"socket", TypeOther},
+		{"unknown", TypeOther},
+		{"", TypeOther},
+	}
+	for _, c := range cases {
+		if got := parseFileType(c.in); got != c.want {
+			t.Errorf("parseFileType(%q) = %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
 func TestBuildFsRequestsEscapesStrings(t *testing.T) {
 	req := buildWriteFileRequest(`/tmp/한글 "a".txt`, "line1\nline2\\tail")
 	var got map[string]any
