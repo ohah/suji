@@ -291,12 +291,13 @@ pub const CefNative = struct {
         browser: *c.cef_browser_t,
         /// macOS: NSWindow 포인터 (destroyWindow에서 close 메시지 송신용).
         /// Linux/Windows: null (CEF가 자체 창 관리).
-        /// **WebContentsView(.kind=.view)는 항상 null** — view는 host의 NSWindow 안에
-        /// 합성되므로 자기 NSWindow 없음. host_ns_view가 대신 set.
+        /// `ns_window`와 `host_ns_view`는 **상호배타** — 일반 창은 ns_window만, Phase 17-A
+        /// WebContentsView는 host_ns_view만 set. WindowManager가 같은 invariant를
+        /// `Window.kind`로 표현 (`.window`/`.view`).
         ns_window: ?*anyopaque,
         /// Phase 17-A: WebContentsView. host 창 contentView 안에 부착된 child NSView 포인터.
-        /// .kind=.window는 항상 null, .kind=.view만 set. setViewBounds/setViewVisible/
-        /// reorderView가 이 NSView를 조작.
+        /// 일반 창은 항상 null, view만 set. setViewBounds/setViewVisible/reorderView가
+        /// 이 NSView를 조작.
         host_ns_view: ?*anyopaque = null,
         /// 캐시된 main frame URL (OnAddressChange 콜백에서만 갱신).
         /// 매 invoke마다 frame.get_url alloc/free를 피하기 위함. len=0이면 미캐싱(폴백).
@@ -423,6 +424,7 @@ pub const CefNative = struct {
         // child NSView 생성. opts.bounds는 host contentView 좌표계(top-left).
         // Cocoa는 bottom-left라 super.bounds.height - y - height로 변환.
         const new_view = allocChildNSView(content_view, opts.bounds) orelse return error.NSViewAllocFailed;
+        errdefer _ = msgSend(new_view, "removeFromSuperview");
 
         // CEF browser를 child NSView 안에 합성. parent_view는 NSView*. bounds는 super 좌표계로
         // (0, 0) + width/height — child NSView 자체가 이미 위치 고정되어 있어 CEF 내부 view는
@@ -452,10 +454,7 @@ pub const CefNative = struct {
             null,
             null,
         );
-        if (browser == null) {
-            _ = msgSend(new_view, "removeFromSuperview");
-            return error.BrowserCreationFailed;
-        }
+        if (browser == null) return error.BrowserCreationFailed;
         const br: *c.cef_browser_t = @ptrCast(browser);
         const handle: u64 = @intCast(br.get_identifier.?(br));
 
@@ -464,9 +463,10 @@ pub const CefNative = struct {
             .ns_window = null,
             .host_ns_view = new_view,
         }) catch {
+            // browsers.put 실패 시 CEF browser는 살아있음 → close_browser로 정리
+            // (errdefer가 NSView removeFromSuperview는 따로 처리).
             const host_obj = asPtr(c.cef_browser_host_t, br.get_host.?(br));
             if (host_obj) |h| h.close_browser.?(h, 1);
-            _ = msgSend(new_view, "removeFromSuperview");
             return error.OutOfMemory;
         };
         return handle;
@@ -476,8 +476,10 @@ pub const CefNative = struct {
         const self = fromCtx(ctx);
         assertUiThread();
         const entry = self.browsers.get(view_handle) orelse return;
-        // close_browser → CEF 자기 view 정리. removeFromSuperview는 즉시 시각적 분리.
-        // OnBeforeClose는 비동기 발화(다음 런루프 틱) — 그 시점에 purge가 BrowserEntry 정리.
+        // destroyWindow(macOS)는 NSWindow close가 CEF 내부 cleanup을 cascade해 close_browser
+        // 생략하지만(중복 호출 경쟁상태 회피), view는 NSWindow 없음 → close_browser 명시 호출
+        // 필요. 그 후 removeFromSuperview로 즉시 시각적 분리. OnBeforeClose는 다음 런루프 틱에
+        // 비동기 발화 — 그 시점에 purge가 BrowserEntry 정리.
         const br = entry.browser;
         const host_obj = asPtr(c.cef_browser_host_t, br.get_host.?(br));
         if (host_obj) |h| h.close_browser.?(h, 1);
@@ -2678,10 +2680,12 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
         _ = devtools_to_inspectee.remove(handle);
     }
 
+    var is_view: bool = false;
     notifyWm: {
         const wm = window_mod.WindowManager.global orelse break :notifyWm;
         const id = wm.findByNativeHandle(handle) orelse break :notifyWm;
         const w = wm.get(id) orelse break :notifyWm;
+        is_view = (w.kind == .view);
         if (w.destroyed) {
             log.debug("OnBeforeClose id={d} already destroyed — skip markClosedExternal", .{id});
             break :notifyWm;
@@ -2690,10 +2694,12 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
         wm.markClosedExternal(id) catch {};
     }
 
-    const is_main = if (g_browser) |main_br|
+    // view OnBeforeClose는 host 종속 — main browser와 별개라 quit_message_loop 트리거 X
+    // (defense-in-depth: g_browser fallback이 view를 main으로 잘못 인식하는 경로 차단).
+    const is_main = !is_view and (if (g_browser) |main_br|
         br.get_identifier.?(br) == main_br.get_identifier.?(main_br)
     else
-        true;
+        true);
     if (is_main) {
         log.info("main browser closed → quitting message loop", .{});
         c.cef_quit_message_loop();
