@@ -1,0 +1,144 @@
+---
+title: Menu (Phase 5-D)
+description: 애플리케이션 메뉴바 커스터마이즈 — macOS NSMenu 기반, submenu/item/checkbox/separator + click 이벤트
+---
+
+# Menu
+
+Electron `Menu.setApplicationMenu`에 대응하는 애플리케이션 메뉴바 API. 현재 macOS
+`NSMenu` 기반으로 동작하며 Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출된다.
+
+Suji는 macOS App 메뉴(About/Hide/Quit)는 유지하고, caller가 전달한 top-level 메뉴를
+그 뒤에 붙인다. 기본 File/Edit/View/Window/Help 메뉴로 되돌리려면 `resetApplicationMenu()`를 호출한다.
+
+## 플랫폼 지원
+
+| API | macOS | Linux | Windows |
+|---|---|---|---|
+| `menu.setApplicationMenu` | ✅ NSMenu | stub (false) | stub |
+| `menu.resetApplicationMenu` | ✅ 기본 메뉴 복원 | stub (false) | stub |
+| Click event | ✅ `menu:click` | — | — |
+
+Linux/Windows는 native 메뉴바 구현 전까지 graceful false 응답.
+
+## 지원 항목
+
+| 항목 | 필드 |
+|---|---|
+| 일반 item | `{ label, click, enabled? }` |
+| checkbox | `{ type: "checkbox", label, click, checked?, enabled? }` |
+| separator | `{ type: "separator" }` |
+| submenu | `{ type?: "submenu", label, enabled?, submenu: MenuItem[] }` |
+
+top-level 항목은 메뉴바에 붙는 메뉴이므로 `submenu` 형태를 사용한다. 중첩 submenu는 지원된다.
+
+checkbox는 클릭 시 native menu item의 checked state를 즉시 토글하고, 동일하게
+`menu:click {click}` 이벤트를 발화한다.
+
+## Frontend JS
+
+```ts
+import { menu, on } from '@suji/api';
+
+await menu.setApplicationMenu([
+  {
+    label: 'Tools',
+    submenu: [
+      { label: 'Run Task', click: 'run-task' },
+      { type: 'checkbox', label: 'Enable Feature', click: 'toggle-feature', checked: true },
+      { type: 'separator' },
+      {
+        label: 'Nested',
+        submenu: [{ label: 'Open Panel', click: 'open-panel' }],
+      },
+    ],
+  },
+]);
+
+on('menu:click', ({ click }) => {
+  if (click === 'run-task') {
+    // run action
+  }
+});
+
+await menu.resetApplicationMenu();
+```
+
+## Backend SDK
+
+### Zig (`suji.menu.*`)
+
+```zig
+_ = suji.menu.setApplicationMenuRaw(
+    "\"items\":[{\"type\":\"submenu\",\"label\":\"Tools\",\"submenu\":[{\"label\":\"Run\",\"click\":\"run\"},{\"type\":\"checkbox\",\"label\":\"Flag\",\"click\":\"flag\",\"checked\":true}]}]",
+);
+_ = suji.menu.resetApplicationMenu();
+```
+
+### Rust (`suji::menu::*`)
+
+```rust
+use suji::menu::{self, MenuItem};
+
+let _ = menu::set_application_menu(&[
+    MenuItem::Submenu {
+        label: "Tools",
+        enabled: true,
+        submenu: vec![
+            MenuItem::Item { label: "Run", click: "run", enabled: true },
+            MenuItem::Checkbox { label: "Flag", click: "flag", checked: true, enabled: true },
+            MenuItem::Separator,
+        ],
+    },
+]);
+let _ = menu::reset_application_menu();
+```
+
+### Go (`github.com/ohah/suji-go/menu`)
+
+```go
+import "github.com/ohah/suji-go/menu"
+
+menu.SetApplicationMenu([]menu.MenuItem{
+    menu.Submenu("Tools", []menu.MenuItem{
+        menu.Item("Run", "run"),
+        menu.Checkbox("Flag", "flag", true),
+        menu.Separator(),
+    }),
+})
+menu.ResetApplicationMenu()
+```
+
+### Node (`@suji/node`)
+
+```ts
+import { menu, on } from '@suji/node';
+
+await menu.setApplicationMenu([
+  { label: 'Tools', submenu: [{ label: 'Run', click: 'run' }] },
+]);
+
+on('menu:click', ({ click }) => {
+  // click === 'run'
+});
+```
+
+## 동작 정밀
+
+- `main.zig`가 `menu_set_application_menu` JSON을 재귀 파싱해 `cef.ApplicationMenuItem` 배열로 변환.
+- `cef.zig`가 `NSMenu` / `NSMenuItem`을 구성하고 `NSApplication.setMainMenu:`로 교체.
+- 각 clickable item은 `representedObject = NSString(click)`을 보유.
+- `SujiAppMenuTarget.appMenuClick:` selector가 click 값을 추출하고
+  `menu:click {"click":"..."}` EventBus 이벤트를 발화.
+- checkbox item은 `tag = 1`로 구분해 클릭 시 `state`를 토글한다.
+
+## E2E
+
+```bash
+./tests/e2e/run-menu.sh
+RUN_DESTRUCTIVE=1 ./tests/e2e/run-menu.sh
+```
+
+기본 E2E는 IPC wiring, 응답 shape, submenu/item/checkbox/separator, Unicode, parse error,
+reset을 검증한다. 실제 메뉴 클릭은 macOS Accessibility 권한이 필요하므로
+`RUN_DESTRUCTIVE=1`에서만 `osascript`로 실행한다.

@@ -36,12 +36,16 @@ func Submenu(label string, items []MenuItem) MenuItem {
 
 // SetApplicationMenu replaces Suji's default custom area while preserving the macOS App menu.
 func SetApplicationMenu(items []MenuItem) string {
+	return suji.Invoke("__core__", buildSetApplicationMenuRequest(items))
+}
+
+func buildSetApplicationMenuRequest(items []MenuItem) string {
 	req := map[string]interface{}{
 		"cmd":   "menu_set_application_menu",
 		"items": items,
 	}
 	b, _ := json.Marshal(req)
-	return suji.Invoke("__core__", string(b))
+	return string(b)
 }
 
 func ResetApplicationMenu() string {

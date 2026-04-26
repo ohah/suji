@@ -162,6 +162,11 @@ CEF DevTools (`--remote-debugging-port=9222`)에서 `console.log(await suji.invo
 | 4-C DevTools | `open_dev_tools` / `close_dev_tools` / `is_dev_tools_opened` / `toggle_dev_tools` |
 | 4-E 편집/검색 | `undo` / `redo` / `cut` / `copy` / `paste` / `select_all` / `find_in_page` / `stop_find_in_page` |
 | 4-D 인쇄 | `print_to_pdf` (콜백 async — 결과는 `window:pdf-print-finished` 이벤트) |
+| 5-A Native | `clipboard_read_text` / `clipboard_write_text` / `clipboard_clear` / `shell_open_external` / `shell_show_item_in_folder` / `shell_beep` / `dialog_show_message_box` / `dialog_show_error_box` / `dialog_show_open_dialog` / `dialog_show_save_dialog` |
+| 5-B Tray | `tray_create` / `tray_set_title` / `tray_set_tooltip` / `tray_set_menu` / `tray_destroy` |
+| 5-C Notification | `notification_is_supported` / `notification_request_permission` / `notification_show` / `notification_close` |
+| 5-D Menu | `menu_set_application_menu` / `menu_reset_application_menu` |
 
-응답은 모두 `{ from: "zig-core", cmd, windowId, ok, ... }` 형태. cmd 매치는 정확 비교
+window 계열 응답은 `{ from: "zig-core", cmd, windowId, ok, ... }`, Native API 계열은
+각 API별 `{success}` / `{trayId}` / `{notificationId}` 등 응답을 반환한다. cmd 매치는 정확 비교
 (이전 substring 매치는 commit 350f9d6에서 제거 — 가짜 cmd substring 회귀 차단).

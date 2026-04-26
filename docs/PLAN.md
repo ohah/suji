@@ -446,7 +446,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `windows[].backgroundColor: "#RRGGBB(AA)"` — NSColor.colorWithRed:green:blue:alpha:.
     - [x] `windows[].titleBarStyle: "hidden" | "hiddenInset"` — titlebarAppearsTransparent + NSWindowStyleMaskFullSizeContentView.
     - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만. 실수요 발견 시 SujiCore.get_window_api로 도입.
-    - **알려진 한계**: frameless의 `-webkit-app-region: drag` 미동작 (Phase 4 백로그 참조).
+    - **플랫폼 한계**: macOS는 frameless의 `-webkit-app-region: drag` 라우팅 완료.
+      Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라 후속 플랫폼 작업 필요.
   - [~] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
     - [x] **Phase 4-A 네비/JS** — `load_url`, `reload`(`ignoreCache`), `execute_javascript`,
           `get_url`(캐시), `is_loading` 6개. WM 메서드 + IPC 핸들러 + Frontend SDK
@@ -536,8 +537,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         재사용 + SujiNotificationDelegate. Bundle ID 검사 — `suji dev` loose binary는 stub
         동작, `.app` 번들 후 실 알림 표시. v1 한계: actions/buttons, reply, custom icon
         미지원. 회귀 1건 + E2E 9건 + Zig SDK 단위 5건. `documents/notification.mdx`.
-  - [ ] **Phase 5-D: 메뉴바 커스터마이즈 API** — 현재 macOS 기본 menu(App/File/Edit/View/Window)만.
-        사용자 정의 menu/submenu/checkbox/separator + click 이벤트 라우팅.
+  - [x] **Phase 5-D: 메뉴바 커스터마이즈 API** — macOS NSMenu 기반.
+        App 메뉴(Quit/Hide/About)는 Suji가 보존하고 사용자 정의 top-level menu를 그 뒤에 구성.
+        `menu.setApplicationMenu/resetApplicationMenu`, `submenu/item/checkbox/separator`,
+        `menu:click {click}` 이벤트 라우팅. Frontend `@suji/api` + Zig/Rust/Go/Node SDK 노출.
+        회귀 테스트 + SDK 단위 + `tests/e2e/menu.test.ts`. `documents/menu.mdx`.
   - [ ] **Phase 5-E: 글로벌 단축키** (NSEvent.addGlobalMonitorForEvents) — Electron `globalShortcut`.
   - [ ] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
         프론트는 IPC, 백엔드는 std lib 직접 + 공통 typed wrapper.
@@ -1226,8 +1230,8 @@ suji build → 결과물:
 |------|----------|-------|------|
 | 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ❌ (Phase 5-F 백로그) |
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
-| 트레이 아이콘 | `Tray` | `tray-icon` | ❌ (Phase 5-B 다음 단계) |
-| 메뉴바 | `Menu` | `menu` | 🟡 (macOS App/File/Edit/View/Window 기본 — 사용자 정의 API 미노출, Phase 5-D) |
+| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 |
+| 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
 | 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | 🟡 close만 부분 — Phase 5 (라이프사이클) |
@@ -1263,6 +1267,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
 | 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. NSPasteboard + 4 SDK + E2E 37 케이스 |
+| 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
@@ -1295,11 +1300,11 @@ suji build → 결과물:
 1. ✅ **멀티 윈도우 완성** — Phase 3 외형 옵션 풀 셋 + Phase 4 webContents 모두 완료
 2. ✅ **다이얼로그** — Phase 5-A 완료 (sheet modal 포함)
 3. ✅ **클립보드 / Shell 외부 핸들러** — Phase 5-A 완료
-4. **트레이 + 알림 + 메뉴바 API** — Phase 5-B/C/D, 데스크톱 앱 기본 요소 (다음 단계 후보)
+4. ✅ **트레이 + 알림 + 메뉴바 API** — Phase 5-B/C/D 완료, 데스크톱 앱 기본 요소
 5. **파일 시스템 API** — Phase 5-F. 백엔드는 Zig `std.fs` 직접, 프론트는 IPC wrapper
 6. **글로벌 단축키** — Phase 5-E. NSEvent.addGlobalMonitorForEvents
 7. **라이프사이클 이벤트** (resize/focus/blur) — Phase 5
-8. **frameless drag region** — Phase 4 백로그. 사용자 만족도 직격
+8. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께 처리
 9. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 10. **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
 11. **보안 모델** (Phase 7: contextIsolation, CSP, IPC 검증) — 프로덕션 사용 전 필수

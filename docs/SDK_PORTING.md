@@ -166,14 +166,48 @@ interface InvokeEvent {
 
 새 SDK는 위 cmd를 모두 typed wrapper로 노출한다. **JSON-safe escape는 SDK 책임** — 사용자가 raw `"`, `\\`, control char 들어간 문자열을 넘겨도 wire JSON이 깨지지 않아야 한다 (구현 패턴: `escape_json` 헬퍼 — `"` → `\"`, `\\` → `\\\\`, `< 0x20` drop).
 
-### 4.4 명명 규칙
+### 4.4 Native API (Phase 5-A/B/C/D)
+
+모든 SDK가 동일한 cmd JSON을 `invoke("__core__", ...)`로 전송한다. Frontend JS는
+`window.__suji__.core(JSON.stringify(...))` 경유.
+
+| 네임스페이스 | cmd / 이벤트 |
+|---|---|
+| `clipboard` | `clipboard_read_text` / `clipboard_write_text` / `clipboard_clear` |
+| `shell` | `shell_open_external` / `shell_show_item_in_folder` / `shell_beep` |
+| `dialog` | `dialog_show_message_box` / `dialog_show_error_box` / `dialog_show_open_dialog` / `dialog_show_save_dialog` |
+| `tray` | `tray_create` / `tray_set_title` / `tray_set_tooltip` / `tray_set_menu` / `tray_destroy`; 이벤트 `tray:menu-click {trayId, click}` |
+| `notification` | `notification_is_supported` / `notification_request_permission` / `notification_show` / `notification_close`; 이벤트 `notification:click {notificationId}` |
+| `menu` | `menu_set_application_menu` / `menu_reset_application_menu`; 이벤트 `menu:click {click}` |
+
+Menu item wire shape:
+
+```json
+[
+  {
+    "type": "submenu",
+    "label": "Tools",
+    "enabled": true,
+    "submenu": [
+      { "type": "item", "label": "Run", "click": "run", "enabled": true },
+      { "type": "checkbox", "label": "Flag", "click": "flag", "checked": true, "enabled": true },
+      { "type": "separator" }
+    ]
+  }
+]
+```
+
+top-level 항목은 메뉴바에 붙는 메뉴이므로 `submenu`를 사용한다. macOS App 메뉴
+(About/Hide/Quit)는 코어가 보존한다.
+
+### 4.5 명명 규칙
 
 | 언어 | 패키지/모듈 | 함수 이름 | 옵션 객체 |
 |------|------------|----------|----------|
-| Zig | `suji.windows` | `loadURL`, `reload`, `executeJavaScript`, ... | struct (snake_case fields) |
-| Rust | `suji::windows` | `load_url`, `reload`, `execute_javascript`, ... | struct (snake_case fields) |
-| Go | `windows` (sub-package, `import "github.com/ohah/suji-go/windows"`) | `LoadURL`, `Reload`, `ExecuteJavaScript`, ... | struct (PascalCase fields) |
-| Node | `suji.windows.*` | `loadURL`, `reload`, `executeJavaScript`, ... | object literal (camelCase) |
+| Zig | `suji.windows`, `suji.menu`, ... | `loadURL`, `resetApplicationMenu`, ... | struct 또는 raw JSON fields |
+| Rust | `suji::windows`, `suji::menu`, ... | `load_url`, `reset_application_menu`, ... | struct / enum (snake_case fields) |
+| Go | `windows`, `menu` sub-package | `LoadURL`, `SetApplicationMenu`, ... | struct (PascalCase fields) |
+| Node | `suji.windows.*`, `suji.menu.*` | `loadURL`, `setApplicationMenu`, ... | object literal (camelCase) |
 | Python (예정) | `suji.windows` | `load_url`, `reload`, `execute_javascript`, ... | dict 또는 dataclass |
 | Ruby (예정) | `Suji::Windows` | `load_url`, `reload`, `execute_javascript`, ... | Hash 또는 Struct |
 
@@ -200,33 +234,39 @@ interface InvokeEvent {
 - [ ] `create / setTitle / setBounds / loadURL / reload / executeJavaScript / getURL / isLoading` 8개 cmd
 - [ ] `escape_json` 헬퍼 — `"`, `\\`, control char 처리
 
-### 5.4 테스트
+### 5.4 Native API (4.4 표)
+- [ ] `clipboard / shell / dialog / tray / notification / menu` 네임스페이스 노출
+- [ ] `menu.setApplicationMenu/resetApplicationMenu` typed wrapper + `menu:click` 문서화
+- [ ] `tray:menu-click`, `notification:click`, `menu:click` EventBus listener 예제
+
+### 5.5 테스트
 - [ ] 단위: handle 등록/dispatch, InvokeEvent 파싱, escape_json 엣지 케이스
 - [ ] 단위: windows.* 가 올바른 cmd JSON으로 변환되는지 (invoke spy)
+- [ ] 단위: Native API wrapper가 올바른 cmd JSON으로 변환되는지 (특히 menu nested item)
 - [ ] examples/X-backend/: 빈 cdylib 빌드 + suji dev 시 시작 → 종료
 - [ ] e2e: tests/e2e의 cef-ipc / window-injection / window-lifecycle 시나리오 통과 (cross-language chain 호출 포함)
 
-### 5.5 빌드 통합
+### 5.6 빌드 통합
 - [ ] Suji core CLI(`suji init`)에 X 템플릿 추가
 - [ ] `suji build` / `suji dev`에서 X cdylib 빌드 명령 통합
 - [ ] CI 매트릭스에 macOS/Linux/Windows X 빌드 추가
 
-### 5.6 문서
+### 5.7 문서
 - [ ] `CLAUDE.md` 코드 예제 섹션에 X 추가
 - [ ] examples/X-backend/ + examples/multi-backend/backends/X 추가
-- [ ] 본 문서(SDK_PORTING.md)의 4.4 명명 규칙 표에 X 행 추가
+- [ ] 본 문서(SDK_PORTING.md)의 4.5 명명 규칙 표에 X 행 추가
 
 ---
 
 ## 6. 참고 구현 위치
 
-| 언어 | 위치 | invoke wrapper | windows API |
+| 언어 | 위치 | invoke wrapper | windows / native API |
 |------|------|---------------|-------------|
-| Zig | `src/core/app.zig` | `callBackend` (L591) | `pub const windows = struct {...}` (L478) |
-| Rust | `crates/suji-rs/src/lib.rs` | `pub fn invoke` (L101) | `pub mod windows {...}` (L154) |
-| Go | `sdks/suji-go/export.go` | `func Invoke` (L61) | `sdks/suji-go/windows/windows.go` (sub-package) |
-| Node | `packages/suji-node/src/index.ts` | `export async function invoke` (L128) | `export const windows = {...}` (말미) |
-| Frontend JS | `packages/suji-js/src/index.ts` | `getBridge().core(...)` | `export const windows = {...}` |
+| Zig | `src/core/app.zig` | `callBackend` | `pub const windows/menu/... = struct {...}` |
+| Rust | `crates/suji-rs/src/lib.rs` | `pub fn invoke` | `pub mod windows/menu/...` |
+| Go | `sdks/suji-go/export.go` | `func Invoke` | `sdks/suji-go/windows`, `sdks/suji-go/menu`, ... |
+| Node | `packages/suji-node/src/index.ts` | `export async function invoke` | `export const windows/menu/...` |
+| Frontend JS | `packages/suji-js/src/index.ts` | `getBridge().core(...)` | `export const windows/menu/...` |
 
 코어 IPC 라우팅: `src/main.zig:cefHandleCore` (L1014) — 새 cmd 추가 시 여기 분기 + `src/core/window_ipc.zig`에 핸들러.
 

@@ -546,12 +546,16 @@ pub mod menu {
         }
     }
 
-    /// Set the macOS application menu. Clicks emit `menu:click {click}`.
-    pub fn set_application_menu(items: &[MenuItem]) -> Option<String> {
-        let req = serde_json::json!({
+    pub(crate) fn set_application_menu_request(items: &[MenuItem]) -> String {
+        serde_json::json!({
             "cmd": "menu_set_application_menu",
             "items": items.iter().map(item_to_json).collect::<Vec<_>>(),
-        }).to_string();
+        }).to_string()
+    }
+
+    /// Set the macOS application menu. Clicks emit `menu:click {click}`.
+    pub fn set_application_menu(items: &[MenuItem]) -> Option<String> {
+        let req = set_application_menu_request(items);
         invoke("__core__", &req)
     }
 
@@ -674,6 +678,48 @@ mod tests {
         assert_eq!(PLATFORM_MACOS, "macos");
         assert_eq!(PLATFORM_LINUX, "linux");
         assert_eq!(PLATFORM_WINDOWS, "windows");
+    }
+
+    #[test]
+    fn menu_set_application_menu_request_builds_nested_items() {
+        let req = crate::menu::set_application_menu_request(&[
+            crate::menu::MenuItem::Submenu {
+                label: "Tools",
+                enabled: true,
+                submenu: vec![
+                    crate::menu::MenuItem::Item { label: "Run", click: "run", enabled: true },
+                    crate::menu::MenuItem::Checkbox { label: "Flag", click: "flag", checked: true, enabled: false },
+                    crate::menu::MenuItem::Separator,
+                ],
+            },
+        ]);
+        let v: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(v["cmd"], "menu_set_application_menu");
+        assert_eq!(v["items"][0]["type"], "submenu");
+        assert_eq!(v["items"][0]["label"], "Tools");
+        assert_eq!(v["items"][0]["submenu"][0]["click"], "run");
+        assert_eq!(v["items"][0]["submenu"][1]["checked"], true);
+        assert_eq!(v["items"][0]["submenu"][1]["enabled"], false);
+        assert_eq!(v["items"][0]["submenu"][2]["type"], "separator");
+    }
+
+    #[test]
+    fn menu_set_application_menu_request_escapes_strings() {
+        let req = crate::menu::set_application_menu_request(&[
+            crate::menu::MenuItem::Submenu {
+                label: "도구 \"Tools\"",
+                enabled: true,
+                submenu: vec![crate::menu::MenuItem::Item {
+                    label: "Run \\ now",
+                    click: "run\nnow",
+                    enabled: true,
+                }],
+            },
+        ]);
+        let v: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(v["items"][0]["label"], "도구 \"Tools\"");
+        assert_eq!(v["items"][0]["submenu"][0]["label"], "Run \\ now");
+        assert_eq!(v["items"][0]["submenu"][0]["click"], "run\nnow");
     }
 
     #[test]

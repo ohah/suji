@@ -123,7 +123,7 @@ await notification.close(notificationId);
 - `dialog.m`처럼 nested NSApp event loop 패턴으로 `requestAuthorizationWithOptions:completionHandler:`
   와 `addNotificationRequest:withCompletionHandler:`를 동기화.
 - `SujiNotificationDelegate` ObjC 클래스 — `UNUserNotificationCenterDelegate` 구현:
-  - `willPresentNotification:` — foreground 상태에서도 banner + sound 표시 (default는 묻힘)
+  - `willPresentNotification:` — foreground 상태에서도 banner 표시. `silent: true`면 sound option을 요청하지 않음
   - `didReceiveNotificationResponse:` — 클릭 시 NSString identifier → C 콜백 → Zig → EventBus emit
 - Bundle ID 검사 (`mainBundle.bundleIdentifier`)로 dev 모드에서 안전한 stub 동작.
 
