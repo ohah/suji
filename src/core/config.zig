@@ -99,9 +99,12 @@ pub const Config = struct {
     };
 
     /// 보안 정책 — `suji://` custom protocol 응답에 적용되는 헤더.
-    /// csp 비어있으면 cef.zig의 default CSP 적용. 비활성화는 `"disabled"` 명시.
+    /// csp 비어있으면 cef.zig의 default CSP 적용 (iframe_allowed_origins로 frame-src 합성).
+    /// CSP 비활성화는 csp `"disabled"` 명시. iframe_allowed_origins 빈 배열이면 모든 iframe 차단,
+    /// `["*"]`이면 무제한.
     pub const Security = struct {
         csp: ?[:0]const u8 = null,
+        iframe_allowed_origins: []const [:0]const u8 = &.{},
     };
 
     /// 시작 시 자동 생성할 창의 최대 개수.
@@ -332,6 +335,16 @@ pub const Config = struct {
         if (root.get("security")) |sec_val| {
             if (sec_val == .object) {
                 if (getStr(sec_val.object, "csp")) |s| config.security.csp = dupeStr(a, s);
+                if (sec_val.object.get("iframeAllowedOrigins")) |arr_val| {
+                    if (arr_val == .array) {
+                        var list = std.ArrayList([:0]const u8).empty;
+                        for (arr_val.array.items) |item| {
+                            if (item != .string) continue;
+                            list.append(a, dupeStr(a, item.string)) catch continue;
+                        }
+                        config.security.iframe_allowed_origins = list.toOwnedSlice(a) catch &.{};
+                    }
+                }
             }
         }
 

@@ -1273,6 +1273,7 @@ suji build → 결과물:
 | IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ✅ payload size 32KB · cmd char allowlist (injection 차단) · missing/invalid/unknown_cmd 표준 에러 |
 | macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin) + `app.entitlements` override |
 | Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ❌ (Phase 7+) |
+| iframe sandbox / origin allowlist | CSP `frame-src` 수동 + `<webview>` partition | `tauri.conf.json` `app.security.csp` | ✅ `security.iframeAllowedOrigins` config — CSP frame-src 자동 합성. default block (`'none'`) + `["*"]` escape |
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |
 | webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ❌ (CEF resource handler 확장) |
@@ -1358,9 +1359,8 @@ suji build → 결과물:
 15. **`safeStorage` (Keychain 암호화)** — 사용자 인증 토큰/secret 저장 (macOS Keychain / Win DPAPI / Linux libsecret)
 16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge) — 분량 소 each
 17. **`windows.createView` (BrowserView 동등)** — 한 창 multi-content 합성 (멀티탭 브라우저 앱 use case 명확할 때)
-18. **iframe sandbox / origin allowlist** — untrusted 외부 콘텐츠 띄울 때 Phase 7+
-19. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
-20. **TypeScript 타입 자동 생성** — Tauri specta 동등 (개발자 경험)
+18. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
+19. **TypeScript 타입 자동 생성** — Tauri specta 동등 (개발자 경험)
 
 ---
 

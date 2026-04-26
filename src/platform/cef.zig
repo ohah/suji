@@ -3500,20 +3500,51 @@ fn setRespHeader(resp: *c.cef_response_t, name: []const u8, value: []const u8) v
     resp.set_header_by_name.?(resp, &name_str, &value_str, 1);
 }
 
-const DEFAULT_CSP =
+/// frame-src 자리에 들어갈 sentinel — iframe allowed origins가 빌드 시점 합성.
+const CSP_FRAME_SRC_SENTINEL = "__SUJI_FRAME_SRC__";
+
+const DEFAULT_CSP_TEMPLATE =
     "default-src 'self' suji:; " ++
     "script-src 'self' suji: 'unsafe-inline'; " ++
     "style-src 'self' suji: 'unsafe-inline'; " ++
     "img-src 'self' suji: data: blob:; " ++
     "connect-src 'self' suji: ws: wss: http: https:; " ++
-    "font-src 'self' suji: data:;";
+    "font-src 'self' suji: data:; " ++
+    "frame-src " ++ CSP_FRAME_SRC_SENTINEL ++ ";";
 
-/// `suji://` 응답에 적용되는 CSP. 기본은 DEFAULT_CSP. config.security.csp가 `"disabled"`면
-/// CSP 헤더 자체를 안 보냄 (escape hatch). 그 외 string은 user-supplied policy로 override.
-/// 처음 set 후 process lifetime 동안 유지 — main이 long-lived config 값을 주입하므로
-/// dangling X (config 자체가 process arena owned).
-pub var g_csp_value: []const u8 = DEFAULT_CSP;
+/// `suji://` 응답에 적용되는 CSP. config.security.csp가 `"disabled"`면 CSP 헤더 자체를
+/// 안 보냄. 그 외는 user-supplied policy로 override. iframeAllowedOrigins는 default
+/// CSP의 frame-src에 합성 (사용자 csp override 시 그것을 우선 — 사용자가 직접 frame-src 명시 책임).
+pub var g_csp_value: []const u8 = "";  // setIframeAllowedOrigins / setCspValue가 process init 시 set.
 pub var g_csp_enabled: bool = true;
+
+/// 사용자가 csp 미지정 시 default CSP를 빌드. iframe allowed origins는 frame-src에 합성.
+/// allocator 소유 — 결과는 process lifetime 유지 (config arena와 연결). 빈 origin 배열이면
+/// `frame-src 'none'` (iframe 완전 차단, default safe).
+pub fn buildDefaultCsp(allocator: std.mem.Allocator, iframe_allowed_origins: []const []const u8) ![]const u8 {
+    var frame_src_buf: std.ArrayList(u8) = .empty;
+    defer frame_src_buf.deinit(allocator);
+    if (iframe_allowed_origins.len == 0) {
+        try frame_src_buf.appendSlice(allocator, "'none'");
+    } else {
+        // ["*"] = unrestricted (escape hatch)
+        var unrestricted = false;
+        for (iframe_allowed_origins) |o| if (std.mem.eql(u8, o, "*")) { unrestricted = true; break; };
+        if (unrestricted) {
+            try frame_src_buf.appendSlice(allocator, "*");
+        } else {
+            try frame_src_buf.appendSlice(allocator, "'self'");
+            for (iframe_allowed_origins) |origin| {
+                try frame_src_buf.append(allocator, ' ');
+                try frame_src_buf.appendSlice(allocator, origin);
+            }
+        }
+    }
+
+    // template의 sentinel을 실제 frame-src로 치환.
+    const result = try std.mem.replaceOwned(u8, allocator, DEFAULT_CSP_TEMPLATE, CSP_FRAME_SRC_SENTINEL, frame_src_buf.items);
+    return result;
+}
 
 pub fn setCspValue(value: []const u8) void {
     if (value.len == 0) return;
@@ -3533,11 +3564,12 @@ test "setCspValue: empty/disabled/custom 분기" {
         g_csp_enabled = saved_enabled;
     }
 
+    const TEST_DEFAULT = "default-src 'self';";
     // 빈 값 → no-op (default 유지)
-    g_csp_value = DEFAULT_CSP;
+    g_csp_value = TEST_DEFAULT;
     g_csp_enabled = true;
     setCspValue("");
-    try std.testing.expectEqualStrings(DEFAULT_CSP, g_csp_value);
+    try std.testing.expectEqualStrings(TEST_DEFAULT, g_csp_value);
     try std.testing.expect(g_csp_enabled);
 
     // "disabled" sentinel → CSP 헤더 자체 disable (escape hatch)
@@ -3548,6 +3580,30 @@ test "setCspValue: empty/disabled/custom 분기" {
     setCspValue("default-src 'none'");
     try std.testing.expect(g_csp_enabled);
     try std.testing.expectEqualStrings("default-src 'none'", g_csp_value);
+}
+
+test "buildDefaultCsp: iframe allowedOrigins 합성" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // 빈 배열 → frame-src 'none' (default safe)
+    const empty = try buildDefaultCsp(a, &.{});
+    try std.testing.expect(std.mem.indexOf(u8, empty, "frame-src 'none';") != null);
+
+    // 명시 origin → frame-src 'self' + origins
+    const origins = [_][]const u8{ "https://trusted.com", "https://api.example.com" };
+    const restrict = try buildDefaultCsp(a, &origins);
+    try std.testing.expect(std.mem.indexOf(u8, restrict, "frame-src 'self' https://trusted.com https://api.example.com;") != null);
+
+    // ["*"] escape → frame-src *
+    const wildcard = [_][]const u8{"*"};
+    const all = try buildDefaultCsp(a, &wildcard);
+    try std.testing.expect(std.mem.indexOf(u8, all, "frame-src *;") != null);
+
+    // 다른 directive 보존
+    try std.testing.expect(std.mem.indexOf(u8, empty, "default-src 'self' suji:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, empty, "script-src 'self' suji: 'unsafe-inline'") != null);
 }
 
 fn rhRead(

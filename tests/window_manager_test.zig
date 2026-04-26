@@ -3117,6 +3117,8 @@ test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
 
     // CSP value config 주입 + cef.setCspValue 호출.
     try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.setCspValue") != null);
+    // iframe allowed origins → buildDefaultCsp로 frame-src 합성.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "buildDefaultCsp") != null);
 
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -3142,6 +3144,8 @@ test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
     // Security config struct + parser.
     try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "pub const Security = struct") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "csp:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "iframe_allowed_origins") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "iframeAllowedOrigins") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "root.get(\"security\")") != null);
 }
 

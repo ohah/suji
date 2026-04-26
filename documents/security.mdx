@@ -63,6 +63,33 @@ Suji 앱이 있어도 cookie/localStorage/IndexedDB/Service Worker가 서로 영
 | 알려진 cmd | unknown 시 `error: "unknown_cmd"` (typo / version mismatch 진단) |
 | cmd 정확 매치 | substring 매치 X (commit 350f9d6에서 제거됨) |
 
+## iframe sandbox / origin allowlist
+
+외부 untrusted 콘텐츠 (광고/위젯/임베드)를 iframe으로 띄울 때 origin 화이트리스트로 제한.
+CSP `frame-src` directive로 Chromium이 차단한다.
+
+`suji.json`:
+```json
+{
+  "security": {
+    "iframeAllowedOrigins": ["https://trusted.com", "https://api.example.com"]
+  }
+}
+```
+
+| 설정 | 동작 |
+|---|---|
+| 미설정 / `[]` | **default block** — 모든 iframe 차단 (`frame-src 'none'`) |
+| `["https://trusted.com"]` | 해당 origin만 허용 (`frame-src 'self' https://trusted.com`) |
+| `["*"]` | 무제한 escape hatch (`frame-src *`) — 권장 X |
+
+사용자가 `security.csp`로 직접 CSP 명시 시 그것 우선 — iframe_allowed_origins은 무시.
+그 경우 사용자가 직접 `frame-src` 명시 책임.
+
+**한계**: CSP는 `suji://` production 응답에만 자동 부착. dev mode (`dev_url`로 vite 직접
+로드)는 CSP 없음 — 사용자 HTML `<meta http-equiv="Content-Security-Policy">` 직접 추가
+또는 production 번들로 검증.
+
 ## 알려진 한계 / 후속
 
 - **CSP (Content-Security-Policy)**: 사용자 HTML에 직접 추가 — Suji default 자동 추가는

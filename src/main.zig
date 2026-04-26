@@ -614,7 +614,15 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
-    if (config.security.csp) |csp_val| cef.setCspValue(csp_val);
+    // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
+    if (config.security.csp) |csp_val| {
+        cef.setCspValue(csp_val);
+    } else blk: {
+        const origins_slice = allocator.alloc([]const u8, config.security.iframe_allowed_origins.len) catch break :blk;
+        for (config.security.iframe_allowed_origins, 0..) |s, i| origins_slice[i] = s;
+        const csp = cef.buildDefaultCsp(allocator, origins_slice) catch break :blk;
+        cef.setCspValue(csp);
+    }
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -781,7 +789,15 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
-    if (config.security.csp) |csp_val| cef.setCspValue(csp_val);
+    // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
+    if (config.security.csp) |csp_val| {
+        cef.setCspValue(csp_val);
+    } else blk: {
+        const origins_slice = allocator.alloc([]const u8, config.security.iframe_allowed_origins.len) catch break :blk;
+        for (config.security.iframe_allowed_origins, 0..) |s, i| origins_slice[i] = s;
+        const csp = cef.buildDefaultCsp(allocator, origins_slice) catch break :blk;
+        cef.setCspValue(csp);
+    }
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
