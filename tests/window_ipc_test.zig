@@ -1046,3 +1046,220 @@ test "handleDevToolsOp: 모든 핸들러 작은 버퍼면 null (회귀)" {
     try std.testing.expectEqual(@as(usize, 0), native.close_dev_tools_calls);
     try std.testing.expectEqual(@as(usize, 0), native.toggle_dev_tools_calls);
 }
+
+// ============================================
+// Phase 17-A: WebContentsView IPC 핸들러
+// ============================================
+
+test "17-A: parseCreateViewFromJson extracts hostId/url/name/bounds" {
+    const json =
+        \\{"cmd":"create_view","hostId":7,"url":"https://example.com","name":"side","x":10,"y":20,"width":300,"height":400}
+    ;
+    const req = ipc.parseCreateViewFromJson(json);
+    try std.testing.expectEqual(@as(u32, 7), req.host_window_id);
+    try std.testing.expectEqualStrings("https://example.com", req.url.?);
+    try std.testing.expectEqualStrings("side", req.name.?);
+    try std.testing.expectEqual(@as(i32, 10), req.bounds.x);
+    try std.testing.expectEqual(@as(u32, 300), req.bounds.width);
+}
+
+test "17-A: handleCreateView calls wm.createView and returns viewId" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleCreateView(.{
+        .host_window_id = host,
+        .url = "https://x.com",
+        .bounds = .{ .x = 0, .y = 0, .width = 100, .height = 200 },
+    }, &buf, &wm).?;
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"cmd\":\"create_view\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"viewId\":2") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.create_view_calls);
+}
+
+test "17-A: handleCreateView with InvalidName returns error response" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleCreateView(.{
+        .host_window_id = host,
+        .name = "bad\"name",
+    }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"error\":\"invalid name\"") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.create_view_calls);
+}
+
+test "17-A: handleCreateView with non-existent host returns error" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleCreateView(.{ .host_window_id = 999 }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"error\":\"failed\"") != null);
+}
+
+test "17-A: handleDestroyView returns ok:true on live view" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleDestroyView(view, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"viewId\":2") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_view_calls);
+}
+
+test "17-A: handleDestroyView on .window returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const w = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleDestroyView(w, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_view_calls);
+}
+
+test "17-A: handleAddChildView reorders + responds with viewId" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleAddChildView(.{ .host_id = host, .view_id = v1, .index = null }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    const ids = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(ids);
+    try std.testing.expectEqual(v2, ids[0]);
+    try std.testing.expectEqual(v1, ids[1]);
+}
+
+test "17-A: handleSetTopView is alias of addChildView(null)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    _ = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleSetTopView(host, v1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"cmd\":\"set_top_view\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+}
+
+test "17-A: handleRemoveChildView ok and view stays alive" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleRemoveChildView(host, view, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expect(!wm.get(view).?.destroyed);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_view_calls);
+}
+
+test "17-A: handleSetViewBounds forwards to wm.setViewBounds" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleSetViewBounds(.{
+        .view_id = view,
+        .x = 10,
+        .y = 20,
+        .width = 300,
+        .height = 400,
+    }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(u32, 300), native.last_view_bounds.?.width);
+}
+
+test "17-A: handleSetViewVisible toggle ok + native call" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleSetViewVisible(view, false, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(?bool, false), native.last_set_view_visible);
+}
+
+test "17-A: handleGetChildViews emits ordered viewIds array" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    _ = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleGetChildViews(host, &buf, &wm, std.testing.allocator).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"viewIds\":[2,3]") != null);
+}
+
+test "17-A: handleGetChildViews on empty host returns viewIds:[]" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleGetChildViews(host, &buf, &wm, std.testing.allocator).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"viewIds\":[]") != null);
+}
+
+test "17-A: handleGetChildViews on non-window host returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    // view를 host로 사용 → NotAWindow → ok:false
+    const out = ipc.handleGetChildViews(view, &buf, &wm, std.testing.allocator).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"viewIds\":[]") != null);
+}
+
+test "17-A: view 핸들러 모두 작은 버퍼면 null (회귀)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var tiny: [3]u8 = undefined;
+    try std.testing.expect(ipc.handleCreateView(.{ .host_window_id = host }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleDestroyView(view, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleAddChildView(.{ .host_id = host, .view_id = view }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleRemoveChildView(host, view, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleSetTopView(host, view, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleSetViewBounds(.{ .view_id = view }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleSetViewVisible(view, true, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleGetChildViews(host, &tiny, &wm, std.testing.allocator) == null);
+}

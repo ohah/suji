@@ -512,3 +512,146 @@ pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.Wi
         .{ window_id, opened },
     ) catch null;
 }
+
+// ============================================
+// Phase 17-A: WebContentsView (createView / addChildView / setTopView / ...)
+// view 전용 응답은 `viewId` 키 사용 (windowId와 같은 풀이지만 시맨틱 명확화).
+// 기존 webContents cmd(load_url/execute_javascript/...)는 windowId 키 그대로 — viewId가
+// 그 자리에 들어가 동작.
+// ============================================
+
+/// `{from, cmd, viewId, ok}` 4-필드 응답 — view 전용 cmd 공용. respondWindowOp의 view 버전.
+fn respondViewOp(buf: []u8, cmd: []const u8, view_id: u32, ok: bool) ?[]const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"viewId\":{d},\"ok\":{}}}",
+        .{ cmd, view_id, ok },
+    ) catch null;
+}
+
+pub const CreateViewReq = struct {
+    host_window_id: u32,
+    url: ?[]const u8 = null,
+    name: ?[]const u8 = null,
+    bounds: window.Bounds = .{},
+};
+
+pub fn parseCreateViewFromJson(json: []const u8) CreateViewReq {
+    var req = CreateViewReq{ .host_window_id = 0 };
+    if (util.extractJsonInt(json, "hostId")) |n| if (n >= 0) {
+        req.host_window_id = util.nonNegU32(n);
+    };
+    if (util.extractJsonString(json, "url")) |s| req.url = s;
+    if (util.extractJsonString(json, "name")) |s| req.name = s;
+    if (util.extractJsonInt(json, "x")) |n| req.bounds.x = util.clampI32(n);
+    if (util.extractJsonInt(json, "y")) |n| req.bounds.y = util.clampI32(n);
+    if (util.extractJsonInt(json, "width")) |n| req.bounds.width = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "height")) |n| req.bounds.height = util.nonNegU32(n);
+    return req;
+}
+
+/// create_view 요청 처리. 성공 시 `{"from":"zig-core","cmd":"create_view","viewId":N}`.
+pub fn handleCreateView(req: CreateViewReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const id = wm.createView(.{
+        .host_window_id = req.host_window_id,
+        .url = req.url,
+        .name = req.name,
+        .bounds = req.bounds,
+    }) catch |e| switch (e) {
+        window.Error.InvalidName => return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"create_view\",\"error\":\"invalid name\"}}",
+            .{},
+        ) catch null,
+        else => return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"create_view\",\"error\":\"failed\"}}",
+            .{},
+        ) catch null,
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"create_view\",\"viewId\":{d}}}",
+        .{id},
+    ) catch null;
+}
+
+pub fn handleDestroyView(view_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.destroyView(view_id)) |_| true else |_| false;
+    return respondViewOp(response_buf, "destroy_view", view_id, ok);
+}
+
+pub const AddChildViewReq = struct {
+    host_id: u32,
+    view_id: u32,
+    /// null이면 top (끝). 음수는 생략.
+    index: ?usize = null,
+};
+
+pub fn handleAddChildView(req: AddChildViewReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.addChildView(req.host_id, req.view_id, req.index)) |_| true else |_| false;
+    return respondViewOp(response_buf, "add_child_view", req.view_id, ok);
+}
+
+pub fn handleRemoveChildView(host_id: u32, view_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.removeChildView(host_id, view_id)) |_| true else |_| false;
+    return respondViewOp(response_buf, "remove_child_view", view_id, ok);
+}
+
+pub fn handleSetTopView(host_id: u32, view_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setTopView(host_id, view_id)) |_| true else |_| false;
+    return respondViewOp(response_buf, "set_top_view", view_id, ok);
+}
+
+pub const SetViewBoundsReq = struct {
+    view_id: u32,
+    x: i32 = 0,
+    y: i32 = 0,
+    width: u32 = 0,
+    height: u32 = 0,
+};
+
+pub fn handleSetViewBounds(req: SetViewBoundsReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setViewBounds(req.view_id, .{
+        .x = req.x,
+        .y = req.y,
+        .width = req.width,
+        .height = req.height,
+    })) |_| true else |_| false;
+    return respondViewOp(response_buf, "set_view_bounds", req.view_id, ok);
+}
+
+pub fn handleSetViewVisible(view_id: u32, visible: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setViewVisible(view_id, visible)) |_| true else |_| false;
+    return respondViewOp(response_buf, "set_view_visible", view_id, ok);
+}
+
+/// get_child_views 응답: `{from, cmd, hostId, ok, viewIds: [...]}`. host destroyed/not-window면
+/// ok=false + 빈 배열. allocator는 임시 슬라이스 alloc용 (호출자 owned).
+pub fn handleGetChildViews(host_id: u32, response_buf: []u8, wm: *window.WindowManager, allocator: std.mem.Allocator) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ids = wm.getChildViews(host_id, allocator) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"get_child_views\",\"hostId\":{d},\"ok\":false,\"viewIds\":[]}}",
+            .{host_id},
+        ) catch null;
+    };
+    defer allocator.free(ids);
+
+    var w = std.Io.Writer.fixed(response_buf);
+    w.print("{{\"from\":\"zig-core\",\"cmd\":\"get_child_views\",\"hostId\":{d},\"ok\":true,\"viewIds\":[", .{host_id}) catch return null;
+    for (ids, 0..) |id, i| {
+        if (i > 0) w.writeByte(',') catch return null;
+        w.print("{d}", .{id}) catch return null;
+    }
+    w.writeAll("]}") catch return null;
+    return w.buffered();
+}

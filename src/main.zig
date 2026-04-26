@@ -1261,6 +1261,63 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .path = util.extractJsonString(req_clean, "path") orelse "",
         }, response_buf, wm);
     }
+    // Phase 17-A: WebContentsView (createView / addChildView / setTopView / ...)
+    if (std.mem.eql(u8, cmd, "create_view")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        return window_ipc.handleCreateView(window_ipc.parseCreateViewFromJson(req_clean), response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "destroy_view")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        return window_ipc.handleDestroyView(view_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "add_child_view")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        const idx_opt: ?usize = if (util.extractJsonInt(req_clean, "index")) |n|
+            (if (n >= 0) @as(usize, @intCast(n)) else null)
+        else
+            null;
+        return window_ipc.handleAddChildView(.{ .host_id = host_id, .view_id = view_id, .index = idx_opt }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "remove_child_view")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        return window_ipc.handleRemoveChildView(host_id, view_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_top_view")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        return window_ipc.handleSetTopView(host_id, view_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_view_bounds")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        return window_ipc.handleSetViewBounds(.{
+            .view_id = view_id,
+            .x = util.clampI32(util.extractJsonInt(req_clean, "x") orelse 0),
+            .y = util.clampI32(util.extractJsonInt(req_clean, "y") orelse 0),
+            .width = util.nonNegU32(util.extractJsonInt(req_clean, "width") orelse 0),
+            .height = util.nonNegU32(util.extractJsonInt(req_clean, "height") orelse 0),
+        }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_view_visible")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        const visible = util.extractJsonBool(req_clean, "visible") orelse true;
+        return window_ipc.handleSetViewVisible(view_id, visible, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "get_child_views")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
+        // viewIds 임시 슬라이스용 stack arena — 256개 view까지 (4 byte * 256 = 1KB).
+        var arena_buf: [4096]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+        return window_ipc.handleGetChildViews(host_id, response_buf, wm, fba.allocator());
+    }
     if (std.mem.eql(u8, cmd, "quit")) {
         cef.quit();
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"quit\"}}", .{}) catch return null;
