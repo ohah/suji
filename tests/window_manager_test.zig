@@ -3145,7 +3145,7 @@ test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
     try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "root.get(\"security\")") != null);
 }
 
-test "회귀: macOS App Sandbox 자동화 — config.app.sandbox + helper별 entitlements" {
+test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부착" {
     const cfg_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/core/config.zig",
@@ -3153,7 +3153,6 @@ test "회귀: macOS App Sandbox 자동화 — config.app.sandbox + helper별 ent
         .limited(2 * 1024 * 1024),
     );
     defer std.testing.allocator.free(cfg_src);
-    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "sandbox: bool = false") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "entitlements:") != null);
 
     const bundle_src = try std.Io.Dir.cwd().readFileAlloc(
@@ -3173,19 +3172,69 @@ test "회귀: macOS App Sandbox 자동화 — config.app.sandbox + helper별 ent
     try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper-plugin.plist") != null);
     try std.testing.expect(std.mem.indexOf(u8, bundle_src, "main.plist") != null);
 
-    // 5개 entitlements plist 파일 모두 존재.
-    const plists = [_][]const u8{
-        "assets/entitlements/main.plist",
-        "assets/entitlements/helper.plist",
-        "assets/entitlements/helper-gpu.plist",
-        "assets/entitlements/helper-renderer.plist",
-        "assets/entitlements/helper-plugin.plist",
+    // 5개 entitlements plist 파일 모두 존재 + 각 helper의 CEF 요구 key 검증.
+    const Plist = struct {
+        path: []const u8,
+        required_keys: []const []const u8,
+    };
+    const plists = [_]Plist{
+        // 메인: app-sandbox + JIT + network + 사용자 file 접근.
+        .{
+            .path = "assets/entitlements/main.plist",
+            .required_keys = &.{
+                "com.apple.security.app-sandbox",
+                "com.apple.security.cs.allow-jit",
+                "com.apple.security.network.client",
+                "com.apple.security.network.server",
+                "com.apple.security.files.user-selected.read-write",
+            },
+        },
+        // Browser/Alerts helper — sandbox + parent inherit.
+        .{
+            .path = "assets/entitlements/helper.plist",
+            .required_keys = &.{
+                "com.apple.security.app-sandbox",
+                "com.apple.security.inherit",
+            },
+        },
+        // GPU helper — Metal/ANGLE 그래픽 + dynamic library 로드.
+        .{
+            .path = "assets/entitlements/helper-gpu.plist",
+            .required_keys = &.{
+                "com.apple.security.app-sandbox",
+                "com.apple.security.cs.allow-jit",
+                "com.apple.security.cs.allow-unsigned-executable-memory",
+                "com.apple.security.cs.disable-library-validation",
+                "com.apple.security.inherit",
+            },
+        },
+        // Renderer helper — V8 JIT 필수 (allow-jit 빠지면 JS 실행 불가).
+        .{
+            .path = "assets/entitlements/helper-renderer.plist",
+            .required_keys = &.{
+                "com.apple.security.app-sandbox",
+                "com.apple.security.cs.allow-jit",
+                "com.apple.security.cs.disable-library-validation",
+                "com.apple.security.inherit",
+            },
+        },
+        // Plugin helper — JIT + unsigned-executable-memory (PPAPI/native plugin).
+        .{
+            .path = "assets/entitlements/helper-plugin.plist",
+            .required_keys = &.{
+                "com.apple.security.app-sandbox",
+                "com.apple.security.cs.allow-jit",
+                "com.apple.security.cs.allow-unsigned-executable-memory",
+                "com.apple.security.inherit",
+            },
+        },
     };
     for (plists) |p| {
-        const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, std.testing.allocator, .limited(8 * 1024));
+        const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p.path, std.testing.allocator, .limited(8 * 1024));
         defer std.testing.allocator.free(content);
-        // App Sandbox key 모두 포함.
-        try std.testing.expect(std.mem.indexOf(u8, content, "com.apple.security.app-sandbox") != null);
+        for (p.required_keys) |key| {
+            try std.testing.expect(std.mem.indexOf(u8, content, key) != null);
+        }
     }
 }
 

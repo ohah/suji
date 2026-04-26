@@ -239,7 +239,6 @@ fn runBuild(allocator: std.mem.Allocator) !void {
         exe_path,
         config.frontend.dist_dir,
         bundle_macos.BundleOptions{
-            .sandbox = config.app.sandbox,
             .user_entitlements = config.app.entitlements,
         },
     );

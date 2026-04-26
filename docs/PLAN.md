@@ -1248,7 +1248,7 @@ suji build → 결과물:
 | 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs만 — 다른 API (network/shell/etc) Phase 7 |
 | CSP (Content Security Policy) | 수동 설정 | 빌트인 | ❌ (Phase 7) |
 | IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ❌ (Phase 7) |
-| macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ `config.app.sandbox: true` — helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin) + user_entitlements override |
+| macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin) + `app.entitlements` override |
 | Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ❌ (Phase 7) |
 
 ### 앱 배포 & 패키징

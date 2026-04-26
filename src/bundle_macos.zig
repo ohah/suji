@@ -20,11 +20,9 @@ const Dir = std.Io.Dir;
 /// │   └── Resources/
 /// │       └── frontend/           ← 프론트엔드 빌드 결과
 pub const BundleOptions = struct {
-    /// `com.apple.security.app-sandbox` 활성. Mac App Store 진출 시 필수. helper별
-    /// 적절 entitlements 자동 부착.
-    sandbox: bool = false,
-    /// 사용자 추가 entitlements plist 경로. sandbox=true 시 메인 entitlements와 병합.
-    /// 예: `assets/my-app.entitlements` (network/files 등 앱 고유 권한).
+    /// 사용자 추가 entitlements plist 경로. 비어있으면 Suji default helper별 entitlements
+    /// (assets/entitlements/{main,helper,helper-{gpu,renderer,plugin}}.plist) 자동 부착.
+    /// 지정 시 모든 binary에 그 plist 단독 적용.
     user_entitlements: ?[]const u8 = null,
 };
 
@@ -232,15 +230,14 @@ fn fixMainBinaryRpath(allocator: std.mem.Allocator, app_name: []const u8, name: 
 }
 
 fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, opts: BundleOptions) !void {
-    std.debug.print("[suji] code signing (sandbox={})...\n", .{opts.sandbox});
+    std.debug.print("[suji] code signing...\n", .{});
 
     // 1. CEF 프레임워크 — entitlements 없이 (framework는 receiver process가 inherit).
     const fw = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/Chromium Embedded Framework.framework", .{app_name});
     defer allocator.free(fw);
     try codesignNoEntitlements(allocator, fw);
 
-    // 2. Helper 앱들 — sandbox 모드면 helper별 적절 entitlements.
-    //    (suffix, plist filename) 매핑.
+    // 2. Helper 앱들 — helper별 적절 entitlements.
     const helpers = [_]struct { suffix: []const u8, plist: []const u8 }{
         .{ .suffix = "", .plist = "helper.plist" },
         .{ .suffix = " (GPU)", .plist = "helper-gpu.plist" },
@@ -253,7 +250,7 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
         try codesignWithEntitlements(allocator, helper, h.plist, opts);
     }
 
-    // 3. 메인 바이너리 — main.plist (sandbox 모드 시) 또는 legacy macos-entitlements.
+    // 3. 메인 바이너리 — main.plist.
     const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
     defer allocator.free(exe);
     try codesignWithEntitlements(allocator, exe, "main.plist", opts);
@@ -262,15 +259,13 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     try codesignWithEntitlements(allocator, app_name, "main.plist", opts);
 }
 
-/// 디렉토리/파일을 entitlements 없이 sign (framework, generic).
 fn codesignNoEntitlements(allocator: std.mem.Allocator, path: []const u8) !void {
     try runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", path });
 }
 
-/// helper별 entitlements 선택 codesign. sandbox=true이면 assets/entitlements/{plist},
-/// false이면 legacy macos-entitlements.plist (root). user_entitlements path 있으면 그것 우선.
+/// user_entitlements 지정 시 그것 모든 binary에 단독, 없으면 helper별 default plist
+/// (assets/entitlements/{plist_filename}). 다 실패하면 entitlements 없이 ad-hoc sign.
 fn codesignWithEntitlements(allocator: std.mem.Allocator, path: []const u8, plist_filename: []const u8, opts: BundleOptions) !void {
-    // 사용자 명시 entitlements 우선.
     if (opts.user_entitlements) |user_path| {
         runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", user_path, path }) catch {
             try codesignNoEntitlements(allocator, path);
@@ -285,12 +280,7 @@ fn codesignWithEntitlements(allocator: std.mem.Allocator, path: []const u8, plis
     };
     const exe_path = exe_buf[0..exe_len];
     const exe_dir = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(exe_path) orelse "") orelse "") orelse "";
-
-    // sandbox 모드면 helper별 plist, 아니면 legacy 단일 파일.
-    const entitlements = if (opts.sandbox)
-        try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ exe_dir, plist_filename })
-    else
-        try std.fmt.allocPrint(allocator, "{s}/macos-entitlements.plist", .{exe_dir});
+    const entitlements = try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ exe_dir, plist_filename });
     defer allocator.free(entitlements);
 
     runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", entitlements, path }) catch {
