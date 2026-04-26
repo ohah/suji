@@ -4270,3 +4270,167 @@ test "17-A.5: setZoomFactor → setZoomLevel 변환이 view에서도 동작" {
     const level = try wm.getZoomLevel(view);
     try std.testing.expect(@abs(level - 1.0) < 0.0001);
 }
+
+// ============================================
+// Phase 17-A.6: Lifecycle 이벤트 (view-created / view-destroyed)
+// ============================================
+
+test "17-A.6: createView emits window:view-created with viewId+hostId" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    sink.reset();
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:view-created", sink.events.items[0].name);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"viewId\":2"));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"hostId\":1"));
+    _ = view;
+}
+
+test "17-A.6: destroyView emits window:view-destroyed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    sink.reset();
+    try wm.destroyView(view);
+
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:view-destroyed", sink.events.items[0].name);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"viewId\":2"));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"hostId\":1"));
+}
+
+test "17-A.6: host destroy emits view-destroyed for each child view (closed X)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    _ = try wm.createView(.{ .host_window_id = host });
+    sink.reset();
+
+    try wm.destroy(host);
+
+    // destroy()는 closed 이벤트 X (close()만 발화). view-destroyed 2건 + all-closed 1건.
+    var view_destroyed_count: usize = 0;
+    var closed_count: usize = 0;
+    var all_closed_count: usize = 0;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, "window:view-destroyed")) view_destroyed_count += 1;
+        if (std.mem.eql(u8, ev.name, "window:closed")) closed_count += 1;
+        if (std.mem.eql(u8, ev.name, "window:all-closed")) all_closed_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 2), view_destroyed_count);
+    try std.testing.expectEqual(@as(usize, 0), closed_count);
+    try std.testing.expectEqual(@as(usize, 1), all_closed_count);
+}
+
+test "17-A.6: close(host) emits view-destroyed → closed → all-closed in order" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    sink.reset();
+
+    _ = try wm.close(host);
+
+    // 순서: window:close (cancelable) → window:view-destroyed → window:closed → window:all-closed
+    try std.testing.expect(sink.events.items.len >= 4);
+    try std.testing.expectEqualStrings("window:close", sink.events.items[0].name);
+    try std.testing.expectEqualStrings("window:view-destroyed", sink.events.items[1].name);
+    try std.testing.expectEqualStrings("window:closed", sink.events.items[2].name);
+    try std.testing.expectEqualStrings("window:all-closed", sink.events.items[3].name);
+}
+
+test "17-A.6: destroyAll emits view-destroyed for each view + closed for each window" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host_a = try wm.create(.{});
+    const host_b = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host_a });
+    _ = try wm.createView(.{ .host_window_id = host_a });
+    _ = try wm.createView(.{ .host_window_id = host_b });
+    sink.reset();
+
+    try wm.destroyAll();
+
+    var view_destroyed_count: usize = 0;
+    var closed_count: usize = 0;
+    var all_closed_count: usize = 0;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, "window:view-destroyed")) view_destroyed_count += 1;
+        if (std.mem.eql(u8, ev.name, "window:closed")) closed_count += 1;
+        if (std.mem.eql(u8, ev.name, "window:all-closed")) all_closed_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 3), view_destroyed_count);
+    try std.testing.expectEqual(@as(usize, 2), closed_count);
+    try std.testing.expectEqual(@as(usize, 1), all_closed_count);
+}
+
+test "17-A.6: markClosedExternal(host) emits view-destroyed + closed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    sink.reset();
+
+    try wm.markClosedExternal(host);
+
+    var view_destroyed_count: usize = 0;
+    var closed_count: usize = 0;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, "window:view-destroyed")) view_destroyed_count += 1;
+        if (std.mem.eql(u8, ev.name, "window:closed")) closed_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), view_destroyed_count);
+    try std.testing.expectEqual(@as(usize, 1), closed_count);
+}
+
+test "17-A.6: createView with InvalidName does NOT emit view-created" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    sink.reset();
+    try std.testing.expectError(window.Error.InvalidName, wm.createView(.{
+        .host_window_id = host,
+        .name = "bad\"name",
+    }));
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}

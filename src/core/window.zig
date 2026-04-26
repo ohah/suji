@@ -37,6 +37,11 @@ pub const events = struct {
     /// `app.on('window-all-closed', ...)`와 동등. macOS는 보통 이 시점에도 종료하지
     /// 않고 dock에 남지만, Windows/Linux는 여기서 quit하는 것이 관습.
     pub const all_closed = "window:all-closed";
+    /// Phase 17-A WebContentsView 라이프사이클. payload: `{viewId, hostId}`.
+    /// view-created는 createView 성공 시, view-destroyed는 destroyView/host destroy/
+    /// destroyAll 어느 경로에서든 view가 정리될 때 한 번씩 발화.
+    pub const view_created = "window:view-created";
+    pub const view_destroyed = "window:view-destroyed";
 };
 
 /// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".
@@ -573,6 +578,15 @@ pub const WindowManager = struct {
         return w.buffered();
     }
 
+    /// `{"viewId":N,"hostId":M}` payload. view-created/view-destroyed 공용.
+    /// view name은 by_name에 등록 안 되고 디버깅용이라 payload에 미포함 (Electron WebContentsView도
+    /// 이벤트 payload에 name 없음).
+    fn buildViewPayload(buf: *[PAYLOAD_BUF_SIZE]u8, view_id: u32, host_id: u32) []const u8 {
+        var w = std.Io.Writer.fixed(buf);
+        w.print("{{\"viewId\":{d},\"hostId\":{d}}}", .{ view_id, host_id }) catch return w.buffered();
+        return w.buffered();
+    }
+
     /// lock 보유 상태에서 id → live window (not destroyed). 내부 헬퍼.
     fn getLiveLocked(self: *WindowManager, id: u32) Error!*Window {
         const win = self.windows.get(id) orelse return Error.WindowNotFound;
@@ -602,10 +616,19 @@ pub const WindowManager = struct {
         return true;
     }
 
+    /// `view-destroyed` 이벤트에 필요한 식별 정보. host 정리 시 자동으로 함께 destroy된
+    /// view들을 caller가 lock 풀린 후 emit하기 위해 수집.
+    pub const DestroyedView = struct { view_id: u32, host_id: u32 };
+
     /// host에 부착된 모든 child view를 destroyed 마킹 + native.destroyView 호출 +
-    /// view_children entry/by_name 정리. 호출자는 lock을 보유. 주 호출처: destroyLocked,
+    /// view_children entry/by_name 정리. 정리된 view 정보는 `out`에 append (호출자가
+    /// lock 풀린 후 view-destroyed 이벤트 발화). 호출자는 lock을 보유. 주 호출처: destroyLocked,
     /// markClosedExternal (host 닫힘 = view 자동 정리, "orphan은 destroyAll만" 정책의 view 버전).
-    fn destroyChildViewsLocked(self: *WindowManager, host_id: u32) void {
+    fn destroyChildViewsLocked(
+        self: *WindowManager,
+        host_id: u32,
+        out: *std.ArrayListUnmanaged(DestroyedView),
+    ) void {
         const kv = self.view_children.fetchRemove(host_id) orelse return;
         var list = kv.value;
         defer list.deinit(self.allocator);
@@ -615,6 +638,7 @@ pub const WindowManager = struct {
             child.destroyed = true;
             if (child.name) |cn| _ = self.by_name.remove(cn);
             self.native.destroyView(child.native_handle);
+            out.append(self.allocator, .{ .view_id = child_view_id, .host_id = host_id }) catch {};
         }
     }
 
@@ -628,12 +652,17 @@ pub const WindowManager = struct {
     /// kind=.window인 경우 view_children에 등록된 자식 view들도 함께 destroy
     /// (orphan은 destroyAll만이라는 PLAN 정책의 view 버전 — host 없는 view는 의미 없음).
     /// kind=.view인 경우 host의 view_children list에서 자기 id를 제거.
-    fn destroyLocked(self: *WindowManager, win: *Window) void {
+    /// 정리된 view들은 `out`에 append — caller가 lock 풀린 후 view-destroyed 이벤트 발화.
+    fn destroyLocked(
+        self: *WindowManager,
+        win: *Window,
+        out: *std.ArrayListUnmanaged(DestroyedView),
+    ) void {
         win.destroyed = true;
         if (win.name) |n| _ = self.by_name.remove(n);
         switch (win.kind) {
             .window => {
-                self.destroyChildViewsLocked(win.id);
+                self.destroyChildViewsLocked(win.id, out);
                 self.native.destroyWindow(win.native_handle);
             },
             .view => {
@@ -641,22 +670,41 @@ pub const WindowManager = struct {
                     if (self.view_children.getPtr(host_id)) |list_ptr| {
                         _ = removeViewIdFromListLocked(list_ptr, win.id);
                     }
+                    out.append(self.allocator, .{ .view_id = win.id, .host_id = host_id }) catch {};
                 }
                 self.native.destroyView(win.native_handle);
             },
         }
     }
 
-    /// 창 파괴 (강제). 이벤트 X, 취소 불가. `window:closed` 이벤트는 `close()` 경로에서만.
+    /// `out` 리스트의 각 view에 대해 view-destroyed 이벤트 발화 + 메모리 정리.
+    /// caller는 lock을 풀고 호출 (이벤트 listener가 wm 메서드 호출해도 deadlock 없음).
+    fn emitViewDestroyedAndDeinit(
+        self: *WindowManager,
+        list: *std.ArrayListUnmanaged(DestroyedView),
+    ) void {
+        defer list.deinit(self.allocator);
+        const s = self.sink orelse return;
+        for (list.items) |info| {
+            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
+            const payload = buildViewPayload(&buf, info.view_id, info.host_id);
+            s.emit(events.view_destroyed, payload);
+        }
+    }
+
+    /// 창 파괴 (강제). `window:closed` 이벤트는 `close()` 경로에서만 발화. 단 host destroy로
+    /// 자동 정리되는 child view는 view-destroyed 이벤트 발화 (Electron WebContentsView 호환).
     pub fn destroy(self: *WindowManager, id: u32) Error!void {
         var live_after: usize = undefined;
+        var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
             const win = try self.getLiveLocked(id);
-            self.destroyLocked(win);
+            self.destroyLocked(win, &destroyed_views);
             live_after = self.liveCountLocked();
         }
+        self.emitViewDestroyedAndDeinit(&destroyed_views);
         self.maybeEmitAllClosed(true, live_after);
     }
 
@@ -683,15 +731,18 @@ pub const WindowManager = struct {
 
         // Phase 3: 실제 파괴 (lock, listener 도중 destroy됐는지 재확인)
         var live_after: usize = undefined;
+        var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
             const win = try self.getLiveLocked(id);
-            self.destroyLocked(win);
+            self.destroyLocked(win, &destroyed_views);
             live_after = self.liveCountLocked();
         }
 
-        // Phase 4: 단방향 이벤트 (lock 밖)
+        // Phase 4: 단방향 이벤트 (lock 밖) — view-destroyed 먼저 (자식 → 부모 순서),
+        // 그 다음 host의 closed.
+        self.emitViewDestroyedAndDeinit(&destroyed_views);
         if (self.sink) |s| {
             var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const payload = buildIdPayload(&buf, id, name_snapshot);
@@ -701,30 +752,40 @@ pub const WindowManager = struct {
         return true;
     }
 
-    /// 모든 창 파괴. 프로세스 종료 시 호출. 각 창마다 `window:closed` 단방향 이벤트 발화.
-    /// 취소 불가 (강제). all-or-nothing: 중간 할당 실패 시 어떤 창도 파괴하지 않음.
+    /// 모든 창 파괴. 프로세스 종료 시 호출. .window는 `window:closed`, .view는
+    /// `window:view-destroyed` 단방향 이벤트 발화. 취소 불가 (강제). all-or-nothing:
+    /// 중간 할당 실패 시 어떤 창도 파괴하지 않음.
     pub fn destroyAll(self: *WindowManager) Error!void {
-        // Phase 1: 파괴 + id/name 수집 (lock). 용량 사전 확보 실패 시 아무것도 파괴하지 않음.
-        // name은 by_name.clearRetainingCapacity 후에도 살아있는 owned slice에서 가져옴 (Window.name은 별도 alloc).
-        const ClosedEntry = struct { id: u32, name: ?[]const u8 };
-        var closed: std.ArrayList(ClosedEntry) = .empty;
-        defer closed.deinit(self.allocator);
+        const ClosedWindow = struct { id: u32, name: ?[]const u8 };
+        var closed_windows: std.ArrayList(ClosedWindow) = .empty;
+        defer closed_windows.deinit(self.allocator);
+        var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
+        defer destroyed_views.deinit(self.allocator);
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            closed.ensureTotalCapacity(self.allocator, self.windows.count()) catch
+            closed_windows.ensureTotalCapacity(self.allocator, self.windows.count()) catch
+                return Error.OutOfMemory;
+            destroyed_views.ensureTotalCapacity(self.allocator, self.windows.count()) catch
                 return Error.OutOfMemory;
             var it = self.windows.iterator();
             while (it.next()) |entry| {
                 const w = entry.value_ptr.*;
-                if (!w.destroyed) {
-                    // destroyLocked과 같은 이유로 destroyed 마킹을 native 호출 전에.
-                    w.destroyed = true;
-                    switch (w.kind) {
-                        .window => self.native.destroyWindow(w.native_handle),
-                        .view => self.native.destroyView(w.native_handle),
-                    }
-                    closed.appendAssumeCapacity(.{ .id = w.id, .name = w.name });
+                if (w.destroyed) continue;
+                // destroyLocked과 같은 이유로 destroyed 마킹을 native 호출 전에.
+                w.destroyed = true;
+                switch (w.kind) {
+                    .window => {
+                        self.native.destroyWindow(w.native_handle);
+                        closed_windows.appendAssumeCapacity(.{ .id = w.id, .name = w.name });
+                    },
+                    .view => {
+                        self.native.destroyView(w.native_handle);
+                        destroyed_views.appendAssumeCapacity(.{
+                            .view_id = w.id,
+                            .host_id = w.host_window_id orelse 0,
+                        });
+                    },
                 }
             }
             self.by_name.clearRetainingCapacity();
@@ -734,16 +795,21 @@ pub const WindowManager = struct {
             self.view_children.clearRetainingCapacity();
         }
 
-        // Phase 2: 이벤트 발화 (lock 밖)
+        // Phase 2: 이벤트 발화 (lock 밖). view → window 순서 (Electron 자식 먼저 emit).
         if (self.sink) |s| {
-            for (closed.items) |c| {
+            for (destroyed_views.items) |info| {
+                var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
+                const payload = buildViewPayload(&buf, info.view_id, info.host_id);
+                s.emit(events.view_destroyed, payload);
+            }
+            for (closed_windows.items) |c| {
                 var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
                 const payload = buildIdPayload(&buf, c.id, c.name);
                 s.emit(events.closed, payload);
             }
         }
-        // destroyAll 이후 live=0 (모두 destroyed 마킹됨). lock 재획득 없이 직접 0 전달.
-        self.maybeEmitAllClosed(closed.items.len > 0, 0);
+        const destroyed_any = closed_windows.items.len > 0 or destroyed_views.items.len > 0;
+        self.maybeEmitAllClosed(destroyed_any, 0);
     }
 
     pub fn get(self: *const WindowManager, id: u32) ?*const Window {
@@ -792,18 +858,20 @@ pub const WindowManager = struct {
     pub fn markClosedExternal(self: *WindowManager, id: u32) Error!void {
         var live_after: usize = undefined;
         var name_snapshot: ?[]const u8 = null;
+        var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
             // markClosedExternal은 OS 윈도우 close 콜백 진입점이라 .window 전용.
             // view는 host close 시 destroyChildViewsLocked가 자동 정리.
             const win = try self.getLiveWindowLocked(id);
-            self.destroyChildViewsLocked(win.id);
+            self.destroyChildViewsLocked(win.id, &destroyed_views);
             win.destroyed = true;
             name_snapshot = win.name;
             if (win.name) |n| _ = self.by_name.remove(n);
             live_after = self.liveCountLocked();
         }
+        self.emitViewDestroyedAndDeinit(&destroyed_views);
         if (self.sink) |s| {
             var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
             const payload = buildIdPayload(&buf, id, name_snapshot);
@@ -1051,19 +1119,31 @@ pub const WindowManager = struct {
     /// host 창 contentView 안에 새 view 합성. host는 live & kind=.window.
     /// view는 같은 id 풀에서 다음 id 발급 (재사용 X). 자동으로 host의 view_children top에
     /// 추가됨 — 이후 addChildView로 z-order 변경 가능.
-    pub fn createView(self: *WindowManager, opts_in: CreateViewOptions) Error!u32 {
-        var opts = opts_in;
+    pub fn createView(self: *WindowManager, opts: CreateViewOptions) Error!u32 {
+        if (opts.name) |n| {
+            // 빈 문자열은 createViewLocked에서 정규화. 길이/JSON-safety만 사전 검증.
+            if (n.len > 0 and !isValidName(n)) return Error.InvalidName;
+        }
 
+        const id = blk: {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            break :blk try self.createViewLocked(opts);
+        };
+        if (self.sink) |s| {
+            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
+            const payload = buildViewPayload(&buf, id, opts.host_window_id);
+            s.emit(events.view_created, payload);
+        }
+        return id;
+    }
+
+    /// `createView`의 lock 보유 본체. caller가 lock 획득/해제 + name 검증 + 이벤트 발화 담당.
+    fn createViewLocked(self: *WindowManager, opts: CreateViewOptions) Error!u32 {
         const requested_name: ?[]const u8 = if (opts.name) |n|
             (if (n.len == 0) null else n)
         else
             null;
-        if (requested_name) |n| {
-            if (!isValidName(n)) return Error.InvalidName;
-        }
-
-        self.lock.lockUncancelable(self.io);
-        defer self.lock.unlock(self.io);
 
         const host = try self.getLiveWindowLocked(opts.host_window_id);
 
@@ -1122,12 +1202,17 @@ pub const WindowManager = struct {
         return id;
     }
 
-    /// view 파괴. .window면 NotAView. host의 view_children에서 자동 제거.
+    /// view 파괴. .window면 NotAView. host의 view_children에서 자동 제거 +
+    /// `view-destroyed` 이벤트 발화.
     pub fn destroyView(self: *WindowManager, view_id: u32) Error!void {
-        self.lock.lockUncancelable(self.io);
-        defer self.lock.unlock(self.io);
-        const view = try self.getLiveViewLocked(view_id);
-        self.destroyLocked(view);
+        var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            const view = try self.getLiveViewLocked(view_id);
+            self.destroyLocked(view, &destroyed_views);
+        }
+        self.emitViewDestroyedAndDeinit(&destroyed_views);
     }
 
     /// view를 host의 children list에 추가/재배치. index가 null이면 top(끝).
