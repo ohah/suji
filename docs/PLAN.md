@@ -1229,7 +1229,7 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat/mkdir/readdir + 5 SDK 노출 |
+| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat(mtime ms)/mkdir/readdir/rm + 5 SDK 노출 |
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
 | 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
@@ -1269,7 +1269,7 @@ suji build → 결과물:
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
 | 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. NSPasteboard + 4 SDK + E2E 37 케이스 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
-| 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list |
+| 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
@@ -1284,7 +1284,7 @@ suji build → 결과물:
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
-| E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`) |
+| E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
 | TypeScript 타입 자동 생성 | - | specta 연동 | ❌ |
 | 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | 🟡 (`suji init` 존재, 제한적) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
