@@ -4187,3 +4187,85 @@ test "17-A: addChildView with view from different host returns ViewNotInHost" {
     // host_b로 view_a를 옮기려 하면 거부
     try std.testing.expectError(window.Error.ViewNotInHost, wm.addChildView(host_b, view_a, null));
 }
+
+// ============================================
+// Phase 17-A.5: webContents API들이 view handle에서도 동작 (회귀 검증)
+// 17-A.1 결정사항: view는 windowId와 같은 id 풀 + Native VTable의 webContents 함수들이
+// handle 단위라 viewId 그대로 통과. 이 회귀는 미래에 누군가 webContents 메서드에
+// `kind != .view` 같은 가드를 잘못 추가했을 때 즉시 실패하도록.
+// ============================================
+
+test "17-A.5: 모든 webContents API가 view handle에서도 native 호출까지 도달" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    try wm.loadUrl(view, "https://x.com");
+    try wm.reload(view, false);
+    try wm.executeJavascript(view, "1+1");
+    try wm.openDevTools(view);
+    try wm.toggleDevTools(view);
+    try wm.closeDevTools(view);
+    try wm.setZoomLevel(view, 1.5);
+    _ = try wm.getZoomLevel(view);
+    try wm.undo(view);
+    try wm.redo(view);
+    try wm.cut(view);
+    try wm.copy(view);
+    try wm.paste(view);
+    try wm.selectAll(view);
+    try wm.findInPage(view, "x", true, false, false);
+    try wm.stopFindInPage(view, true);
+    try wm.printToPDF(view, "/tmp/x.pdf");
+    _ = try wm.getUrl(view);
+    _ = try wm.isLoading(view);
+
+    try std.testing.expectEqual(@as(usize, 1), native.load_url_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.reload_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.execute_js_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.open_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.toggle_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.close_dev_tools_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.set_zoom_level_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.edit_calls.undo);
+    try std.testing.expectEqual(@as(usize, 1), native.edit_calls.redo);
+    try std.testing.expectEqual(@as(usize, 1), native.edit_calls.cut);
+    try std.testing.expectEqual(@as(usize, 1), native.edit_calls.copy);
+    try std.testing.expectEqual(@as(usize, 1), native.edit_calls.paste);
+    try std.testing.expectEqual(@as(usize, 1), native.edit_calls.select_all);
+    try std.testing.expectEqual(@as(usize, 1), native.find_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.stop_find_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.print_to_pdf_calls);
+
+    // 호출 인자도 view에 정확히 전달됐는지 spot-check
+    try std.testing.expectEqualStrings("https://x.com", native.last_loaded_url.?);
+    try std.testing.expectEqualStrings("1+1", native.last_executed_js.?);
+    try std.testing.expectEqualStrings("/tmp/x.pdf", native.last_print_path.?);
+    try std.testing.expectEqualStrings("x", native.last_find_text.?);
+}
+
+test "17-A.5: getUrl/isLoading가 view에서도 native stub 값을 반환" {
+    var native = TestNative{ .stub_url = "https://stub", .stub_is_loading = true };
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    const u = try wm.getUrl(view);
+    try std.testing.expectEqualStrings("https://stub", u.?);
+    try std.testing.expect(try wm.isLoading(view));
+}
+
+test "17-A.5: setZoomFactor → setZoomLevel 변환이 view에서도 동작" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    // zoom factor 1.2 → level 1.0 (pow(1.2, 1.0) = 1.2)
+    try wm.setZoomFactor(view, 1.2);
+    const level = try wm.getZoomLevel(view);
+    try std.testing.expect(@abs(level - 1.0) < 0.0001);
+}

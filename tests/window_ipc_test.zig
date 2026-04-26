@@ -1331,3 +1331,61 @@ test "17-A: handleGetChildViews 작은 버퍼면 null" {
     var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleGetChildViews(host, &tiny, &wm, std.testing.allocator) == null);
 }
+
+// ============================================
+// Phase 17-A.5: 기존 webContents IPC 핸들러가 viewId(=windowId 같은 풀)도 통과
+// ============================================
+
+test "17-A.5: handleLoadUrl on viewId returns ok:true" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleLoadUrl(.{ .window_id = view, .url = "https://x.com" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.load_url_calls);
+    try std.testing.expectEqualStrings("https://x.com", native.last_loaded_url.?);
+}
+
+test "17-A.5: handleExecuteJavascript on viewId returns ok:true" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleExecuteJavascript(.{ .window_id = view, .code = "1+1" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.execute_js_calls);
+}
+
+test "17-A.5: handleOpenDevTools on viewId returns ok:true" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleOpenDevTools(view, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.open_dev_tools_calls);
+}
+
+test "17-A.5: handleSetTitle on viewId returns ok:false (NotAWindow)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    // setTitle은 .window 전용 — viewId 호출 시 ok:false
+    const out = ipc.handleSetTitle(.{ .window_id = view, .title = "x" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_title_calls);
+}
