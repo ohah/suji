@@ -282,7 +282,36 @@ suji/
 - macOS: Cocoa + ObjC + CEF Framework 링크, `.app` 번들링
 - Linux: GTK3 + X11 + CEF 공유 라이브러리, CEF 자체 윈도우
 - Windows: Win32 + CEF DLL 링크
-- CI: GitHub Actions (macos-14 + ubuntu-24.04 + windows-latest)
+- CI: GitHub Actions (macos-14 + ubuntu-24.04 + windows-latest) + e2e (macos-14 only)
+
+## 앱별 cache / 사용자 데이터 (Electron `app.getPath('userData')` 동등)
+
+`config.app.name`을 키로 OS 표준 user-data 디렉토리 아래 격리. 한 시스템에 여러 Suji 앱
+설치 시 cookie/localStorage/IndexedDB/Service Worker 자동 격리.
+
+| OS | 경로 | env fallback |
+|----|------|------|
+| macOS | `~/Library/Application Support/<app>/Cache` | `$HOME` |
+| Linux | `$XDG_CONFIG_HOME/<app>/Cache` (없으면 `~/.config/<app>/Cache`) | XDG Base Directory Spec |
+| Windows | `%APPDATA%/<app>/Cache` (없으면 `%USERPROFILE%/AppData/Roaming/<app>/Cache`) | Roaming 표준 |
+
+## fs sandbox (Electron `webPreferences.sandbox` 동등)
+
+frontend(renderer)에서 호출되는 `fs.*` cmd가 path 화이트리스트로 검증. backend는 항상 무제한.
+
+```json
+{ "fs": { "allowedRoots": ["~/Documents/myapp"] } }
+```
+
+| 설정 | Frontend 동작 |
+|------|---|
+| 미설정 / `[]` | 모든 `fs.*` 차단 → `error: "forbidden"` (default safe) |
+| `["~/Documents/myapp"]` | 해당 prefix 안 path만 허용 (`~`은 `$HOME`/`%USERPROFILE%`로 사전 expand) |
+| `["*"]` | escape hatch (`..` traversal은 여전히 차단) |
+
+`..` path component는 모든 mode에서 항상 차단 (security-critical). prefix 매치는 separator
+boundary 가드 — `/foo/bar` 허용 시 `/foo/barX` 통과 X. backend SDK 호출은 thread-local
+마커로 sandbox 우회. 자세한 내용: [`documents/fs.mdx`](./documents/fs.mdx).
 
 ## 알려진 이슈
 

@@ -1,0 +1,56 @@
+---
+title: 앱 데이터 / 캐시 위치
+description: cookie · localStorage · IndexedDB · Service Worker — Electron app.getPath('userData') 동등
+---
+
+# 앱 데이터 / 캐시 위치
+
+Suji는 `config.app.name`을 키로 OS 표준 user-data 디렉토리 아래 cookie · localStorage ·
+IndexedDB · Service Worker · HTTP cache를 자동 격리한다. Electron `app.getPath('userData')` /
+`app.getPath('cache')`와 동일한 컨벤션이라 한 시스템에 여러 Suji 앱을 설치해도 서로
+영향 없음.
+
+## 경로
+
+| OS | 경로 | env fallback |
+|----|------|-------|
+| **macOS** | `~/Library/Application Support/<app>/Cache` | `$HOME` |
+| **Linux** | `$XDG_CONFIG_HOME/<app>/Cache` (없으면 `~/.config/<app>/Cache`) | XDG Base Directory Spec |
+| **Windows** | `%APPDATA%/<app>/Cache` (없으면 `%USERPROFILE%/AppData/Roaming/<app>/Cache`) | Roaming 표준 |
+
+`<app>`은 `suji.json`의 `app.name` 값:
+
+```json
+{ "app": { "name": "My App", "version": "1.0.0" } }
+```
+
+→ `~/Library/Application Support/My App/Cache` (macOS).
+
+## 사용자 데이터 일괄 삭제
+
+앱 데이터를 완전히 초기화하려면 위 디렉토리를 통째로 지운다. CEF가 다음 실행 시
+자동 재생성.
+
+```bash
+# macOS
+rm -rf "~/Library/Application Support/My App"
+
+# Linux
+rm -rf ~/.config/My\ App
+
+# Windows
+rmdir /s "%APPDATA%\My App"
+```
+
+## CEF cache_path
+
+내부적으로 `cef_settings_t.root_cache_path`에 위 경로를 set. CEF가 그 아래에
+`Cookies`, `Local Storage/`, `IndexedDB/`, `Service Worker/`, `GPUCache/` 등 Chromium
+표준 하위 디렉토리를 자동 생성.
+
+## 한계
+
+- 같은 시스템에 동일 `app.name`인 두 Suji 앱이 있으면 데이터 공유. 앱 이름은 unique 하게
+  지정해야 함.
+- Tauri의 `bundle.identifier` 같은 reverse-DNS 컨벤션은 미지원 — `app.name`만으로 격리.
+  필요 시 `app.name`을 `com.example.myapp` 형태로 지정해 직접 충돌 회피 가능.

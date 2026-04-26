@@ -1243,7 +1243,9 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | ❌ (Phase 7) |
+| **fs sandbox (frontend path 화이트리스트)** | `webPreferences.sandbox` + nodeIntegration:false | allowlist | ✅ `fs.allowedRoots` config + `..` traversal 가드 + boundary check + backend bypass |
+| **앱별 cache 격리** | `app.getPath('userData')` | 자동 | ✅ OS 표준 (macOS Application Support / Linux XDG / Windows APPDATA) — 앱 이름별 자동 격리 |
+| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs만 — 다른 API (network/shell/etc) Phase 7 |
 | CSP (Content Security Policy) | 수동 설정 | 빌트인 | ❌ (Phase 7) |
 | IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ❌ (Phase 7) |
 | macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | 🟡 entitlements.plist 직접 추가 시 동작. CEF Helper 5개 자동 부착은 Phase 7 |
