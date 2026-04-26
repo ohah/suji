@@ -374,11 +374,31 @@ pub const CefNative = struct {
         .find_in_page = findInPageImpl,
         .stop_find_in_page = stopFindInPageImpl,
         .print_to_pdf = printToPDFImpl,
+        // Phase 17-A: WebContentsView. 실제 구현은 17-A.3 (NSView + cef_window_info_t.parent_view).
+        // 일단 컴파일 통과용 placeholder — 호출되면 not-implemented 또는 no-op.
+        .create_view = createView,
+        .destroy_view = destroyView,
+        .set_view_bounds = setViewBounds,
+        .set_view_visible = setViewVisible,
+        .reorder_view = reorderView,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
         return @ptrCast(@alignCast(ctx.?));
     }
+
+    // ==================== Phase 17-A: WebContentsView (placeholder) ====================
+    // TODO 17-A.3: macOS NSView 합성 구현 — host의 contentView에 child NSView 부착,
+    // cef_window_info_t.parent_view로 child CefBrowser 임베드.
+
+    fn createView(_: ?*anyopaque, _: u64, _: *const window_mod.CreateViewOptions) anyerror!u64 {
+        log.warn("create_view: not yet implemented (Phase 17-A.3)", .{});
+        return error.NotImplemented;
+    }
+    fn destroyView(_: ?*anyopaque, _: u64) void {}
+    fn setViewBounds(_: ?*anyopaque, _: u64, _: window_mod.Bounds) void {}
+    fn setViewVisible(_: ?*anyopaque, _: u64, _: bool) void {}
+    fn reorderView(_: ?*anyopaque, _: u64, _: u64, _: u32) void {}
 
     fn assertUiThread() void {
         std.debug.assert(c.cef_currently_on(c.TID_UI) == 1);

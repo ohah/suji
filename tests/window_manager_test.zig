@@ -3898,3 +3898,292 @@ test "회귀: 4-C cef.zig openDevTools/closeDevTools/toggleDevTools가 인자 br
         try std.testing.expect(std.mem.indexOf(u8, source, sig) != null);
     }
 }
+
+// ============================================
+// Phase 17-A: WebContentsView (createView / addChildView / setTopView / ...)
+// ============================================
+
+test "17-A: createView returns id from same monotonic pool" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const host = try wm.create(.{});
+    try std.testing.expectEqual(@as(u32, 1), host);
+
+    const view = try wm.createView(.{ .host_window_id = host });
+    try std.testing.expectEqual(@as(u32, 2), view);
+    try std.testing.expectEqual(@as(usize, 1), native.create_view_calls);
+    // host의 native handle이 createView에 전달됐는지
+    try std.testing.expectEqual(wm.get(host).?.native_handle, native.last_create_view_host_handle.?);
+}
+
+test "17-A: createView stores kind=.view + host_window_id + bounds + name" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{
+        .host_window_id = host,
+        .name = "side-panel",
+        .url = "https://example.com",
+        .bounds = .{ .x = 10, .y = 20, .width = 300, .height = 400 },
+    });
+    const w = wm.get(view).?;
+    try std.testing.expectEqual(window.WindowKind.view, w.kind);
+    try std.testing.expectEqual(@as(?u32, host), w.host_window_id);
+    try std.testing.expectEqual(@as(?u32, null), w.parent_id);
+    try std.testing.expectEqual(@as(i32, 10), w.bounds.x);
+    try std.testing.expectEqual(@as(u32, 300), w.bounds.width);
+    try std.testing.expectEqualStrings("side-panel", w.name.?);
+    // view의 name은 by_name 등록 X — fromName으로 안 잡힘
+    try std.testing.expectEqual(@as(?u32, null), wm.fromName("side-panel"));
+}
+
+test "17-A: createView with non-existent host returns WindowNotFound" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    try std.testing.expectError(window.Error.WindowNotFound, wm.createView(.{ .host_window_id = 999 }));
+    try std.testing.expectEqual(@as(usize, 0), native.create_view_calls);
+}
+
+test "17-A: createView with view as host returns NotAWindow" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    // view를 다른 createView의 host로 지정 → NotAWindow
+    try std.testing.expectError(window.Error.NotAWindow, wm.createView(.{ .host_window_id = view }));
+}
+
+test "17-A: createView with invalid name returns InvalidName" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    try std.testing.expectError(window.Error.InvalidName, wm.createView(.{
+        .host_window_id = host,
+        .name = "bad\"name",
+    }));
+    try std.testing.expectEqual(@as(usize, 0), native.create_view_calls);
+}
+
+test "17-A: createView native failure → NativeCreateFailed, no id increment" {
+    var native = TestNative{ .fail_next_create_view = true };
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const next_before = wm.next_id;
+    try std.testing.expectError(window.Error.NativeCreateFailed, wm.createView(.{ .host_window_id = host }));
+    try std.testing.expectEqual(next_before, wm.next_id);
+}
+
+test "17-A: createView appends to host's view_children at top" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    var children = try wm.getChildViews(host, std.testing.allocator);
+    defer children.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), children.items.len);
+    try std.testing.expectEqual(v1, children.items[0]); // bottom
+    try std.testing.expectEqual(v2, children.items[1]); // top
+}
+
+test "17-A: addChildView re-call moves view to top (Electron idiom)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    // v1을 top으로
+    try wm.addChildView(host, v1, null);
+
+    var children = try wm.getChildViews(host, std.testing.allocator);
+    defer children.deinit(std.testing.allocator);
+    try std.testing.expectEqual(v2, children.items[0]);
+    try std.testing.expectEqual(v1, children.items[1]);
+    try std.testing.expectEqual(@as(usize, 1), native.reorder_view_calls);
+    try std.testing.expectEqual(@as(u32, 1), native.last_reorder_index.?); // top index = 1
+}
+
+test "17-A: addChildView with explicit index inserts at that position" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+    const v3 = try wm.createView(.{ .host_window_id = host });
+
+    // v3을 index=0(bottom)으로
+    try wm.addChildView(host, v3, 0);
+
+    var children = try wm.getChildViews(host, std.testing.allocator);
+    defer children.deinit(std.testing.allocator);
+    try std.testing.expectEqual(v3, children.items[0]);
+    try std.testing.expectEqual(v1, children.items[1]);
+    try std.testing.expectEqual(v2, children.items[2]);
+}
+
+test "17-A: setTopView is alias of addChildView(null)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+    try wm.setTopView(host, v1);
+
+    var children = try wm.getChildViews(host, std.testing.allocator);
+    defer children.deinit(std.testing.allocator);
+    try std.testing.expectEqual(v2, children.items[0]);
+    try std.testing.expectEqual(v1, children.items[1]);
+}
+
+test "17-A: removeChildView detaches view, hides via native, view stays alive" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try wm.removeChildView(host, view);
+
+    var children = try wm.getChildViews(host, std.testing.allocator);
+    defer children.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 0), children.items.len);
+    try std.testing.expect(!wm.get(view).?.destroyed);
+    try std.testing.expect(!wm.get(view).?.visible_in_host);
+    try std.testing.expectEqual(@as(?bool, false), native.last_set_view_visible);
+}
+
+test "17-A: setViewBounds updates Window.bounds + calls native" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try wm.setViewBounds(view, .{ .x = 50, .y = 60, .width = 400, .height = 500 });
+
+    try std.testing.expectEqual(@as(usize, 1), native.set_view_bounds_calls);
+    try std.testing.expectEqual(@as(u32, 400), native.last_view_bounds.?.width);
+    try std.testing.expectEqual(@as(i32, 50), wm.get(view).?.bounds.x);
+}
+
+test "17-A: setViewVisible toggles visible_in_host" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try wm.setViewVisible(view, false);
+    try std.testing.expect(!wm.get(view).?.visible_in_host);
+    try wm.setViewVisible(view, true);
+    try std.testing.expect(wm.get(view).?.visible_in_host);
+    try std.testing.expectEqual(@as(usize, 2), native.set_view_visible_calls);
+}
+
+test "17-A: setViewBounds/setViewVisible on .window returns NotAView" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const w = try wm.create(.{});
+    try std.testing.expectError(window.Error.NotAView, wm.setViewBounds(w, .{}));
+    try std.testing.expectError(window.Error.NotAView, wm.setViewVisible(w, false));
+}
+
+test "17-A: setTitle/setBounds/setVisible/close on .view returns NotAWindow" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try std.testing.expectError(window.Error.NotAWindow, wm.setTitle(view, "x"));
+    try std.testing.expectError(window.Error.NotAWindow, wm.setBounds(view, .{}));
+    try std.testing.expectError(window.Error.NotAWindow, wm.setVisible(view, false));
+    try std.testing.expectError(window.Error.NotAWindow, wm.close(view));
+}
+
+test "17-A: host destroy auto-destroys all child views" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    try wm.destroy(host);
+
+    try std.testing.expect(wm.get(host).?.destroyed);
+    try std.testing.expect(wm.get(v1).?.destroyed);
+    try std.testing.expect(wm.get(v2).?.destroyed);
+    try std.testing.expectEqual(@as(usize, 2), native.destroy_view_calls);
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_calls);
+}
+
+test "17-A: getChildViews on destroyed host returns WindowDestroyed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    try wm.destroy(host);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.getChildViews(host, std.testing.allocator));
+}
+
+test "17-A: destroyView removes from host's view_children" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    try wm.destroyView(v1);
+    try std.testing.expect(wm.get(v1).?.destroyed);
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_view_calls);
+
+    var children = try wm.getChildViews(host, std.testing.allocator);
+    defer children.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 1), children.items.len);
+    try std.testing.expectEqual(v2, children.items[0]);
+}
+
+test "17-A: destroyView on .window returns NotAView" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const w = try wm.create(.{});
+    try std.testing.expectError(window.Error.NotAView, wm.destroyView(w));
+}
+
+test "17-A: liveCount only counts .window (views not included)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    _ = try wm.createView(.{ .host_window_id = host });
+    // window 1개 + view 2개 = liveCount 1
+    try std.testing.expectEqual(@as(usize, 1), wm.liveCount());
+}
+
+test "17-A: addChildView with view from different host returns ViewNotInHost" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host_a = try wm.create(.{});
+    const host_b = try wm.create(.{});
+    const view_a = try wm.createView(.{ .host_window_id = host_a });
+    // host_b로 view_a를 옮기려 하면 거부
+    try std.testing.expectError(window.Error.ViewNotInHost, wm.addChildView(host_b, view_a, null));
+}

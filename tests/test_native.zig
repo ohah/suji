@@ -69,6 +69,23 @@ pub const TestNative = struct {
     last_print_path: ?[]const u8 = null,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
+
+    // Phase 17-A: WebContentsView 캡처
+    create_view_calls: usize = 0,
+    destroy_view_calls: usize = 0,
+    set_view_bounds_calls: usize = 0,
+    set_view_visible_calls: usize = 0,
+    reorder_view_calls: usize = 0,
+    last_create_view_host_handle: ?u64 = null,
+    last_create_view_bounds: ?window.Bounds = null,
+    last_create_view_url: ?[]const u8 = null,
+    last_view_bounds: ?window.Bounds = null,
+    last_set_view_visible: ?bool = null,
+    last_reorder_host_handle: ?u64 = null,
+    last_reorder_view_handle: ?u64 = null,
+    last_reorder_index: ?u32 = null,
+    /// true이면 다음 create_view 호출이 error.NativeFailure 반환 후 자동 리셋.
+    fail_next_create_view: bool = false,
     /// destroyWindow 콜백 도중 WM 상태 관찰용. 세팅 시 해당 WM에서 handle을 역조회해
     /// observed_destroyed_during_destroy에 기록 (CefNative의 DoClose 재진입 시나리오 시뮬레이션).
     observe_wm: ?*const window.WindowManager = null,
@@ -105,6 +122,11 @@ pub const TestNative = struct {
         .find_in_page = findInPage,
         .stop_find_in_page = stopFindInPage,
         .print_to_pdf = printToPDF,
+        .create_view = createView,
+        .destroy_view = destroyView,
+        .set_view_bounds = setViewBounds,
+        .set_view_visible = setViewVisible,
+        .reorder_view = reorderView,
     };
 
     /// edit_calls의 named 필드 카운트 증가. 잘못된 필드명은 컴파일 에러.
@@ -243,5 +265,44 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.print_to_pdf_calls += 1;
         self.last_print_path = path;
+    }
+
+    fn createView(ctx: ?*anyopaque, host_handle: u64, opts: *const window.CreateViewOptions) anyerror!u64 {
+        const self = fromCtx(ctx);
+        if (self.fail_next_create_view) {
+            self.fail_next_create_view = false;
+            return error.NativeFailure;
+        }
+        self.create_view_calls += 1;
+        self.last_create_view_host_handle = host_handle;
+        self.last_create_view_bounds = opts.bounds;
+        self.last_create_view_url = opts.url;
+        const handle = self.next_handle;
+        self.next_handle += 1;
+        return handle;
+    }
+
+    fn destroyView(ctx: ?*anyopaque, _: u64) void {
+        fromCtx(ctx).destroy_view_calls += 1;
+    }
+
+    fn setViewBounds(ctx: ?*anyopaque, _: u64, bounds: window.Bounds) void {
+        const self = fromCtx(ctx);
+        self.set_view_bounds_calls += 1;
+        self.last_view_bounds = bounds;
+    }
+
+    fn setViewVisible(ctx: ?*anyopaque, _: u64, visible: bool) void {
+        const self = fromCtx(ctx);
+        self.set_view_visible_calls += 1;
+        self.last_set_view_visible = visible;
+    }
+
+    fn reorderView(ctx: ?*anyopaque, host_handle: u64, view_handle: u64, idx: u32) void {
+        const self = fromCtx(ctx);
+        self.reorder_view_calls += 1;
+        self.last_reorder_host_handle = host_handle;
+        self.last_reorder_view_handle = view_handle;
+        self.last_reorder_index = idx;
     }
 };
