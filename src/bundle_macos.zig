@@ -24,6 +24,12 @@ pub const BundleOptions = struct {
     /// (assets/entitlements/{main,helper,helper-{gpu,renderer,plugin}}.plist) 자동 부착.
     /// 지정 시 모든 binary에 그 plist 단독 적용.
     user_entitlements: ?[]const u8 = null,
+    /// 번들에 포함할 CEF locale (`Resources/<lang>.lproj`). 빈 슬라이스면 default `["en"]`만.
+    /// `["*"]` 명시하면 220개 모두 포함 (i18n 앱). 기본 1개만 → ~110MB 절약.
+    locales: []const []const u8 = &.{},
+    /// CEF framework binary strip — debug symbols 제거로 ~30MB 절약. default true.
+    /// 디버깅 필요 시 `false`.
+    strip_cef: bool = true,
 };
 
 pub fn createBundle(
@@ -60,8 +66,8 @@ pub fn createBundle(
     // 2. 메인 바이너리 복사
     try copyFile(allocator, exe_path, try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name }));
 
-    // 3. CEF 프레임워크 복사
-    try copyCefFramework(allocator, app_name);
+    // 3. CEF 프레임워크 복사 (옵션: locale 필터링 + binary strip)
+    try copyCefFramework(allocator, app_name, opts);
 
     // 4. Helper 앱 생성
     const helper_types = [_][]const u8{ "", " (GPU)", " (Renderer)", " (Plugin)" };
@@ -127,7 +133,7 @@ fn writeInfoPlist(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     }
 }
 
-fn copyCefFramework(allocator: std.mem.Allocator, app_name: []const u8) !void {
+fn copyCefFramework(allocator: std.mem.Allocator, app_name: []const u8, opts: BundleOptions) !void {
     const home = runtime.env("HOME") orelse "/tmp";
     const src = try std.fmt.allocPrint(allocator, "{s}/.suji/cef/macos-arm64/Release/Chromium Embedded Framework.framework", .{home});
     defer allocator.free(src);
@@ -135,9 +141,58 @@ fn copyCefFramework(allocator: std.mem.Allocator, app_name: []const u8) !void {
     defer allocator.free(dst);
 
     std.debug.print("[suji] copying CEF framework...\n", .{});
-    // APFS clone (-c) で instant copy, fallback to regular cp
+    // APFS clone (-c)으로 instant copy, fallback regular cp.
     runCmd(allocator, &.{ "cp", "-Rc", src, dst }) catch {
         try runCmd(allocator, &.{ "cp", "-R", src, dst });
+    };
+
+    try pruneCefLocales(allocator, dst, opts.locales);
+    if (opts.strip_cef) try stripCefBinary(allocator, dst);
+}
+
+/// 220개 .lproj 중 `keep` 명시한 것만 남기고 나머지 삭제. `keep`이 비어있으면 ["en"]만.
+/// `["*"]` 포함 시 전부 보존 (i18n 앱). 평균 500KB × ~219 → ~110MB 절약.
+fn pruneCefLocales(allocator: std.mem.Allocator, framework_dst: []const u8, keep: []const []const u8) !void {
+    // wildcard 검사 — 전체 보존이면 prune 자체 skip.
+    for (keep) |lang| if (std.mem.eql(u8, lang, "*")) return;
+
+    const resources = try std.fmt.allocPrint(allocator, "{s}/Resources", .{framework_dst});
+    defer allocator.free(resources);
+
+    var dir = std.Io.Dir.cwd().openDir(runtime.io, resources, .{ .iterate = true }) catch return;
+    defer dir.close(runtime.io);
+
+    var iter = dir.iterate();
+    var pruned: usize = 0;
+    while (iter.next(runtime.io) catch null) |entry| {
+        if (!std.mem.endsWith(u8, entry.name, ".lproj")) continue;
+        const lang = entry.name[0 .. entry.name.len - ".lproj".len];
+        if (isLangKept(lang, keep)) continue;
+        const path = std.fmt.allocPrint(allocator, "{s}/{s}", .{ resources, entry.name }) catch continue;
+        defer allocator.free(path);
+        runCmd(allocator, &.{ "rm", "-rf", path }) catch continue;
+        pruned += 1;
+    }
+    std.debug.print("[suji] pruned {d} CEF locales (kept: {s})\n", .{ pruned, if (keep.len == 0) "en" else "user-specified" });
+}
+
+fn isLangKept(lang: []const u8, keep: []const []const u8) bool {
+    if (keep.len == 0) return std.mem.eql(u8, lang, "en");
+    for (keep) |k| {
+        if (std.mem.eql(u8, k, lang)) return true;
+        // "en"이 명시됐으면 "en_GB" 등 variant도 보존 (단순 prefix match).
+        if (std.mem.startsWith(u8, lang, k) and lang.len > k.len and lang[k.len] == '_') return true;
+    }
+    return false;
+}
+
+/// CEF framework binary `strip -S` (local + debug symbols 제거) — 약 30MB 절약.
+/// 결과 binary는 정상 실행 가능, lldb stack trace만 제한.
+fn stripCefBinary(allocator: std.mem.Allocator, framework_dst: []const u8) !void {
+    const cef_bin = try std.fmt.allocPrint(allocator, "{s}/Chromium Embedded Framework", .{framework_dst});
+    defer allocator.free(cef_bin);
+    runCmd(allocator, &.{ "strip", "-S", "-x", cef_bin }) catch |err| {
+        std.debug.print("[suji] strip CEF binary skipped: {}\n", .{err});
     };
 }
 

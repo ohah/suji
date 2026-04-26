@@ -3145,6 +3145,31 @@ test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
     try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "root.get(\"security\")") != null);
 }
 
+test "회귀: bundle 크기 최적화 — locale prune + CEF strip" {
+    const cfg_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/config.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cfg_src);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "locales:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "strip_cef") != null);
+
+    const bundle_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/bundle_macos.zig",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(bundle_src);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "pruneCefLocales") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "stripCefBinary") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "isLangKept") != null);
+    // wildcard "*" 보존 명시 + en variant prefix match (en_GB 등).
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "if (std.mem.eql(u8, lang, \"*\")) return") != null);
+}
+
 test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부착" {
     const cfg_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

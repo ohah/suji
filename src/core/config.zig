@@ -31,6 +31,11 @@ pub const Config = struct {
         /// 모든 binary에 단독 적용 (예: `app.entitlements: "my-app.entitlements"`).
         /// 비어있으면 Suji default (assets/entitlements/{main,helper,helper-{gpu,renderer,plugin}}.plist).
         entitlements: ?[:0]const u8 = null,
+        /// 번들에 포함할 CEF locale (`en`, `ko` 등). 비어있으면 default `["en"]`만 →
+        /// ~110MB 절약. `["*"]`면 220개 전부 (i18n 앱).
+        locales: []const [:0]const u8 = &.{},
+        /// CEF framework binary strip — debug symbols 제거 (~30MB 절약). default true.
+        strip_cef: bool = true,
     };
 
     pub const Protocol = enum { suji, file };
@@ -185,6 +190,17 @@ pub const Config = struct {
                 if (getStr(app, "name")) |s| config.app.name = dupeStr(a, s);
                 if (getStr(app, "version")) |s| config.app.version = dupeStr(a, s);
                 if (getStr(app, "entitlements")) |s| config.app.entitlements = dupeStr(a, s);
+                if (getBool(app, "stripCef")) |b| config.app.strip_cef = b;
+                if (app.get("locales")) |loc_val| {
+                    if (loc_val == .array) {
+                        var list = std.ArrayList([:0]const u8).empty;
+                        for (loc_val.array.items) |item| {
+                            if (item != .string) continue;
+                            list.append(a, dupeStr(a, item.string)) catch continue;
+                        }
+                        config.app.locales = list.toOwnedSlice(a) catch &.{};
+                    }
+                }
             }
         }
 

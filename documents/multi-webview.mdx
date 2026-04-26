@@ -1,0 +1,111 @@
+---
+title: 멀티 webview / BrowserView (설계 메모)
+description: 한 창에 여러 web 콘텐츠 합성 — Electron BrowserView · Tauri v2 Webview 비교 + Suji 구현 방향
+---
+
+# 멀티 webview / BrowserView
+
+한 OS 창 안에 여러 web 콘텐츠를 합성하는 패턴. 멀티탭 브라우저 / 사이드바 + 메인 (다른
+origin) / OAuth 인-라인 / 위젯 임베드 같은 use case에 사용된다.
+
+> **현 상태**: Suji는 미구현. 일반 데스크톱 앱은 `windows.create({ url })` (별도 창)으로
+> 충분해서 우선순위는 낮음. 멀티탭 브라우저 같은 use case 명확할 때 도입 검토.
+
+## 다른 프레임워크는 어떻게 하나
+
+### Electron
+
+| API | 상태 |
+|---|---|
+| `<webview>` tag | 별도 OS process 격리 — 강력하지만 복잡, deprecation 검토 |
+| `BrowserView` | 한 BrowserWindow에 합성 (deprecated, WebContentsView로 이행) |
+| `WebContentsView` (Electron 30+) | 한 BrowserWindow에 여러 web content 합성, 현재 권장 |
+
+### Tauri v2
+
+v1까지는 `WebviewWindow` 한 묶음만 있었음 (별도 창만). v2부터 `Window`와 `Webview`가 분리:
+
+```rust
+let window = tauri::WindowBuilder::new(app, "main").build()?;
+
+let webview = tauri::WebviewBuilder::new("child", WebviewUrl::App("page.html".into()))
+    .build()?;
+window.add_child(
+    webview,
+    LogicalPosition::new(0, 100),    // 부모 창 안 절대 좌표
+    LogicalSize::new(800, 500),
+)?;
+```
+
+JS:
+
+```js
+import { Webview } from '@tauri-apps/api/webview';
+import { Window } from '@tauri-apps/api/window';
+
+const win = Window.getCurrent();
+const webview = new Webview(win, 'child', { url: 'page.html' });
+await webview.setSize({ width: 800, height: 500 });
+await webview.setPosition({ x: 0, y: 100 });
+```
+
+**격리**: WKWebView (macOS) / WebView2 (Windows) / WebKitGTK (Linux) — 각 webview가
+OS-level 별도 process. 각자 history/cookies/JS context 분리.
+
+**한계**: 절대 좌표 기반 (CSS layout 아님). 부모 창 resize 시 사용자가 좌표 갱신 필요.
+
+## Suji 구현 방향 (제안)
+
+### API
+
+```ts
+import { windows } from '@suji/api';
+
+const viewId = await windows.createView(parentWindowId, {
+  url: 'page.html',
+  bounds: { x: 0, y: 100, width: 800, height: 500 },
+});
+
+await windows.setViewBounds(viewId, { x: 0, y: 100, width: 1024, height: 600 });
+await windows.setViewVisible(viewId, false);  // 탭 전환에 활용
+await windows.loadURL(viewId, 'https://example.com');  // 기존 windows.* 동일
+await windows.executeJavaScript(viewId, "document.title");
+await windows.destroyView(viewId);
+```
+
+### 구현 — CEF 기반
+
+CEF는 한 NSWindow의 contentView에 여러 `cef_browser_t`를 자식 NSView로 attach 가능.
+
+| 단계 | 동작 |
+|---|---|
+| 1 | `cef_browser_host_create_browser_sync` 추가 호출 — parent의 contentView를 `window_info.parent_view`로 |
+| 2 | CEF가 자동으로 자식 NSView 만들고 webContents 별도 생성 |
+| 3 | viewId 발급 — windowId namespace에 통합 (`windows.*` 모든 API가 windowId 또는 viewId 받음) |
+| 4 | bounds 변경은 NSView setFrame: |
+| 5 | 부모 창 close 시 자식 view들 자동 destroy (NSWindow contentView dealloc → 자식 NSView dealloc → cef_browser OnBeforeClose) |
+
+### 격리 강도
+
+| | 격리 단위 | history/cookies | JS context |
+|---|---|---|---|
+| Electron BrowserView | webContents | 별도 (또는 공유 — `partition` 옵션) | 별도 |
+| Tauri v2 Webview | OS process (WKWebView/WV2) | 별도 | 별도 |
+| **Suji 제안** | CEF browser (single process) | 별도 (each browser has own request context) | 별도 |
+
+CEF는 default가 single process로 multiple browser 운영. 격리는 webContents 단위 — Electron BrowserView와 동등. Tauri의 OS process 격리보단 약간 약하지만 일반 데스크톱 앱 충분.
+
+## Use case 판단 기준
+
+| Use case | 권장 |
+|---|---|
+| 자체 frontend만 + multi-window UI | `windows.create({url})` 충분 (이미 됨) |
+| 한 창에 사이드바 + 메인 (같은 origin) | iframe (표준 HTML, 격리 약하지만 same-origin이라 OK) |
+| 한 창에 사이드바 + 메인 (다른 origin) | **`windows.createView` 필요** (또는 별도 창) |
+| 멀티탭 브라우저 앱 | **`windows.createView` 필요** (각 탭이 view) |
+| OAuth 인-라인 로그인 페이지 | 별도 창 OR `windows.createView` |
+| 광고/위젯 임베드 (격리 강함) | `windows.createView` |
+| 외부 untrusted iframe | iframe + `sandbox` 속성 (Phase 7+ origin allowlist도) |
+
+대부분의 데스크톱 앱은 multi-window로 충분하므로 `windows.createView`는 use case가
+명확할 때만 추가하는 것이 PLAN.md의 입장.

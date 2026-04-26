@@ -382,10 +382,33 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 
 **목표**: Zig 전용 프레임워크로 완성도 올리기
 
-- [ ] 플러그인: fs — 파일 시스템 (`plugins/fs/`)
-- [ ] 플러그인: dialog — 시스템 다이얼로그 (`plugins/dialog/`)
-- [ ] 플러그인: tray — 트레이 아이콘 (`plugins/tray/`)
-- [ ] 플러그인: menu — 메뉴바 (CEF `cef_menu_model_capi.h` 사용, 기본 NSMenu Edit 메뉴는 이미 제공)
+- [x] fs — 파일 시스템 (Phase 5-F: 코어 API + 5 SDK 노출 + sandbox + typed wrapper)
+- [x] dialog — 시스템 다이얼로그 (Phase 5-A: NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 5 SDK)
+- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
+- [x] menu — 메뉴바 (Phase 5-D: macOS NSMenu + submenu/item/checkbox/separator + click + 5 SDK)
+  > **옛 스펙 vs 실제 구현**: 옛 PLAN은 `plugins/{fs,dialog,tray,menu}/` 분리 dylib을
+  > 의도했으나, 실제 구현은 **코어 API + 5 SDK wrapper** 형태. OS native API (Cocoa/
+  > CoreFoundation 등) 의존이라 dylib 분리는 Mac App Sandbox + CEF Helper와 충돌.
+  > Electron/Tauri도 동일하게 코어 API로 제공. `plugins/` 디렉토리는 `state` 같은
+  > cross-cutting 사용자 코드 (DB, 상태 동기화 등) 전용.
+  >
+  > **각 기능 코드 위치** (현재 — 모두 `src/platform/cef.zig` 내부):
+  > | 기능 | cef.zig section | ObjC .m 파일 | main.zig handler |
+  > |---|---|---|---|
+  > | clipboard | `clipboardReadText/WriteText/Clear` | — | `clipboard_read_text` 등 |
+  > | shell | `shellOpenExternal/ShowItemInFolder/Beep` | — | `shell_*` |
+  > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (sheet modal) | `handleDialog*` |
+  > | tray | `createTray/setTrayMenu/destroyTray` | — (Cocoa 직접) | `tray_*` |
+  > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` | `notification_*` |
+  > | menu | `setApplicationMenu/resetApplicationMenu` | — (Cocoa 직접) | `handleMenu*` |
+  > | fs | `fsSandboxCheck` etc | — | `handleFs*` (`src/main.zig`) |
+  > | globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (Carbon) | `handleGlobalShortcut*` |
+  > | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
+  > | windows (멀티) | `createWindow/destroyWindow/setBounds/...` | — | `src/core/window_ipc.zig` |
+  >
+  > **후속 refactor 후보** (별도 PR): 각 native API를 `src/platform/{clipboard,shell,...}.zig`로 분리
+  > → cef.zig는 코어 (browser, IPC, V8, lifecycle)만 남김. 분량 큼 (cef.zig 5000+줄
+  > 분해, glue/global state 정리), risk 중. 현재 우선순위는 낮음.
 - [~] window — 멀티 윈도우 + BrowserWindow API (`docs/WINDOW_API.md`)
   - [x] Phase 1: 설계 확정 + PoC (`__core__:create_window`, `cef.zig:createNewWindow`, Electron 방식 동등성, name 중복 싱글턴)
   - [~] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태) + IPC `__window` 자동 태깅 + `windows[]` 배열 파싱

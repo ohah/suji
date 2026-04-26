@@ -1,0 +1,120 @@
+---
+title: 플러그인 모델
+description: 외부 plugin (`plugins/<name>/`) · Electron / Tauri 비교 · 코어 native API와의 차이
+---
+
+# 플러그인 모델
+
+Suji의 plugin은 **사용자가 만든 cross-cutting 기능**을 5 SDK (Zig/Rust/Go/Node + frontend
+JS)에서 일관되게 호출하기 위한 구조. OS native API (clipboard/fs/dialog 등)는 plugin이
+**아니라** 코어 API로 제공되며, 이 부분은 Electron/Tauri와 동일한 결정.
+
+## 두 종류 비교
+
+| | OS native API | 사용자 plugin |
+|---|---|---|
+| 위치 | `src/platform/cef.zig` (코어) | `plugins/<name>/` (외부 디렉토리) |
+| 빌드 | suji 코어와 함께 | 별도 dylib (또는 source 포함) |
+| 5 SDK 노출 | ✅ 자동 (suji core가 책임) | ✅ wrapper 직접 작성 |
+| 예시 | clipboard, fs, dialog, tray, menu, notification, globalShortcut | `state` (첫 공식), 사용자 DB / 인증 / telemetry 등 |
+| Mac App Sandbox 호환 | ✅ (entitlements + 코어 binary) | 🟡 dylib + entitlements 분리 작업 필요 |
+
+OS native API를 plugin으로 만들지 못하는 이유:
+- Cocoa/CoreFoundation 등 framework 링크가 필요 → dylib 분리 시 framework path/runtime
+  search complexity
+- CEF Helper 5개와 entitlements 격리 충돌
+- Electron/Tauri도 이 부분은 코어 API로 둠
+
+## Tauri 모델 비교
+
+Tauri의 "plugin install"은 **build-time Cargo 의존성**이지 런타임 plugin 아님:
+
+```toml
+# Cargo.toml
+[dependencies]
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+```
+
+```bash
+cargo build   # fetch + compile + link → 같은 binary
+```
+
+→ 사용자가 필요한 것만 install = build-time choice. 결국 같은 binary에 들어감.
+**진짜 dylib plugin이 아님** (Tauri도 안 함 — OS Sandbox 충돌이 동일).
+
+| 모델 | 사용자 경험 | binary 크기 | 진짜 외부 plugin? |
+|---|---|---|---|
+| **Tauri** | `cargo add tauri-plugin-fs` | feature만큼만 | ❌ build-time dep |
+| **Electron** | (없음, 모든 API 코어) | 전체 포함 | ❌ |
+| **Suji 현재** | (없음, native API 코어) | 전체 포함 | ❌ for native API |
+| **Suji `plugins/<name>/` 패턴** | `plugins/<my-plugin>/` 디렉토리 + Zig dylib | 사용자 plugin만 | ✅ 진짜 외부 install |
+
+**진짜 외부 install 형태 plugin은 Suji가 이미 더 강함** — 사용자가 임의 plugin 만들고
+dylib으로 빌드, `suji.json` `plugins: ["my-plugin"]`에 등록. 5 SDK wrapper도 직접 작성.
+
+## 사용자 plugin 만들기
+
+### 디렉토리 구조
+
+```
+plugins/my-plugin/
+├── zig/                    # plugin 본체 (Zig)
+│   ├── build.zig
+│   └── src/main.zig        # plugin_init, plugin_handle_ipc, plugin_destroy
+├── rust/                   # 5 SDK wrapper (선택)
+├── go/
+├── node/
+└── ts/                     # frontend SDK (@suji/<plugin> 또는 inline)
+```
+
+`plugins/state/`가 첫 공식 — 패턴 참고.
+
+### suji.json 등록
+
+```json
+{
+  "plugins": ["my-plugin"]
+}
+```
+
+→ suji 시작 시 `plugins/my-plugin/zig/zig-out/lib/libmy-plugin.dylib` 자동 로드.
+
+### Plugin C ABI
+
+backend dlopen과 같은 entry:
+
+```zig
+export fn plugin_init(...) callconv(.c) c_int { ... }
+export fn plugin_handle_ipc(channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) [*:0]const u8 { ... }
+export fn plugin_destroy() callconv(.c) void { ... }
+```
+
+→ 5 SDK가 `suji.invoke('my-channel', request)` 같이 호출.
+
+## OS native API의 코드 위치 (참고)
+
+코어 native 기능은 모두 `src/platform/cef.zig`에 있고, 일부는 ObjC `.m` 파일로 분리됨
+(블록 콜백 / Carbon API 같이 Zig가 직접 못 다루는 부분).
+
+| 기능 | cef.zig section | ObjC `.m` 파일 | main.zig handler |
+|---|---|---|---|
+| clipboard | `clipboardReadText` 등 | — | `clipboard_*` |
+| shell | `shellOpenExternal` 등 | — | `shell_*` |
+| dialog | `showMessageBox` 등 | `src/platform/dialog.m` | `handleDialog*` |
+| tray | `createTray` 등 | — (Cocoa 직접) | `tray_*` |
+| notification | `notificationShow` 등 | `src/platform/notification.m` | `notification_*` |
+| menu | `setApplicationMenu` 등 | — (Cocoa 직접) | `handleMenu*` |
+| fs | `fsSandboxCheck` 등 | — | `handleFs*` |
+| globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (Carbon) | `handleGlobalShortcut*` |
+| window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
+| windows | `createWindow` 등 | — | `src/core/window_ipc.zig` |
+
+## 후속 검토 (Phase 6+)
+
+- **Build-time feature flag** (Tauri 패턴): `zig build -Dfeatures=fs,clipboard` 또는
+  `suji.json` `features: [...]`. 미사용 native API를 binary에서 제외 → 크기 절약.
+  분량 중. CEF + libcef가 압도적이라 절약 효과는 작음.
+- **각 native API를 별도 .zig 파일로 분리** (`src/platform/{clipboard,shell,...}.zig`):
+  cef.zig가 5000+줄이라 관리성 ↑. 분량 큼 (글로벌 state 정리 + import 그래프 정리).
+  현재 우선순위 낮음.

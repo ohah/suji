@@ -231,6 +231,13 @@ fn runBuild(allocator: std.mem.Allocator) !void {
     const identifier = config.app.name;
 
     // macOS .app 번들 생성
+    // [:0]const u8 slice → []const u8 slice 변환 (BundleOptions는 sentinel 무관).
+    const locales_slice: []const []const u8 = blk: {
+        if (config.app.locales.len == 0) break :blk &.{};
+        var buf = allocator.alloc([]const u8, config.app.locales.len) catch break :blk &.{};
+        for (config.app.locales, 0..) |s, i| buf[i] = s;
+        break :blk buf;
+    };
     try bundle_macos.createBundle(
         allocator,
         config.app.name,
@@ -240,6 +247,8 @@ fn runBuild(allocator: std.mem.Allocator) !void {
         config.frontend.dist_dir,
         bundle_macos.BundleOptions{
             .user_entitlements = config.app.entitlements,
+            .locales = locales_slice,
+            .strip_cef = config.app.strip_cef,
         },
     );
 }
