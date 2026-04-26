@@ -596,7 +596,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
-    cef.setWindowLifecycleEmitHandler(&windowLifecycleEmitHandler);
+    cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -761,7 +761,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
-    cef.setWindowLifecycleEmitHandler(&windowLifecycleEmitHandler);
+    cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -2018,22 +2018,30 @@ fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {
     emitToBus("globalShortcut:trigger", "{{\"accelerator\":\"{s}\",\"click\":\"{s}\"}}", .{ accel_esc[0..accel_n], click_esc[0..click_n] });
 }
 
-/// CEF browser native handle → WindowManager.windowId 변환 후 라이프사이클 이벤트 emit.
-/// 이벤트별 payload: resized → {windowId,x,y,width,height}, moved → {windowId,x,y},
-/// focus/blur → {windowId}.
-fn windowLifecycleEmitHandler(handle: u64, event: []const u8, x: f64, y: f64, width: f64, height: f64) void {
-    const wm = window_mod.WindowManager.global orelse return;
-    const win_id = wm.findByNativeHandle(handle) orelse return;
+/// CEF browser native handle → WindowManager.windowId 변환 helper.
+fn windowIdFromHandle(handle: u64) ?u32 {
+    const wm = window_mod.WindowManager.global orelse return null;
+    return wm.findByNativeHandle(handle);
+}
 
-    if (std.mem.eql(u8, event, "resized")) {
-        emitToBus("window:resized", "{{\"windowId\":{d},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}}}", .{ win_id, @as(i64, @intFromFloat(x)), @as(i64, @intFromFloat(y)), @as(i64, @intFromFloat(width)), @as(i64, @intFromFloat(height)) });
-    } else if (std.mem.eql(u8, event, "moved")) {
-        emitToBus("window:moved", "{{\"windowId\":{d},\"x\":{d},\"y\":{d}}}", .{ win_id, @as(i64, @intFromFloat(x)), @as(i64, @intFromFloat(y)) });
-    } else if (std.mem.eql(u8, event, "focus")) {
-        emitToBus("window:focus", "{{\"windowId\":{d}}}", .{win_id});
-    } else if (std.mem.eql(u8, event, "blur")) {
-        emitToBus("window:blur", "{{\"windowId\":{d}}}", .{win_id});
-    }
+fn windowResizedHandler(handle: u64, x: f64, y: f64, width: f64, height: f64) void {
+    const win_id = windowIdFromHandle(handle) orelse return;
+    emitToBus("window:resized", "{{\"windowId\":{d},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}}}", .{ win_id, @as(i64, @intFromFloat(x)), @as(i64, @intFromFloat(y)), @as(i64, @intFromFloat(width)), @as(i64, @intFromFloat(height)) });
+}
+
+fn windowMovedHandler(handle: u64, x: f64, y: f64) void {
+    const win_id = windowIdFromHandle(handle) orelse return;
+    emitToBus("window:moved", "{{\"windowId\":{d},\"x\":{d},\"y\":{d}}}", .{ win_id, @as(i64, @intFromFloat(x)), @as(i64, @intFromFloat(y)) });
+}
+
+fn windowFocusHandler(handle: u64) void {
+    const win_id = windowIdFromHandle(handle) orelse return;
+    emitToBus("window:focus", "{{\"windowId\":{d}}}", .{win_id});
+}
+
+fn windowBlurHandler(handle: u64) void {
+    const win_id = windowIdFromHandle(handle) orelse return;
+    emitToBus("window:blur", "{{\"windowId\":{d}}}", .{win_id});
 }
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {

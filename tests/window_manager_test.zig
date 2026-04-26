@@ -3106,8 +3106,11 @@ test "회귀: Window lifecycle (Phase 5) — NSWindowDelegate + 4 events" {
         .limited(2 * 1024 * 1024),
     );
     defer std.testing.allocator.free(main_src);
-    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowLifecycleEmitHandler") != null);
-    try std.testing.expect(std.mem.indexOf(u8, main_src, "setWindowLifecycleEmitHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowResizedHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowMovedHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowFocusHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowBlurHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "setWindowLifecycleHandlers") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:resized\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:moved\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:focus\"") != null);
@@ -3120,7 +3123,7 @@ test "회귀: Window lifecycle (Phase 5) — NSWindowDelegate + 4 events" {
         .limited(2 * 1024 * 1024),
     );
     defer std.testing.allocator.free(cef_src);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_set_callback") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_set_callbacks") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_attach") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "attachWindowLifecycle(ns_window, handle)") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "detachWindowLifecycle") != null);

@@ -1411,32 +1411,46 @@ pub fn globalShortcutIsRegistered(accelerator: []const u8) bool {
 }
 
 // ============================================
-// Window lifecycle events — NSWindowDelegate (resize/focus/blur/move)
+// Window lifecycle events (Electron BrowserWindow events 대응) — 비-macOS는 stub.
 // ============================================
-// window_lifecycle.m이 NSWindowDidResize/Move/BecomeKey/ResignKey 노티 → C 콜백.
-// 트리거 시 main.zig가 EventBus로 emit:
-//   window:resized {windowId, x, y, width, height}
-//   window:moved   {windowId, x, y}
-//   window:focus   {windowId}
-//   window:blur    {windowId}
-// 비-macOS는 모두 stub.
 
-pub const WindowLifecycleEmitHandler = *const fn (handle: u64, event: []const u8, x: f64, y: f64, width: f64, height: f64) void;
-pub var g_window_lifecycle_emit_handler: ?WindowLifecycleEmitHandler = null;
+pub const WindowResizedHandler = *const fn (handle: u64, x: f64, y: f64, width: f64, height: f64) void;
+pub const WindowMovedHandler = *const fn (handle: u64, x: f64, y: f64) void;
+pub const WindowFocusHandler = *const fn (handle: u64) void;
+pub const WindowBlurHandler = *const fn (handle: u64) void;
 
-fn windowLifecycleC(handle: u64, event_cstr: [*:0]const u8, x: f64, y: f64, width: f64, height: f64) callconv(.c) void {
-    if (g_window_lifecycle_emit_handler) |emit| emit(handle, std.mem.span(event_cstr), x, y, width, height);
+pub var g_window_resized_handler: ?WindowResizedHandler = null;
+pub var g_window_moved_handler: ?WindowMovedHandler = null;
+pub var g_window_focus_handler: ?WindowFocusHandler = null;
+pub var g_window_blur_handler: ?WindowBlurHandler = null;
+
+fn windowResizedC(handle: u64, x: f64, y: f64, width: f64, height: f64) callconv(.c) void {
+    if (g_window_resized_handler) |h| h(handle, x, y, width, height);
+}
+fn windowMovedC(handle: u64, x: f64, y: f64) callconv(.c) void {
+    if (g_window_moved_handler) |h| h(handle, x, y);
+}
+fn windowFocusC(handle: u64) callconv(.c) void {
+    if (g_window_focus_handler) |h| h(handle);
+}
+fn windowBlurC(handle: u64) callconv(.c) void {
+    if (g_window_blur_handler) |h| h(handle);
 }
 
-pub fn setWindowLifecycleEmitHandler(handler: WindowLifecycleEmitHandler) void {
+pub fn setWindowLifecycleHandlers(resized: WindowResizedHandler, moved: WindowMovedHandler, focus: WindowFocusHandler, blur: WindowBlurHandler) void {
     if (!comptime is_macos) return;
-    g_window_lifecycle_emit_handler = handler;
-    suji_window_lifecycle_set_callback(&windowLifecycleC);
+    g_window_resized_handler = resized;
+    g_window_moved_handler = moved;
+    g_window_focus_handler = focus;
+    g_window_blur_handler = blur;
+    suji_window_lifecycle_set_callbacks(&windowResizedC, &windowMovedC, &windowFocusC, &windowBlurC);
 }
 
 fn attachWindowLifecycle(ns_window: ?*anyopaque, handle: u64) void {
     if (!comptime is_macos) return;
-    _ = suji_window_lifecycle_attach(ns_window, handle);
+    if (suji_window_lifecycle_attach(ns_window, handle) == 0) {
+        log.warn("attachWindowLifecycle failed for handle={d} (capacity {d} reached or null window)", .{ handle, 64 });
+    }
 }
 
 fn detachWindowLifecycle(ns_window: ?*anyopaque) void {
@@ -1475,8 +1489,13 @@ extern "c" fn suji_global_shortcut_unregister(accelerator: [*:0]const u8) i32;
 extern "c" fn suji_global_shortcut_unregister_all() void;
 extern "c" fn suji_global_shortcut_is_registered(accelerator: [*:0]const u8) i32;
 
-// window_lifecycle.m — NSWindowDelegate (resize/focus/blur/move).
-extern "c" fn suji_window_lifecycle_set_callback(cb: *const fn (u64, [*:0]const u8, f64, f64, f64, f64) callconv(.c) void) void;
+// window_lifecycle.m — NSWindowDelegate. typed callbacks per event 타입.
+extern "c" fn suji_window_lifecycle_set_callbacks(
+    resized: *const fn (u64, f64, f64, f64, f64) callconv(.c) void,
+    moved: *const fn (u64, f64, f64) callconv(.c) void,
+    focus: *const fn (u64) callconv(.c) void,
+    blur: *const fn (u64) callconv(.c) void,
+) void;
 extern "c" fn suji_window_lifecycle_attach(ns_window: ?*anyopaque, handle: u64) i32;
 extern "c" fn suji_window_lifecycle_detach(ns_window: ?*anyopaque) void;
 
