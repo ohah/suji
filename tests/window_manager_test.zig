@@ -4206,6 +4206,7 @@ test "17-A.5: 모든 webContents API가 view handle에서도 native 호출까지
     try wm.reload(view, false);
     try wm.executeJavascript(view, "1+1");
     try wm.openDevTools(view);
+    _ = try wm.isDevToolsOpened(view);
     try wm.toggleDevTools(view);
     try wm.closeDevTools(view);
     try wm.setZoomLevel(view, 1.5);
