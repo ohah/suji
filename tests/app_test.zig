@@ -970,6 +970,30 @@ test "menu.setApplicationMenuRaw + resetApplicationMenu: cmd 전송" {
     }.run);
 }
 
+test "fs.*: __core__ 파일 시스템 cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.fs.readFile("/tmp/suji.txt");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_read_file\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"path\":\"/tmp/suji.txt\"") != null);
+
+            _ = app_mod.fs.writeFile("/tmp/suji.txt", "hello\nworld");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_write_file\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"text\":\"hello\\nworld\"") != null);
+
+            _ = app_mod.fs.stat("/tmp/suji.txt");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_stat\"") != null);
+
+            _ = app_mod.fs.mkdir("/tmp/suji-dir", true);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_mkdir\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"recursive\":true") != null);
+
+            _ = app_mod.fs.readdir("/tmp");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"fs_readdir\"") != null);
+        }
+    }.run);
+}
+
 test "notification.isSupported: __core__ + notification_is_supported 전송" {
     try withInvokeCore(struct {
         fn run() !void {

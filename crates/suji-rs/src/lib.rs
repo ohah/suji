@@ -16,9 +16,9 @@
 // crate 내부 (테스트 포함)에서도 그 경로를 유효하게 하려면 self를 `suji`라는 이름으로 노출.
 extern crate self as suji;
 
-pub use suji_macros::command as handle;
-pub use serde_json;
 pub use serde;
+pub use serde_json;
+pub use suji_macros::command as handle;
 
 /// IPC 요청의 sender 창 컨텍스트 — Electron의 `event.sender`/`BrowserWindow.fromWebContents` 대응.
 ///
@@ -67,19 +67,37 @@ impl InvokeEvent {
             .get("__window_url")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
-        let is_main_frame = parsed
-            .get("__window_main_frame")
-            .and_then(|v| v.as_bool());
-        Self { window: Window { id, name, url, is_main_frame } }
+        let is_main_frame = parsed.get("__window_main_frame").and_then(|v| v.as_bool());
+        Self {
+            window: Window {
+                id,
+                name,
+                url,
+                is_main_frame,
+            },
+        }
     }
 }
 
 #[repr(C)]
 pub struct SujiCore {
-    pub invoke: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char) -> *const std::os::raw::c_char,
+    pub invoke: extern "C" fn(
+        *const std::os::raw::c_char,
+        *const std::os::raw::c_char,
+    ) -> *const std::os::raw::c_char,
     pub free: extern "C" fn(*const std::os::raw::c_char),
     pub emit: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char),
-    pub on: extern "C" fn(*const std::os::raw::c_char, Option<extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char, *mut std::os::raw::c_void)>, *mut std::os::raw::c_void) -> u64,
+    pub on: extern "C" fn(
+        *const std::os::raw::c_char,
+        Option<
+            extern "C" fn(
+                *const std::os::raw::c_char,
+                *const std::os::raw::c_char,
+                *mut std::os::raw::c_void,
+            ),
+        >,
+        *mut std::os::raw::c_void,
+    ) -> u64,
     pub off: extern "C" fn(u64),
     pub register: extern "C" fn(*const std::os::raw::c_char),
     /// Zig plugin 전용. Rust plugin은 `std::sync`/`std::fs` 사용 권장.
@@ -106,7 +124,11 @@ pub static __SUJI_CORE: std::sync::atomic::AtomicPtr<SujiCore> =
 #[inline]
 pub fn __get_core() -> Option<&'static SujiCore> {
     let p = __SUJI_CORE.load(std::sync::atomic::Ordering::Acquire);
-    if p.is_null() { None } else { Some(unsafe { &*p }) }
+    if p.is_null() {
+        None
+    } else {
+        Some(unsafe { &*p })
+    }
 }
 
 pub fn invoke(backend: &str, request: &str) -> Option<String> {
@@ -114,8 +136,15 @@ pub fn invoke(backend: &str, request: &str) -> Option<String> {
     let c_name = std::ffi::CString::new(backend).ok()?;
     let c_req = std::ffi::CString::new(request).ok()?;
     let resp = (core.invoke)(c_name.as_ptr(), c_req.as_ptr());
-    if resp.is_null() { return None; }
-    Some(unsafe { std::ffi::CStr::from_ptr(resp) }.to_str().ok()?.to_string())
+    if resp.is_null() {
+        return None;
+    }
+    Some(
+        unsafe { std::ffi::CStr::from_ptr(resp) }
+            .to_str()
+            .ok()?
+            .to_string(),
+    )
 }
 
 pub fn send(channel: &str, data: &str) {
@@ -138,7 +167,15 @@ pub fn send_to(window_id: u32, channel: &str, data: &str) {
 
 /// 이벤트 수신 (Electron: ipcMain.on)
 /// 리스너 ID를 반환 (off로 해제 가능)
-pub fn on(channel: &str, callback: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char, *mut std::os::raw::c_void), arg: *mut std::os::raw::c_void) -> u64 {
+pub fn on(
+    channel: &str,
+    callback: extern "C" fn(
+        *const std::os::raw::c_char,
+        *const std::os::raw::c_char,
+        *mut std::os::raw::c_void,
+    ),
+    arg: *mut std::os::raw::c_void,
+) -> u64 {
     if let Some(core) = __get_core() {
         let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
         (core.on)(c_ch.as_ptr(), Some(callback), arg)
@@ -221,56 +258,113 @@ pub mod windows {
     }
 
     pub fn get_url(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"get_url","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"get_url","windowId":{}}}"#, window_id),
+        )
     }
 
     pub fn is_loading(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"is_loading","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"is_loading","windowId":{}}}"#, window_id),
+        )
     }
 
     pub fn open_dev_tools(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"open_dev_tools","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"open_dev_tools","windowId":{}}}"#, window_id),
+        )
     }
     pub fn close_dev_tools(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"close_dev_tools","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"close_dev_tools","windowId":{}}}"#, window_id),
+        )
     }
     pub fn is_dev_tools_opened(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"is_dev_tools_opened","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"is_dev_tools_opened","windowId":{}}}"#,
+                window_id
+            ),
+        )
     }
     pub fn toggle_dev_tools(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"toggle_dev_tools","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"toggle_dev_tools","windowId":{}}}"#, window_id),
+        )
     }
 
     pub fn set_zoom_level(window_id: u32, level: f64) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"set_zoom_level","windowId":{},"level":{}}}"#, window_id, level))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_zoom_level","windowId":{},"level":{}}}"#,
+                window_id, level
+            ),
+        )
     }
     pub fn get_zoom_level(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"get_zoom_level","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"get_zoom_level","windowId":{}}}"#, window_id),
+        )
     }
     pub fn set_zoom_factor(window_id: u32, factor: f64) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"set_zoom_factor","windowId":{},"factor":{}}}"#, window_id, factor))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_zoom_factor","windowId":{},"factor":{}}}"#,
+                window_id, factor
+            ),
+        )
     }
     pub fn get_zoom_factor(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"get_zoom_factor","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"get_zoom_factor","windowId":{}}}"#, window_id),
+        )
     }
 
     pub fn undo(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"undo","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"undo","windowId":{}}}"#, window_id),
+        )
     }
     pub fn redo(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"redo","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"redo","windowId":{}}}"#, window_id),
+        )
     }
     pub fn cut(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"cut","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"cut","windowId":{}}}"#, window_id),
+        )
     }
     pub fn copy(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"copy","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"copy","windowId":{}}}"#, window_id),
+        )
     }
     pub fn paste(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"paste","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"paste","windowId":{}}}"#, window_id),
+        )
     }
     pub fn select_all(window_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"select_all","windowId":{}}}"#, window_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"select_all","windowId":{}}}"#, window_id),
+        )
     }
 
     #[derive(Default, Clone, Copy)]
@@ -281,25 +375,39 @@ pub mod windows {
     }
 
     pub fn find_in_page(window_id: u32, text: &str, opts: FindOptions) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"find_in_page","windowId":{},"text":"{}","forward":{},"matchCase":{},"findNext":{}}}"#,
-            window_id, escape_json(text), opts.forward, opts.match_case, opts.find_next,
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"find_in_page","windowId":{},"text":"{}","forward":{},"matchCase":{},"findNext":{}}}"#,
+                window_id,
+                escape_json(text),
+                opts.forward,
+                opts.match_case,
+                opts.find_next,
+            ),
+        )
     }
 
     pub fn stop_find_in_page(window_id: u32, clear_selection: bool) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"stop_find_in_page","windowId":{},"clearSelection":{}}}"#,
-            window_id, clear_selection,
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"stop_find_in_page","windowId":{},"clearSelection":{}}}"#,
+                window_id, clear_selection,
+            ),
+        )
     }
 
     /// PDF 인쇄 (콜백 async — 결과는 `window:pdf-print-finished` 이벤트).
     pub fn print_to_pdf(window_id: u32, path: &str) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"print_to_pdf","windowId":{},"path":"{}"}}"#,
-            window_id, escape_json(path),
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"print_to_pdf","windowId":{},"path":"{}"}}"#,
+                window_id,
+                escape_json(path),
+            ),
+        )
     }
 
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
@@ -399,7 +507,10 @@ pub mod clipboard {
     pub fn write_text(text: &str) -> Option<String> {
         invoke(
             "__core__",
-            &format!(r#"{{"cmd":"clipboard_write_text","text":"{}"}}"#, escape_json_full(text)),
+            &format!(
+                r#"{{"cmd":"clipboard_write_text","text":"{}"}}"#,
+                escape_json_full(text)
+            ),
         )
     }
 
@@ -414,19 +525,89 @@ pub mod shell {
     pub fn open_external(url: &str) -> Option<String> {
         invoke(
             "__core__",
-            &format!(r#"{{"cmd":"shell_open_external","url":"{}"}}"#, escape_json_full(url)),
+            &format!(
+                r#"{{"cmd":"shell_open_external","url":"{}"}}"#,
+                escape_json_full(url)
+            ),
         )
     }
 
     pub fn show_item_in_folder(path: &str) -> Option<String> {
         invoke(
             "__core__",
-            &format!(r#"{{"cmd":"shell_show_item_in_folder","path":"{}"}}"#, escape_json_full(path)),
+            &format!(
+                r#"{{"cmd":"shell_show_item_in_folder","path":"{}"}}"#,
+                escape_json_full(path)
+            ),
         )
     }
 
     pub fn beep() -> Option<String> {
         invoke("__core__", r#"{"cmd":"shell_beep"}"#)
+    }
+}
+
+pub mod fs {
+    use crate::{escape_json_full, invoke, serde_json};
+
+    pub(crate) fn read_file_request(path: &str) -> String {
+        serde_json::json!({
+            "cmd": "fs_read_file",
+            "path": path,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn write_file_request(path: &str, text: &str) -> String {
+        serde_json::json!({
+            "cmd": "fs_write_file",
+            "path": path,
+            "text": text,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn stat_request(path: &str) -> String {
+        format!(r#"{{"cmd":"fs_stat","path":"{}"}}"#, escape_json_full(path))
+    }
+
+    pub(crate) fn mkdir_request(path: &str, recursive: bool) -> String {
+        serde_json::json!({
+            "cmd": "fs_mkdir",
+            "path": path,
+            "recursive": recursive,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn readdir_request(path: &str) -> String {
+        format!(
+            r#"{{"cmd":"fs_readdir","path":"{}"}}"#,
+            escape_json_full(path)
+        )
+    }
+
+    /// Read UTF-8 text. Response JSON: `{"success":true,"text":"..."}`.
+    pub fn read_file(path: &str) -> Option<String> {
+        invoke("__core__", &read_file_request(path))
+    }
+
+    /// Write UTF-8 text, replacing the file if it exists.
+    pub fn write_file(path: &str, text: &str) -> Option<String> {
+        invoke("__core__", &write_file_request(path, text))
+    }
+
+    /// File metadata. Response JSON: `{"success":true,"type":"file","size":N,"mtime":N}`.
+    pub fn stat(path: &str) -> Option<String> {
+        invoke("__core__", &stat_request(path))
+    }
+
+    pub fn mkdir(path: &str, recursive: bool) -> Option<String> {
+        invoke("__core__", &mkdir_request(path, recursive))
+    }
+
+    pub fn readdir(path: &str) -> Option<String> {
+        invoke("__core__", &readdir_request(path))
     }
 }
 
@@ -445,17 +626,25 @@ pub mod notification {
 
     /// 알림 표시 — `{"notificationId":"...","success":bool}` 응답.
     pub fn show(title: &str, body: &str, silent: bool) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"notification_show","title":"{}","body":"{}","silent":{}}}"#,
-            escape_json_full(title), escape_json_full(body), silent,
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"notification_show","title":"{}","body":"{}","silent":{}}}"#,
+                escape_json_full(title),
+                escape_json_full(body),
+                silent,
+            ),
+        )
     }
 
     pub fn close(notification_id: &str) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"notification_close","notificationId":"{}"}}"#,
-            escape_json_full(notification_id),
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"notification_close","notificationId":"{}"}}"#,
+                escape_json_full(notification_id),
+            ),
+        )
     }
 }
 
@@ -470,43 +659,64 @@ pub mod tray {
 
     /// 새 트레이 생성. 응답 JSON: `{"from","cmd","trayId":N}`. trayId=0이면 실패.
     pub fn create(title: &str, tooltip: &str) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"tray_create","title":"{}","tooltip":"{}"}}"#,
-            escape_json_full(title), escape_json_full(tooltip),
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"tray_create","title":"{}","tooltip":"{}"}}"#,
+                escape_json_full(title),
+                escape_json_full(tooltip),
+            ),
+        )
     }
 
     pub fn set_title(tray_id: u32, title: &str) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"tray_set_title","trayId":{},"title":"{}"}}"#,
-            tray_id, escape_json_full(title),
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"tray_set_title","trayId":{},"title":"{}"}}"#,
+                tray_id,
+                escape_json_full(title),
+            ),
+        )
     }
 
     pub fn set_tooltip(tray_id: u32, tooltip: &str) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"tray_set_tooltip","trayId":{},"tooltip":"{}"}}"#,
-            tray_id, escape_json_full(tooltip),
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"tray_set_tooltip","trayId":{},"tooltip":"{}"}}"#,
+                tray_id,
+                escape_json_full(tooltip),
+            ),
+        )
     }
 
     /// 메뉴 설정 — items 배열을 serde_json으로 안전하게 직렬화.
     /// 클릭 시 `tray:menu-click {trayId, click}` 이벤트 발화.
     pub fn set_menu(tray_id: u32, items: &[MenuItem]) -> Option<String> {
-        let arr: Vec<serde_json::Value> = items.iter().map(|it| match it {
-            MenuItem::Separator => serde_json::json!({"type": "separator"}),
-            MenuItem::Item { label, click } => serde_json::json!({"label": label, "click": click}),
-        }).collect();
+        let arr: Vec<serde_json::Value> = items
+            .iter()
+            .map(|it| match it {
+                MenuItem::Separator => serde_json::json!({"type": "separator"}),
+                MenuItem::Item { label, click } => {
+                    serde_json::json!({"label": label, "click": click})
+                }
+            })
+            .collect();
         let req = serde_json::json!({
             "cmd": "tray_set_menu",
             "trayId": tray_id,
             "items": arr,
-        }).to_string();
+        })
+        .to_string();
         invoke("__core__", &req)
     }
 
     pub fn destroy(tray_id: u32) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"tray_destroy","trayId":{}}}"#, tray_id))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"tray_destroy","trayId":{}}}"#, tray_id),
+        )
     }
 }
 
@@ -515,21 +725,43 @@ pub mod menu {
 
     /// Application menu item — top-level entries should be Submenu.
     pub enum MenuItem<'a> {
-        Item { label: &'a str, click: &'a str, enabled: bool },
-        Checkbox { label: &'a str, click: &'a str, checked: bool, enabled: bool },
+        Item {
+            label: &'a str,
+            click: &'a str,
+            enabled: bool,
+        },
+        Checkbox {
+            label: &'a str,
+            click: &'a str,
+            checked: bool,
+            enabled: bool,
+        },
         Separator,
-        Submenu { label: &'a str, enabled: bool, submenu: Vec<MenuItem<'a>> },
+        Submenu {
+            label: &'a str,
+            enabled: bool,
+            submenu: Vec<MenuItem<'a>>,
+        },
     }
 
     fn item_to_json(item: &MenuItem) -> serde_json::Value {
         match item {
-            MenuItem::Item { label, click, enabled } => serde_json::json!({
+            MenuItem::Item {
+                label,
+                click,
+                enabled,
+            } => serde_json::json!({
                 "type": "item",
                 "label": label,
                 "click": click,
                 "enabled": enabled,
             }),
-            MenuItem::Checkbox { label, click, checked, enabled } => serde_json::json!({
+            MenuItem::Checkbox {
+                label,
+                click,
+                checked,
+                enabled,
+            } => serde_json::json!({
                 "type": "checkbox",
                 "label": label,
                 "click": click,
@@ -537,7 +769,11 @@ pub mod menu {
                 "enabled": enabled,
             }),
             MenuItem::Separator => serde_json::json!({"type": "separator"}),
-            MenuItem::Submenu { label, enabled, submenu } => serde_json::json!({
+            MenuItem::Submenu {
+                label,
+                enabled,
+                submenu,
+            } => serde_json::json!({
                 "type": "submenu",
                 "label": label,
                 "enabled": enabled,
@@ -550,7 +786,8 @@ pub mod menu {
         serde_json::json!({
             "cmd": "menu_set_application_menu",
             "items": items.iter().map(item_to_json).collect::<Vec<_>>(),
-        }).to_string()
+        })
+        .to_string()
     }
 
     /// Set the macOS application menu. Clicks emit `menu:click {click}`.
@@ -572,7 +809,7 @@ pub mod dialog {
     #[derive(Default)]
     pub struct MessageBoxOpts<'a> {
         pub window_id: Option<u32>,
-        pub r#type: Option<&'a str>,           // "info" | "warning" | "error" | "question" | "none"
+        pub r#type: Option<&'a str>, // "info" | "warning" | "error" | "question" | "none"
         pub title: Option<&'a str>,
         pub message: &'a str,
         pub detail: Option<&'a str>,
@@ -585,34 +822,69 @@ pub mod dialog {
 
     pub fn show_message_box(opts: MessageBoxOpts) -> Option<String> {
         let mut req = serde_json::Map::new();
-        req.insert("cmd".into(), serde_json::Value::String("dialog_show_message_box".into()));
-        req.insert("message".into(), serde_json::Value::String(opts.message.into()));
-        if let Some(id) = opts.window_id { req.insert("windowId".into(), serde_json::Value::from(id)); }
-        if let Some(t) = opts.r#type { req.insert("type".into(), serde_json::Value::String(t.into())); }
-        if let Some(t) = opts.title { req.insert("title".into(), serde_json::Value::String(t.into())); }
-        if let Some(d) = opts.detail { req.insert("detail".into(), serde_json::Value::String(d.into())); }
-        if !opts.buttons.is_empty() {
-            req.insert("buttons".into(), serde_json::Value::Array(
-                opts.buttons.iter().map(|s| serde_json::Value::String((*s).into())).collect(),
-            ));
+        req.insert(
+            "cmd".into(),
+            serde_json::Value::String("dialog_show_message_box".into()),
+        );
+        req.insert(
+            "message".into(),
+            serde_json::Value::String(opts.message.into()),
+        );
+        if let Some(id) = opts.window_id {
+            req.insert("windowId".into(), serde_json::Value::from(id));
         }
-        if let Some(d) = opts.default_id { req.insert("defaultId".into(), serde_json::Value::from(d)); }
-        if let Some(c) = opts.cancel_id { req.insert("cancelId".into(), serde_json::Value::from(c)); }
-        if let Some(c) = opts.checkbox_label { req.insert("checkboxLabel".into(), serde_json::Value::String(c.into())); }
-        if opts.checkbox_checked { req.insert("checkboxChecked".into(), serde_json::Value::Bool(true)); }
+        if let Some(t) = opts.r#type {
+            req.insert("type".into(), serde_json::Value::String(t.into()));
+        }
+        if let Some(t) = opts.title {
+            req.insert("title".into(), serde_json::Value::String(t.into()));
+        }
+        if let Some(d) = opts.detail {
+            req.insert("detail".into(), serde_json::Value::String(d.into()));
+        }
+        if !opts.buttons.is_empty() {
+            req.insert(
+                "buttons".into(),
+                serde_json::Value::Array(
+                    opts.buttons
+                        .iter()
+                        .map(|s| serde_json::Value::String((*s).into()))
+                        .collect(),
+                ),
+            );
+        }
+        if let Some(d) = opts.default_id {
+            req.insert("defaultId".into(), serde_json::Value::from(d));
+        }
+        if let Some(c) = opts.cancel_id {
+            req.insert("cancelId".into(), serde_json::Value::from(c));
+        }
+        if let Some(c) = opts.checkbox_label {
+            req.insert("checkboxLabel".into(), serde_json::Value::String(c.into()));
+        }
+        if opts.checkbox_checked {
+            req.insert("checkboxChecked".into(), serde_json::Value::Bool(true));
+        }
         invoke("__core__", &serde_json::Value::Object(req).to_string())
     }
 
     /// raw JSON fields. 정교한 옵션 조합 (filters 등)이 필요할 때.
     pub fn show_message_box_raw(fields_json: &str) -> Option<String> {
-        invoke("__core__", &format!(r#"{{"cmd":"dialog_show_message_box",{}}}"#, fields_json))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"dialog_show_message_box",{}}}"#, fields_json),
+        )
     }
 
     pub fn show_error_box(title: &str, content: &str) -> Option<String> {
-        invoke("__core__", &format!(
-            r#"{{"cmd":"dialog_show_error_box","title":"{}","content":"{}"}}"#,
-            escape_json_full(title), escape_json_full(content),
-        ))
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"dialog_show_error_box","title":"{}","content":"{}"}}"#,
+                escape_json_full(title),
+                escape_json_full(content),
+            ),
+        )
     }
 
     /// raw fields. 옵션은 `{"properties":["openFile"],"filters":[...]}` 등.
@@ -620,14 +892,20 @@ pub mod dialog {
         if fields_json.is_empty() {
             return invoke("__core__", r#"{"cmd":"dialog_show_open_dialog"}"#);
         }
-        invoke("__core__", &format!(r#"{{"cmd":"dialog_show_open_dialog",{}}}"#, fields_json))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"dialog_show_open_dialog",{}}}"#, fields_json),
+        )
     }
 
     pub fn show_save_dialog(fields_json: &str) -> Option<String> {
         if fields_json.is_empty() {
             return invoke("__core__", r#"{"cmd":"dialog_show_save_dialog"}"#);
         }
-        invoke("__core__", &format!(r#"{{"cmd":"dialog_show_save_dialog",{}}}"#, fields_json))
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"dialog_show_save_dialog",{}}}"#, fields_json),
+        )
     }
 }
 
@@ -682,17 +960,24 @@ mod tests {
 
     #[test]
     fn menu_set_application_menu_request_builds_nested_items() {
-        let req = crate::menu::set_application_menu_request(&[
-            crate::menu::MenuItem::Submenu {
-                label: "Tools",
-                enabled: true,
-                submenu: vec![
-                    crate::menu::MenuItem::Item { label: "Run", click: "run", enabled: true },
-                    crate::menu::MenuItem::Checkbox { label: "Flag", click: "flag", checked: true, enabled: false },
-                    crate::menu::MenuItem::Separator,
-                ],
-            },
-        ]);
+        let req = crate::menu::set_application_menu_request(&[crate::menu::MenuItem::Submenu {
+            label: "Tools",
+            enabled: true,
+            submenu: vec![
+                crate::menu::MenuItem::Item {
+                    label: "Run",
+                    click: "run",
+                    enabled: true,
+                },
+                crate::menu::MenuItem::Checkbox {
+                    label: "Flag",
+                    click: "flag",
+                    checked: true,
+                    enabled: false,
+                },
+                crate::menu::MenuItem::Separator,
+            ],
+        }]);
         let v: serde_json::Value = serde_json::from_str(&req).unwrap();
         assert_eq!(v["cmd"], "menu_set_application_menu");
         assert_eq!(v["items"][0]["type"], "submenu");
@@ -705,21 +990,51 @@ mod tests {
 
     #[test]
     fn menu_set_application_menu_request_escapes_strings() {
-        let req = crate::menu::set_application_menu_request(&[
-            crate::menu::MenuItem::Submenu {
-                label: "도구 \"Tools\"",
+        let req = crate::menu::set_application_menu_request(&[crate::menu::MenuItem::Submenu {
+            label: "도구 \"Tools\"",
+            enabled: true,
+            submenu: vec![crate::menu::MenuItem::Item {
+                label: "Run \\ now",
+                click: "run\nnow",
                 enabled: true,
-                submenu: vec![crate::menu::MenuItem::Item {
-                    label: "Run \\ now",
-                    click: "run\nnow",
-                    enabled: true,
-                }],
-            },
-        ]);
+            }],
+        }]);
         let v: serde_json::Value = serde_json::from_str(&req).unwrap();
         assert_eq!(v["items"][0]["label"], "도구 \"Tools\"");
         assert_eq!(v["items"][0]["submenu"][0]["label"], "Run \\ now");
         assert_eq!(v["items"][0]["submenu"][0]["click"], "run\nnow");
+    }
+
+    #[test]
+    fn fs_requests_build_valid_json() {
+        let read: serde_json::Value =
+            serde_json::from_str(&crate::fs::read_file_request("/tmp/a.txt")).unwrap();
+        assert_eq!(read["cmd"], "fs_read_file");
+        assert_eq!(read["path"], "/tmp/a.txt");
+
+        let write: serde_json::Value =
+            serde_json::from_str(&crate::fs::write_file_request("/tmp/a.txt", "hello\nworld"))
+                .unwrap();
+        assert_eq!(write["cmd"], "fs_write_file");
+        assert_eq!(write["text"], "hello\nworld");
+
+        let mkdir: serde_json::Value =
+            serde_json::from_str(&crate::fs::mkdir_request("/tmp/dir", true)).unwrap();
+        assert_eq!(mkdir["cmd"], "fs_mkdir");
+        assert_eq!(mkdir["recursive"], true);
+    }
+
+    #[test]
+    fn fs_requests_escape_strings() {
+        let stat: serde_json::Value =
+            serde_json::from_str(&crate::fs::stat_request("/tmp/한글 \"a\"")).unwrap();
+        assert_eq!(stat["cmd"], "fs_stat");
+        assert_eq!(stat["path"], "/tmp/한글 \"a\"");
+
+        let readdir: serde_json::Value =
+            serde_json::from_str(&crate::fs::readdir_request("/tmp/a\\b")).unwrap();
+        assert_eq!(readdir["cmd"], "fs_readdir");
+        assert_eq!(readdir["path"], "/tmp/a\\b");
     }
 
     #[test]
@@ -872,16 +1187,16 @@ mod tests {
 pub mod prelude {
     pub use crate::handle;
     pub use crate::invoke;
+    pub use crate::off;
+    pub use crate::on;
+    pub use crate::platform;
+    pub use crate::quit;
     pub use crate::send;
     pub use crate::send_to;
-    pub use crate::on;
-    pub use crate::off;
-    pub use crate::quit;
-    pub use crate::platform;
     pub use crate::InvokeEvent;
     pub use crate::Window;
-    pub use crate::PLATFORM_MACOS;
     pub use crate::PLATFORM_LINUX;
+    pub use crate::PLATFORM_MACOS;
     pub use crate::PLATFORM_WINDOWS;
     pub use serde_json::json;
 }

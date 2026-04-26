@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, menu, type InvokeEvent } from './index';
+import { handle, send, sendTo, menu, fs as sujiFs, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -106,5 +106,30 @@ describe('menu', () => {
     bridge.invoke.mockResolvedValueOnce('{"success":true}');
     await menu.resetApplicationMenu();
     expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"menu_reset_application_menu"}');
+  });
+});
+
+describe('fs', () => {
+  it('readFile invokes __core__ and returns text', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"text":"hello"}');
+    const text = await sujiFs.readFile('/tmp/a.txt');
+    expect(text).toBe('hello');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"fs_read_file","path":"/tmp/a.txt"}');
+  });
+
+  it('writeFile / stat / mkdir / readdir invoke __core__', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await sujiFs.writeFile('/tmp/a.txt', 'hello\nworld')).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"fs_write_file","path":"/tmp/a.txt","text":"hello\\nworld"}');
+
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"type":"file","size":5,"mtime":1}');
+    expect((await sujiFs.stat('/tmp/a.txt')).type).toBe('file');
+
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await sujiFs.mkdir('/tmp/dir', { recursive: true })).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"fs_mkdir","path":"/tmp/dir","recursive":true}');
+
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"entries":[{"name":"a.txt","type":"file"}]}');
+    expect(await sujiFs.readdir('/tmp')).toEqual([{ name: 'a.txt', type: 'file' }]);
   });
 });

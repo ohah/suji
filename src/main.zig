@@ -1287,6 +1287,23 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
+    // File system API — std.fs/std.Io.Dir wrapper.
+    if (std.mem.eql(u8, cmd, "fs_read_file")) {
+        return handleFsReadFile(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "fs_write_file")) {
+        return handleFsWriteFile(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "fs_stat")) {
+        return handleFsStat(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "fs_mkdir")) {
+        return handleFsMkdir(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "fs_readdir")) {
+        return handleFsReadDir(req_clean, response_buf);
+    }
+
     // Dialog API — NSAlert / NSOpenPanel / NSSavePanel.
     if (std.mem.eql(u8, cmd, "dialog_show_message_box")) {
         return handleDialogShowMessageBox(req_clean, response_buf);
@@ -1570,6 +1587,126 @@ fn handleDialogShowErrorBox(req_clean: []const u8, response_buf: []u8) ?[]const 
     ) catch null;
 }
 
+// ============================================
+// File system handlers — std.fs/std.Io.Dir wrapper
+// ============================================
+
+const FS_MAX_TEXT_BYTES: usize = 8192;
+const FS_MAX_PATH_BYTES: usize = 4096;
+
+fn fsError(response_buf: []u8, cmd: []const u8, err: []const u8) ?[]const u8 {
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":false,\"error\":\"{s}\"}}", .{ cmd, err }) catch null;
+}
+
+fn fsPathFromRequest(req_clean: []const u8, out: []u8) ?[]const u8 {
+    const raw = util.extractJsonString(req_clean, "path") orelse return null;
+    const n = util.unescapeJsonStr(raw, out) orelse return null;
+    if (n == 0) return null;
+    return out[0..n];
+}
+
+fn fsKindName(kind: std.Io.File.Kind) []const u8 {
+    return switch (kind) {
+        .file => "file",
+        .directory => "directory",
+        .sym_link => "symlink",
+        .block_device => "blockDevice",
+        .character_device => "characterDevice",
+        .named_pipe => "fifo",
+        .unix_domain_socket => "socket",
+        .whiteout => "whiteout",
+        .door => "door",
+        .event_port => "eventPort",
+        .unknown => "unknown",
+    };
+}
+
+fn handleFsReadFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_read_file", "path");
+
+    const text = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, std.heap.page_allocator, .limited(FS_MAX_TEXT_BYTES)) catch
+        return fsError(response_buf, "fs_read_file", "read");
+    defer std.heap.page_allocator.free(text);
+
+    var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
+    const esc_len = util.escapeJsonStrFull(text, &esc_buf) orelse return fsError(response_buf, "fs_read_file", "too_large");
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"fs_read_file\",\"success\":true,\"text\":\"{s}\"}}",
+        .{esc_buf[0..esc_len]},
+    ) catch null;
+}
+
+fn handleFsWriteFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_write_file", "path");
+    const raw_text = util.extractJsonString(req_clean, "text") orelse util.extractJsonString(req_clean, "data") orelse "";
+
+    var text_buf: [FS_MAX_TEXT_BYTES]u8 = undefined;
+    const text_len = util.unescapeJsonStr(raw_text, &text_buf) orelse return fsError(response_buf, "fs_write_file", "too_large");
+
+    var file = std.Io.Dir.cwd().createFile(runtime.io, path, .{}) catch return fsError(response_buf, "fs_write_file", "write");
+    defer file.close(runtime.io);
+    var writer_buf: [4096]u8 = undefined;
+    var fw = file.writer(runtime.io, &writer_buf);
+    fw.interface.writeAll(text_buf[0..text_len]) catch return fsError(response_buf, "fs_write_file", "write");
+    fw.interface.flush() catch return fsError(response_buf, "fs_write_file", "write");
+
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"fs_write_file\",\"success\":true}}", .{}) catch null;
+}
+
+fn handleFsStat(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_stat", "path");
+    const st = std.Io.Dir.cwd().statFile(runtime.io, path, .{}) catch return fsError(response_buf, "fs_stat", "not_found");
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"fs_stat\",\"success\":true,\"type\":\"{s}\",\"size\":{d},\"mtime\":{d}}}",
+        .{ fsKindName(st.kind), st.size, st.mtime.nanoseconds },
+    ) catch null;
+}
+
+fn handleFsMkdir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_mkdir", "path");
+    const recursive = util.extractJsonBool(req_clean, "recursive") orelse false;
+    if (recursive) {
+        std.Io.Dir.cwd().createDirPath(runtime.io, path) catch return fsError(response_buf, "fs_mkdir", "mkdir");
+    } else {
+        std.Io.Dir.cwd().createDir(runtime.io, path, .default_dir) catch |err| {
+            if (err != error.PathAlreadyExists) return fsError(response_buf, "fs_mkdir", "mkdir");
+        };
+    }
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"fs_mkdir\",\"success\":true}}", .{}) catch null;
+}
+
+fn handleFsReadDir(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    const path = fsPathFromRequest(req_clean, &path_buf) orelse return fsError(response_buf, "fs_readdir", "path");
+    var dir = std.Io.Dir.cwd().openDir(runtime.io, path, .{ .iterate = true }) catch return fsError(response_buf, "fs_readdir", "open");
+    defer dir.close(runtime.io);
+
+    var out_pos: usize = 0;
+    out_pos += (std.fmt.bufPrint(response_buf[out_pos..], "{{\"from\":\"zig-core\",\"cmd\":\"fs_readdir\",\"success\":true,\"entries\":[", .{}) catch return null).len;
+    var iter = dir.iterate();
+    var first = true;
+    while (iter.next(runtime.io) catch return fsError(response_buf, "fs_readdir", "read")) |entry| {
+        var esc_name: [1024]u8 = undefined;
+        const n = util.escapeJsonStrFull(entry.name, &esc_name) orelse continue;
+        const sep: []const u8 = if (first) "" else ",";
+        const part = std.fmt.bufPrint(
+            response_buf[out_pos..],
+            "{s}{{\"name\":\"{s}\",\"type\":\"{s}\"}}",
+            .{ sep, esc_name[0..n], fsKindName(entry.kind) },
+        ) catch return fsError(response_buf, "fs_readdir", "too_large");
+        out_pos += part.len;
+        first = false;
+    }
+    out_pos += (std.fmt.bufPrint(response_buf[out_pos..], "]}}", .{}) catch return null).len;
+    return response_buf[0..out_pos];
+}
+
 fn handleDialogShowOpenDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
@@ -1658,29 +1795,28 @@ fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 // ============================================
 
 fn handleMenuSetApplicationMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    // submenu 깊이가 깊어질 수 있어 dialog 대비 2배 arena.
     var arena_buf: [DIALOG_PARSE_ARENA * 2]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
     const arena = fba.allocator();
 
-    const parsed = std.json.parseFromSlice(std.json.Value, arena, req_clean, .{}) catch {
-        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
-    };
-    defer parsed.deinit();
-    if (parsed.value != .object) {
-        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
-    }
-    const items_val = parsed.value.object.get("items") orelse {
-        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
-    };
-    if (items_val != .array) {
-        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
-    }
-
-    const items = parseApplicationMenuItems(arena, items_val.array.items) catch {
-        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
-    };
+    const items = parseMenuItemsFromRequest(arena, req_clean) catch return menuSetParseError(response_buf);
     const ok = cef.setApplicationMenu(items);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+fn menuSetParseError(response_buf: []u8) ?[]const u8 {
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
+}
+
+fn parseMenuItemsFromRequest(arena: std.mem.Allocator, req_clean: []const u8) MenuParseError![]cef.ApplicationMenuItem {
+    // FixedBufferAllocator로 알로케이션이 끝난 뒤 arena 전체가 한 번에 회수되므로
+    // parsed.deinit()은 no-op. 따라서 호출하지 않는다.
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, req_clean, .{}) catch return error.InvalidMenuItem;
+    if (parsed.value != .object) return error.InvalidMenuItem;
+    const items_val = parsed.value.object.get("items") orelse return error.InvalidMenuItem;
+    if (items_val != .array) return error.InvalidMenuItem;
+    return parseApplicationMenuItems(arena, items_val.array.items);
 }
 
 const MenuParseError = error{ OutOfMemory, InvalidMenuItem };

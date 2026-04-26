@@ -543,7 +543,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         `menu:click {click}` 이벤트 라우팅. Frontend `@suji/api` + Zig/Rust/Go/Node SDK 노출.
         회귀 테스트 + SDK 단위 + `tests/e2e/menu.test.ts`. `documents/menu.mdx`.
   - [ ] **Phase 5-E: 글로벌 단축키** (NSEvent.addGlobalMonitorForEvents) — Electron `globalShortcut`.
-  - [ ] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
+  - [x] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
+        Frontend JS + Zig/Rust/Go/Node SDK wrapper, 단위/회귀/E2E 테스트, 문서 추가.
         프론트는 IPC, 백엔드는 std lib 직접 + 공통 typed wrapper.
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
         - [x] windows.* API 5개 진입점 노출
@@ -1228,7 +1229,7 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ❌ (Phase 5-F 백로그) |
+| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat/mkdir/readdir + 5 SDK 노출 |
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
 | 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
@@ -1268,6 +1269,7 @@ suji build → 결과물:
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
 | 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. NSPasteboard + 4 SDK + E2E 37 케이스 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
+| 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
@@ -1301,7 +1303,7 @@ suji build → 결과물:
 2. ✅ **다이얼로그** — Phase 5-A 완료 (sheet modal 포함)
 3. ✅ **클립보드 / Shell 외부 핸들러** — Phase 5-A 완료
 4. ✅ **트레이 + 알림 + 메뉴바 API** — Phase 5-B/C/D 완료, 데스크톱 앱 기본 요소
-5. **파일 시스템 API** — Phase 5-F. 백엔드는 Zig `std.fs` 직접, 프론트는 IPC wrapper
+5. ✅ **파일 시스템 API** — Phase 5-F 완료. 백엔드/프론트 공통 `fs` wrapper + E2E
 6. **글로벌 단축키** — Phase 5-E. NSEvent.addGlobalMonitorForEvents
 7. **라이프사이클 이벤트** (resize/focus/blur) — Phase 5
 8. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께 처리

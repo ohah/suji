@@ -166,6 +166,7 @@ CEF DevTools (`--remote-debugging-port=9222`)에서 `console.log(await suji.invo
 | 5-B Tray | `tray_create` / `tray_set_title` / `tray_set_tooltip` / `tray_set_menu` / `tray_destroy` |
 | 5-C Notification | `notification_is_supported` / `notification_request_permission` / `notification_show` / `notification_close` |
 | 5-D Menu | `menu_set_application_menu` / `menu_reset_application_menu` |
+| 5-F File system | `fs_read_file` / `fs_write_file` / `fs_stat` / `fs_mkdir` / `fs_readdir` |
 
 window 계열 응답은 `{ from: "zig-core", cmd, windowId, ok, ... }`, Native API 계열은
 각 API별 `{success}` / `{trayId}` / `{notificationId}` 등 응답을 반환한다. cmd 매치는 정확 비교

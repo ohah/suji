@@ -710,6 +710,50 @@ pub const shell = struct {
     }
 };
 
+pub const fs = struct {
+    pub fn readFile(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("fs_read_file", fields);
+    }
+
+    pub fn writeFile(path: []const u8, text: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        var t_buf: [8192]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        const t_n = util.escapeJsonStrFull(text, &t_buf) orelse return null;
+        var fields_buf: [12500]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\",\"text\":\"{s}\"", .{ p_buf[0..p_n], t_buf[0..t_n] }) catch return null;
+        return coreCmd("fs_write_file", fields);
+    }
+
+    pub fn stat(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("fs_stat", fields);
+    }
+
+    pub fn mkdir(path: []const u8, recursive: bool) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4300]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\",\"recursive\":{}", .{ p_buf[0..p_n], recursive }) catch return null;
+        return coreCmd("fs_mkdir", fields);
+    }
+
+    pub fn readdir(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("fs_readdir", fields);
+    }
+};
+
 pub const notification = struct {
     /// 플랫폼 지원 여부 — `{"supported":bool}` 응답.
     pub fn isSupported() ?[]const u8 {

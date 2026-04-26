@@ -549,18 +549,12 @@ pub fn build(b: *std.Build) void {
     const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
 
-    // CEF drag region hit-test tests (CEF 런타임/헤더 불필요)
+    // CEF drag region hit-test tests (CEF 런타임/헤더 불필요) — 테스트는 src 파일에 인라인.
     const cef_drag_region_test_mod = b.createModule(.{
-        .root_source_file = b.path("tests/cef_drag_region_test.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    const cef_drag_region_module = b.createModule(.{
         .root_source_file = b.path("src/platform/cef_drag_region.zig"),
         .target = target,
         .optimize = optimize,
     });
-    cef_drag_region_test_mod.addImport("cef_drag_region", cef_drag_region_module);
     const cef_drag_region_test = b.addTest(.{ .root_module = cef_drag_region_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_drag_region_test).step);
 }

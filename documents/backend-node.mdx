@@ -200,3 +200,17 @@ const { success } = await windows.printToPDF(2, '/tmp/report.pdf');
 ```
 
 핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+```ts
+import { fs } from '@suji/node';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
+const text = await fs.readFile('/tmp/suji/hello.txt');
+const stat = await fs.stat('/tmp/suji/hello.txt');
+const entries = await fs.readdir('/tmp/suji');
+```
+
+`readFile`/`readdir`는 `success:false` 응답이면 예외를 던진다.

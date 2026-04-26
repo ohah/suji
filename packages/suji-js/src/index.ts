@@ -533,6 +533,63 @@ export const shell = {
 };
 
 // ============================================
+// fs — 파일 시스템 API (Phase 5-F)
+// ============================================
+
+export type FileType =
+  | "file"
+  | "directory"
+  | "symlink"
+  | "blockDevice"
+  | "characterDevice"
+  | "fifo"
+  | "socket"
+  | "whiteout"
+  | "door"
+  | "eventPort"
+  | "unknown";
+
+export interface FsStat {
+  success: boolean;
+  type: FileType;
+  size: number;
+  mtime: number;
+}
+
+export interface FsDirEntry {
+  name: string;
+  type: FileType;
+}
+
+export const fs = {
+  async readFile(path: string): Promise<string> {
+    const r = await coreCall<{ success: boolean; text: string; error?: string }>({ cmd: "fs_read_file", path });
+    if (r.success !== true) throw new Error(r.error ?? "fs_read_file failed");
+    return r.text;
+  },
+
+  async writeFile(path: string, text: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "fs_write_file", path, text });
+    return r.success === true;
+  },
+
+  async stat(path: string): Promise<FsStat> {
+    return coreCall<FsStat>({ cmd: "fs_stat", path });
+  },
+
+  async mkdir(path: string, options: { recursive?: boolean } = {}): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "fs_mkdir", path, recursive: options.recursive === true });
+    return r.success === true;
+  },
+
+  async readdir(path: string): Promise<FsDirEntry[]> {
+    const r = await coreCall<{ success: boolean; entries: FsDirEntry[]; error?: string }>({ cmd: "fs_readdir", path });
+    if (r.success !== true) throw new Error(r.error ?? "fs_readdir failed");
+    return r.entries;
+  },
+};
+
+// ============================================
 // dialog — Native modal dialogs (Electron `dialog.*`)
 // ============================================
 // macOS만 지원 (NSOpenPanel/NSSavePanel/NSAlert). Linux/Windows에선 stub —

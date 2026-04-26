@@ -277,6 +277,26 @@ export declare const shell: {
     /** 시스템 비프음. */
     beep(): Promise<boolean>;
 };
+export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
+export interface FsStat {
+    success: boolean;
+    type: FileType;
+    size: number;
+    mtime: number;
+}
+export interface FsDirEntry {
+    name: string;
+    type: FileType;
+}
+export declare const fs: {
+    readFile(path: string): Promise<string>;
+    writeFile(path: string, text: string): Promise<boolean>;
+    stat(path: string): Promise<FsStat>;
+    mkdir(path: string, options?: {
+        recursive?: boolean;
+    }): Promise<boolean>;
+    readdir(path: string): Promise<FsDirEntry[]>;
+};
 export type MessageBoxStyle = "none" | "info" | "warning" | "error" | "question";
 export interface MessageBoxOptions {
     /** 아이콘 / 시스템 사운드 결정. 기본 "none". */

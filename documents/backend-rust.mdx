@@ -149,3 +149,17 @@ let _ = windows::print_to_pdf(2, "/tmp/report.pdf");
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+```rust
+use suji::fs;
+
+let _ = fs::mkdir("/tmp/suji", true);
+let _ = fs::write_file("/tmp/suji/hello.txt", "hello\nworld");
+let _ = fs::read_file("/tmp/suji/hello.txt");
+let _ = fs::stat("/tmp/suji/hello.txt");
+let _ = fs::readdir("/tmp/suji");
+```
+
+모든 함수는 `invoke("__core__", ...)` 경유 raw JSON `Option<String>`을 반환한다.

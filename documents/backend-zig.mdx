@@ -175,3 +175,17 @@ _ = suji.windows.printToPDF(2, "/tmp/report.pdf");
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape (`"` `\\` 이스케이프 + control char drop).
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+코어 `std.fs` wrapper를 `__core__` IPC로 호출한다. 응답은 `?[]const u8` JSON 문자열.
+
+```zig
+_ = suji.fs.mkdir("/tmp/suji", true);
+_ = suji.fs.writeFile("/tmp/suji/hello.txt", "hello\nworld");
+_ = suji.fs.readFile("/tmp/suji/hello.txt");
+_ = suji.fs.stat("/tmp/suji/hello.txt");
+_ = suji.fs.readdir("/tmp/suji");
+```
+
+현재 텍스트 파일 중심 API이며 대용량/바이너리 스트리밍은 후속 범위다.

@@ -2950,6 +2950,71 @@ test "회귀: Menu API (Phase 5-D) — NSMenu 커스터마이즈 + click 라우�
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "MenuCheckboxItem") != null);
 }
 
+test "회귀: File System API (Phase 5-F) — core route + Zig/Rust/Go/Node/JS SDK" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_read_file\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_write_file\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_stat\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_mkdir\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"fs_readdir\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "handleFsReadFile") != null);
+
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const fs = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub fn readFile(") != null);
+
+    const rs_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod fs {") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub fn read_file(") != null);
+
+    const go_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/fs/fs.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_src);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func ReadFile(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func ReadDir(") != null);
+
+    const node_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-node/src/index.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(node_src);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const fs =") != null);
+
+    const ts_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "export const fs =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "FsDirEntry") != null);
+}
+
 test "회귀: 백엔드 SDK clipboard/shell/dialog 노출 — Zig/Rust/Go/Node 4개 모두" {
     // Zig SDK (src/core/app.zig).
     const app_src = try std.Io.Dir.cwd().readFileAlloc(

@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -154,6 +154,31 @@ describe("menu", () => {
     mockBridge.core.mockResolvedValueOnce({ success: true });
     await menu.resetApplicationMenu();
     expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"menu_reset_application_menu"}');
+  });
+});
+
+describe("fs", () => {
+  it("readFile calls core and returns text", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true, text: "hello" });
+    const text = await sujiFs.readFile("/tmp/a.txt");
+    expect(text).toBe("hello");
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"fs_read_file","path":"/tmp/a.txt"}');
+  });
+
+  it("writeFile / stat / mkdir / readdir call core", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await sujiFs.writeFile("/tmp/a.txt", "hello\nworld")).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"fs_write_file","path":"/tmp/a.txt","text":"hello\\nworld"}');
+
+    mockBridge.core.mockResolvedValueOnce({ success: true, type: "file", size: 5, mtime: 1 });
+    expect((await sujiFs.stat("/tmp/a.txt")).type).toBe("file");
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await sujiFs.mkdir("/tmp/dir", { recursive: true })).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"fs_mkdir","path":"/tmp/dir","recursive":true}');
+
+    mockBridge.core.mockResolvedValueOnce({ success: true, entries: [{ name: "a.txt", type: "file" }] });
+    expect(await sujiFs.readdir("/tmp")).toEqual([{ name: "a.txt", type: "file" }]);
   });
 });
 

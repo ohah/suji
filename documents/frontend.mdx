@@ -72,6 +72,11 @@ interface InvokeOptions {
 | `create_window` | `title`, `url?`, `name?`, `width?`, `height?` | `{from:"zig-core", windowId:N}` |
 | `set_title` | `windowId`, `title` | `{windowId:N, ok:bool}` |
 | `set_bounds` | `windowId`, `x?`, `y?`, `width?`, `height?` | `{windowId:N, ok:bool}` |
+| `fs_read_file` | `path` | `{success:true,text}` |
+| `fs_write_file` | `path`, `text` | `{success:true}` |
+| `fs_stat` | `path` | `{success:true,type,size,mtime}` |
+| `fs_mkdir` | `path`, `recursive?` | `{success:true}` |
+| `fs_readdir` | `path` | `{success:true,entries}` |
 | `quit` | — | `{cmd:"quit"}` |
 | `core_info` | — | `{backends:[...]}` |
 
@@ -85,6 +90,16 @@ const w = await window.__suji__.core(JSON.stringify({
   url: 'http://localhost:5173/settings',
 }));
 console.log(w.windowId);  // 2, 3, ...
+```
+
+`@suji/api`에서는 raw `core` 대신 typed wrapper를 권장:
+
+```ts
+import { fs } from '@suji/api';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello');
+const text = await fs.readFile('/tmp/suji/hello.txt');
 ```
 
 ## Electron 대응

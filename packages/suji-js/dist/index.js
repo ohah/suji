@@ -294,6 +294,31 @@ export const shell = {
         return r.success === true;
     },
 };
+export const fs = {
+    async readFile(path) {
+        const r = await coreCall({ cmd: "fs_read_file", path });
+        if (r.success !== true)
+            throw new Error(r.error ?? "fs_read_file failed");
+        return r.text;
+    },
+    async writeFile(path, text) {
+        const r = await coreCall({ cmd: "fs_write_file", path, text });
+        return r.success === true;
+    },
+    async stat(path) {
+        return coreCall({ cmd: "fs_stat", path });
+    },
+    async mkdir(path, options = {}) {
+        const r = await coreCall({ cmd: "fs_mkdir", path, recursive: options.recursive === true });
+        return r.success === true;
+    },
+    async readdir(path) {
+        const r = await coreCall({ cmd: "fs_readdir", path });
+        if (r.success !== true)
+            throw new Error(r.error ?? "fs_readdir failed");
+        return r.entries;
+    },
+};
 /// Dialog 함수의 Electron 두-인자 오버로드 분해. 첫 인자가 number면 windowId(=sheet 부모),
 /// 아니면 options 단일 인자로 free-floating modal.
 function splitDialogArgs(arg1, arg2) {

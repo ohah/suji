@@ -155,3 +155,19 @@ windows.PrintToPDF(2, "/tmp/report.pdf")
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+별도 sub-package로 노출 — `import "github.com/ohah/suji-go/fs"`.
+
+```go
+import "github.com/ohah/suji-go/fs"
+
+fs.Mkdir("/tmp/suji", true)
+fs.WriteFile("/tmp/suji/hello.txt", "hello\nworld")
+fs.ReadFile("/tmp/suji/hello.txt")
+fs.Stat("/tmp/suji/hello.txt")
+fs.ReadDir("/tmp/suji")
+```
+
+응답은 core JSON 문자열이다.

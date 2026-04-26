@@ -1,0 +1,100 @@
+---
+title: File System (Phase 5-F)
+description: 텍스트 파일 read/write + stat/mkdir/readdir — Zig std.fs 기반 core API
+---
+
+# File System
+
+Electron `fs` 사용 흐름에 대응하는 Suji core 파일 시스템 API. Frontend JS와
+Zig/Rust/Go/Node 백엔드 SDK 모두 같은 `__core__` cmd를 사용한다.
+
+현재 범위는 UTF-8 텍스트 파일과 디렉토리 metadata/listing이다. 바이너리/스트리밍/권한 모델은
+별도 후속 API로 둔다.
+
+## API
+
+| API | cmd | 응답 |
+|---|---|---|
+| `fs.readFile(path)` | `fs_read_file` | `{success:true,text}` |
+| `fs.writeFile(path, text)` | `fs_write_file` | `{success:true}` |
+| `fs.stat(path)` | `fs_stat` | `{success:true,type,size,mtime}` |
+| `fs.mkdir(path, {recursive})` | `fs_mkdir` | `{success:true}` |
+| `fs.readdir(path)` | `fs_readdir` | `{success:true,entries:[{name,type}]}` |
+
+실패 응답은 `{success:false,error}` 형태다. `readFile/writeFile`은 단일 IPC payload 한도 안에서
+동작하므로 큰 파일은 아직 대상이 아니다.
+
+## Frontend JS
+
+```ts
+import { fs } from '@suji/api';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
+
+const text = await fs.readFile('/tmp/suji/hello.txt');
+const stat = await fs.stat('/tmp/suji/hello.txt');
+const entries = await fs.readdir('/tmp/suji');
+```
+
+## Backend SDK
+
+### Zig (`suji.fs.*`)
+
+```zig
+_ = suji.fs.mkdir("/tmp/suji", true);
+_ = suji.fs.writeFile("/tmp/suji/hello.txt", "hello\nworld");
+_ = suji.fs.readFile("/tmp/suji/hello.txt");
+_ = suji.fs.stat("/tmp/suji/hello.txt");
+_ = suji.fs.readdir("/tmp/suji");
+```
+
+### Rust (`suji::fs::*`)
+
+```rust
+use suji::fs;
+
+let _ = fs::mkdir("/tmp/suji", true);
+let _ = fs::write_file("/tmp/suji/hello.txt", "hello\nworld");
+let _ = fs::read_file("/tmp/suji/hello.txt");
+let _ = fs::stat("/tmp/suji/hello.txt");
+let _ = fs::readdir("/tmp/suji");
+```
+
+### Go (`github.com/ohah/suji-go/fs`)
+
+```go
+import "github.com/ohah/suji-go/fs"
+
+fs.Mkdir("/tmp/suji", true)
+fs.WriteFile("/tmp/suji/hello.txt", "hello\nworld")
+fs.ReadFile("/tmp/suji/hello.txt")
+fs.Stat("/tmp/suji/hello.txt")
+fs.ReadDir("/tmp/suji")
+```
+
+### Node (`@suji/node`)
+
+```ts
+import { fs } from '@suji/node';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
+const entries = await fs.readdir('/tmp/suji');
+```
+
+## Type 값
+
+`stat.type`과 `readdir[].type`은 다음 문자열 중 하나다:
+
+`file`, `directory`, `symlink`, `blockDevice`, `characterDevice`, `fifo`, `socket`,
+`whiteout`, `door`, `eventPort`, `unknown`.
+
+## E2E
+
+```bash
+./tests/e2e/run-fs.sh
+```
+
+E2E는 임시 디렉토리에서 `mkdir/write/read/stat/readdir` round-trip, missing path 오류,
+empty path validation을 검증한다.

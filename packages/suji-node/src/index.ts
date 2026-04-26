@@ -525,6 +525,63 @@ export const shell = {
 };
 
 // ============================================
+// fs — 파일 시스템 API (Phase 5-F)
+// ============================================
+
+export type FileType =
+  | 'file'
+  | 'directory'
+  | 'symlink'
+  | 'blockDevice'
+  | 'characterDevice'
+  | 'fifo'
+  | 'socket'
+  | 'whiteout'
+  | 'door'
+  | 'eventPort'
+  | 'unknown';
+
+export interface FsStat {
+  success: boolean;
+  type: FileType;
+  size: number;
+  mtime: number;
+}
+
+export interface FsDirEntry {
+  name: string;
+  type: FileType;
+}
+
+export const fs = {
+  async readFile(path: string): Promise<string> {
+    const r = await invoke<{ success: boolean; text: string; error?: string }>('__core__', { cmd: 'fs_read_file', path });
+    if (r.success !== true) throw new Error(r.error ?? 'fs_read_file failed');
+    return r.text;
+  },
+
+  async writeFile(path: string, text: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'fs_write_file', path, text });
+    return r.success === true;
+  },
+
+  async stat(path: string): Promise<FsStat> {
+    return invoke<FsStat>('__core__', { cmd: 'fs_stat', path });
+  },
+
+  async mkdir(path: string, options: { recursive?: boolean } = {}): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'fs_mkdir', path, recursive: options.recursive === true });
+    return r.success === true;
+  },
+
+  async readdir(path: string): Promise<FsDirEntry[]> {
+    const r = await invoke<{ success: boolean; entries: FsDirEntry[]; error?: string }>('__core__', { cmd: 'fs_readdir', path });
+    if (r.success !== true) throw new Error(r.error ?? 'fs_readdir failed');
+    return r.entries;
+  },
+};
+
+// ============================================
 // notification — 시스템 알림 (Electron `Notification`). macOS only (UNUserNotificationCenter).
 // 클릭은 `notification:click {notificationId}` 이벤트로 수신.
 // ============================================
