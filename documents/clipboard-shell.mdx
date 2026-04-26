@@ -1,0 +1,156 @@
+---
+title: Clipboard & Shell
+description: 시스템 클립보드 + 외부 핸들러 (Electron clipboard.* / shell.*) — 5개 진입점 모두 노출
+---
+
+# Clipboard & Shell
+
+Electron `clipboard.*` / `shell.*` 호환 API. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK
+모두 노출 — 모든 호출은 `__core__` 채널로 라우팅되어 cef.zig 핸들러로 도달.
+
+## 플랫폼 지원
+
+| API | macOS | Linux | Windows |
+|---|---|---|---|
+| `clipboard.readText/writeText/clear` | ✅ NSPasteboard | stub (빈 문자열) | stub |
+| `shell.openExternal` | ✅ NSWorkspace + URL scheme 검사 | stub (false) | stub |
+| `shell.showItemInFolder` | ✅ activateFileViewerSelectingURLs: + 사전 fileExistsAtPath: | stub | stub |
+| `shell.beep` | ✅ NSBeep | stub | stub |
+
+Linux/Windows는 향후 GTK/Win32 plug-in. 현재 호출은 graceful 응답 (`success: false` /
+`text: ""`).
+
+## Clipboard
+
+### Frontend JS (`@suji/api`)
+
+```ts
+import { clipboard } from '@suji/api';
+
+await clipboard.readText();        // → string (빈 문자열이면 클립보드 빔)
+await clipboard.writeText(text);   // → boolean (성공 여부)
+await clipboard.clear();           // → boolean
+```
+
+### Zig 백엔드 (`suji.clipboard.*`)
+
+```zig
+const r = suji.clipboard.readText();         // ?[]const u8 — raw JSON
+const r = suji.clipboard.writeText("hi");
+const r = suji.clipboard.clear();
+```
+
+### Rust 백엔드 (`suji::clipboard::*`)
+
+```rust
+let r = suji::clipboard::read_text();        // Option<String>
+let r = suji::clipboard::write_text("hi");
+let r = suji::clipboard::clear();
+```
+
+### Go 백엔드 (`github.com/ohah/suji-go/clipboard`)
+
+```go
+import "github.com/ohah/suji-go/clipboard"
+text := clipboard.ReadText()
+clipboard.WriteText("hi")
+clipboard.Clear()
+```
+
+### Node 백엔드 (`@suji/node`)
+
+```ts
+import { clipboard } from '@suji/node';
+await clipboard.readText();
+await clipboard.writeText("hi");
+await clipboard.clear();
+```
+
+## Shell
+
+### Frontend JS
+
+```ts
+import { shell } from '@suji/api';
+
+await shell.openExternal("https://example.com");  // → boolean
+await shell.showItemInFolder("/tmp/file.txt");    // → boolean (경로 존재해야 true)
+await shell.beep();                                // → boolean
+```
+
+### 백엔드 — 4개 SDK 동일 패턴
+
+```zig
+suji.shell.openExternal("https://...");
+suji.shell.showItemInFolder("/path");
+suji.shell.beep();
+```
+
+```rust
+suji::shell::open_external("https://...");
+suji::shell::show_item_in_folder("/path");
+suji::shell::beep();
+```
+
+```go
+import "github.com/ohah/suji-go/shell"
+shell.OpenExternal("https://...")
+shell.ShowItemInFolder("/path")
+shell.Beep()
+```
+
+```ts
+import { shell } from '@suji/node';
+await shell.openExternal("https://...");
+await shell.showItemInFolder("/path");
+await shell.beep();
+```
+
+## 동작 정밀
+
+### `openExternal`
+
+URL 검증 단계:
+1. JSON unescape → `text.len + 1 > 4096`이면 false 즉시 (path 한도)
+2. NSURL.URLWithString — malformed면 nil → false
+3. NSURL.scheme — 빈 문자열 또는 nil이면 false (LaunchServices `-50` dialog 회피)
+4. NSWorkspace.openURL → 시스템 핸들러 매칭 시 true
+
+scheme 없는 input(`"noschemejustwords"` 같은 relative URL)은 사전 차단 — `URLWithString`이
+relative URL을 통과시켜 그대로 `openURL`에 보내면 macOS가 OS 알림 띄우는 문제 회피.
+
+### `showItemInFolder`
+
+1. `NSFileManager.fileExistsAtPath:` 사전 체크 — 없으면 false (`-50` dialog 회피)
+2. `NSURL.fileURLWithPath:` + `NSArray.arrayWithObject:` 래핑
+3. `NSWorkspace.activateFileViewerSelectingURLs:` (modern API. `selectFile:inFileViewerRootedAtPath:`은 deprecated)
+
+### `beep`
+
+`NSBeep()` 직접 호출 — AppKit C symbol. 동기 (즉시 반환).
+
+## JSON wire 안전성
+
+text/path/url 페이로드는 모두 `escapeJsonStrFull`로 인코딩 — `\n`/`\t`/`\r` 보존,
+control char `\u00XX`. 백슬래시/따옴표 round-trip 정확. UTF-8 멀티바이트(한글/이모지)
+그대로 통과.
+
+응답 디코딩(클립보드 read의 text 필드)도 동일 — 모든 control char 보존.
+
+## 한계
+
+- **macOS 한정** — 다른 플랫폼은 stub.
+- **Clipboard 텍스트 16KB 한도** — `CLIPBOARD_MAX_TEXT` 상수 + `MAX_RESPONSE`. 더 긴 텍스트는 `false` 반환.
+- **URL/path 4KB 한도** — `SHELL_MAX_PATH` (NSString stack alloc 안전).
+- **Clipboard 이미지/파일/HTML 미지원** — Electron의 `clipboard.readImage` / `writeBuffer`는 향후 작업.
+- **Shell 트래시 / 휴지통 미지원** — Electron의 `shell.trashItem`은 향후 작업.
+
+## E2E 검증
+
+- **Clipboard**: `tests/e2e/clipboard.test.ts` — 37 케이스 (write/read/clear, 길이 한도, JSON wire, Unicode/RTL/이모지/ZWJ, 200회 stress, Promise.all 동시, 인터리브, 다중 창)
+- **Shell**: `tests/e2e/shell.test.ts` — 32 케이스 (invalid input, valid path/URL RUN_DESTRUCTIVE, scheme 사전 차단, fixtures with spaces/한글/symlink/hidden, 100회 stress)
+
+```bash
+bash tests/e2e/run-clipboard.sh
+RUN_DESTRUCTIVE=1 bash tests/e2e/run-shell.sh   # 브라우저 탭 + Finder 윈도우 + beep 발생
+```

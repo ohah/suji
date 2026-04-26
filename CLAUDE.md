@@ -62,6 +62,11 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.openDevTools(id) / toggleDevTools(id)  — DevTools (Phase 4-C)
 // suji.windows.copy(id) / paste(id) / findInPage(id, "x", .{})  — 편집/검색 (Phase 4-E)
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
+// suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
+// suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep()
+// suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
+// suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
+// suji.dialog.showErrorBox("Title", "content")
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -78,6 +83,11 @@ suji::export_handlers!(ping);
 // suji::windows::load_url(id, url) / reload(id, false) / execute_javascript(id, code)  (Phase 4-A)
 // suji::windows::set_zoom_factor(id, 1.2) / open_dev_tools(id) / copy(id) / find_in_page(id, "x", ..)
 // suji::windows::print_to_pdf(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D)
+// suji::clipboard::read_text() / write_text("hi") / clear()
+// suji::shell::open_external("https://...") / show_item_in_folder("/path") / beep()
+// suji::dialog::show_message_box(MessageBoxOpts { message: "Q", ... })
+// suji::dialog::show_open_dialog(r#""properties":["openFile"]"#)
+// suji::dialog::show_error_box("Title", "content")
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -95,6 +105,13 @@ var _ = suji.Bind(&App{})
 // windows.LoadURL(id, url) / Reload(id, false) / ExecuteJavaScript(id, code)  (Phase 4-A)
 // windows.SetZoomFactor(id, 1.2) / OpenDevTools(id) / Copy(id) / FindInPage(id, "x", ..)
 // windows.PrintToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D)
+// import "github.com/ohah/suji-go/clipboard"
+// clipboard.ReadText() / WriteText("hi") / Clear()
+// import "github.com/ohah/suji-go/shell"
+// shell.OpenExternal(url) / ShowItemInFolder(path) / Beep()
+// import "github.com/ohah/suji-go/dialog"
+// dialog.ShowMessageBox(dialog.MessageBoxOpts{Message:"Q", Buttons:[]string{"OK"}})
+// dialog.ShowOpenDialog(`"properties":["openFile"]`) / ShowErrorBox(t, c)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -116,6 +133,17 @@ suji.platform                                                // "macos" | "linux
 // await windows.openDevTools(id) / toggleDevTools(id) / isDevToolsOpened(id)  (Phase 4-C)
 // await windows.undo(id) / copy(id) / paste(id) / findInPage(id, "x", {})  (Phase 4-E)
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
+
+// import { clipboard, shell, dialog } from '@suji/api';
+// await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard)
+// await shell.openExternal(url) / showItemInFolder(path) / beep()         (macOS NSWorkspace)
+// await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert)
+// await dialog.showMessageBox(windowId, options)  — sheet (부모 창 attach, dialog.m)
+// await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel)
+// await dialog.showOpenDialog(windowId, options) — sheet
+// await dialog.showSaveDialog({ defaultPath:'~/x.txt', nameFieldLabel })  (NSSavePanel)
+// await dialog.showSaveDialog(windowId, options) — sheet
+// await dialog.showErrorBox(title, content)                               (간이 에러 popup)
 ```
 
 ## suji.json 설정
@@ -164,6 +192,13 @@ const result = await suji.invoke('rust', '{"cmd":"greet"}')
 
 // 이벤트 발신
 suji.send('my-event', JSON.stringify({ msg: 'hello' }))
+
+// import { clipboard, shell, dialog } from '@suji/node'
+// await clipboard.readText() / writeText("hi")
+// await shell.openExternal(url) / showItemInFolder(path) / beep()
+// await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
+// await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
+// await dialog.showErrorBox(title, content)
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.

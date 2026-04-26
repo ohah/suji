@@ -488,6 +488,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           헬퍼 경유. 멀티 매핑 `devtools_to_inspectee: AutoHashMap(u64, u64)` —
           openDevTools에서 pending 변수 set → onAfterCreated에서 새 DevTools browser와 매핑 →
           onBeforeClose에서 정리. CEF single UI thread라 race-free, 멀티 윈도우 동시 DevTools 안전.
+    - [x] **DevTools 닫힘 시 부모 창 키 포커스 복귀** — onBeforeClose에서 inspectee NSWindow에
+          `performSelector:withObject:afterDelay:0`으로 다음 런루프 틱에 makeKeyAndOrderFront 예약.
+          AppKit close-time 비동기 focus 재할당 후 우리 호출이 적용되도록.
+    - [x] **DevTools 떠 있는 상태 quit + Cmd+Q SIGTRAP 회피** — `cef.quit()`이 모든 DevTools/browser
+          close 후 cef_quit_message_loop. App 메뉴 Quit 항목은 `terminate:` 대신 `SujiQuitTarget.sujiQuit:`
+          custom selector → cef.quit() (NSApplicationWillTerminate 옵저버에서 CEF SIGTRAP 우회).
+    - [x] **Frameless 창 키 이벤트** — `SujiKeyableWindow` ObjC subclass + `canBecomeKeyWindow=YES`
+          override (기본 NSWindow는 borderless면 NO 반환).
     - [ ] **`find_in_page` 결과 보고 이벤트** — `cef_find_handler_t.OnFindResult`로 매치 수,
           현재 인덱스, 셀렉션 영역 받음 → `window:find-result` 이벤트로 발화. 현재는 ok 응답만.
 
@@ -503,13 +511,46 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           달라 dispatcher 2벌 (CEF는 wrapped `{__core,request}`, backend는 raw cmd JSON).
           `SPECIAL_DISPATCHERS` 테이블은 공유 중. 통합 시: cefHandleCore의 두 입력 형식 분기를
           제거하고 backend 경유로 단일화. Phase 4 완전히 끝난 뒤 진행 (모듈 안정화).
+  - [~] **Phase 5-A: Native API (Clipboard / Shell / Dialog)** — 5개 진입점 모두 노출 완료.
+        - [x] **Clipboard** (`readText/writeText/clear`) — NSPasteboard. Frontend `@suji/api` +
+              Zig/Rust/Go/Node SDK 4개. E2E 37 케이스 (write/read/clear, 길이 한도, JSON wire,
+              Unicode/RTL/이모지/ZWJ, 200회 stress, 다중 창). `documents/clipboard-shell.mdx`.
+        - [x] **Shell** (`openExternal/showItemInFolder/beep`) — NSWorkspace + NSBeep.
+              modern API `activateFileViewerSelectingURLs:` (deprecated `selectFile:` 회피).
+              scheme 사전 검사 + `fileExistsAtPath:` 사전 검증으로 LaunchServices `-50` dialog 회피.
+              E2E 32 케이스. 4개 SDK 노출.
+        - [x] **Dialog** (`showMessageBox/showErrorBox/showOpenDialog/showSaveDialog` + Sync 변종 3개) —
+              NSAlert/NSOpenPanel/NSSavePanel + sheet modal. `src/platform/dialog.m` ObjC block
+              completion handler + nested NSApp event loop. windowId 첫 인자로 sheet vs
+              free-floating 분기 (Electron 두-인자 오버로드). showsTagField + filters + checkbox.
+              `documents/dialog.mdx`. 4개 SDK 노출.
+        - **새로 깔린 인프라**: `.m` 파일 컴파일 룰 (build.zig + `-fobjc-arc`) — 향후 ObjC block
+              필요 API (Notification completion, NSAnimation, vibrancy 등) 재사용 가능.
   - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
+  - [ ] **Phase 5-B: Tray** (NSStatusItem) — 시스템 트레이 아이콘 + 메뉴. Electron `Tray`/`Menu` 호환.
+  - [ ] **Phase 5-C: Notification** (NSUserNotificationCenter / UNUserNotificationCenter) —
+        백엔드/프론트 양쪽에서 사용자 알림. 권한 요청 흐름 포함.
+  - [ ] **Phase 5-D: 메뉴바 커스터마이즈 API** — 현재 macOS 기본 menu(App/File/Edit/View/Window)만.
+        사용자 정의 menu/submenu/checkbox/separator + click 이벤트 라우팅.
+  - [ ] **Phase 5-E: 글로벌 단축키** (NSEvent.addGlobalMonitorForEvents) — Electron `globalShortcut`.
+  - [ ] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
+        프론트는 IPC, 백엔드는 std lib 직접 + 공통 typed wrapper.
   - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
+        - [x] windows.* API 5개 진입점 노출
+        - [x] clipboard/shell/dialog 5개 진입점 노출
+        - [ ] BrowserWindow OO wrapper (현재는 raw windowId 기반)
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
     - [ ] `contextIsolation: true` — 별도 V8 world에 `window.__suji__` 생성 + `Object.freeze`된
           프록시만 메인 월드에 노출. XSS가 bridge를 변조/레퍼런스 캡처 불가.
           Electron의 contextBridge 대체 (더 간결). 외부 URL 로드 시 권장 기본값 후보.
           (preload.js / contextBridge 자체는 **비제공** — WINDOW_API.md 설계 참조)
+    - [ ] **macOS App Sandbox 인프라** — `suji build --sandbox` 옵션 + entitlements.plist 자동 부착.
+          핵심 작업: **CEF Helper 번들 5개에 entitlements 자동 부착** (`Suji Helper.app`,
+          `Suji Helper (GPU/Renderer/Plugin/Alerts).app`) — Electron이 historic하게 풀어낸 패턴.
+          + Security-scoped bookmarks API (`bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope`)
+          노출 (`startAccessingSecurityScopedResource` / `stopAccessingSecurityScopedResource`).
+          Mac App Store 진출 시 필수.
+    - [ ] **Sheet modal** ✅ 완료 (Phase 5-A에서 구현) — `src/platform/dialog.m` + `windowId` 첫 인자.
   - **설계 비제공 (문서화 완료)**: 렌더러 직접 통신, MessagePort, preload.js, contextBridge — `docs/WINDOW_API.md#설계-비제공-항목과-이유`
   - **V2 검토**: `cross_origin_isolation` 플래그 (SharedArrayBuffer 활성화), `inject` 초기 스크립트 옵션
   - **엣지 케이스 / TDD 전략 / E2E 범위**: `docs/WINDOW_API.md` 해당 섹션 참조
@@ -1173,25 +1214,29 @@ suji build → 결과물:
 
 현재 Suji는 IPC + EventBus + 멀티 백엔드(Phase 2, 4, 6)가 동작하지만, 실제 앱을 만들어 배포하려면 아래 기능들이 필요하다.
 
-### 네이티브 데스크톱 API (Phase 3 미완성)
+### 네이티브 데스크톱 API
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ❌ |
-| 시스템 다이얼로그 (열기/저장/알림) | `dialog` | `dialog` 플러그인 | ❌ |
-| 트레이 아이콘 | `Tray` | `tray-icon` | ❌ |
-| 메뉴바 | `Menu` | `menu` | 🟡 (macOS Edit 메뉴만 기본 제공) |
-| 창 이벤트 (resize/close/focus) | `BrowserWindow` 이벤트 | `Window` 이벤트 | 🟡 (설계 완료, 구현 대기) |
-| 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | 🟡 (PoC 완료, API 미구현) |
+| 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ❌ (Phase 5-F 백로그) |
+| 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
+| 트레이 아이콘 | `Tray` | `tray-icon` | ❌ (Phase 5-B 다음 단계) |
+| 메뉴바 | `Menu` | `menu` | 🟡 (macOS App/File/Edit/View/Window 기본 — 사용자 정의 API 미노출, Phase 5-D) |
+| 알림 (Notification) | `Notification` | `notification` | ❌ (Phase 5-C) |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
+| 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | 🟡 close만 부분 — Phase 5 (라이프사이클) |
+| 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ✅ `windows.create()` + Phase 3 외형 옵션 풀 셋 (frame/transparent/parent) |
 | 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ✅ (dylib 재로드 + Vite HMR) |
 
 ### 보안
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | ❌ |
-| CSP (Content Security Policy) | 수동 설정 | 빌트인 | ❌ |
-| IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ❌ |
+| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | ❌ (Phase 7) |
+| CSP (Content Security Policy) | 수동 설정 | 빌트인 | ❌ (Phase 7) |
+| IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ❌ (Phase 7) |
+| macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | 🟡 entitlements.plist 직접 추가 시 동작. CEF Helper 5개 자동 부착은 Phase 7 |
+| Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ❌ (Phase 7) |
 
 ### 앱 배포 & 패키징
 
@@ -1200,21 +1245,25 @@ suji build → 결과물:
 | macOS .app 번들 | electron-builder | `tauri build` | ✅ (`bundle_macos.zig`, Helper 4개, Info.plist) |
 | Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
 | Linux .deb/.AppImage | electron-builder | `tauri build` | ❌ |
-| 코드 서명 & 공증 | electron-notarize | 빌트인 | 🟡 (서명 준비 — 공증 미구현) |
+| 코드 서명 & 공증 | electron-notarize | 빌트인 | 🟡 (서명 준비 — 공증 자동화 미구현) |
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
+| GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ❌ |
+| Homebrew tap | 사용자 직접 | -- | ❌ (CLAUDE.md "예정") |
+| `npx @suji/cli` | -- | `create-tauri-app` | ❌ (CLAUDE.md "예정") |
 
 ### 플러그인 / 확장 API
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
-| 클립보드 | `clipboard` | `clipboard-manager` | ❌ |
-| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ |
-| 알림 (Notification) | `Notification` | `notification` | ❌ |
-| 셸 명령 실행 | `child_process` | `shell` 플러그인 | ❌ |
-| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ |
+| 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. NSPasteboard + 4 SDK + E2E 37 케이스 |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
+| 알림 (Notification) | `Notification` | `notification` | ❌ (Phase 5-C) |
+| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
+| 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | ❌ (Zig `std.process.Child` 노출만 하면 됨) |
+| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ (Zig `std.http` 있음 — 노출만) |
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ |
-| 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | ❌ |
+| 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ❌ |
 
 ### 개발자 경험 (DX)
@@ -1235,14 +1284,21 @@ suji build → 결과물:
 | 바이너리 IPC | Buffer 직접 전송 | `asset://` 커스텀 프로토콜 | ✅ `suji://` 커스텀 프로토콜 |
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`) |
 
-### 우선순위 제안
+### 우선순위 제안 (현재)
 
-1. **멀티 윈도우 완성** (`BrowserWindow` API Phase 2~7) — 설계 확정됨, 실제 데스크톱 앱 필수
-2. **파일 시스템 + 다이얼로그** — 가장 기본적인 네이티브 API
-3. **앱 패키징** (Windows .msi, Linux .AppImage) — macOS는 완료, 타 OS 보완
-4. **트레이 + 메뉴바** — 데스크톱 앱의 기본 요소
-5. **보안 모델** — 프로덕션 사용 전 필수
-6. **자동 업데이트** — 배포 후 유지보수에 필수
+1. ✅ **멀티 윈도우 완성** — Phase 3 외형 옵션 풀 셋 + Phase 4 webContents 모두 완료
+2. ✅ **다이얼로그** — Phase 5-A 완료 (sheet modal 포함)
+3. ✅ **클립보드 / Shell 외부 핸들러** — Phase 5-A 완료
+4. **트레이 + 알림 + 메뉴바 API** — Phase 5-B/C/D, 데스크톱 앱 기본 요소 (다음 단계 후보)
+5. **파일 시스템 API** — Phase 5-F. 백엔드는 Zig `std.fs` 직접, 프론트는 IPC wrapper
+6. **글로벌 단축키** — Phase 5-E. NSEvent.addGlobalMonitorForEvents
+7. **라이프사이클 이벤트** (resize/focus/blur) — Phase 5
+8. **frameless drag region** — Phase 4 백로그. 사용자 만족도 직격
+9. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
+10. **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
+11. **보안 모델** (Phase 7: contextIsolation, CSP, IPC 검증) — 프로덕션 사용 전 필수
+12. **자동 업데이트** — 배포 후 유지보수에 필수
+13. **CLI 배포** (npx/Homebrew/curl) — CLAUDE.md "예정"
 
 ---
 
