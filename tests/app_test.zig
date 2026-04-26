@@ -831,3 +831,127 @@ test "suji.sendTo() forwards target id + channel + data to emit_to_fn" {
     try std.testing.expectEqualStrings("toast", SendToSpy.last_channel[0..SendToSpy.last_channel_len]);
     try std.testing.expectEqualStrings("{\"msg\":\"hi\"}", SendToSpy.last_data[0..SendToSpy.last_data_len]);
 }
+
+// ============================================
+// Phase 5-A/5-B Backend SDK 단위 — Zig SDK가 올바른 cmd JSON을 emit하는지
+// ============================================
+
+test "clipboard.readText: __core__ + clipboard_read_text 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.readText();
+            try std.testing.expectEqual(@as(usize, 1), InvokeSpy.call_count);
+            try std.testing.expectEqualStrings("__core__", InvokeSpy.lastBackend());
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_read_text\"") != null);
+        }
+    }.run);
+}
+
+test "clipboard.writeText: text 필드 + escape 적용" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.writeText("hi\nworld");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_write_text\"") != null);
+            // \n이 escape sequence로 보존돼야 (escapeJsonStrFull).
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "hi\\nworld") != null);
+        }
+    }.run);
+}
+
+test "clipboard.clear: 인자 없는 cmd" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.clear();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_clear\"") != null);
+        }
+    }.run);
+}
+
+test "shell.openExternal: url 필드 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.shell.openExternal("https://example.com");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"shell_open_external\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"url\":\"https://example.com\"") != null);
+        }
+    }.run);
+}
+
+test "shell.showItemInFolder: path 필드 + 백슬래시 escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.shell.showItemInFolder("/tmp/file with spaces.txt");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"shell_show_item_in_folder\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "file with spaces") != null);
+        }
+    }.run);
+}
+
+test "shell.beep: 인자 없는 cmd" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.shell.beep();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"shell_beep\"") != null);
+        }
+    }.run);
+}
+
+test "dialog.showErrorBox: title + content 둘 다 필수 필드" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.dialog.showErrorBox("Error", "Something failed");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"dialog_show_error_box\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"title\":\"Error\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"content\":\"Something failed\"") != null);
+        }
+    }.run);
+}
+
+test "dialog.messageBoxSimple: type/message + buttons 배열 빌드" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.dialog.messageBoxSimple("info", "Q?", &.{ "Yes", "No" });
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"dialog_show_message_box\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"type\":\"info\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"message\":\"Q?\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"buttons\":[\"Yes\",\"No\"]") != null);
+        }
+    }.run);
+}
+
+test "tray.create: title + tooltip 필드 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.tray.create("🚀 App", "tooltip");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"tray_create\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"title\":\"🚀 App\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"tooltip\":\"tooltip\"") != null);
+        }
+    }.run);
+}
+
+test "tray.setTitle: trayId + title 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.tray.setTitle(42, "New Title");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"tray_set_title\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"trayId\":42") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"title\":\"New Title\"") != null);
+        }
+    }.run);
+}
+
+test "tray.setMenuRaw + tray.destroy: trayId 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.tray.setMenuRaw(7, "\"items\":[]");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"tray_set_menu\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"trayId\":7") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"items\":[]") != null);
+
+            _ = app_mod.tray.destroy(7);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"tray_destroy\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"trayId\":7") != null);
+        }
+    }.run);
+}

@@ -2602,6 +2602,53 @@ test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpe
     try std.testing.expect(std.mem.indexOf(u8, main_src, "showsTagField") != null);
 }
 
+test "회귀: Dialog 옵션 파싱 — std.json filters/properties nested 배열 정상 처리" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    // FileFilterJson struct가 정의됨 — name + extensions 배열.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "const FileFilterJson = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "extensions: []const []const u8") != null);
+
+    // OpenDialogJson / SaveDialogJson에 filters: []const FileFilterJson 포함.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "filters: []const FileFilterJson") != null);
+    // OpenDialogJson properties: []const []const u8 (string 배열).
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "properties: []const []const u8") != null);
+
+    // convertFilters 헬퍼 — JSON struct → cef.FileFilter slice.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fn convertFilters(") != null);
+    // hasProp 헬퍼 — properties 배열에서 특정 문자열 존재 여부.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fn hasProp(") != null);
+}
+
+test "회귀: dialogParentNSWindow stale windowId — warn 로그 + null 반환 (sheet → free-floating fallback)" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+
+    const fn_marker = "fn dialogParentNSWindow(";
+    const fn_start = std.mem.indexOf(u8, main_src, fn_marker) orelse return error.HelperNotFound;
+    const body_end = std.mem.indexOfPos(u8, main_src, fn_start + fn_marker.len, "\nfn ") orelse main_src.len;
+    const body = main_src[fn_start..body_end];
+
+    // 두 가지 fallback 경로 모두 명시 warn 로그:
+    //   1. wm.get(id) failure → "windowId={d} not found"
+    //   2. nsWindowForBrowserHandle null → "has no NSWindow"
+    try std.testing.expect(std.mem.indexOf(u8, body, "std.log.warn") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "not found in WindowManager") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "has no NSWindow") != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, "fallback to free-floating") != null);
+}
+
 test "회귀: Tray API (Phase 5-B) — NSStatusItem + 메뉴 + click 라우팅 + 5 진입점" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

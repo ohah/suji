@@ -198,6 +198,33 @@ test "rust wrapper: keys_in returns prefix-stripped user keys" {
     try std.testing.expect(!contains(resp, "baz")); // global은 제외
 }
 
+// Rust SDK __SUJI_CORE OnceLock → AtomicPtr 회귀.
+// 이전엔 OnceLock으로 첫 set만 성공 → 두 번째 reg의 backend_init이 silently 실패하고
+// stale 포인터 유지 → invoke 시 use-after-free GP exception (Linux).
+// AtomicPtr는 store가 항상 replace — 매 backend_init이 최신 포인터로 갱신.
+//
+// 명시 회귀: 4개 reg를 순차 생성/teardown하면서 매번 invoke 동작해야 함. 이전 OnceLock
+// 구현이면 두 번째부터 crash, 현재는 통과.
+test "회귀: __SUJI_CORE AtomicPtr — 다중 reg use-after-free 차단" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+
+    // 4개 reg 순차 생성/teardown. OnceLock 시절엔 두 번째부터 stale 포인터로
+    // GP exception (Linux). AtomicPtr는 매 backend_init이 store로 replace.
+    for (0..4) |iter| {
+        var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+        defer reg.deinit();
+        reg.setGlobal();
+        try setupRegistry(&reg);
+
+        const set_resp = invokeRust(&reg, "{\"cmd\":\"rust_state_set\",\"key\":\"iter\",\"value\":\"1\"}") orelse {
+            std.debug.print("iter {d}: no response — possible use-after-free regression\n", .{iter});
+            return error.NoResponse;
+        };
+        defer freeResp(&reg, "rust", set_resp);
+        try std.testing.expect(contains(set_resp, "\"ok\":true"));
+    }
+}
+
 test "rust wrapper: delete_in removes key only in that scope" {
     var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
