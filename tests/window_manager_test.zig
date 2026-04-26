@@ -3017,6 +3017,41 @@ test "회귀: File System API (Phase 5-F) — core route + Zig/Rust/Go/Node/JS S
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "FsDirEntry") != null);
 }
 
+test "회귀: multi-backend demo exposes native API controls" {
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "examples/multi-backend/frontend/src/App.tsx",
+        std.testing.allocator,
+        .limited(512 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+
+    inline for (.{
+        "Clipboard write",
+        "OpenDialog",
+        "Tray create",
+        "Notification show",
+        "Set app menu",
+        "FS round-trip",
+        "Frameless 창 열기",
+        "tray:menu-click",
+        "notification:click",
+        "menu:click",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, app_src, needle) != null);
+    }
+
+    const css_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "examples/multi-backend/frontend/src/App.css",
+        std.testing.allocator,
+        .limited(128 * 1024),
+    );
+    defer std.testing.allocator.free(css_src);
+    try std.testing.expect(std.mem.indexOf(u8, css_src, "-webkit-app-region: drag") != null);
+    try std.testing.expect(std.mem.indexOf(u8, css_src, "-webkit-app-region: no-drag") != null);
+}
+
 test "회귀: 백엔드 SDK clipboard/shell/dialog 노출 — Zig/Rust/Go/Node 4개 모두" {
     // Zig SDK (src/core/app.zig).
     const app_src = try std.Io.Dir.cwd().readFileAlloc(
