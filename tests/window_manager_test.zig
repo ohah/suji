@@ -3990,11 +3990,11 @@ test "17-A: createView appends to host's view_children at top" {
     const v1 = try wm.createView(.{ .host_window_id = host });
     const v2 = try wm.createView(.{ .host_window_id = host });
 
-    var children = try wm.getChildViews(host, std.testing.allocator);
-    defer children.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 2), children.items.len);
-    try std.testing.expectEqual(v1, children.items[0]); // bottom
-    try std.testing.expectEqual(v2, children.items[1]); // top
+    const children = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(children);
+    try std.testing.expectEqual(@as(usize, 2), children.len);
+    try std.testing.expectEqual(v1, children[0]); // bottom
+    try std.testing.expectEqual(v2, children[1]); // top
 }
 
 test "17-A: addChildView re-call moves view to top (Electron idiom)" {
@@ -4008,10 +4008,10 @@ test "17-A: addChildView re-call moves view to top (Electron idiom)" {
     // v1을 top으로
     try wm.addChildView(host, v1, null);
 
-    var children = try wm.getChildViews(host, std.testing.allocator);
-    defer children.deinit(std.testing.allocator);
-    try std.testing.expectEqual(v2, children.items[0]);
-    try std.testing.expectEqual(v1, children.items[1]);
+    const children = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(children);
+    try std.testing.expectEqual(v2, children[0]);
+    try std.testing.expectEqual(v1, children[1]);
     try std.testing.expectEqual(@as(usize, 1), native.reorder_view_calls);
     try std.testing.expectEqual(@as(u32, 1), native.last_reorder_index.?); // top index = 1
 }
@@ -4028,11 +4028,11 @@ test "17-A: addChildView with explicit index inserts at that position" {
     // v3을 index=0(bottom)으로
     try wm.addChildView(host, v3, 0);
 
-    var children = try wm.getChildViews(host, std.testing.allocator);
-    defer children.deinit(std.testing.allocator);
-    try std.testing.expectEqual(v3, children.items[0]);
-    try std.testing.expectEqual(v1, children.items[1]);
-    try std.testing.expectEqual(v2, children.items[2]);
+    const children = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(children);
+    try std.testing.expectEqual(v3, children[0]);
+    try std.testing.expectEqual(v1, children[1]);
+    try std.testing.expectEqual(v2, children[2]);
 }
 
 test "17-A: setTopView is alias of addChildView(null)" {
@@ -4044,10 +4044,10 @@ test "17-A: setTopView is alias of addChildView(null)" {
     const v2 = try wm.createView(.{ .host_window_id = host });
     try wm.setTopView(host, v1);
 
-    var children = try wm.getChildViews(host, std.testing.allocator);
-    defer children.deinit(std.testing.allocator);
-    try std.testing.expectEqual(v2, children.items[0]);
-    try std.testing.expectEqual(v1, children.items[1]);
+    const children = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(children);
+    try std.testing.expectEqual(v2, children[0]);
+    try std.testing.expectEqual(v1, children[1]);
 }
 
 test "17-A: removeChildView detaches view, hides via native, view stays alive" {
@@ -4058,9 +4058,9 @@ test "17-A: removeChildView detaches view, hides via native, view stays alive" {
     const view = try wm.createView(.{ .host_window_id = host });
     try wm.removeChildView(host, view);
 
-    var children = try wm.getChildViews(host, std.testing.allocator);
-    defer children.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 0), children.items.len);
+    const children = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(children);
+    try std.testing.expectEqual(@as(usize, 0), children.len);
     try std.testing.expect(!wm.get(view).?.destroyed);
     try std.testing.expect(!wm.get(view).?.visible_in_host);
     try std.testing.expectEqual(@as(?bool, false), native.last_set_view_visible);
@@ -4152,10 +4152,10 @@ test "17-A: destroyView removes from host's view_children" {
     try std.testing.expect(wm.get(v1).?.destroyed);
     try std.testing.expectEqual(@as(usize, 1), native.destroy_view_calls);
 
-    var children = try wm.getChildViews(host, std.testing.allocator);
-    defer children.deinit(std.testing.allocator);
-    try std.testing.expectEqual(@as(usize, 1), children.items.len);
-    try std.testing.expectEqual(v2, children.items[0]);
+    const children = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(children);
+    try std.testing.expectEqual(@as(usize, 1), children.len);
+    try std.testing.expectEqual(v2, children[0]);
 }
 
 test "17-A: destroyView on .window returns NotAView" {

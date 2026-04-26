@@ -580,6 +580,44 @@ pub const WindowManager = struct {
         return win;
     }
 
+    /// `getLiveLocked + kind == .window` 단축. 호출 사이트가 12+ 곳이라 중복 제거.
+    fn getLiveWindowLocked(self: *WindowManager, id: u32) Error!*Window {
+        const w = try self.getLiveLocked(id);
+        if (w.kind != .window) return Error.NotAWindow;
+        return w;
+    }
+
+    /// `getLiveLocked + kind == .view` 단축.
+    fn getLiveViewLocked(self: *WindowManager, id: u32) Error!*Window {
+        const w = try self.getLiveLocked(id);
+        if (w.kind != .view) return Error.NotAView;
+        return w;
+    }
+
+    /// `list`에서 `view_id`와 같은 첫 항목을 제거. 제거됐으면 true.
+    /// view_id 중복 삽입은 addChildView가 막으므로 첫 매치만 처리하면 충분.
+    fn removeViewIdFromListLocked(list: *std.ArrayListUnmanaged(u32), view_id: u32) bool {
+        const idx = std.mem.indexOfScalar(u32, list.items, view_id) orelse return false;
+        _ = list.orderedRemove(idx);
+        return true;
+    }
+
+    /// host에 부착된 모든 child view를 destroyed 마킹 + native.destroyView 호출 +
+    /// view_children entry/by_name 정리. 호출자는 lock을 보유. 주 호출처: destroyLocked,
+    /// markClosedExternal (host 닫힘 = view 자동 정리, "orphan은 destroyAll만" 정책의 view 버전).
+    fn destroyChildViewsLocked(self: *WindowManager, host_id: u32) void {
+        const kv = self.view_children.fetchRemove(host_id) orelse return;
+        var list = kv.value;
+        defer list.deinit(self.allocator);
+        for (list.items) |child_view_id| {
+            const child = self.windows.get(child_view_id) orelse continue;
+            if (child.destroyed) continue;
+            child.destroyed = true;
+            if (child.name) |cn| _ = self.by_name.remove(cn);
+            self.native.destroyView(child.native_handle);
+        }
+    }
+
     /// lock 이미 잡은 상태에서 실제 파괴. 내부 헬퍼.
     ///
     /// 순서가 중요: destroyed 마킹 + by_name 정리를 **native.destroyWindow 호출 전**에.
@@ -592,36 +630,16 @@ pub const WindowManager = struct {
     /// kind=.view인 경우 host의 view_children list에서 자기 id를 제거.
     fn destroyLocked(self: *WindowManager, win: *Window) void {
         win.destroyed = true;
-        if (win.name) |n| {
-            _ = self.by_name.remove(n);
-        }
+        if (win.name) |n| _ = self.by_name.remove(n);
         switch (win.kind) {
             .window => {
-                if (self.view_children.fetchRemove(win.id)) |kv| {
-                    var list = kv.value;
-                    defer list.deinit(self.allocator);
-                    for (list.items) |child_view_id| {
-                        if (self.windows.get(child_view_id)) |child| {
-                            if (!child.destroyed) {
-                                child.destroyed = true;
-                                if (child.name) |cn| _ = self.by_name.remove(cn);
-                                self.native.destroyView(child.native_handle);
-                            }
-                        }
-                    }
-                }
+                self.destroyChildViewsLocked(win.id);
                 self.native.destroyWindow(win.native_handle);
             },
             .view => {
                 if (win.host_window_id) |host_id| {
                     if (self.view_children.getPtr(host_id)) |list_ptr| {
-                        var i: usize = 0;
-                        while (i < list_ptr.items.len) : (i += 1) {
-                            if (list_ptr.items[i] == win.id) {
-                                _ = list_ptr.orderedRemove(i);
-                                break;
-                            }
-                        }
+                        _ = removeViewIdFromListLocked(list_ptr, win.id);
                     }
                 }
                 self.native.destroyView(win.native_handle);
@@ -650,8 +668,7 @@ pub const WindowManager = struct {
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            const win = try self.getLiveLocked(id);
-            if (win.kind != .window) return Error.NotAWindow;
+            _ = try self.getLiveWindowLocked(id);
         }
 
         // Phase 2: 취소 가능 이벤트 (lock 밖). name은 destroy 전에 캡처해서 close/closed 동일 사용.
@@ -756,8 +773,7 @@ pub const WindowManager = struct {
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            const win = try self.getLiveLocked(id);
-            if (win.kind != .window) return Error.NotAWindow;
+            _ = try self.getLiveWindowLocked(id);
         }
         if (self.sink) |s| {
             var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
@@ -775,34 +791,17 @@ pub const WindowManager = struct {
     /// **native.destroyWindow는 호출하지 않음** — 외부가 이미 처리.
     pub fn markClosedExternal(self: *WindowManager, id: u32) Error!void {
         var live_after: usize = undefined;
-        // name은 by_name 제거 전에 캡처 — Window.name(owned slice)는 살아있어 안전.
         var name_snapshot: ?[]const u8 = null;
         {
             self.lock.lockUncancelable(self.io);
             defer self.lock.unlock(self.io);
-            const win = try self.getLiveLocked(id);
             // markClosedExternal은 OS 윈도우 close 콜백 진입점이라 .window 전용.
-            // view는 host close 시 destroyLocked가 자동 정리.
-            if (win.kind != .window) return Error.NotAWindow;
-            // host였다면 child view들도 자동 정리 (native.destroyView까지).
-            if (self.view_children.fetchRemove(win.id)) |kv| {
-                var list = kv.value;
-                defer list.deinit(self.allocator);
-                for (list.items) |child_view_id| {
-                    if (self.windows.get(child_view_id)) |child| {
-                        if (!child.destroyed) {
-                            child.destroyed = true;
-                            if (child.name) |cn| _ = self.by_name.remove(cn);
-                            self.native.destroyView(child.native_handle);
-                        }
-                    }
-                }
-            }
+            // view는 host close 시 destroyChildViewsLocked가 자동 정리.
+            const win = try self.getLiveWindowLocked(id);
+            self.destroyChildViewsLocked(win.id);
             win.destroyed = true;
             name_snapshot = win.name;
-            if (win.name) |n| {
-                _ = self.by_name.remove(n);
-            }
+            if (win.name) |n| _ = self.by_name.remove(n);
             live_after = self.liveCountLocked();
         }
         if (self.sink) |s| {
@@ -846,8 +845,7 @@ pub const WindowManager = struct {
     pub fn setTitle(self: *WindowManager, id: u32, title: []const u8) Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const win = try self.getLiveLocked(id);
-        if (win.kind != .window) return Error.NotAWindow;
+        const win = try self.getLiveWindowLocked(id);
         const owned = self.allocator.dupe(u8, title) catch return Error.OutOfMemory;
         self.allocator.free(win.title);
         win.title = owned;
@@ -857,8 +855,7 @@ pub const WindowManager = struct {
     pub fn setBounds(self: *WindowManager, id: u32, bounds: Bounds) Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const win = try self.getLiveLocked(id);
-        if (win.kind != .window) return Error.NotAWindow;
+        const win = try self.getLiveWindowLocked(id);
         win.bounds = bounds;
         self.native.setBounds(win.native_handle, bounds);
     }
@@ -866,8 +863,7 @@ pub const WindowManager = struct {
     pub fn setVisible(self: *WindowManager, id: u32, visible: bool) Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const win = try self.getLiveLocked(id);
-        if (win.kind != .window) return Error.NotAWindow;
+        const win = try self.getLiveWindowLocked(id);
         win.state.visible = visible;
         self.native.setVisible(win.native_handle, visible);
     }
@@ -1069,15 +1065,23 @@ pub const WindowManager = struct {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
 
-        const host = try self.getLiveLocked(opts.host_window_id);
-        if (host.kind != .window) return Error.NotAWindow;
+        const host = try self.getLiveWindowLocked(opts.host_window_id);
 
         // 사전 capacity 확보 — put 단계의 부분 성공 방지.
         self.windows.ensureUnusedCapacity(1) catch return Error.OutOfMemory;
         const gop = self.view_children.getOrPut(opts.host_window_id) catch return Error.OutOfMemory;
-        if (!gop.found_existing) {
-            gop.value_ptr.* = .empty;
-        }
+        const inserted_new_list = !gop.found_existing;
+        if (inserted_new_list) gop.value_ptr.* = .empty;
+        // 실패 경로에서 빈 entry가 view_children에 남지 않도록 정리 — defer 순서: lock unlock
+        // 이전에 실행되도록 lockUncancelable 직후에 errdefer를 두는 게 이상적이지만 lock 정리
+        // 자체를 defer 한 줄로 처리한 흐름과 맞물려 단순화: main thread 전제이므로 lock 풀린
+        // 후 fetchRemove로 정리해도 race X.
+        errdefer if (inserted_new_list) {
+            if (self.view_children.fetchRemove(opts.host_window_id)) |kv| {
+                var v = kv.value;
+                v.deinit(self.allocator);
+            }
+        };
         const list_ptr = gop.value_ptr;
         list_ptr.ensureUnusedCapacity(self.allocator, 1) catch return Error.OutOfMemory;
 
@@ -1122,8 +1126,7 @@ pub const WindowManager = struct {
     pub fn destroyView(self: *WindowManager, view_id: u32) Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const view = try self.getLiveLocked(view_id);
-        if (view.kind != .view) return Error.NotAView;
+        const view = try self.getLiveViewLocked(view_id);
         self.destroyLocked(view);
     }
 
@@ -1134,32 +1137,23 @@ pub const WindowManager = struct {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
 
-        const host = try self.getLiveLocked(host_id);
-        if (host.kind != .window) return Error.NotAWindow;
-        const view = try self.getLiveLocked(view_id);
-        if (view.kind != .view) return Error.NotAView;
+        const host = try self.getLiveWindowLocked(host_id);
+        const view = try self.getLiveViewLocked(view_id);
         if (view.host_window_id != host_id) return Error.ViewNotInHost;
 
         const gop = self.view_children.getOrPut(host_id) catch return Error.OutOfMemory;
-        if (!gop.found_existing) {
-            gop.value_ptr.* = .empty;
-        }
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
         const list_ptr = gop.value_ptr;
 
-        // 기존 위치 제거
-        var i: usize = 0;
-        while (i < list_ptr.items.len) : (i += 1) {
-            if (list_ptr.items[i] == view_id) {
-                _ = list_ptr.orderedRemove(i);
-                break;
-            }
-        }
+        _ = removeViewIdFromListLocked(list_ptr, view_id);
         const insert_idx: usize = if (index) |idx| @min(idx, list_ptr.items.len) else list_ptr.items.len;
         list_ptr.insert(self.allocator, insert_idx, view_id) catch return Error.OutOfMemory;
 
+        const was_visible = view.visible_in_host;
         view.visible_in_host = true;
         self.native.reorderView(host.native_handle, view.native_handle, @intCast(insert_idx));
-        self.native.setViewVisible(view.native_handle, true);
+        // visible 상태 변경됐을 때만 native 호출 — 매번 reorder마다 setHidden walk를 트리거하면 비용.
+        if (!was_visible) self.native.setViewVisible(view.native_handle, true);
     }
 
     /// view를 host의 children list에서 분리 (destroy X). native에서는 setHidden(true)로 처리.
@@ -1168,23 +1162,14 @@ pub const WindowManager = struct {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
 
-        const host = try self.getLiveLocked(host_id);
-        if (host.kind != .window) return Error.NotAWindow;
-        const view = try self.getLiveLocked(view_id);
-        if (view.kind != .view) return Error.NotAView;
+        _ = try self.getLiveWindowLocked(host_id);
+        const view = try self.getLiveViewLocked(view_id);
         if (view.host_window_id != host_id) return Error.ViewNotInHost;
 
         const list_ptr = self.view_children.getPtr(host_id) orelse return Error.ViewNotInHost;
-        var i: usize = 0;
-        while (i < list_ptr.items.len) : (i += 1) {
-            if (list_ptr.items[i] == view_id) {
-                _ = list_ptr.orderedRemove(i);
-                view.visible_in_host = false;
-                self.native.setViewVisible(view.native_handle, false);
-                return;
-            }
-        }
-        return Error.ViewNotInHost;
+        if (!removeViewIdFromListLocked(list_ptr, view_id)) return Error.ViewNotInHost;
+        view.visible_in_host = false;
+        self.native.setViewVisible(view.native_handle, false);
     }
 
     /// `addChildView(host, view, null)` 편의 alias. Electron 구 BrowserView의 setTopBrowserView 동등.
@@ -1195,8 +1180,7 @@ pub const WindowManager = struct {
     pub fn setViewBounds(self: *WindowManager, view_id: u32, bounds: Bounds) Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const view = try self.getLiveLocked(view_id);
-        if (view.kind != .view) return Error.NotAView;
+        const view = try self.getLiveViewLocked(view_id);
         view.bounds = bounds;
         self.native.setViewBounds(view.native_handle, bounds);
     }
@@ -1204,25 +1188,21 @@ pub const WindowManager = struct {
     pub fn setViewVisible(self: *WindowManager, view_id: u32, visible: bool) Error!void {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const view = try self.getLiveLocked(view_id);
-        if (view.kind != .view) return Error.NotAView;
+        const view = try self.getLiveViewLocked(view_id);
+        if (view.visible_in_host == visible) return;
         view.visible_in_host = visible;
         self.native.setViewVisible(view.native_handle, visible);
     }
 
-    /// host의 child view id들을 z-order 순(0=bottom, 마지막=top)으로 반환. caller가 result.deinit.
-    /// host가 .view면 NotAWindow. host에 view가 없으면 빈 list (entry 자체가 없을 수도 있음).
-    pub fn getChildViews(self: *WindowManager, host_id: u32, allocator: std.mem.Allocator) Error!std.ArrayListUnmanaged(u32) {
+    /// host의 child view id들을 z-order 순(0=bottom, 마지막=top)으로 owned slice로 반환.
+    /// caller가 `allocator.free(slice)`. host가 .view면 NotAWindow. view 없으면 빈 slice.
+    pub fn getChildViews(self: *WindowManager, host_id: u32, allocator: std.mem.Allocator) Error![]u32 {
         self.lock.lockUncancelable(self.io);
         defer self.lock.unlock(self.io);
-        const host = try self.getLiveLocked(host_id);
-        if (host.kind != .window) return Error.NotAWindow;
-
-        var result: std.ArrayListUnmanaged(u32) = .empty;
-        if (self.view_children.get(host_id)) |list| {
-            result.ensureTotalCapacity(allocator, list.items.len) catch return Error.OutOfMemory;
-            for (list.items) |id| result.appendAssumeCapacity(id);
-        }
-        return result;
+        _ = try self.getLiveWindowLocked(host_id);
+        const items: []const u32 = if (self.view_children.get(host_id)) |list| list.items else &[_]u32{};
+        const out = allocator.alloc(u32, items.len) catch return Error.OutOfMemory;
+        @memcpy(out, items);
+        return out;
     }
 };
