@@ -3145,6 +3145,50 @@ test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
     try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "root.get(\"security\")") != null);
 }
 
+test "회귀: macOS App Sandbox 자동화 — config.app.sandbox + helper별 entitlements" {
+    const cfg_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/config.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cfg_src);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "sandbox: bool = false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "entitlements:") != null);
+
+    const bundle_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/bundle_macos.zig",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(bundle_src);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "pub const BundleOptions") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "codesignWithEntitlements") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "user_entitlements") != null);
+    // 4 helper plist 매핑 — suffix별.
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper.plist") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper-gpu.plist") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper-renderer.plist") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper-plugin.plist") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "main.plist") != null);
+
+    // 5개 entitlements plist 파일 모두 존재.
+    const plists = [_][]const u8{
+        "assets/entitlements/main.plist",
+        "assets/entitlements/helper.plist",
+        "assets/entitlements/helper-gpu.plist",
+        "assets/entitlements/helper-renderer.plist",
+        "assets/entitlements/helper-plugin.plist",
+    };
+    for (plists) |p| {
+        const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, std.testing.allocator, .limited(8 * 1024));
+        defer std.testing.allocator.free(content);
+        // App Sandbox key 모두 포함.
+        try std.testing.expect(std.mem.indexOf(u8, content, "com.apple.security.app-sandbox") != null);
+    }
+}
+
 test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 분기" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

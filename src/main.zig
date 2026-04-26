@@ -15,9 +15,13 @@ const NodeRuntime = node_mod.NodeRuntime;
 const node_enabled = node_mod.node_enabled;
 const builtin = @import("builtin");
 const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") else struct {
-    pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
+    pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
     }
+    pub const BundleOptions = struct {
+        sandbox: bool = false,
+        user_entitlements: ?[]const u8 = null,
+    };
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -234,6 +238,10 @@ fn runBuild(allocator: std.mem.Allocator) !void {
         identifier,
         exe_path,
         config.frontend.dist_dir,
+        bundle_macos.BundleOptions{
+            .sandbox = config.app.sandbox,
+            .user_entitlements = config.app.entitlements,
+        },
     );
 }
 

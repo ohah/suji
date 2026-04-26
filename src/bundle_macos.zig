@@ -19,6 +19,15 @@ const Dir = std.Io.Dir;
 /// │   │   └── {name} Helper (Plugin).app/
 /// │   └── Resources/
 /// │       └── frontend/           ← 프론트엔드 빌드 결과
+pub const BundleOptions = struct {
+    /// `com.apple.security.app-sandbox` 활성. Mac App Store 진출 시 필수. helper별
+    /// 적절 entitlements 자동 부착.
+    sandbox: bool = false,
+    /// 사용자 추가 entitlements plist 경로. sandbox=true 시 메인 entitlements와 병합.
+    /// 예: `assets/my-app.entitlements` (network/files 등 앱 고유 권한).
+    user_entitlements: ?[]const u8 = null,
+};
+
 pub fn createBundle(
     allocator: std.mem.Allocator,
     name: []const u8,
@@ -26,6 +35,7 @@ pub fn createBundle(
     identifier: []const u8,
     exe_path: []const u8,
     frontend_dist: []const u8,
+    opts: BundleOptions,
 ) !void {
     const app_name = try std.fmt.allocPrint(allocator, "{s}.app", .{name});
     defer allocator.free(app_name);
@@ -70,8 +80,8 @@ pub fn createBundle(
     // 7. 메인 바이너리 install_name_tool
     try fixMainBinaryRpath(allocator, app_name, name);
 
-    // 8. 코드서명
-    try codesignBundle(allocator, app_name, name);
+    // 8. 코드서명 (sandbox 모드면 helper별 다른 entitlements)
+    try codesignBundle(allocator, app_name, name, opts);
 
     std.debug.print("[suji] bundle created: {s}\n", .{app_name});
 }
@@ -221,46 +231,70 @@ fn fixMainBinaryRpath(allocator: std.mem.Allocator, app_name: []const u8, name: 
     };
 }
 
-fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8) !void {
-    std.debug.print("[suji] code signing...\n", .{});
+fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, opts: BundleOptions) !void {
+    std.debug.print("[suji] code signing (sandbox={})...\n", .{opts.sandbox});
 
-    // 1. CEF 프레임워크
+    // 1. CEF 프레임워크 — entitlements 없이 (framework는 receiver process가 inherit).
     const fw = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/Chromium Embedded Framework.framework", .{app_name});
     defer allocator.free(fw);
-    try codesign(allocator, fw);
+    try codesignNoEntitlements(allocator, fw);
 
-    // 2. Helper 앱들
-    const suffixes = [_][]const u8{ "", " (GPU)", " (Renderer)", " (Plugin)" };
-    for (suffixes) |suffix| {
-        const helper = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/{s} Helper{s}.app", .{ app_name, name, suffix });
+    // 2. Helper 앱들 — sandbox 모드면 helper별 적절 entitlements.
+    //    (suffix, plist filename) 매핑.
+    const helpers = [_]struct { suffix: []const u8, plist: []const u8 }{
+        .{ .suffix = "", .plist = "helper.plist" },
+        .{ .suffix = " (GPU)", .plist = "helper-gpu.plist" },
+        .{ .suffix = " (Renderer)", .plist = "helper-renderer.plist" },
+        .{ .suffix = " (Plugin)", .plist = "helper-plugin.plist" },
+    };
+    for (helpers) |h| {
+        const helper = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/{s} Helper{s}.app", .{ app_name, name, h.suffix });
         defer allocator.free(helper);
-        try codesign(allocator, helper);
+        try codesignWithEntitlements(allocator, helper, h.plist, opts);
     }
 
-    // 3. 메인 바이너리
+    // 3. 메인 바이너리 — main.plist (sandbox 모드 시) 또는 legacy macos-entitlements.
     const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
     defer allocator.free(exe);
-    try codesign(allocator, exe);
+    try codesignWithEntitlements(allocator, exe, "main.plist", opts);
 
-    // 4. 전체 앱 번들
-    try codesign(allocator, app_name);
+    // 4. 전체 앱 번들 — 메인과 동일 entitlements 재사용.
+    try codesignWithEntitlements(allocator, app_name, "main.plist", opts);
 }
 
-fn codesign(allocator: std.mem.Allocator, path: []const u8) !void {
-    // entitlements 파일은 suji 바이너리와 같은 디렉토리에 위치
+/// 디렉토리/파일을 entitlements 없이 sign (framework, generic).
+fn codesignNoEntitlements(allocator: std.mem.Allocator, path: []const u8) !void {
+    try runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", path });
+}
+
+/// helper별 entitlements 선택 codesign. sandbox=true이면 assets/entitlements/{plist},
+/// false이면 legacy macos-entitlements.plist (root). user_entitlements path 있으면 그것 우선.
+fn codesignWithEntitlements(allocator: std.mem.Allocator, path: []const u8, plist_filename: []const u8, opts: BundleOptions) !void {
+    // 사용자 명시 entitlements 우선.
+    if (opts.user_entitlements) |user_path| {
+        runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", user_path, path }) catch {
+            try codesignNoEntitlements(allocator, path);
+        };
+        return;
+    }
+
     var exe_buf: [1024]u8 = undefined;
     const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch {
-        try runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", path });
+        try codesignNoEntitlements(allocator, path);
         return;
     };
     const exe_path = exe_buf[0..exe_len];
     const exe_dir = std.fs.path.dirname(std.fs.path.dirname(std.fs.path.dirname(exe_path) orelse "") orelse "") orelse "";
-    const entitlements = try std.fmt.allocPrint(allocator, "{s}/macos-entitlements.plist", .{exe_dir});
+
+    // sandbox 모드면 helper별 plist, 아니면 legacy 단일 파일.
+    const entitlements = if (opts.sandbox)
+        try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ exe_dir, plist_filename })
+    else
+        try std.fmt.allocPrint(allocator, "{s}/macos-entitlements.plist", .{exe_dir});
     defer allocator.free(entitlements);
 
     runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", entitlements, path }) catch {
-        // entitlements 없으면 entitlements 없이 서명
-        try runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", path });
+        try codesignNoEntitlements(allocator, path);
     };
 }
 

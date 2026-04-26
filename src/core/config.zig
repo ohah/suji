@@ -27,6 +27,12 @@ pub const Config = struct {
     pub const App = struct {
         name: [:0]const u8 = "Suji App",
         version: [:0]const u8 = "0.1.0",
+        /// App Sandbox 활성화 (`com.apple.security.app-sandbox`). Mac App Store 진출 시
+        /// 필수. true면 bundle_macos가 helper별 entitlements 자동 부착.
+        sandbox: bool = false,
+        /// 사용자 추가 entitlements plist 경로. sandbox=true 시 Suji default에 병합 OR
+        /// 직접 override. 비어있으면 Suji default만 사용.
+        entitlements: ?[:0]const u8 = null,
     };
 
     pub const Protocol = enum { suji, file };
@@ -180,6 +186,8 @@ pub const Config = struct {
                 const app = app_val.object;
                 if (getStr(app, "name")) |s| config.app.name = dupeStr(a, s);
                 if (getStr(app, "version")) |s| config.app.version = dupeStr(a, s);
+                if (getBool(app, "sandbox")) |b| config.app.sandbox = b;
+                if (getStr(app, "entitlements")) |s| config.app.entitlements = dupeStr(a, s);
             }
         }
 
