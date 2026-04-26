@@ -10,6 +10,26 @@
   overflow-y: auto;
 }
 
+.drag-demo {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid #444;
+  border-radius: 6px;
+  background: #111;
+  color: #9ad7ff;
+  font-size: 12px;
+}
+
+.drag-demo button {
+  -webkit-app-region: no-drag;
+}
+
 .log-panel {
   width: 420px;
   background: #0a0a0a;

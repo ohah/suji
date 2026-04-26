@@ -26,6 +26,8 @@ function App() {
 
   const log = (msg: string) => setLogs((p) => [...p.slice(-100), msg]);
   const clear = () => setLogs(["Cleared."]);
+  const suji = window.__suji__;
+  const core = (request: Record<string, unknown>) => suji.core(JSON.stringify(request));
 
   const call = async (fn: () => Promise<unknown>, label: string) => {
     const start = performance.now();
@@ -38,11 +40,29 @@ function App() {
     }
   };
 
-  const suji = window.__suji__;
-
   return (
     <div className="layout">
       <div className="panel">
+        <div className="drag-demo">
+          Drag region demo — frameless 창에서는 이 영역을 잡고 이동할 수 있습니다.
+          <button
+            onClick={() => call(
+              () => core({
+                cmd: "create_window",
+                title: "Frameless Drag Demo",
+                url: "http://localhost:5173",
+                name: "frameless-drag",
+                frame: false,
+                width: 920,
+                height: 680,
+              }),
+              "frameless-drag-window",
+            )}
+          >
+            Frameless 창 열기
+          </button>
+        </div>
+
         <h1>Suji Multi-Backend</h1>
         <p className="subtitle">Zig + Rust + Go + Node.js — Electron-style API</p>
 
@@ -217,7 +237,93 @@ function App() {
         </section>
 
         <section>
-          <h3>8. Stress</h3>
+          <h3>8. Native Desktop APIs</h3>
+          <p>Clipboard / Shell / Dialog / Tray / Notification / Menu / File System 수동 확인.</p>
+          <div className="buttons">
+            <button className="zig" onClick={() => call(() => core({ cmd: "clipboard_write_text", text: "hello from Suji demo" }), "clipboard-write")}>Clipboard write</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "clipboard_read_text" }), "clipboard-read")}>Clipboard read</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "clipboard_clear" }), "clipboard-clear")}>Clipboard clear</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "shell_beep" }), "shell-beep")}>Beep</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "shell_open_external", url: "https://example.com" }), "shell-open")}>Open URL</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "shell_show_item_in_folder", path: "/tmp" }), "shell-show-item")}>Show /tmp</button>
+          </div>
+          <div className="buttons" style={{ marginTop: 6 }}>
+            <button className="zig" onClick={() => call(() => core({ cmd: "dialog_show_message_box", type: "info", title: "Suji", message: "Message box from demo", buttons: ["OK"] }), "dialog-message")}>MessageBox</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "dialog_show_error_box", title: "Suji Error", content: "Error box from demo" }), "dialog-error")}>ErrorBox</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "dialog_show_open_dialog", properties: ["openFile", "openDirectory"] }), "dialog-open")}>OpenDialog</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "dialog_show_save_dialog", defaultPath: "/tmp/suji-demo.txt" }), "dialog-save")}>SaveDialog</button>
+          </div>
+          <div className="buttons" style={{ marginTop: 6 }}>
+            <button className="zig" onClick={() => {
+              const cancel = suji.on("tray:menu-click", (data: unknown) => log(`  [tray:menu-click] ${S(data)}`));
+              (window as any).__trayClickCancel = cancel;
+              log("tray:menu-click listener ON");
+            }}>Tray event ON</button>
+            <button className="zig" onClick={() => call(async () => {
+              const created = await core({ cmd: "tray_create", title: "S", tooltip: "Suji demo tray" }) as { trayId?: number };
+              (window as any).__trayId = created.trayId;
+              return created;
+            }, "tray-create")}>Tray create</button>
+            <button className="zig" onClick={() => call(() => core({
+              cmd: "tray_set_menu",
+              trayId: (window as any).__trayId ?? 1,
+              items: [
+                { label: "Demo Click", click: "demo-click" },
+                { type: "separator" },
+                { label: "Second", click: "second-click" },
+              ],
+            }), "tray-menu")}>Tray menu</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "tray_destroy", trayId: (window as any).__trayId ?? 1 }), "tray-destroy")}>Tray destroy</button>
+          </div>
+          <div className="buttons" style={{ marginTop: 6 }}>
+            <button className="zig" onClick={() => {
+              const cancel = suji.on("notification:click", (data: unknown) => log(`  [notification:click] ${S(data)}`));
+              (window as any).__notificationClickCancel = cancel;
+              log("notification:click listener ON");
+            }}>Notification event ON</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "notification_is_supported" }), "notification-supported")}>Notification supported</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "notification_request_permission" }), "notification-permission")}>Notification permission</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "notification_show", title: "Suji Demo", body: "Notification from demo", silent: false }), "notification-show")}>Notification show</button>
+          </div>
+          <div className="buttons" style={{ marginTop: 6 }}>
+            <button className="zig" onClick={() => {
+              const cancel = suji.on("menu:click", (data: unknown) => log(`  [menu:click] ${S(data)}`));
+              (window as any).__menuClickCancel = cancel;
+              log("menu:click listener ON");
+            }}>Menu event ON</button>
+            <button className="zig" onClick={() => call(() => core({
+              cmd: "menu_set_application_menu",
+              items: [
+                {
+                  label: "Demo",
+                  submenu: [
+                    { label: "Run Demo Action", click: "demo-action" },
+                    { type: "checkbox", label: "Enabled", click: "demo-enabled", checked: true },
+                    { type: "separator" },
+                    { label: "Nested", submenu: [{ label: "Nested Action", click: "nested-action" }] },
+                  ],
+                },
+              ],
+            }), "menu-set")}>Set app menu</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "menu_reset_application_menu" }), "menu-reset")}>Reset app menu</button>
+          </div>
+          <div className="buttons" style={{ marginTop: 6 }}>
+            <button className="zig" onClick={() => call(async () => {
+              const base = `/tmp/suji-demo-${Date.now()}`;
+              const file = `${base}/hello.txt`;
+              const mkdir = await core({ cmd: "fs_mkdir", path: base, recursive: true });
+              const write = await core({ cmd: "fs_write_file", path: file, text: "hello\nfrom demo" });
+              const read = await core({ cmd: "fs_read_file", path: file });
+              const stat = await core({ cmd: "fs_stat", path: file });
+              const readdir = await core({ cmd: "fs_readdir", path: base });
+              return { base, mkdir, write, read, stat, readdir };
+            }, "fs-roundtrip")}>FS round-trip</button>
+            <button className="zig" onClick={() => call(() => core({ cmd: "fs_read_file", path: "/tmp/suji-demo-missing.txt" }), "fs-missing")}>FS missing file</button>
+          </div>
+        </section>
+
+        <section>
+          <h3>9. Stress</h3>
           <div className="buttons">
             <button className="chain" onClick={async () => {
               log("--- 30 calls ---");
