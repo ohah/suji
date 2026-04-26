@@ -95,11 +95,22 @@ pub struct SujiCore {
 unsafe impl Send for SujiCore {}
 unsafe impl Sync for SujiCore {}
 
+/// 코어 포인터 — `backend_init` 호출마다 replace. OnceLock으로는 테스트 격리에서
+/// reg1 deinit 후 reg2의 backend_init이 silently set 실패해 stale 포인터로 use-after-free
+/// crash (Linux GP exception). AtomicPtr는 항상 최신 포인터로 atomic store.
 #[doc(hidden)]
-pub static __SUJI_CORE: std::sync::OnceLock<&'static SujiCore> = std::sync::OnceLock::new();
+pub static __SUJI_CORE: std::sync::atomic::AtomicPtr<SujiCore> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+
+#[doc(hidden)]
+#[inline]
+pub fn __get_core() -> Option<&'static SujiCore> {
+    let p = __SUJI_CORE.load(std::sync::atomic::Ordering::Acquire);
+    if p.is_null() { None } else { Some(unsafe { &*p }) }
+}
 
 pub fn invoke(backend: &str, request: &str) -> Option<String> {
-    let core = __SUJI_CORE.get()?;
+    let core = __get_core()?;
     let c_name = std::ffi::CString::new(backend).ok()?;
     let c_req = std::ffi::CString::new(request).ok()?;
     let resp = (core.invoke)(c_name.as_ptr(), c_req.as_ptr());
@@ -108,7 +119,7 @@ pub fn invoke(backend: &str, request: &str) -> Option<String> {
 }
 
 pub fn send(channel: &str, data: &str) {
-    if let Some(core) = __SUJI_CORE.get() {
+    if let Some(core) = __get_core() {
         let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
         let c_data = std::ffi::CString::new(data).unwrap_or_default();
         (core.emit)(c_ch.as_ptr(), c_data.as_ptr());
@@ -118,7 +129,7 @@ pub fn send(channel: &str, data: &str) {
 /// 특정 창(window id)에만 이벤트 전달 (Electron `webContents.send`).
 /// 대상 창이 닫혔거나 core가 주입 전이면 silent no-op.
 pub fn send_to(window_id: u32, channel: &str, data: &str) {
-    if let Some(core) = __SUJI_CORE.get() {
+    if let Some(core) = __get_core() {
         let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
         let c_data = std::ffi::CString::new(data).unwrap_or_default();
         (core.emit_to)(window_id, c_ch.as_ptr(), c_data.as_ptr());
@@ -128,7 +139,7 @@ pub fn send_to(window_id: u32, channel: &str, data: &str) {
 /// 이벤트 수신 (Electron: ipcMain.on)
 /// 리스너 ID를 반환 (off로 해제 가능)
 pub fn on(channel: &str, callback: extern "C" fn(*const std::os::raw::c_char, *const std::os::raw::c_char, *mut std::os::raw::c_void), arg: *mut std::os::raw::c_void) -> u64 {
-    if let Some(core) = __SUJI_CORE.get() {
+    if let Some(core) = __get_core() {
         let c_ch = std::ffi::CString::new(channel).unwrap_or_default();
         (core.on)(c_ch.as_ptr(), Some(callback), arg)
     } else {
@@ -138,7 +149,7 @@ pub fn on(channel: &str, callback: extern "C" fn(*const std::os::raw::c_char, *c
 
 /// 리스너 해제
 pub fn off(listener_id: u64) {
-    if let Some(core) = __SUJI_CORE.get() {
+    if let Some(core) = __get_core() {
         (core.off)(listener_id);
     }
 }
@@ -147,7 +158,7 @@ pub fn off(listener_id: u64) {
 /// 주로 `on("window:all-closed", ...)` 핸들러에서 플랫폼 확인 후 호출.
 /// core 주입 전이면 silent no-op.
 pub fn quit() {
-    if let Some(core) = __SUJI_CORE.get() {
+    if let Some(core) = __get_core() {
         (core.quit)();
     }
 }
@@ -489,7 +500,7 @@ pub mod dialog {
 /// 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
 /// Electron `process.platform` 대응 (단 Suji는 `"darwin"` 대신 `"macos"`).
 pub fn platform() -> &'static str {
-    let core = match __SUJI_CORE.get() {
+    let core = match __get_core() {
         Some(c) => c,
         None => return "unknown",
     };
@@ -712,9 +723,14 @@ macro_rules! export_handlers {
     (@impl [$($handler:ident),*]; [$($ch:literal => $listener:ident),*]) => {
         #[no_mangle]
         pub extern "C" fn backend_init(core: *const $crate::SujiCore) {
+            // AtomicPtr.store는 항상 replace — 매 호출이 최신 포인터로 갱신.
+            // OnceLock은 첫 set만 성공해서 테스트 격리 시 use-after-free 발생.
+            $crate::__SUJI_CORE.store(
+                core as *mut $crate::SujiCore,
+                std::sync::atomic::Ordering::Release,
+            );
             if !core.is_null() {
                 let core_ref: &'static $crate::SujiCore = unsafe { std::mem::transmute(&*core) };
-                let _ = $crate::__SUJI_CORE.set(core_ref);
                 // 핸들러 채널 등록
                 $(
                     let ch = std::ffi::CString::new(stringify!($handler)).unwrap();
