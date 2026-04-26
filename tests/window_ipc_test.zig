@@ -1246,20 +1246,88 @@ test "17-A: handleGetChildViews on non-window host returns ok:false" {
     try std.testing.expect(std.mem.indexOf(u8, out, "\"viewIds\":[]") != null);
 }
 
-test "17-A: view 핸들러 모두 작은 버퍼면 null (회귀)" {
+// 작은 버퍼 회귀: 각 핸들러는 RESPONSE_MIN_LEN 미만 buf에 null 반환 + native 미호출.
+// 각 핸들러를 별도 테스트로 분리 — 한 곳 회귀 시 어느 핸들러가 깨졌는지 즉시 식별.
+
+test "17-A: handleCreateView 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    var tiny: [3]u8 = undefined;
+    try std.testing.expect(ipc.handleCreateView(.{ .host_window_id = host }, &tiny, &wm) == null);
+    try std.testing.expectEqual(@as(usize, 0), native.create_view_calls);
+}
+
+test "17-A: handleDestroyView 작은 버퍼면 null" {
     var native = TestNative{};
     var wm = newWm(&native);
     defer wm.deinit();
     const host = try wm.create(.{});
     const view = try wm.createView(.{ .host_window_id = host });
-
     var tiny: [3]u8 = undefined;
-    try std.testing.expect(ipc.handleCreateView(.{ .host_window_id = host }, &tiny, &wm) == null);
     try std.testing.expect(ipc.handleDestroyView(view, &tiny, &wm) == null);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_view_calls);
+}
+
+test "17-A: handleAddChildView 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleAddChildView(.{ .host_id = host, .view_id = view }, &tiny, &wm) == null);
+    try std.testing.expectEqual(@as(usize, 0), native.reorder_view_calls);
+}
+
+test "17-A: handleRemoveChildView 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleRemoveChildView(host, view, &tiny, &wm) == null);
+}
+
+test "17-A: handleSetTopView 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleSetTopView(host, view, &tiny, &wm) == null);
+}
+
+test "17-A: handleSetViewBounds 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleSetViewBounds(.{ .view_id = view }, &tiny, &wm) == null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_view_bounds_calls);
+}
+
+test "17-A: handleSetViewVisible 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleSetViewVisible(view, true, &tiny, &wm) == null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_view_visible_calls);
+}
+
+test "17-A: handleGetChildViews 작은 버퍼면 null" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    var tiny: [3]u8 = undefined;
     try std.testing.expect(ipc.handleGetChildViews(host, &tiny, &wm, std.testing.allocator) == null);
 }

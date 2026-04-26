@@ -113,6 +113,18 @@ pub const CreateWindowReq = struct {
     fullscreen: bool = false,
 };
 
+/// 평면 JSON에서 `x/y/width/height` 4 필드를 Bounds로 복원. 키 없는 필드는 default(0).
+/// CreateViewReq, SetViewBoundsReq처럼 width/height의 default가 0인 경우에만 사용 적합 —
+/// CreateWindowReq는 default 800/600이라 별도 처리(키 유무 보존 필요).
+pub fn parseBoundsFromJson(json: []const u8) window.Bounds {
+    var b: window.Bounds = .{ .width = 0, .height = 0 };
+    if (util.extractJsonInt(json, "x")) |n| b.x = util.clampI32(n);
+    if (util.extractJsonInt(json, "y")) |n| b.y = util.clampI32(n);
+    if (util.extractJsonInt(json, "width")) |n| b.width = util.nonNegU32(n);
+    if (util.extractJsonInt(json, "height")) |n| b.height = util.nonNegU32(n);
+    return b;
+}
+
 /// 평면 JSON에서 CreateWindowReq를 복원. config.zig는 std.json(nested object)
 /// 사용하지만 IPC는 평면 키만 받으므로 경량 util.extractJson* 으로 충분.
 /// 반환 슬라이스는 src JSON 버퍼를 가리키므로 호출자가 src 수명 보장 필요.
@@ -543,10 +555,7 @@ pub fn parseCreateViewFromJson(json: []const u8) CreateViewReq {
     };
     if (util.extractJsonString(json, "url")) |s| req.url = s;
     if (util.extractJsonString(json, "name")) |s| req.name = s;
-    if (util.extractJsonInt(json, "x")) |n| req.bounds.x = util.clampI32(n);
-    if (util.extractJsonInt(json, "y")) |n| req.bounds.y = util.clampI32(n);
-    if (util.extractJsonInt(json, "width")) |n| req.bounds.width = util.nonNegU32(n);
-    if (util.extractJsonInt(json, "height")) |n| req.bounds.height = util.nonNegU32(n);
+    req.bounds = parseBoundsFromJson(json);
     return req;
 }
 

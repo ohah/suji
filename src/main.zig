@@ -1275,11 +1275,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const wm = window_mod.WindowManager.global orelse return null;
         const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
         const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
-        const idx_opt: ?usize = if (util.extractJsonInt(req_clean, "index")) |n|
-            (if (n >= 0) @as(usize, @intCast(n)) else null)
-        else
-            null;
-        return window_ipc.handleAddChildView(.{ .host_id = host_id, .view_id = view_id, .index = idx_opt }, response_buf, wm);
+        return window_ipc.handleAddChildView(.{
+            .host_id = host_id,
+            .view_id = view_id,
+            .index = util.extractNonNegUsize(req_clean, "index"),
+        }, response_buf, wm);
     }
     if (std.mem.eql(u8, cmd, "remove_child_view")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1296,12 +1296,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "set_view_bounds")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        const b = window_ipc.parseBoundsFromJson(req_clean);
         return window_ipc.handleSetViewBounds(.{
             .view_id = view_id,
-            .x = util.clampI32(util.extractJsonInt(req_clean, "x") orelse 0),
-            .y = util.clampI32(util.extractJsonInt(req_clean, "y") orelse 0),
-            .width = util.nonNegU32(util.extractJsonInt(req_clean, "width") orelse 0),
-            .height = util.nonNegU32(util.extractJsonInt(req_clean, "height") orelse 0),
+            .x = b.x,
+            .y = b.y,
+            .width = b.width,
+            .height = b.height,
         }, response_buf, wm);
     }
     if (std.mem.eql(u8, cmd, "set_view_visible")) {
@@ -1313,7 +1314,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "get_child_views")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
-        // viewIds 임시 슬라이스용 stack arena — 256개 view까지 (4 byte * 256 = 1KB).
+        // viewIds 임시 u32 슬라이스용 stack arena. 4 byte * 1024 = 4KB → 최대 ~1024 view 지원.
         var arena_buf: [4096]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
         return window_ipc.handleGetChildViews(host_id, response_buf, wm, fba.allocator());

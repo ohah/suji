@@ -44,6 +44,14 @@ pub fn clampI32(v: i64) i32 {
     return @intCast(v);
 }
 
+/// JSON에서 비음수 정수 필드를 ?usize로 추출. 키 없거나 음수면 null.
+/// addChildView의 `index?: usize`처럼 "absent or negative both mean default" 시맨틱에 사용.
+pub fn extractNonNegUsize(json: []const u8, key: []const u8) ?usize {
+    const n = extractJsonInt(json, key) orelse return null;
+    if (n < 0) return null;
+    return @intCast(n);
+}
+
 /// JSON 문자열 리터럴 안전 escape — `"` → `\"`, `\\` → `\\\\`, control char(`< 0x20`) drop.
 /// dst 부족 시 null. 빈 src는 0 반환 (caller가 빈 결과로 처리).
 /// 백엔드 SDK windows.* typed wrapper에서 사용.
