@@ -1045,10 +1045,6 @@ pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
     const menu_alloc = msgSend(NSMenu, "alloc") orelse return false;
     const menu = msgSend(menu_alloc, "init") orelse return false;
 
-    const sel_action = objc.sel_registerName("trayMenuClick:");
-    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
     const setTagFn: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void =
         @ptrCast(&objc.objc_msgSend);
 
@@ -1061,8 +1057,7 @@ pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
             const ns_label = nsStringFromSlice(it.label) orelse continue;
             const ns_click = nsStringFromSlice(it.click) orelse continue;
             const empty = nsStringFromSlice("") orelse continue;
-            const m_alloc = msgSend(NSMenuItem, "alloc") orelse continue;
-            const m = initFn(m_alloc, @ptrCast(initSel), ns_label, @ptrCast(sel_action), empty) orelse continue;
+            const m = allocNSMenuItem(ns_label, "trayMenuClick:", empty) orelse continue;
             msgSendVoid1(m, "setTarget:", target);
             msgSendVoid1(m, "setRepresentedObject:", ns_click);
             setTagFn(m, @ptrCast(objc.sel_registerName("setTag:")), @intCast(tray_id));
@@ -3231,76 +3226,54 @@ fn addSubmenuItem(menubar: *anyopaque, title: [:0]const u8, submenu: *anyopaque)
 }
 
 fn addMenuItemWithModifier(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8, shift: bool) void {
-    const NSMenuItem = getClass("NSMenuItem") orelse return;
-    const NSString = getClass("NSString") orelse return;
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
-    const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), key.ptr);
-
-    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
-    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action.ptr)), ns_key) orelse return;
-
-    if (shift) {
-        // NSCommandKeyMask | NSShiftKeyMask = (1 << 20) | (1 << 17)
-        const setModSel = objc.sel_registerName("setKeyEquivalentModifierMask:");
-        const setModFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-        setModFn(item, @ptrCast(setModSel), (1 << 20) | (1 << 17));
-    }
-
-    msgSendVoid1(menu, "addItem:", item);
+    addMenuItemWithModifiers(menu, title, action, key, shift, false);
 }
 
 fn addMenuItemWithModifiers(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8, shift: bool, alt: bool) void {
-    const NSMenuItem = getClass("NSMenuItem") orelse return;
     const NSString = getClass("NSString") orelse return;
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
     const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), key.ptr);
-
-    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
-    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action.ptr)), ns_key) orelse return;
+    const item = allocNSMenuItem(ns_title, action.ptr, ns_key) orelse return;
 
     // NSCommandKeyMask=1<<20, NSShiftKeyMask=1<<17, NSAlternateKeyMask=1<<19
     var mask: u64 = 1 << 20; // Cmd
     if (shift) mask |= 1 << 17;
     if (alt) mask |= 1 << 19;
-    const setModSel = objc.sel_registerName("setKeyEquivalentModifierMask:");
     const setModFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    setModFn(item, @ptrCast(setModSel), mask);
+    setModFn(item, @ptrCast(objc.sel_registerName("setKeyEquivalentModifierMask:")), mask);
 
     msgSendVoid1(menu, "addItem:", item);
 }
 
+/// NSMenuItem.alloc.initWithTitle:action:keyEquivalent: 보일러플레이트.
+/// caller가 NSString을 미리 만들고(nsStringFromSlice 또는 stringWithUTF8String) action
+/// selector 이름을 줌. target/representedObject/tag는 caller가 추가 설정.
+fn allocNSMenuItem(ns_title: ?*anyopaque, action_sel_name: [*:0]const u8, ns_key: ?*anyopaque) ?*anyopaque {
+    const NSMenuItem = getClass("NSMenuItem") orelse return null;
+    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
+    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const alloc = msgSend(NSMenuItem, "alloc") orelse return null;
+    return initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action_sel_name)), ns_key);
+}
+
 fn addMenuItem(menu: *anyopaque, title: [:0]const u8, action: [:0]const u8, key: [:0]const u8) void {
-    const NSMenuItem = getClass("NSMenuItem") orelse return;
     const NSString = getClass("NSString") orelse return;
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), title.ptr);
     const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), key.ptr);
-
-    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
-    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName(action.ptr)), ns_key) orelse return;
+    const item = allocNSMenuItem(ns_title, action.ptr, ns_key) orelse return;
     msgSendVoid1(menu, "addItem:", item);
 }
 
 fn addQuitMenuItem(menu: *anyopaque) void {
     const target = ensureQuitTarget() orelse return;
-    const NSMenuItem = getClass("NSMenuItem") orelse return;
     const NSString = getClass("NSString") orelse return;
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), "Quit Suji");
     const ns_key = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), "q");
-
-    const initSel = objc.sel_registerName("initWithTitle:action:keyEquivalent:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const alloc = msgSend(NSMenuItem, "alloc") orelse return;
-    const item = initFn(alloc, @ptrCast(initSel), ns_title, @ptrCast(objc.sel_registerName("sujiQuit:")), ns_key) orelse return;
+    const item = allocNSMenuItem(ns_title, "sujiQuit:", ns_key) orelse return;
     msgSendVoid1(item, "setTarget:", target);
     msgSendVoid1(menu, "addItem:", item);
 }

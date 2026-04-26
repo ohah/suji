@@ -1575,7 +1575,7 @@ const TraySetMenuJson = struct {
 };
 
 fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
-    var arena_buf: [16384]u8 = undefined;
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
     const arena = fba.allocator();
 
