@@ -399,6 +399,10 @@ pub const CefNative = struct {
             return error.OutOfMemory;
         };
 
+        // window:resized/focus/blur/moved 이벤트 라우팅용 NSWindowDelegate 부착.
+        // browsers.put 이후 attach해서 매핑 일관성 유지.
+        attachWindowLifecycle(ns_window, handle);
+
         // 부모-자식 시각 관계 (PLAN: 재귀 close X). browsers.put 이후에 처리해 put 실패 시 attach 스킵.
         if (comptime is_macos) {
             if (opts.parent_id) |pid| {
@@ -430,6 +434,8 @@ pub const CefNative = struct {
             log.warn("CefNative.destroyWindow: handle={d} not in table", .{handle});
             return;
         };
+        // delegate 매핑 제거 (NSWindow dealloc 후엔 lookup이 무의미).
+        detachWindowLifecycle(entry.ns_window);
         if (comptime is_macos) {
             // macOS: NSWindow close가 content view + CEF browser view를 dealloc시켜
             // CEF 내부 cleanup을 연쇄 트리거 → OnBeforeClose fire. close_browser는 생략
@@ -1405,6 +1411,40 @@ pub fn globalShortcutIsRegistered(accelerator: []const u8) bool {
 }
 
 // ============================================
+// Window lifecycle events — NSWindowDelegate (resize/focus/blur/move)
+// ============================================
+// window_lifecycle.m이 NSWindowDidResize/Move/BecomeKey/ResignKey 노티 → C 콜백.
+// 트리거 시 main.zig가 EventBus로 emit:
+//   window:resized {windowId, x, y, width, height}
+//   window:moved   {windowId, x, y}
+//   window:focus   {windowId}
+//   window:blur    {windowId}
+// 비-macOS는 모두 stub.
+
+pub const WindowLifecycleEmitHandler = *const fn (handle: u64, event: []const u8, x: f64, y: f64, width: f64, height: f64) void;
+pub var g_window_lifecycle_emit_handler: ?WindowLifecycleEmitHandler = null;
+
+fn windowLifecycleC(handle: u64, event_cstr: [*:0]const u8, x: f64, y: f64, width: f64, height: f64) callconv(.c) void {
+    if (g_window_lifecycle_emit_handler) |emit| emit(handle, std.mem.span(event_cstr), x, y, width, height);
+}
+
+pub fn setWindowLifecycleEmitHandler(handler: WindowLifecycleEmitHandler) void {
+    if (!comptime is_macos) return;
+    g_window_lifecycle_emit_handler = handler;
+    suji_window_lifecycle_set_callback(&windowLifecycleC);
+}
+
+fn attachWindowLifecycle(ns_window: ?*anyopaque, handle: u64) void {
+    if (!comptime is_macos) return;
+    _ = suji_window_lifecycle_attach(ns_window, handle);
+}
+
+fn detachWindowLifecycle(ns_window: ?*anyopaque) void {
+    if (!comptime is_macos) return;
+    suji_window_lifecycle_detach(ns_window);
+}
+
+// ============================================
 // Dialog API — NSAlert / NSOpenPanel / NSSavePanel (Electron `dialog.*`)
 // ============================================
 // 두 가지 modal 모드:
@@ -1434,6 +1474,11 @@ extern "c" fn suji_global_shortcut_register(accelerator: [*:0]const u8, click: [
 extern "c" fn suji_global_shortcut_unregister(accelerator: [*:0]const u8) i32;
 extern "c" fn suji_global_shortcut_unregister_all() void;
 extern "c" fn suji_global_shortcut_is_registered(accelerator: [*:0]const u8) i32;
+
+// window_lifecycle.m — NSWindowDelegate (resize/focus/blur/move).
+extern "c" fn suji_window_lifecycle_set_callback(cb: *const fn (u64, [*:0]const u8, f64, f64, f64, f64) callconv(.c) void) void;
+extern "c" fn suji_window_lifecycle_attach(ns_window: ?*anyopaque, handle: u64) i32;
+extern "c" fn suji_window_lifecycle_detach(ns_window: ?*anyopaque) void;
 
 /// CEF browser native_handle → NSWindow 포인터 lookup. main.zig가 windowId(WM)를
 /// browser handle로 변환 후 호출.

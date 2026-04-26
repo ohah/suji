@@ -1235,7 +1235,7 @@ suji build → 결과물:
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key (권한 불필요) + 5 SDK + accelerator 파싱 |
-| 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | 🟡 close만 부분 — Phase 5 (라이프사이클) |
+| 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | ✅ Phase 5. close/closed/all-closed/resized/moved/focus/blur (macOS NSWindowDelegate) |
 | 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ✅ `windows.create()` + Phase 3 외형 옵션 풀 셋 (frame/transparent/parent) |
 | 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ✅ (dylib 재로드 + Vite HMR) |
 
@@ -1305,7 +1305,7 @@ suji build → 결과물:
 4. ✅ **트레이 + 알림 + 메뉴바 API** — Phase 5-B/C/D 완료, 데스크톱 앱 기본 요소
 5. ✅ **파일 시스템 API** — Phase 5-F 완료. 백엔드/프론트 공통 `fs` wrapper + E2E
 6. ✅ **글로벌 단축키** — Phase 5-E 완료. macOS Carbon Hot Key (권한 불필요) + 5 SDK + accelerator 파싱
-7. **라이프사이클 이벤트** (resize/focus/blur) — Phase 5
+7. ✅ **라이프사이클 이벤트** — Phase 5 완료. resize/focus/blur/move (macOS NSWindowDelegate 자동 부착)
 8. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께 처리
 9. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 10. **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수

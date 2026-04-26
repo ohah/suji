@@ -3098,6 +3098,46 @@ test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {
     try std.testing.expect(std.mem.indexOf(u8, node_src2, "export const globalShortcut") != null);
 }
 
+test "회귀: Window lifecycle (Phase 5) — NSWindowDelegate + 4 events" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "windowLifecycleEmitHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "setWindowLifecycleEmitHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:resized\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:moved\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:focus\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:blur\"") != null);
+
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_set_callback") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_attach") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "attachWindowLifecycle(ns_window, handle)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "detachWindowLifecycle") != null);
+
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/window_lifecycle.m",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(m_src);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "windowDidResize") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "windowDidMove") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "windowDidBecomeKey") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "windowDidResignKey") != null);
+}
+
 test "회귀: multi-backend demo exposes native API controls" {
     const app_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

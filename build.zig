@@ -147,6 +147,11 @@ pub fn build(b: *std.Build) void {
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
         root_module.linkFramework("Carbon", .{});
+        // window_lifecycle.m — NSWindowDelegate (resize/focus/blur/move) → C callback.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/window_lifecycle.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
