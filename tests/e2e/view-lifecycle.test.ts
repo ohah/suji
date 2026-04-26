@@ -11,8 +11,11 @@
  *   - addChildView/setTopView/getChildViews — z-order 매트릭스
  *   - setViewBounds/setViewVisible — 위치/표시 제어
  *   - destroyView → window:view-destroyed 이벤트 도달
- *   - host destroy → 모든 child view auto destroy
- *   - 기존 webContents API(loadURL/executeJavaScript)에 viewId 전달 시 정상 동작 (17-A.5 회귀)
+ *   - 기존 webContents API(loadURL/setTitle)에 viewId 전달 시 정상 동작 (17-A.5 회귀)
+ *
+ * NOTE: host 창은 close_window IPC가 아직 노출되지 않아 테스트 간 누적된다 (puppeteer
+ *       세션 종료 시 함께 정리). host destroy → child auto-destroy 검증은 17-B에서
+ *       close_window 노출 후 추가.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
@@ -46,7 +49,6 @@ afterAll(async () => {
   await browser?.disconnect();
 });
 
-// 각 test가 독립적이도록 host 창을 새로 만들고 끝에 정리.
 async function freshHost(): Promise<number> {
   const r = (await coreCall({
     cmd: "create_window",
@@ -57,11 +59,20 @@ async function freshHost(): Promise<number> {
   return r.windowId;
 }
 
-async function destroyWindow(windowId: number): Promise<void> {
-  // close()는 cancelable이라 destroy 직접 호출. 단 destroy IPC가 노출 안되어 있을 수도.
-  // SDK는 close만 노출하지만 IPC 차원에선 close가 충분 (cancelable이지만 listener 없음).
-  // 단순화: window를 그대로 두고 다음 테스트가 새 window 사용 — 누적되어도 같은 process.
-  void windowId;
+/** view 생성 + viewId 추출 — `(await coreCall({...})) as {viewId}` 보일러를 한 줄로. */
+async function mkView(
+  hostId: number,
+  bounds: { x?: number; y?: number; width?: number; height?: number } = {},
+): Promise<number> {
+  const r = (await coreCall({
+    cmd: "create_view",
+    hostId,
+    x: bounds.x ?? 0,
+    y: bounds.y ?? 0,
+    width: bounds.width ?? 100,
+    height: bounds.height ?? 100,
+  })) as { viewId: number };
+  return r.viewId;
 }
 
 describe("17-A.7: createView / destroyView", () => {
@@ -79,7 +90,6 @@ describe("17-A.7: createView / destroyView", () => {
     expect(r.cmd).toBe("create_view");
     expect(typeof r.viewId).toBe("number");
     expect(r.viewId).toBeGreaterThan(host);
-    await destroyWindow(host);
   });
 
   test("createView with non-existent host returns error", async () => {
@@ -97,101 +107,86 @@ describe("17-A.7: createView / destroyView", () => {
 
   test("destroyView returns ok:true", async () => {
     const host = await freshHost();
-    const v = (await coreCall({
-      cmd: "create_view",
-      hostId: host,
-      x: 0,
-      y: 0,
-      width: 100,
-      height: 100,
-    })) as { viewId: number };
-    const r = (await coreCall({ cmd: "destroy_view", viewId: v.viewId })) as { ok: boolean };
+    const view = await mkView(host);
+    const r = (await coreCall({ cmd: "destroy_view", viewId: view })) as { ok: boolean };
     expect(r.ok).toBe(true);
-    await destroyWindow(host);
   });
 });
 
 describe("17-A.7: z-order (addChildView / setTopView / getChildViews)", () => {
   test("addChildView re-call moves view to top", async () => {
     const host = await freshHost();
-    const v1 = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 100, height: 100 })) as { viewId: number };
-    const v2 = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 100, width: 100, height: 100 })) as { viewId: number };
+    const v1 = await mkView(host);
+    const v2 = await mkView(host, { y: 100 });
 
     const before = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
-    expect(before.viewIds).toEqual([v1.viewId, v2.viewId]); // v1 bottom, v2 top
+    expect(before.viewIds).toEqual([v1, v2]);
 
-    await coreCall({ cmd: "add_child_view", hostId: host, viewId: v1.viewId });
+    await coreCall({ cmd: "add_child_view", hostId: host, viewId: v1 });
     const after = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
-    expect(after.viewIds).toEqual([v2.viewId, v1.viewId]); // v1 이제 top
-    await destroyWindow(host);
+    expect(after.viewIds).toEqual([v2, v1]);
   });
 
   test("setTopView == addChildView(undefined)", async () => {
     const host = await freshHost();
-    const v1 = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 50, height: 50 })) as { viewId: number };
-    const v2 = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 50, width: 50, height: 50 })) as { viewId: number };
-    await coreCall({ cmd: "set_top_view", hostId: host, viewId: v1.viewId });
+    const v1 = await mkView(host, { width: 50, height: 50 });
+    const v2 = await mkView(host, { y: 50, width: 50, height: 50 });
+    await coreCall({ cmd: "set_top_view", hostId: host, viewId: v1 });
     const r = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
-    expect(r.viewIds).toEqual([v2.viewId, v1.viewId]);
-    await destroyWindow(host);
+    expect(r.viewIds).toEqual([v2, v1]);
   });
 });
 
 describe("17-A.7: setViewBounds / setViewVisible", () => {
   test("setViewBounds returns ok:true", async () => {
     const host = await freshHost();
-    const v = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 100, height: 100 })) as { viewId: number };
+    const view = await mkView(host);
     const r = (await coreCall({
       cmd: "set_view_bounds",
-      viewId: v.viewId,
+      viewId: view,
       x: 50,
       y: 60,
       width: 300,
       height: 400,
     })) as { ok: boolean };
     expect(r.ok).toBe(true);
-    await destroyWindow(host);
   });
 
   test("setViewVisible toggle ok:true", async () => {
     const host = await freshHost();
-    const v = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 100, height: 100 })) as { viewId: number };
-    const r1 = (await coreCall({ cmd: "set_view_visible", viewId: v.viewId, visible: false })) as { ok: boolean };
+    const view = await mkView(host);
+    const r1 = (await coreCall({ cmd: "set_view_visible", viewId: view, visible: false })) as { ok: boolean };
     expect(r1.ok).toBe(true);
-    const r2 = (await coreCall({ cmd: "set_view_visible", viewId: v.viewId, visible: true })) as { ok: boolean };
+    const r2 = (await coreCall({ cmd: "set_view_visible", viewId: view, visible: true })) as { ok: boolean };
     expect(r2.ok).toBe(true);
-    await destroyWindow(host);
   });
 });
 
 describe("17-A.7: 17-A.5 회귀 — webContents API view 호환", () => {
   test("loadURL on viewId returns ok:true (windowId 자리에 viewId)", async () => {
     const host = await freshHost();
-    const v = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 200, height: 200 })) as { viewId: number };
-    const r = (await coreCall({ cmd: "load_url", windowId: v.viewId, url: "about:blank" })) as { ok: boolean };
+    const view = await mkView(host, { width: 200, height: 200 });
+    const r = (await coreCall({ cmd: "load_url", windowId: view, url: "about:blank" })) as { ok: boolean };
     expect(r.ok).toBe(true);
-    await destroyWindow(host);
   });
 
   test("setTitle on viewId returns ok:false (NotAWindow)", async () => {
     const host = await freshHost();
-    const v = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 100, height: 100 })) as { viewId: number };
-    const r = (await coreCall({ cmd: "set_title", windowId: v.viewId, title: "x" })) as { ok: boolean };
+    const view = await mkView(host);
+    const r = (await coreCall({ cmd: "set_title", windowId: view, title: "x" })) as { ok: boolean };
     expect(r.ok).toBe(false);
-    await destroyWindow(host);
   });
 });
 
 describe("17-A.7: getChildViews", () => {
   test("getChildViews returns ordered viewIds (z-order, 0=bottom, last=top)", async () => {
     const host = await freshHost();
-    const a = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 0, width: 50, height: 50 })) as { viewId: number };
-    const b = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 50, width: 50, height: 50 })) as { viewId: number };
-    const c = (await coreCall({ cmd: "create_view", hostId: host, x: 0, y: 100, width: 50, height: 50 })) as { viewId: number };
+    const a = await mkView(host, { width: 50, height: 50 });
+    const b = await mkView(host, { y: 50, width: 50, height: 50 });
+    const c = await mkView(host, { y: 100, width: 50, height: 50 });
     const r = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[]; ok: boolean };
     expect(r.ok).toBe(true);
-    expect(r.viewIds).toEqual([a.viewId, b.viewId, c.viewId]);
-    await destroyWindow(host);
+    expect(r.viewIds).toEqual([a, b, c]);
   });
 
   test("getChildViews on host without view returns empty array", async () => {
@@ -199,6 +194,5 @@ describe("17-A.7: getChildViews", () => {
     const r = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[]; ok: boolean };
     expect(r.ok).toBe(true);
     expect(r.viewIds).toEqual([]);
-    await destroyWindow(host);
   });
 });

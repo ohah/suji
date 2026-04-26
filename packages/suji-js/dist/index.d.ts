@@ -218,7 +218,8 @@ export declare const windows: {
         success: boolean;
     }>;
     /** host 창 contentView 안에 새 view 합성 (Electron `WebContentsView`). 자동으로 host의
-     *  view_children top에 추가됨 — 이후 addChildView로 z-order 변경 가능. */
+     *  view_children top에 추가됨 — 이후 addChildView로 z-order 변경 가능. bounds 미지정 시
+     *  800x600 @ 0,0 (코어의 parseBoundsFromJson은 누락 키를 0으로 채워 SDK가 default 적용). */
     createView(opts: ViewOptions): Promise<CreateViewResponse>;
     /** view 파괴. host의 view_children에서 자동 제거 + `window:view-destroyed` 이벤트 */
     destroyView(viewId: number): Promise<ViewOpResponse>;
