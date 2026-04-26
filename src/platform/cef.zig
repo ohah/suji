@@ -497,10 +497,7 @@ pub const CefNative = struct {
         const super = msgSend(view, "superview") orelse return;
         // 매 호출마다 super 현재 bounds로 Cocoa Y 재계산 — host 창 resize 후에도 정확히 매핑.
         const rect = computeChildViewRect(super, bounds);
-        const setFrameSel = objc.sel_registerName("setFrame:");
-        const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) void =
-            @ptrCast(&objc.objc_msgSend);
-        setFrameFn(view, @ptrCast(setFrameSel), rect);
+        _ = msgSendNSRect(view, "setFrame:", rect);
     }
 
     fn setViewVisible(ctx: ?*anyopaque, view_handle: u64, visible: bool) void {
@@ -4119,6 +4116,16 @@ fn msgSendVoidBool(target: ?*anyopaque, sel_name: [:0]const u8, arg: bool) void 
     func(target, @ptrCast(sel), if (arg) 1 else 0);
 }
 
+/// NSRect 1-arg 버전 — setFrame:/initWithFrame: 등. ARM64 ABI는 NSRect를 d0~d3 float
+/// 레지스터로 전달하므로 함수 포인터 시그니처에 NSRect를 그대로 두면 Zig가 올바른 cc 선택.
+/// initWithFrame:은 alloc된 NSView를 반환해 ?*anyopaque를 돌려주지만 setFrame:은 void —
+/// 호출자가 반환값을 _ = 으로 처리하면 동일 헬퍼 재사용 가능.
+fn msgSendNSRect(target: ?*anyopaque, sel_name: [:0]const u8, rect: NSRect) ?*anyopaque {
+    const sel = objc.sel_registerName(sel_name.ptr);
+    const func: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    return func(target, @ptrCast(sel), rect);
+}
+
 fn activateNSApp() void {
     const cls = getClass("NSApplication") orelse return;
     const app = msgSend(cls, "sharedApplication") orelse return;
@@ -4328,7 +4335,7 @@ fn applyMacWindowOptions(window: *anyopaque, opts: WindowInitOpts) void {
 fn attachMacChildWindow(parent: *anyopaque, child: *anyopaque) void {
     const sel = objc.sel_registerName("addChildWindow:ordered:");
     const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    fn_ptr(parent, @ptrCast(sel), child, 1); // NSWindowAbove = 1
+    fn_ptr(parent, @ptrCast(sel), child, NS_WINDOW_ABOVE);
 }
 
 /// macOS: 투명 창 설정 — opaque=NO + clearColor 배경 + 그림자 제거.
@@ -4456,9 +4463,7 @@ fn allocChildNSView(super: *anyopaque, bounds: window_mod.Bounds) ?*anyopaque {
     const NSViewClass = getClass("NSView") orelse return null;
     const view_alloc = msgSend(NSViewClass, "alloc") orelse return null;
     const view_rect = computeChildViewRect(super, bounds);
-    const initSel = objc.sel_registerName("initWithFrame:");
-    const initFn: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const view = initFn(view_alloc, @ptrCast(initSel), view_rect) orelse return null;
+    const view = msgSendNSRect(view_alloc, "initWithFrame:", view_rect) orelse return null;
     msgSendVoid1(super, "addSubview:", view);
     _ = msgSend(view, "release");
     return view;
@@ -4493,20 +4498,16 @@ fn reorderSubview(super: *anyopaque, view: *anyopaque, index: u32) void {
         msgSendVoid1(super, "addSubview:", view);
         return;
     }
+    // count > 0 + index < count 검증 후라 objectAtIndex가 nil 반환은 NSRangeException 영역.
+    // 정상 NSArray는 throw하지 nil 반환 X — `.?`로 받아 invariant 위반 시 명확한 panic.
     const objAtSel = objc.sel_registerName("objectAtIndex:");
     const objAtFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
     if (index == 0) {
-        const ref = objAtFn(subviews, @ptrCast(objAtSel), 0) orelse {
-            msgSendVoid1(super, "addSubview:", view);
-            return;
-        };
+        const ref = objAtFn(subviews, @ptrCast(objAtSel), 0).?;
         addSubviewPositioned(super, view, NS_WINDOW_BELOW, ref);
     } else {
-        const ref = objAtFn(subviews, @ptrCast(objAtSel), index - 1) orelse {
-            msgSendVoid1(super, "addSubview:", view);
-            return;
-        };
+        const ref = objAtFn(subviews, @ptrCast(objAtSel), index - 1).?;
         addSubviewPositioned(super, view, NS_WINDOW_ABOVE, ref);
     }
 }
