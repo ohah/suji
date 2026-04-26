@@ -838,6 +838,7 @@ fn openWindow(
         .height = @intCast(main_win.height),
         .url = url,
         .debug = main_win.debug,
+        .app_name = config.app.name,
     };
     try cef.initialize(cef_config);
 

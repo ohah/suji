@@ -67,6 +67,9 @@ pub const CefConfig = struct {
     url: ?[:0]const u8 = null,
     debug: bool = false,
     remote_debugging_port: i32 = 0,
+    /// 앱별 cache 격리 키 (Electron의 app.getPath('userData') 동등). cookie/localStorage/
+    /// IndexedDB/Service Worker 모두 이 디렉토리 아래로 격리. config.app.name에서 주입.
+    app_name: [:0]const u8 = "Suji App",
 };
 
 /// IPC 핸들러 콜백 — 메인 프로세스에서 백엔드 호출용
@@ -122,6 +125,30 @@ pub fn executeSubprocess() void {
 }
 
 /// CEF 초기화
+/// OS 표준 user-data 디렉토리 + 앱 이름 (Electron `app.getPath('userData')` 동등).
+/// macOS: ~/Library/Application Support/&lt;app&gt;/Cache
+/// Linux: ~/.config/&lt;app&gt;/Cache
+/// Windows: %APPDATA%/&lt;app&gt;/Cache (없으면 %USERPROFILE%/AppData/Roaming/&lt;app&gt;/Cache)
+fn buildAppCachePath(buf: []u8, home: []const u8, app_name: []const u8) ?[]const u8 {
+    const result = switch (builtin.os.tag) {
+        .macos => std.fmt.bufPrint(buf, "{s}/Library/Application Support/{s}/Cache", .{ home, app_name }),
+        .linux => blk: {
+            // XDG Base Directory Specification — $XDG_CONFIG_HOME 우선, fallback ~/.config
+            const xdg = runtime.env("XDG_CONFIG_HOME");
+            if (xdg) |x| if (x.len > 0) break :blk std.fmt.bufPrint(buf, "{s}/{s}/Cache", .{ x, app_name });
+            break :blk std.fmt.bufPrint(buf, "{s}/.config/{s}/Cache", .{ home, app_name });
+        },
+        .windows => blk: {
+            // %APPDATA% (보통 ~/AppData/Roaming) 우선, fallback %USERPROFILE%/AppData/Roaming
+            const appdata = runtime.env("APPDATA");
+            if (appdata) |a| break :blk std.fmt.bufPrint(buf, "{s}\\{s}\\Cache", .{ a, app_name });
+            break :blk std.fmt.bufPrint(buf, "{s}\\AppData\\Roaming\\{s}\\Cache", .{ home, app_name });
+        },
+        else => std.fmt.bufPrint(buf, "{s}/.suji/cef/{s}/Cache", .{ home, app_name }),
+    } catch return null;
+    return result;
+}
+
 pub fn initialize(config: CefConfig) !void {
     if (!g_app_initialized) {
         _ = c.cef_api_hash(c.CEF_API_VERSION, 0);
@@ -170,7 +197,13 @@ pub fn initialize(config: CefConfig) !void {
     }
     setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/{s}/Resources", .{ home, cef_platform }) catch return error.PathTooLong);
     setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/{s}/Resources/locales", .{ home, cef_platform }) catch return error.PathTooLong);
-    setCefString(&settings.root_cache_path, std.fmt.bufPrint(&cache_buf, "{s}/.suji/cef/cache", .{home}) catch return error.PathTooLong);
+    // OS 표준 앱별 user-data 디렉토리. Electron app.getPath('userData') 동등:
+    //   macOS:   ~/Library/Application Support/<app_name>
+    //   Linux:   $XDG_CONFIG_HOME or ~/.config/<app_name>
+    //   Windows: %APPDATA%/<app_name>  (HOME 대용으로 USERPROFILE 사용 X — runtime.env가 emit)
+    // 한 system에 여러 Suji 앱 설치 시 cookie/localStorage/IndexedDB 자동 격리.
+    const cache_path = buildAppCachePath(&cache_buf, home, config.app_name) orelse return error.PathTooLong;
+    setCefString(&settings.root_cache_path, cache_path);
 
     // macOS: NSApplication 초기화 (cef_initialize 전에 필수)
     if (comptime is_macos) initNSApp();
