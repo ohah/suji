@@ -1,0 +1,148 @@
+---
+title: Notification (Phase 5-C)
+description: 시스템 알림 (Electron Notification) — UNUserNotificationCenter 기반, 5 진입점 노출
+---
+
+# Notification
+
+Electron `Notification` 호환 — macOS UNUserNotificationCenter (NSUserNotification은
+deprecated 후 macOS 26 제거). Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
+
+## 플랫폼 지원
+
+| API | macOS | Linux | Windows |
+|---|---|---|---|
+| `notification.isSupported` | ✅ Bundle ID 있을 때만 true | stub (false) | stub |
+| `notification.requestPermission` | ✅ OS 다이얼로그 | stub (false) | stub |
+| `notification.show` | ✅ UNUserNotificationCenter | stub | stub |
+| `notification.close` | ✅ pending + delivered | stub | stub |
+| Click event | ✅ `notification:click` | — | — |
+
+Linux/Windows는 향후 `libnotify` / Win32 `XML toast` plug-in. 현재 호출은 graceful 응답.
+
+## ⚠️ Bundle ID 필수 (dev 모드 한계)
+
+`UNUserNotificationCenter`는 **valid Bundle ID + Info.plist** 필요. `suji dev`로
+실행하면 binary가 loose라 Bundle ID 없음 → `isSupported()` false 반환 + 알림 안 뜸.
+
+**정상 동작 조건**:
+- `suji build` → `.app` 번들 생성 (Info.plist에 `CFBundleIdentifier` 자동 포함)
+- 또는 `Info.plist` 수동 작성 + 코드사인
+
+**dev 모드에서**:
+- `isSupported()` → false
+- `show()` → `success: false` (notification 안 뜸)
+- E2E는 IPC wiring + 응답 형식만 검증. 실제 알림은 `.app` 번들 manual 검증.
+
+## v1 한계
+
+| 미지원 | 비고 |
+|---|---|
+| **Actions / 버튼** | UNNotificationCategory 작업 — v2 |
+| **Reply input** | macOS only, hasReply: true — v2 |
+| **커스텀 icon** | 앱 아이콘만 자동 (NSImage attachment v2) |
+| **커스텀 sound** | default sound or silent만 (v1) |
+
+## API
+
+```ts
+import { notification } from '@suji/api';
+
+// 플랫폼 + Bundle ID 검사
+const supported = await notification.isSupported();
+if (!supported) {
+  console.warn('Notifications require a bundled app (.app)');
+  return;
+}
+
+// 권한 요청 — 첫 호출만 OS 다이얼로그
+const granted = await notification.requestPermission();
+if (!granted) return;
+
+// 알림 표시
+const { notificationId, success } = await notification.show({
+  title: 'Build complete',
+  body: 'Your project compiled successfully.',
+  silent: false,
+});
+
+// 클릭 수신
+suji.on('notification:click', ({ notificationId: clickedId }) => {
+  if (clickedId === notificationId) {
+    // bring main window forward etc.
+  }
+});
+
+// 명시 close (자동 dismiss 외에)
+await notification.close(notificationId);
+```
+
+## Backend SDK
+
+### Zig (`suji.notification.*`)
+
+```zig
+const sup = suji.notification.isSupported();
+const grant = suji.notification.requestPermission();
+const show = suji.notification.show("Title", "Body", false);
+_ = suji.notification.close("suji-notif-1");
+```
+
+### Rust (`suji::notification::*`)
+
+```rust
+let sup = suji::notification::is_supported();
+let grant = suji::notification::request_permission();
+let show = suji::notification::show("Title", "Body", false);
+let _ = suji::notification::close("suji-notif-1");
+```
+
+### Go (`github.com/ohah/suji-go/notification`)
+
+```go
+import "github.com/ohah/suji-go/notification"
+notification.IsSupported()
+notification.RequestPermission()
+notification.Show("Title", "Body", false)
+notification.Close("suji-notif-1")
+```
+
+### Node (`@suji/node`)
+
+```ts
+import { notification } from '@suji/node';
+const supported = await notification.isSupported();
+const granted = await notification.requestPermission();
+const { notificationId } = await notification.show({ title: 'Hi', body: 'World' });
+await notification.close(notificationId);
+```
+
+## 동작 정밀
+
+### notification.m (block completion handler 인프라 재사용)
+- `dialog.m`처럼 nested NSApp event loop 패턴으로 `requestAuthorizationWithOptions:completionHandler:`
+  와 `addNotificationRequest:withCompletionHandler:`를 동기화.
+- `SujiNotificationDelegate` ObjC 클래스 — `UNUserNotificationCenterDelegate` 구현:
+  - `willPresentNotification:` — foreground 상태에서도 banner + sound 표시 (default는 묻힘)
+  - `didReceiveNotificationResponse:` — 클릭 시 NSString identifier → C 콜백 → Zig → EventBus emit
+- Bundle ID 검사 (`mainBundle.bundleIdentifier`)로 dev 모드에서 안전한 stub 동작.
+
+### notificationId 전략
+- main.zig가 단조증가 카운터로 `suji-notif-{N}` 식별자 발급 (캐릭터 안전)
+- caller가 `close(notificationId)`로 명시 제거 가능
+- pending(미발화) + delivered(이미 표시) 둘 다 제거
+
+### Click 라우팅
+1. 사용자 알림 클릭 → macOS가 `didReceiveNotificationResponse:` 호출
+2. delegate가 `g_notification_click_callback` C 함수 포인터 호출 (notificationId C string 전달)
+3. cef.zig의 `notificationClickC`가 `g_notification_emit_handler?` 호출
+4. main.zig의 `notificationEmitHandler`가 `notification:click {notificationId}` EventBus emit
+5. JS/SDK 리스너 수신
+
+## E2E 한계
+
+OS 알림 표시 자체는 puppeteer로 검증 불가 (NSUserNotificationCenter는 process 외부).
+자동화 범위:
+1. **회귀 가드** (`tests/window_manager_test.zig`) — 정적 ObjC selector / cmd / SDK 노출.
+2. **응답 형식 검증** (`tests/e2e/notification.test.ts`) — IPC 응답 shape (notificationId, success, granted, supported).
+3. **수동 검증 필수** — `.app` 번들 후 권한 grant 후 알림 시각/사운드 확인.

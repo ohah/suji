@@ -2649,6 +2649,118 @@ test "회귀: dialogParentNSWindow stale windowId — warn 로그 + null 반환 
     try std.testing.expect(std.mem.indexOf(u8, body, "fallback to free-floating") != null);
 }
 
+test "회귀: Notification API (Phase 5-C) — UNUserNotificationCenter + .m 파일 + 5 진입점" {
+    // .m 파일 존재 + UNUserNotificationCenter API 사용 + delegate.
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/notification.m",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(m_src);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "UNUserNotificationCenter") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "requestAuthorizationWithOptions:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "addNotificationRequest:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "SujiNotificationDelegate") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "didReceiveNotificationResponse:") != null);
+    // foreground도 표시 (default 무음 처리 회피).
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "willPresentNotification:") != null);
+    // 4개 C 함수 export.
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_notification_set_click_callback") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_notification_request_permission") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_notification_show") != null);
+    try std.testing.expect(std.mem.indexOf(u8, m_src, "suji_notification_close") != null);
+
+    // build.zig에 notification.m + UserNotifications framework.
+    const build_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(128 * 1024),
+    );
+    defer std.testing.allocator.free(build_src);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/notification.m") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "linkFramework(\"UserNotifications\"") != null);
+
+    // cef.zig: extern decl + pub fn 4개 + emit handler.
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "extern \"c\" fn suji_notification_show(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn notificationIsSupported(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn notificationRequestPermission(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn notificationShow(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn notificationClose(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setNotificationEmitHandler(") != null);
+
+    // main.zig: 4 cmd + emit handler 등록 + notification:click 이벤트.
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"notification_is_supported\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"notification_request_permission\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"notification_show\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"notification_close\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.setNotificationEmitHandler(&notificationEmitHandler)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "notification:click") != null);
+
+    // 5 SDK 노출.
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/app.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(app_src);
+    try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const notification = struct") != null);
+
+    const rs_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "crates/suji-rs/src/lib.rs",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(rs_src);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod notification {") != null);
+
+    const go_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "sdks/suji-go/notification/notification.go",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(go_src);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func Show(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func RequestPermission(") != null);
+
+    const node_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-node/src/index.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(node_src);
+    try std.testing.expect(std.mem.indexOf(u8, node_src, "export const notification =") != null);
+
+    const ts_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "packages/suji-js/src/index.ts",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(ts_src);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "export const notification =") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "NotificationOptions") != null);
+}
+
 test "회귀: Tray API (Phase 5-B) — NSStatusItem + 메뉴 + click 라우팅 + 5 진입점" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

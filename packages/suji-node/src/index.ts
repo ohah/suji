@@ -525,6 +525,41 @@ export const shell = {
 };
 
 // ============================================
+// notification — 시스템 알림 (Electron `Notification`). macOS only (UNUserNotificationCenter).
+// 클릭은 `notification:click {notificationId}` 이벤트로 수신.
+// ============================================
+
+export interface NotificationOptions {
+  title: string;
+  body: string;
+  silent?: boolean;
+}
+
+export const notification = {
+  async isSupported(): Promise<boolean> {
+    const r = await invoke<{ supported: boolean }>('__core__', { cmd: 'notification_is_supported' });
+    return r.supported === true;
+  },
+
+  async requestPermission(): Promise<boolean> {
+    const r = await invoke<{ granted: boolean }>('__core__', { cmd: 'notification_request_permission' });
+    return r.granted === true;
+  },
+
+  async show(options: NotificationOptions): Promise<{ notificationId: string; success: boolean }> {
+    return invoke<{ notificationId: string; success: boolean }>('__core__', {
+      cmd: 'notification_show',
+      ...options,
+    });
+  },
+
+  async close(notificationId: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'notification_close', notificationId });
+    return r.success === true;
+  },
+};
+
+// ============================================
 // tray — 시스템 트레이 (Electron `Tray`). frontend `@suji/api`와 동일 cmd.
 // 클릭은 `tray:menu-click {trayId, click}` 이벤트로 수신 (suji.on 사용).
 // ============================================

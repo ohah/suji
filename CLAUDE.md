@@ -69,6 +69,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.dialog.showErrorBox("Title", "content")
 // suji.tray.create("🚀 App", "tooltip") / setMenuRaw(id, "...items...") / destroy(id)
 //                                                                       (macOS NSStatusItem)
+// suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
+//                                       (macOS UNUserNotificationCenter, .app 번들 필수)
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -91,6 +93,7 @@ suji::export_handlers!(ping);
 // suji::dialog::show_open_dialog(r#""properties":["openFile"]"#)
 // suji::dialog::show_error_box("Title", "content")
 // suji::tray::create("🚀", "tip") / set_menu(id, &[MenuItem::Item{...}, MenuItem::Separator]) / destroy(id)
+// suji::notification::{is_supported, request_permission, show("T","B",false), close("id")}
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -117,6 +120,8 @@ var _ = suji.Bind(&App{})
 // dialog.ShowOpenDialog(`"properties":["openFile"]`) / ShowErrorBox(t, c)
 // import "github.com/ohah/suji-go/tray"
 // tray.Create("🚀", "tip") / SetMenu(id, []tray.MenuItem{{Label:"Quit",Click:"quit"}}) / Destroy(id)
+// import "github.com/ohah/suji-go/notification"
+// notification.Show("Title", "Body", false) / RequestPermission() / Close(id)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -207,6 +212,9 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // const { trayId } = await tray.create({ title:"🚀", tooltip:"..." })
 // await tray.setMenu(trayId, [{label:"Quit",click:"quit"},{type:"separator"}])
 // await tray.destroy(trayId) — suji.on('tray:menu-click', ({trayId,click}) => ...)
+// const sup = await notification.isSupported() (Bundle ID 필수)
+// await notification.requestPermission() / show({title,body,silent}) / close(notificationId)
+//                              — suji.on('notification:click', ({notificationId}) => ...)
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.

@@ -132,6 +132,13 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/platform/dialog.m"),
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
+        // notification.m — UNUserNotificationCenter wrapper (block completion handlers
+        // for requestAuthorizationWithOptions / addNotificationRequest + delegate).
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/notification.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
+        root_module.linkFramework("UserNotifications", .{});
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
@@ -196,7 +203,7 @@ pub fn build(b: *std.Build) void {
         const entitlements = b.pathFromRoot("macos-entitlements.plist");
 
         const fix_rpath = b.addSystemCommand(&.{
-            "install_name_tool", "-change",
+            "install_name_tool",                                                                                "-change",
             "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
         });
         const cef_fw_abs = std.fmt.allocPrint(b.allocator, "{s}/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{cef_base}) catch @panic("OOM");
@@ -219,7 +226,7 @@ pub fn build(b: *std.Build) void {
         }
 
         const codesign = b.addSystemCommand(&.{
-            "codesign", "--force", "--sign", "-",
+            "codesign",       "--force", "--sign", "-",
             "--entitlements",
         });
         codesign.addArg(entitlements);
@@ -541,6 +548,21 @@ pub fn build(b: *std.Build) void {
     });
     const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
+
+    // CEF drag region hit-test tests (CEF 런타임/헤더 불필요)
+    const cef_drag_region_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/cef_drag_region_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cef_drag_region_module = b.createModule(.{
+        .root_source_file = b.path("src/platform/cef_drag_region.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cef_drag_region_test_mod.addImport("cef_drag_region", cef_drag_region_module);
+    const cef_drag_region_test = b.addTest(.{ .root_module = cef_drag_region_test_mod });
+    test_step.dependOn(&b.addRunArtifact(cef_drag_region_test).step);
 }
 
 /// 정적 검증 테스트(`std.Io.Dir.cwd().readFileAlloc`)는 cwd가 build root여야

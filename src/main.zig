@@ -594,6 +594,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
     cef.setTrayEmitHandler(&trayEmitHandler);
+    cef.setNotificationEmitHandler(&notificationEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -755,6 +756,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     registry.setQuitHandler(&cef.quit);
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
     cef.setTrayEmitHandler(&trayEmitHandler);
+    cef.setNotificationEmitHandler(&notificationEmitHandler);
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -1342,6 +1344,47 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
+    // Notification API — UNUserNotificationCenter (macOS only).
+    if (std.mem.eql(u8, cmd, "notification_is_supported")) {
+        const supported = cef.notificationIsSupported();
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_is_supported\",\"supported\":{}}}", .{supported}) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "notification_request_permission")) {
+        const granted = cef.notificationRequestPermission();
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_request_permission\",\"granted\":{}}}", .{granted}) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "notification_show")) {
+        const title_raw = util.extractJsonString(req_clean, "title") orelse "";
+        const body_raw = util.extractJsonString(req_clean, "body") orelse "";
+        const silent = util.extractJsonBool(req_clean, "silent") orelse false;
+        var t_buf: [4096]u8 = undefined;
+        var b_buf: [4096]u8 = undefined;
+        const t_n = util.unescapeJsonStr(title_raw, &t_buf) orelse 0;
+        const b_n = util.unescapeJsonStr(body_raw, &b_buf) orelse 0;
+
+        const id = nextNotificationId();
+        var id_buf: [32]u8 = undefined;
+        const id_str = std.fmt.bufPrint(&id_buf, "suji-notif-{d}", .{id}) catch return null;
+
+        const ok = cef.notificationShow(id_str, t_buf[0..t_n], b_buf[0..b_n], silent);
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"notification_show\",\"notificationId\":\"{s}\",\"success\":{}}}",
+            .{ id_str, ok },
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "notification_close")) {
+        const id_raw = util.extractJsonString(req_clean, "notificationId") orelse "";
+        var id_buf: [128]u8 = undefined;
+        const id_n = util.unescapeJsonStr(id_raw, &id_buf) orelse 0;
+        const ok = cef.notificationClose(id_buf[0..id_n]);
+        const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_close\",\"success\":{}}}", .{ok}) catch return null;
+        return result;
+    }
+
     if (std.mem.eql(u8, cmd, "core_info")) {
         var out_pos: usize = 0;
         const out = response_buf;
@@ -1598,6 +1641,27 @@ fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 
     const ok = cef.setTrayMenu(opts.trayId, items);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+/// notification id 카운터 — `suji-notif-{N}` 형식 식별자 발급.
+var g_next_notification_id: u32 = 1;
+
+fn nextNotificationId() u32 {
+    const id = g_next_notification_id;
+    g_next_notification_id += 1;
+    return id;
+}
+
+/// cef.zig의 notification click → EventBus 라우팅. SujiNotificationDelegate가 NSApp UI
+/// thread에서 호출.
+fn notificationEmitHandler(notification_id: []const u8) void {
+    const registry = suji.BackendRegistry.global orelse return;
+    const bus = registry.event_bus orelse return;
+    var data_buf: [256]u8 = undefined;
+    var id_esc: [128]u8 = undefined;
+    const id_n = util.escapeJsonStrFull(notification_id, &id_esc) orelse return;
+    const data = std.fmt.bufPrint(&data_buf, "{{\"notificationId\":\"{s}\"}}", .{id_esc[0..id_n]}) catch return;
+    bus.emit("notification:click", data);
 }
 
 /// cef.zig의 tray click → EventBus 라우팅. SujiTrayTarget.trayMenuClick:이 NSApp UI thread에서

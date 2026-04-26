@@ -364,6 +364,48 @@ export const clipboard = {
 };
 
 // ============================================
+// notification — 시스템 알림 (Electron `Notification`)
+// ============================================
+// macOS: UNUserNotificationCenter. Linux/Windows stub. valid Bundle ID + Info.plist 필요
+// (suji dev 모드에선 알림 안 뜰 수 있음 — `.app` 번들 이후 정상). 첫 호출 시 OS 권한 요청.
+//
+// 클릭은 `notification:click {notificationId}` 이벤트로 수신 (suji.on 사용).
+
+export interface NotificationOptions {
+  title: string;
+  body: string;
+  /** 사운드 묻음 */
+  silent?: boolean;
+}
+
+export const notification = {
+  /** 플랫폼 지원 여부 — 현재 macOS만 true. */
+  async isSupported(): Promise<boolean> {
+    const r = await coreCall<{ supported: boolean }>({ cmd: "notification_is_supported" });
+    return r.supported === true;
+  },
+
+  /** 알림 권한 요청 — 첫 호출 시 OS 다이얼로그. 이후 캐시. */
+  async requestPermission(): Promise<boolean> {
+    const r = await coreCall<{ granted: boolean }>({ cmd: "notification_request_permission" });
+    return r.granted === true;
+  },
+
+  /** 알림 표시. 반환 `notificationId`로 close 가능. success=false면 권한/번들 문제. */
+  async show(options: NotificationOptions): Promise<{ notificationId: string; success: boolean }> {
+    return coreCall<{ notificationId: string; success: boolean }>({
+      cmd: "notification_show",
+      ...options,
+    });
+  },
+
+  async close(notificationId: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "notification_close", notificationId });
+    return r.success === true;
+  },
+};
+
+// ============================================
 // tray — 시스템 트레이 아이콘 (Electron `Tray`)
 // ============================================
 // 현재 macOS만 지원 (NSStatusItem). Linux/Windows는 stub — create는 trayId:0 반환.

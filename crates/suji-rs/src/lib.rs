@@ -430,6 +430,35 @@ pub mod shell {
     }
 }
 
+pub mod notification {
+    use crate::{escape_json_full, invoke};
+
+    /// 플랫폼 지원 여부 — `{"supported":bool}` raw JSON 응답.
+    pub fn is_supported() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"notification_is_supported"}"#)
+    }
+
+    /// 권한 요청 — `{"granted":bool}` 응답. 첫 호출 시 OS 다이얼로그.
+    pub fn request_permission() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"notification_request_permission"}"#)
+    }
+
+    /// 알림 표시 — `{"notificationId":"...","success":bool}` 응답.
+    pub fn show(title: &str, body: &str, silent: bool) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"notification_show","title":"{}","body":"{}","silent":{}}}"#,
+            escape_json_full(title), escape_json_full(body), silent,
+        ))
+    }
+
+    pub fn close(notification_id: &str) -> Option<String> {
+        invoke("__core__", &format!(
+            r#"{{"cmd":"notification_close","notificationId":"{}"}}"#,
+            escape_json_full(notification_id),
+        ))
+    }
+}
+
 pub mod tray {
     use crate::{escape_json_full, invoke, serde_json};
 

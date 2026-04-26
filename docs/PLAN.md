@@ -474,13 +474,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     #### Phase 4 백로그 (Phase 5 진입 전 또는 그 이후 처리)
 
     A 사용자 가시 기능 (가치 높음 / 작업 큼):
-    - [ ] **frameless drag region (`-webkit-app-region: drag`) — CEF Alloy 라우팅**.
-          현재 HTML drag region 지정해도 CEF view가 마우스 이벤트를 swallow → 동작 X.
-          정식: `cef_drag_handler_t` vtable + `on_draggable_regions_changed` 콜백 → `cef_draggable_region_t`
-          배열을 macOS `NSView` hit-test로 라우팅 (custom contentView wrapper에서 mouseDown 시
-          영역 안이면 `[window performWindowDragWithEvent:]`). Linux GTK는 `gtk_window_begin_move_drag`,
-          Windows는 `WM_NCHITTEST` HTCAPTION 반환. 현재 frameless 창 이동 불가
-          (examples/window-styles README 명시). 사용자 만족도 직격.
+    - [~] **frameless drag region (`-webkit-app-region: drag`) — CEF Alloy 라우팅**.
+          CEF `cef_drag_handler_t.on_draggable_regions_changed`로 region 수집 완료.
+          macOS는 `NSWindow.sendEvent:`에서 hit-test 후 `[window performWindowDragWithEvent:]`
+          라우팅 완료. Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라
+          GTK/Win32 창 생성 및 `gtk_window_begin_move_drag` / `WM_NCHITTEST` 라우팅 필요.
     - [ ] **`capture_page`** — CEF 직접 미지원. CDP `Page.captureScreenshot` 또는 off-screen
           rendering 우회 필요. Electron 호환 위해 추후 구현. (4-D 후속.)
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
@@ -532,8 +530,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
         representedObject 라우팅. v1 한계: 아이콘 이미지 미지원(텍스트만), tray:click 미지원,
         서브메뉴/checkbox 없음. 회귀 테스트 1건. `documents/tray.mdx`.
-  - [ ] **Phase 5-C: Notification** (NSUserNotificationCenter / UNUserNotificationCenter) —
-        백엔드/프론트 양쪽에서 사용자 알림. 권한 요청 흐름 포함.
+  - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + 5 진입점.
+        `notification.{isSupported, requestPermission, show, close}` + `notification:click`
+        이벤트 라우팅. `src/platform/notification.m` ObjC block completion handler 인프라
+        재사용 + SujiNotificationDelegate. Bundle ID 검사 — `suji dev` loose binary는 stub
+        동작, `.app` 번들 후 실 알림 표시. v1 한계: actions/buttons, reply, custom icon
+        미지원. 회귀 1건 + E2E 9건 + Zig SDK 단위 5건. `documents/notification.mdx`.
   - [ ] **Phase 5-D: 메뉴바 커스터마이즈 API** — 현재 macOS 기본 menu(App/File/Edit/View/Window)만.
         사용자 정의 menu/submenu/checkbox/separator + click 이벤트 라우팅.
   - [ ] **Phase 5-E: 글로벌 단축키** (NSEvent.addGlobalMonitorForEvents) — Electron `globalShortcut`.
@@ -1226,7 +1228,7 @@ suji build → 결과물:
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
 | 트레이 아이콘 | `Tray` | `tray-icon` | ❌ (Phase 5-B 다음 단계) |
 | 메뉴바 | `Menu` | `menu` | 🟡 (macOS App/File/Edit/View/Window 기본 — 사용자 정의 API 미노출, Phase 5-D) |
-| 알림 (Notification) | `Notification` | `notification` | ❌ (Phase 5-C) |
+| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
 | 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | 🟡 close만 부분 — Phase 5 (라이프사이클) |
 | 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ✅ `windows.create()` + Phase 3 외형 옵션 풀 셋 (frame/transparent/parent) |
@@ -1262,7 +1264,7 @@ suji build → 결과물:
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
 | 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. NSPasteboard + 4 SDK + E2E 37 케이스 |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ❌ (Phase 5-E) |
-| 알림 (Notification) | `Notification` | `notification` | ❌ (Phase 5-C) |
+| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | ❌ (Zig `std.process.Child` 노출만 하면 됨) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ (Zig `std.http` 있음 — 노출만) |

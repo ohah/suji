@@ -955,3 +955,53 @@ test "tray.setMenuRaw + tray.destroy: trayId 전송" {
         }
     }.run);
 }
+
+test "notification.isSupported: __core__ + notification_is_supported 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.notification.isSupported();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"notification_is_supported\"") != null);
+        }
+    }.run);
+}
+
+test "notification.requestPermission: cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.notification.requestPermission();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"notification_request_permission\"") != null);
+        }
+    }.run);
+}
+
+test "notification.show: title/body/silent 필드 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.notification.show("Hello", "World", false);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"notification_show\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"title\":\"Hello\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"body\":\"World\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"silent\":false") != null);
+        }
+    }.run);
+}
+
+test "notification.show: silent=true + escape 적용 (newline 보존)" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.notification.show("Title", "Line 1\nLine 2", true);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"silent\":true") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "Line 1\\nLine 2") != null);
+        }
+    }.run);
+}
+
+test "notification.close: notificationId 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.notification.close("suji-notif-42");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"notification_close\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"notificationId\":\"suji-notif-42\"") != null);
+        }
+    }.run);
+}

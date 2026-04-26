@@ -713,6 +713,41 @@ pub const shell = struct {
     }
 };
 
+pub const notification = struct {
+    /// 플랫폼 지원 여부 — `{"supported":bool}` 응답.
+    pub fn isSupported() ?[]const u8 {
+        return coreCmd("notification_is_supported", "");
+    }
+
+    /// 권한 요청 — `{"granted":bool}` 응답. 첫 호출 시 OS 다이얼로그.
+    pub fn requestPermission() ?[]const u8 {
+        return coreCmd("notification_request_permission", "");
+    }
+
+    /// 알림 표시 — `{"notificationId":"...","success":bool}` 응답.
+    pub fn show(title: []const u8, body: []const u8, silent: bool) ?[]const u8 {
+        var t_buf: [4096]u8 = undefined;
+        var b_buf: [4096]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
+        const b_n = util.escapeJsonStrFull(body, &b_buf) orelse return null;
+        var fields_buf: [9000]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"title\":\"{s}\",\"body\":\"{s}\",\"silent\":{}",
+            .{ t_buf[0..t_n], b_buf[0..b_n], silent },
+        ) catch return null;
+        return coreCmd("notification_show", fields);
+    }
+
+    pub fn close(notification_id: []const u8) ?[]const u8 {
+        var id_buf: [128]u8 = undefined;
+        const id_n = util.escapeJsonStrFull(notification_id, &id_buf) orelse return null;
+        var fields_buf: [256]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"notificationId\":\"{s}\"", .{id_buf[0..id_n]}) catch return null;
+        return coreCmd("notification_close", fields);
+    }
+};
+
 pub const tray = struct {
     /// 트레이 생성. 응답: `{"from","cmd","trayId":N}`. trayId=0이면 실패 (비-macOS 등).
     /// title/tooltip은 빈 문자열이면 미설정.

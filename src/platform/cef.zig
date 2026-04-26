@@ -10,6 +10,7 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_app_capi.h");
     @cInclude("include/capi/cef_browser_capi.h");
     @cInclude("include/capi/cef_client_capi.h");
+    @cInclude("include/capi/cef_drag_handler_capi.h");
     @cInclude("include/capi/cef_life_span_handler_capi.h");
     @cInclude("include/capi/cef_frame_capi.h");
     @cInclude("include/capi/cef_v8_capi.h");
@@ -27,6 +28,7 @@ const window_mod = @import("window");
 const window_ipc = @import("window_ipc");
 const logger = @import("logger");
 const util = @import("util");
+const drag_region = @import("cef_drag_region.zig");
 
 const log = logger.module("cef");
 
@@ -45,6 +47,7 @@ const objc = if (is_macos) struct {
         imp: *const fn () callconv(.c) void,
         types: [*:0]const u8,
     ) u8;
+    pub extern "c" fn class_getMethodImplementation(cls: ?*anyopaque, name: ?*anyopaque) *const fn () callconv(.c) void;
     pub extern "c" fn objc_allocateClassPair(superclass: ?*anyopaque, name: [*:0]const u8, extra_bytes: usize) ?*anyopaque;
     pub extern "c" fn objc_registerClassPair(cls: ?*anyopaque) void;
     /// AppKit 시스템 비프 (NSGraphics.h). Cocoa 프레임워크 링크로 자동 가용.
@@ -97,7 +100,7 @@ fn makeMainArgs() c.cef_main_args_t {
     const vec = runtime.args_vector; // []const [*:0]const u8
     return .{
         .argc = @intCast(vec.len),
-        .argv = @constCast(@ptrCast(vec.ptr)),
+        .argv = @ptrCast(@constCast(vec.ptr)),
     };
 }
 
@@ -199,9 +202,11 @@ fn ensureGlobalHandlers() void {
     if (g_handlers_initialized) return;
     initLifeSpanHandler();
     initKeyboardHandler();
+    initDragHandler();
     zeroCefStruct(c.cef_client_t, &g_devtools_client);
     initBaseRefCounted(&g_devtools_client.base);
     g_devtools_client.get_keyboard_handler = &getKeyboardHandler;
+    g_devtools_client.get_drag_handler = &getDragHandler;
     // life_span_handler — DevTools browser의 onAfterCreated/onBeforeClose 콜백.
     // 없으면 DevTools browser 생성/소멸이 우리에게 안 보여 inspectee 매핑 등록/정리 X.
     g_devtools_client.get_life_span_handler = &getLifeSpanHandler;
@@ -231,6 +236,9 @@ pub const CefNative = struct {
         /// 매 invoke마다 frame.get_url alloc/free를 피하기 위함. len=0이면 미캐싱(폴백).
         url_cache_buf: [URL_CACHE_LEN]u8 = undefined,
         url_cache_len: usize = 0,
+        /// CEF가 계산한 `-webkit-app-region` rectangle들. browser id별로 보관하고
+        /// macOS NSWindow.sendEvent:에서 native drag hit-test에 사용.
+        drag_regions: []drag_region.DragRegion = &.{},
     };
 
     allocator: std.mem.Allocator,
@@ -253,6 +261,10 @@ pub const CefNative = struct {
 
     pub fn deinit(self: *CefNative) void {
         // 브라우저 수명은 CEF가 OnBeforeClose로 관리 → 우리는 테이블만 정리.
+        var it = self.browsers.valueIterator();
+        while (it.next()) |entry| {
+            self.allocator.free(entry.drag_regions);
+        }
         self.browsers.deinit();
     }
 
@@ -266,7 +278,9 @@ pub const CefNative = struct {
 
     /// CEF가 OnBeforeClose에서 확정 파괴를 알렸을 때 테이블에서 제거.
     pub fn purge(self: *CefNative, handle: u64) void {
-        _ = self.browsers.remove(handle);
+        if (self.browsers.fetchRemove(handle)) |kv| {
+            self.allocator.free(kv.value.drag_regions);
+        }
     }
 
     pub fn asNative(self: *CefNative) window_mod.Native {
@@ -1086,6 +1100,75 @@ pub fn destroyTray(tray_id: u32) bool {
 }
 
 // ============================================
+// Notification API — UNUserNotificationCenter (Electron `Notification`)
+// ============================================
+// macOS 10.14+ UNUserNotificationCenter (NSUserNotification deprecated 후 macOS 26 제거).
+// 첫 호출 시 OS 권한 다이얼로그 — 그 이후 알림 표시 가능.
+// 한계: valid Bundle ID + Info.plist 필요. `suji dev` loose binary는 권한 요청 자체가
+// 실패하거나 알림 안 뜰 수 있음. `suji build` .app 번들에서 정상 동작.
+//
+// click 이벤트는 SujiNotificationDelegate (notification.m)가 C 콜백으로 디스패치 →
+// main.zig가 `notification:click {notificationId}` EventBus.emit.
+
+pub const NotificationEmitHandler = *const fn (notification_id: []const u8) void;
+pub var g_notification_emit_handler: ?NotificationEmitHandler = null;
+
+/// notification.m의 C 콜백 — Zig 측에서 main.zig로 라우팅.
+fn notificationClickC(id_cstr: [*:0]const u8) callconv(.c) void {
+    if (g_notification_emit_handler) |emit| emit(std.mem.span(id_cstr));
+}
+
+/// main.zig가 등록 — 알림 클릭 → EventBus 라우팅.
+pub fn setNotificationEmitHandler(handler: NotificationEmitHandler) void {
+    if (!comptime is_macos) return;
+    if (!notificationIsSupported()) return;
+    g_notification_emit_handler = handler;
+    suji_notification_set_click_callback(&notificationClickC);
+}
+
+pub fn notificationIsSupported() bool {
+    if (!comptime is_macos) return false;
+    return suji_notification_is_supported() != 0;
+}
+
+/// 권한 요청 — 첫 호출 시 OS 다이얼로그. 동기 대기.
+pub fn notificationRequestPermission() bool {
+    if (!comptime is_macos) return false;
+    return suji_notification_request_permission() != 0;
+}
+
+/// 알림 표시. id는 caller-controlled 식별자 (close에 사용). 한도: 64 byte.
+/// title/body는 4KB stack-alloc 한도.
+pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+    if (!comptime is_macos) return false;
+    var id_buf: [64]u8 = undefined;
+    var t_buf: [4096]u8 = undefined;
+    var b_buf: [4096]u8 = undefined;
+    if (id.len + 1 > id_buf.len or title.len + 1 > t_buf.len or body.len + 1 > b_buf.len) return false;
+    @memcpy(id_buf[0..id.len], id);
+    id_buf[id.len] = 0;
+    @memcpy(t_buf[0..title.len], title);
+    t_buf[title.len] = 0;
+    @memcpy(b_buf[0..body.len], body);
+    b_buf[body.len] = 0;
+    const id_cstr: [*:0]const u8 = @ptrCast(&id_buf);
+    const t_cstr: [*:0]const u8 = @ptrCast(&t_buf);
+    const b_cstr: [*:0]const u8 = @ptrCast(&b_buf);
+    return suji_notification_show(id_cstr, t_cstr, b_cstr, if (silent) 1 else 0) != 0;
+}
+
+pub fn notificationClose(id: []const u8) bool {
+    if (!comptime is_macos) return false;
+    var id_buf: [64]u8 = undefined;
+    if (id.len + 1 > id_buf.len) return false;
+    @memcpy(id_buf[0..id.len], id);
+    id_buf[id.len] = 0;
+    const id_cstr: [*:0]const u8 = @ptrCast(&id_buf);
+    suji_notification_close(id_cstr);
+    return true;
+}
+
+// ============================================
 // Dialog API — NSAlert / NSOpenPanel / NSSavePanel (Electron `dialog.*`)
 // ============================================
 // 두 가지 modal 모드:
@@ -1100,6 +1183,13 @@ pub fn destroyTray(tray_id: u32) bool {
 // dialog.m C 함수 (sheet path). nested run loop로 동기화.
 extern "c" fn suji_run_sheet_alert(parent_window: ?*anyopaque, alert: ?*anyopaque) i64;
 extern "c" fn suji_run_sheet_save_panel(parent_window: ?*anyopaque, panel: ?*anyopaque) i64;
+
+// notification.m — UNUserNotificationCenter wrapper.
+extern "c" fn suji_notification_is_supported() i32;
+extern "c" fn suji_notification_set_click_callback(cb: *const fn ([*:0]const u8) callconv(.c) void) void;
+extern "c" fn suji_notification_request_permission() i32;
+extern "c" fn suji_notification_show(id: [*:0]const u8, title: [*:0]const u8, body: [*:0]const u8, silent: i32) i32;
+extern "c" fn suji_notification_close(id: [*:0]const u8) void;
 
 /// CEF browser native_handle → NSWindow 포인터 lookup. main.zig가 windowId(WM)를
 /// browser handle로 변환 후 호출.
@@ -1696,9 +1786,15 @@ fn initBaseRefCounted(base: *c.cef_base_ref_counted_t) void {
 // TODO: no-op 참조 카운팅 — 글로벌 스태틱 객체에는 안전하지만,
 //       동적 CEF 객체(멀티 브라우저 등) 사용 시 실제 ref counting 구현 필요.
 fn addRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) void {}
-fn release(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 { return 1; }
-fn hasOneRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 { return 1; }
-fn hasAtLeastOneRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 { return 1; }
+fn release(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    return 1;
+}
+fn hasOneRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    return 1;
+}
+fn hasAtLeastOneRef(_: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    return 1;
+}
 
 // ============================================
 // CEF App (메인 + 서브프로세스 공통)
@@ -1769,6 +1865,7 @@ fn initClient(client_ptr: *c.cef_client_t) void {
     initBaseRefCounted(&client_ptr.base);
     client_ptr.get_life_span_handler = &getLifeSpanHandler;
     client_ptr.get_keyboard_handler = &getKeyboardHandler;
+    client_ptr.get_drag_handler = &getDragHandler;
     client_ptr.get_display_handler = &getDisplayHandler;
     client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
 }
@@ -1779,6 +1876,10 @@ fn getKeyboardHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_keyboard_handl
 
 fn getLifeSpanHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_life_span_handler_t {
     return &g_life_span_handler;
+}
+
+fn getDragHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_drag_handler_t {
+    return &g_drag_handler;
 }
 
 // ============================================
@@ -1823,6 +1924,68 @@ fn onAddressChange(
     const utf8_len = cefStringToUtf8(u, &entry.url_cache_buf).len;
     // 256 byte 초과 URL은 캐시 무효화 → 폴백 (frame.get_url) 사용.
     entry.url_cache_len = if (utf8_len > 0 and utf8_len < entry.url_cache_buf.len) utf8_len else 0;
+}
+
+// ============================================
+// CEF Drag Handler — `-webkit-app-region` region 수집
+// ============================================
+
+var g_drag_handler: c.cef_drag_handler_t = undefined;
+var g_drag_handler_initialized: bool = false;
+
+fn initDragHandler() void {
+    if (g_drag_handler_initialized) return;
+    zeroCefStruct(c.cef_drag_handler_t, &g_drag_handler);
+    initBaseRefCounted(&g_drag_handler.base);
+    g_drag_handler.on_drag_enter = &onDragEnter;
+    g_drag_handler.on_draggable_regions_changed = &onDraggableRegionsChanged;
+    g_drag_handler_initialized = true;
+}
+
+fn onDragEnter(
+    _: ?*c._cef_drag_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_drag_data_t,
+    _: c.cef_drag_operations_mask_t,
+) callconv(.c) i32 {
+    return 0;
+}
+
+fn onDraggableRegionsChanged(
+    _: ?*c._cef_drag_handler_t,
+    browser: ?*c._cef_browser_t,
+    frame: ?*c._cef_frame_t,
+    regions_count: usize,
+    regions_ptr: [*c]const c.cef_draggable_region_t,
+) callconv(.c) void {
+    const br = browser orelse return;
+    const f = frame orelse return;
+    if ((frameIsMain(@ptrCast(f)) orelse false) == false) return;
+
+    const native = g_cef_native orelse return;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+    const entry = native.browsers.getPtr(handle) orelse return;
+
+    native.allocator.free(entry.drag_regions);
+    entry.drag_regions = &.{};
+
+    if (regions_count == 0 or regions_ptr == null) return;
+
+    const next = native.allocator.alloc(drag_region.DragRegion, regions_count) catch |e| {
+        log.err("draggable regions allocation failed: {s}", .{@errorName(e)});
+        return;
+    };
+    const source = regions_ptr[0..regions_count];
+    for (source, 0..) |region, i| {
+        next[i] = .{
+            .x = region.bounds.x,
+            .y = region.bounds.y,
+            .width = region.bounds.width,
+            .height = region.bounds.height,
+            .draggable = region.draggable != 0,
+        };
+    }
+    entry.drag_regions = next;
 }
 
 /// 메인 프로세스: 렌더러에서 온 메시지 처리
@@ -2646,7 +2809,6 @@ fn onRendererProcessMessageReceived(
     var name_buf: [64]u8 = undefined;
     const msg_name = cefUserfreeToUtf8(name_userfree, &name_buf);
 
-
     if (std.mem.eql(u8, msg_name, "suji:response")) {
         return handleRendererResponse(msg);
     } else if (std.mem.eql(u8, msg_name, "suji:event")) {
@@ -2664,7 +2826,6 @@ fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
 
     var result_buf: [16384]u8 = undefined;
     const result = getArgString(args, 2, &result_buf);
-
 
     const slot = seq_id % MAX_PENDING;
     const ctx = g_pending_contexts[slot] orelse g_renderer_context orelse return 0;
@@ -3381,6 +3542,8 @@ fn ensureSujiKeyableWindowClass() ?*anyopaque {
     };
     const sel = objc.sel_registerName("canBecomeKeyWindow");
     _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&returnYesBOOL), "c@:");
+    const send_event_sel = objc.sel_registerName("sendEvent:");
+    _ = objc.class_addMethod(cls, @ptrCast(send_event_sel), @ptrCast(&sujiWindowSendEvent), "v@:@");
     objc.objc_registerClassPair(cls);
     g_keyable_window_class = cls;
     return cls;
@@ -3388,6 +3551,65 @@ fn ensureSujiKeyableWindowClass() ?*anyopaque {
 
 fn returnYesBOOL(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) u8 {
     return 1;
+}
+
+fn sujiWindowSendEvent(self: ?*anyopaque, cmd: ?*anyopaque, event: ?*anyopaque) callconv(.c) void {
+    const window = self orelse return;
+    const ev = event orelse return;
+    if (shouldPerformNativeWindowDrag(window, ev)) {
+        msgSendVoid1(window, "performWindowDragWithEvent:", ev);
+        return;
+    }
+    callNSWindowSendEvent(window, cmd, ev);
+}
+
+fn callNSWindowSendEvent(window: *anyopaque, cmd: ?*anyopaque, event: *anyopaque) void {
+    const ns_window = getClass("NSWindow") orelse return;
+    const imp = objc.class_getMethodImplementation(ns_window, cmd);
+    const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(imp);
+    f(window, cmd, event);
+}
+
+fn shouldPerformNativeWindowDrag(ns_window: *anyopaque, event: *anyopaque) bool {
+    const event_type = nsEventType(event);
+    if (event_type != 1) return false; // NSEventTypeLeftMouseDown
+
+    const native = g_cef_native orelse return false;
+    const entry = findBrowserEntryByNSWindow(native, ns_window) orelse return false;
+    if (entry.drag_regions.len == 0) return false;
+
+    const content_view = msgSend(ns_window, "contentView") orelse return false;
+    const bounds = nsViewBounds(content_view);
+    const point = nsEventLocationInWindow(event);
+    const x: i32 = @intFromFloat(@floor(point.x));
+    const y: i32 = @intFromFloat(@floor(bounds.height - point.y));
+    return drag_region.isPointDraggable(entry.drag_regions, x, y);
+}
+
+fn findBrowserEntryByNSWindow(native: *CefNative, ns_window: *anyopaque) ?*CefNative.BrowserEntry {
+    var it = native.browsers.valueIterator();
+    while (it.next()) |entry| {
+        if (entry.ns_window == ns_window) return entry;
+    }
+    return null;
+}
+
+fn nsEventType(event: *anyopaque) u64 {
+    const sel = objc.sel_registerName("type");
+    const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
+    return f(event, @ptrCast(sel));
+}
+
+fn nsEventLocationInWindow(event: *anyopaque) NSPoint {
+    const sel = objc.sel_registerName("locationInWindow");
+    const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
+    return f(event, @ptrCast(sel));
+}
+
+fn nsViewBounds(view: *anyopaque) NSRect {
+    const sel = objc.sel_registerName("bounds");
+    const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    return f(view, @ptrCast(sel));
 }
 
 /// Quit 메뉴/Cmd+Q action 타깃. 기본 NSApplication의 `terminate:`를 부르면 CEF가
@@ -3520,7 +3742,9 @@ fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {
     const NSColor = getClass("NSColor") orelse return;
     const sel = objc.sel_registerName("colorWithRed:green:blue:alpha:");
     const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, f64, f64, f64, f64) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const color = fn_ptr(NSColor, @ptrCast(sel),
+    const color = fn_ptr(
+        NSColor,
+        @ptrCast(sel),
         @as(f64, @floatFromInt(r)) / 255.0,
         @as(f64, @floatFromInt(g)) / 255.0,
         @as(f64, @floatFromInt(b)) / 255.0,
