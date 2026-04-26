@@ -1,0 +1,72 @@
+---
+title: 보안 모델
+description: fs sandbox + cache 격리 + V8 binding surface + IPC 검증 — Electron 비교
+---
+
+# 보안 모델
+
+Suji가 frontend(renderer)에서 backend로 향하는 모든 호출에 적용하는 보안 정책.
+Electron 모델과 동등한 곳, 다른 곳을 정확히 구분한다.
+
+## 노출 surface (V8 binding)
+
+`window.__suji__` 오브젝트에 노출되는 것:
+
+| 항목 | 종류 | 비고 |
+|------|------|------|
+| `invoke(backend, request)` | native (V8 binding) | backend cmd 호출, Promise<JSON> |
+| `emit(event, data)` | native (V8 binding) | EventBus 브로드캐스트 |
+| `core(request)` | JS helper | `invoke("__core__", ...)` shorthand |
+| `on(event, cb)` / `off(event, cb)` | JS helper | EventBus listener |
+| `platform` | string 상수 | `"macos" | "linux" | "windows"` |
+
+**Electron 비교**: Electron의 `contextIsolation: true`는 preload script만 main world에
+노출. Suji는 모든 surface를 main world의 `window.__suji__`에 직접 바인딩 (Electron의
+contextIsolation:false 동등). 노출 surface가 매우 작아 (`invoke` + `emit` 2개 native만)
+실제 위험은 cmd-level 정책에 의존한다.
+
+**Phase 7+ 검토**: Electron-style contextBridge isolated world 분리. 우선순위 낮음 —
+현재 surface가 작고 fs/cache 격리로 대부분의 위험은 차단됨.
+
+## fs sandbox
+
+frontend가 호출하는 `fs.*` cmd는 path 화이트리스트 + traversal 가드로 검증.
+[`fs.mdx`](./fs.mdx) 참고.
+
+```json
+{ "fs": { "allowedRoots": ["~/Documents/myapp"] } }
+```
+
+| 보호 | 동작 |
+|------|------|
+| Default safe | `allowedRoots` 미설정/빈 배열 → 모든 frontend `fs.*` 차단 |
+| Path traversal | `..` path component는 모든 mode에서 항상 차단 (`["*"]`도 우회 불가) |
+| Prefix-extension 차단 | `/foo/bar` 허용 시 `/foo/barX` 통과 X (separator boundary 가드) |
+| `~` 사전 expand | config load 시 1회 — hot path env lookup 0회 |
+| Backend 우회 | thread-local 마커 — backend SDK 호출은 무제한 (사용자 자체 코드 신뢰) |
+
+## 앱 데이터 / cache 격리
+
+`config.app.name` 키로 OS 표준 user-data 디렉토리 아래 자동 격리. 한 시스템에 여러
+Suji 앱이 있어도 cookie/localStorage/IndexedDB/Service Worker가 서로 영향 없음.
+[`cache.mdx`](./cache.mdx) 참고.
+
+## IPC 유효성 검사
+
+`__core__` channel을 통해 들어오는 모든 IPC 메시지가 통과:
+
+| 검증 | 거부 시 응답 |
+|------|---|
+| payload size ≤ 32KB | `error: "payload_too_large"` |
+| `cmd` 필드 존재 | `error: "missing_cmd"` |
+| `cmd` 영숫자/언더스코어만 | `error: "invalid_cmd"` (newline/quote 등 injection 차단) |
+| 알려진 cmd | unknown 시 `error: "unknown_cmd"` (typo / version mismatch 진단) |
+| cmd 정확 매치 | substring 매치 X (commit 350f9d6에서 제거됨) |
+
+## 알려진 한계 / 후속
+
+- **CSP (Content-Security-Policy)**: 사용자 HTML에 직접 추가 — Suji default 자동 추가는
+  후속 (`config.security.csp`).
+- **Network/Shell allowlist**: fs만 sandbox 됨. shell.openExternal 등 cmd-level 화이트리스트는 후속.
+- **macOS App Sandbox 자동화**: `entitlements.plist` + CEF Helper 5개 자동 부착 후속.
+- **외부 origin 제한**: iframe / external URL 띄울 때 origin 화이트리스트는 후속 검토.

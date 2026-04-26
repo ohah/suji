@@ -598,6 +598,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
+    if (config.security.csp) |csp_val| cef.setCspValue(csp_val);
 
     // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
     // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
@@ -764,6 +765,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
+    if (config.security.csp) |csp_val| cef.setCspValue(csp_val);
 
     // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
     var event_bus = suji.EventBus.init(allocator, runtime.io);
@@ -1065,6 +1067,7 @@ fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: [
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     // 32KB — clipboard write 등 큰 payload 수용. 이전 4KB는 8KB 클립보드 쓰기에서 잘려
     // 응답 빈 string(undefined로 resolve)됨.
+    if (data.len > 32768) return coreError(response_buf, "__core__", "payload_too_large");
     var req_buf: [32768]u8 = undefined;
     const req_clean: []const u8 = if (util.extractJsonString(data, "request")) |request_str|
         unescapeJson(request_str, &req_buf)
@@ -1072,6 +1075,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         data;
 
     const cmd = util.extractJsonString(req_clean, "cmd") orelse "";
+    if (cmd.len == 0) return coreError(response_buf, "__core__", "missing_cmd");
+    // cmd는 영숫자/언더스코어만 허용 — IPC injection (newline/quote 등) 차단.
+    for (cmd) |c| {
+        const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or c == '_';
+        if (!ok) return coreError(response_buf, "__core__", "invalid_cmd");
+    }
 
     if (std.mem.eql(u8, cmd, "create_window")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1454,10 +1464,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return out[0..out_pos];
     }
 
-    // 알 수 없는 cmd — default ack. raw cmd JSON이 아니거나 매치 실패한 모든 경우 도달.
-    const result = "{\"from\":\"zig-core\",\"msg\":\"hello from zig\"}";
-    @memcpy(response_buf[0..result.len], result);
-    return response_buf[0..result.len];
+    // 알 수 없는 cmd — 표준 에러 응답. caller가 typo / version mismatch 진단 가능.
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":false,\"error\":\"unknown_cmd\"}}",
+        .{cmd},
+    ) catch null;
 }
 
 // ============================================

@@ -209,6 +209,41 @@ describe("core", () => {
     expect(result.backends).toBeArray();
     expect(result.backends.length).toBeGreaterThanOrEqual(3);
   });
+
+  // ============================================
+  // IPC validation (Phase 7 보안)
+  // ============================================
+  test("missing cmd → error: missing_cmd", async () => {
+    const r: any = await page.evaluate(() => (window as any).__suji__.core('{}'));
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("missing_cmd");
+  });
+
+  test("invalid cmd char (newline injection) → error: invalid_cmd", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core('{"cmd":"ping\\ninjected"}')
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("invalid_cmd");
+  });
+
+  test("invalid cmd char (quote injection) → error: invalid_cmd", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core('{"cmd":"ping\\"break"}')
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("invalid_cmd");
+  });
+
+  test("unknown cmd → error: unknown_cmd (typo 진단)", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core('{"cmd":"this_cmd_does_not_exist"}')
+    );
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("unknown_cmd");
+    // cmd echo 포함 (사용자 typo 인식 도움).
+    expect(r.cmd).toBe("this_cmd_does_not_exist");
+  });
 });
 
 // ============================================

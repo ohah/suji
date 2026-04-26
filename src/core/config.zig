@@ -16,6 +16,7 @@ pub const Config = struct {
     asset_dir: [:0]const u8 = "assets",
     frontend: Frontend = .{},
     fs: Fs = .{},
+    security: Security = .{},
 
     // _arena는 포인터로 보관. 값으로 담으면 `Config { ._arena = arena }` 시점에 arena의
     // 내부 state(buffer 리스트 head)가 COPY되고, 이후 동일 arena를 거치는 할당(예:
@@ -86,6 +87,12 @@ pub const Config = struct {
     /// allowedRoots 비어있으면 frontend fs 완전 차단. ["*"] = unrestricted (escape hatch).
     pub const Fs = struct {
         allowed_roots: []const [:0]const u8 = &.{},
+    };
+
+    /// 보안 정책 — `suji://` custom protocol 응답에 적용되는 헤더.
+    /// csp 비어있으면 cef.zig의 default CSP 적용. 비활성화는 `"disabled"` 명시.
+    pub const Security = struct {
+        csp: ?[:0]const u8 = null,
     };
 
     /// 시작 시 자동 생성할 창의 최대 개수.
@@ -298,6 +305,12 @@ pub const Config = struct {
                         config.fs.allowed_roots = list.toOwnedSlice(a) catch &.{};
                     }
                 }
+            }
+        }
+
+        if (root.get("security")) |sec_val| {
+            if (sec_val == .object) {
+                if (getStr(sec_val.object, "csp")) |s| config.security.csp = dupeStr(a, s);
             }
         }
 

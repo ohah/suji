@@ -3476,9 +3476,44 @@ fn rhGetResponseHeaders(
     setCefString(&mime_str, rh.mime);
     resp.set_mime_type.?(resp, &mime_str);
 
+    // CSP default — suji:// 프로덕션 응답에만 적용. dev (file:// / dev_url)은 vite hmr
+    // 때문에 'unsafe-inline'/'unsafe-eval' 필요해 별도 정책 — 그쪽은 사용자 HTML 메타 태그.
+    // config.security.csp가 비어있으면 안전한 default. ["disabled"]면 미적용 (escape hatch).
+    setSecurityHeaders(resp);
+
     if (response_length) |rl| {
         rl.* = @intCast(rh.data.len);
     }
+}
+
+/// suji:// 응답에 추가하는 보안 헤더 묶음 — CSP 외 X-Content-Type-Options, X-Frame-Options.
+/// CEF의 response.set_header_by_name(name, value, overwrite=1) 사용.
+fn setSecurityHeaders(resp: *c.cef_response_t) void {
+    setRespHeader(resp, "Content-Security-Policy", g_csp_value);
+    setRespHeader(resp, "X-Content-Type-Options", "nosniff");
+    setRespHeader(resp, "X-Frame-Options", "SAMEORIGIN");
+}
+
+fn setRespHeader(resp: *c.cef_response_t, name: []const u8, value: []const u8) void {
+    var name_str: c.cef_string_t = .{};
+    var value_str: c.cef_string_t = .{};
+    setCefString(&name_str, name);
+    setCefString(&value_str, value);
+    resp.set_header_by_name.?(resp, &name_str, &value_str, 1);
+}
+
+/// CSP value — config.security.csp에서 주입 받음. default는 suji:// scheme 안전 정책.
+/// 사용자가 설정 시 그 값으로 override.
+pub var g_csp_value: []const u8 =
+    "default-src 'self' suji:; " ++
+    "script-src 'self' suji: 'unsafe-inline'; " ++
+    "style-src 'self' suji: 'unsafe-inline'; " ++
+    "img-src 'self' suji: data: blob:; " ++
+    "connect-src 'self' suji: ws: wss: http: https:; " ++
+    "font-src 'self' suji: data:;";
+
+pub fn setCspValue(value: []const u8) void {
+    if (value.len > 0) g_csp_value = value;
 }
 
 fn rhRead(

@@ -3101,6 +3101,50 @@ test "회귀: 4 backend SDK fs typed wrapper (statTyped/readdirTyped)" {
     try std.testing.expect(std.mem.indexOf(u8, app_src, "pub const FileType = enum") != null);
 }
 
+test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    // payload size guard (32KB), missing/invalid/unknown cmd 표준 에러.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "payload_too_large") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "missing_cmd") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "invalid_cmd") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "unknown_cmd") != null);
+
+    // CSP value config 주입 + cef.setCspValue 호출.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.setCspValue") != null);
+
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_src);
+    // suji:// 응답에 CSP + X-Content-Type-Options + X-Frame-Options.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "Content-Security-Policy") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "X-Content-Type-Options") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "X-Frame-Options") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setSecurityHeaders") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "g_csp_value") != null);
+
+    const cfg_src2 = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/config.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(cfg_src2);
+    // Security config struct + parser.
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "pub const Security = struct") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "csp:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src2, "root.get(\"security\")") != null);
+}
+
 test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 분기" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
