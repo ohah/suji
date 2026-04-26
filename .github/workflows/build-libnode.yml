@@ -48,11 +48,24 @@ jobs:
           NODE_SRC="/tmp/node-v${{ inputs.node_version }}"
           mkdir -p /tmp/libnode-pkg/include
 
+          # Node.js 빌드 결과는 versioned name (`libnode.<ABI>.dylib` / `libnode.so.<ABI>`).
+          # suji 바이너리가 link되는 install_name도 동일하게 versioned이므로 release tar에
+          # `libnode.dylib` (or .so) + versioned symlink 둘 다 포함해 dyld 양쪽 lookup 모두 성공.
           if [ "${{ matrix.platform }}" = "macos-arm64" ]; then
-            cp "$NODE_SRC/out/Release/libnode."*.dylib /tmp/libnode-pkg/libnode.dylib
+            ORIG=$(ls "$NODE_SRC/out/Release/libnode."*.dylib | head -1)
+            ABI_VER=$(basename "$ORIG" .dylib | sed 's/^libnode\.//')
+            cp "$ORIG" /tmp/libnode-pkg/libnode.dylib
+            ln -sf libnode.dylib "/tmp/libnode-pkg/libnode.${ABI_VER}.dylib"
+            echo "macOS libnode ABI: $ABI_VER"
           else
-            cp "$NODE_SRC/out/Release/lib/libnode.so."* /tmp/libnode-pkg/libnode.so || \
-            cp "$NODE_SRC/out/Release/libnode.so."* /tmp/libnode-pkg/libnode.so || true
+            ORIG=$(ls "$NODE_SRC/out/Release/lib/libnode.so."* 2>/dev/null | head -1)
+            if [ -z "$ORIG" ]; then
+              ORIG=$(ls "$NODE_SRC/out/Release/libnode.so."* 2>/dev/null | head -1)
+            fi
+            ABI_VER=$(basename "$ORIG" | sed 's/^libnode\.so\.//')
+            cp "$ORIG" /tmp/libnode-pkg/libnode.so
+            ln -sf libnode.so "/tmp/libnode-pkg/libnode.so.${ABI_VER}"
+            echo "Linux libnode ABI: $ABI_VER"
           fi
 
           cp -R "$NODE_SRC/deps/v8/include/"* /tmp/libnode-pkg/include/
@@ -62,7 +75,9 @@ jobs:
           done
 
           cd /tmp/libnode-pkg
+          # symlink 보존 — `tar czf`는 기본적으로 symlink를 그대로 archive에 저장.
           tar czf /tmp/libnode-${{ inputs.node_version }}-${{ matrix.platform }}.tar.gz .
+          tar tzf /tmp/libnode-${{ inputs.node_version }}-${{ matrix.platform }}.tar.gz | head
 
       - name: Upload (Unix)
         if: runner.os != 'Windows'
