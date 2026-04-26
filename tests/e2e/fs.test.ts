@@ -228,4 +228,34 @@ describe("fs core commands", () => {
     expect(r.success).toBe(false);
     expect(r.error).toBe("forbidden");
   });
+
+  test("sandbox: 정상 파일명에 `..` 포함은 통과 (false positive 회귀)", async () => {
+    const file = `${FIXTURE_BASE}/my..file.txt`;
+    await core({ cmd: "fs_mkdir", path: FIXTURE_BASE, recursive: true });
+    const wr = await core<{ success: boolean }>({
+      cmd: "fs_write_file",
+      path: file,
+      text: "ok",
+    });
+    expect(wr.success).toBe(true);
+    const rd = await core<{ success: boolean; text: string }>({ cmd: "fs_read_file", path: file });
+    expect(rd.success).toBe(true);
+    expect(rd.text).toBe("ok");
+  });
+
+  test("sandbox: write/stat/mkdir/rm/readdir 모두 `..` 거부", async () => {
+    const evil = `${FIXTURE_BASE}/../../etc/passwd`;
+    const cmds: Array<[string, Record<string, unknown>]> = [
+      ["fs_write_file", { path: evil, text: "x" }],
+      ["fs_stat", { path: evil }],
+      ["fs_mkdir", { path: evil, recursive: false }],
+      ["fs_rm", { path: evil, recursive: false, force: false }],
+      ["fs_readdir", { path: evil }],
+    ];
+    for (const [cmd, payload] of cmds) {
+      const r = await core<{ success: boolean; error: string }>({ cmd, ...payload });
+      expect(r.success).toBe(false);
+      expect(r.error).toBe("forbidden");
+    }
+  });
 });

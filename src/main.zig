@@ -1635,49 +1635,71 @@ pub fn setGlobalConfig(c: *const suji.Config) void {
 /// BackendRegistry __core__ 채널 핸들러가 set, frontend IPC origin은 false 유지.
 threadlocal var g_in_backend_invoke: bool = false;
 
-extern "c" fn getenv(name: [*:0]const u8) ?[*:0]const u8;
-
-/// `~`을 $HOME으로 확장한 절대 경로를 caller buffer에 복사.
-fn expandHome(path: []const u8, out: []u8) ?[]const u8 {
-    if (path.len == 0) return null;
-    if (path[0] != '~') {
-        if (path.len > out.len) return null;
-        @memcpy(out[0..path.len], path);
-        return out[0..path.len];
+/// path를 separator 단위로 split해 단일 ".." segment가 있는지 검사.
+/// substring 검사 (`my..file.txt`도 reject되는 false positive)와 달리 정확한 component 단위.
+fn hasParentTraversalSegment(path: []const u8) bool {
+    var iter = std.mem.tokenizeAny(u8, path, "/\\");
+    while (iter.next()) |seg| {
+        if (std.mem.eql(u8, seg, "..")) return true;
     }
-    const home_cstr: ?[*:0]const u8 = getenv("HOME");
-    const home = std.mem.span(home_cstr orelse return null);
-    const rest = path[1..];
-    const total = home.len + rest.len;
-    if (total > out.len) return null;
-    @memcpy(out[0..home.len], home);
-    @memcpy(out[home.len..total], rest);
-    return out[0..total];
+    return false;
+}
+
+/// `prefix` 다음 위치가 separator 또는 string 끝인지 — boundary check로
+/// `/foo/barX` vs root `/foo/bar` prefix-extension attack 차단.
+fn pathHasRootBoundary(path: []const u8, prefix: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, prefix)) return false;
+    if (path.len == prefix.len) return true;
+    // root가 separator로 끝나면 startsWith만으로 boundary OK.
+    if (prefix.len > 0 and (prefix[prefix.len - 1] == '/' or prefix[prefix.len - 1] == '\\')) return true;
+    const next = path[prefix.len];
+    return next == '/' or next == '\\';
 }
 
 /// frontend가 호출한 fs.* path가 sandbox 통과하는지 검증.
-/// (1) `..` 토큰 거부 — security-critical, 모든 mode에 항상 적용,
+/// (1) `..` path component 거부 — security-critical, 모든 mode에 항상 적용,
 /// (2) config 미설정/roots 비어있음 → 차단,
-/// (3) ["*"]면 무제한 (`..` 외),
-/// (4) `~` 확장 후 allowed_roots 중 하나로 startsWith 매치.
+/// (3) `*` element 포함 시 무제한 escape hatch (`..` 가드는 여전히),
+/// (4) 그 외 — root prefix + boundary 매치 (config load 시 ~ 사전 expand됨).
 fn isPathAllowedForFrontend(path: []const u8) bool {
-    // path traversal 가드는 mode 무관 항상 적용 — escape hatch ["*"]도 우회 불가.
-    if (std.mem.indexOf(u8, path, "..") != null) return false;
+    if (hasParentTraversalSegment(path)) return false;
 
     const cfg = g_config orelse return false;
     const roots = cfg.fs.allowed_roots;
     if (roots.len == 0) return false;
-    if (roots.len == 1 and std.mem.eql(u8, roots[0], "*")) return true;
 
-    var resolved_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-    const resolved = expandHome(path, &resolved_buf) orelse return false;
-
-    var root_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
     for (roots) |root| {
-        const root_resolved = expandHome(root, &root_buf) orelse continue;
-        if (std.mem.startsWith(u8, resolved, root_resolved)) return true;
+        if (std.mem.eql(u8, root, "*")) return true;
+        if (pathHasRootBoundary(path, root)) return true;
     }
     return false;
+}
+
+test "hasParentTraversalSegment: component vs substring" {
+    try std.testing.expect(hasParentTraversalSegment("../etc/passwd"));
+    try std.testing.expect(hasParentTraversalSegment("/foo/../bar"));
+    try std.testing.expect(hasParentTraversalSegment("foo/bar/.."));
+    try std.testing.expect(hasParentTraversalSegment("foo\\..\\bar"));
+    // false positive 방지 — `..`이 component가 아닌 filename 일부면 통과.
+    try std.testing.expect(!hasParentTraversalSegment("/foo/my..file.txt"));
+    try std.testing.expect(!hasParentTraversalSegment("/foo/..hidden"));
+    try std.testing.expect(!hasParentTraversalSegment("/foo/archive..bak"));
+    try std.testing.expect(!hasParentTraversalSegment("/normal/path"));
+}
+
+test "pathHasRootBoundary: separator boundary 가드 (prefix-extension 차단)" {
+    // 정상 — root 정확 매치 또는 separator로 끝나면 허용.
+    try std.testing.expect(pathHasRootBoundary("/foo/bar", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("/foo/bar/baz", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("/foo/bar/", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("/foo/bar/baz", "/foo/bar/"));
+    // 차단 — prefix-extension attack.
+    try std.testing.expect(!pathHasRootBoundary("/foo/barX", "/foo/bar"));
+    try std.testing.expect(!pathHasRootBoundary("/foo/bar_secret", "/foo/bar"));
+    try std.testing.expect(!pathHasRootBoundary("/other", "/foo/bar"));
+    // Windows 경로 separator.
+    try std.testing.expect(pathHasRootBoundary("C:\\foo\\bar\\baz", "C:\\foo\\bar"));
+    try std.testing.expect(!pathHasRootBoundary("C:\\foo\\barX", "C:\\foo\\bar"));
 }
 
 fn fsSandboxCheck(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {

@@ -774,7 +774,7 @@ pub const fs = struct {
     /// 실패 시 null (path 거부 / not_found / sandbox forbidden 등).
     pub fn statTyped(path: []const u8) ?Stat {
         const raw = stat(path) orelse return null;
-        if (util.extractJsonBool(raw, "success") orelse false == false) return null;
+        if (!(util.extractJsonBool(raw, "success") orelse false)) return null;
         const type_str = util.extractJsonString(raw, "type") orelse return null;
         const size = util.extractJsonInt(raw, "size") orelse return null;
         const mtime = util.extractJsonInt(raw, "mtime") orelse return null;
@@ -790,7 +790,7 @@ pub const fs = struct {
     /// raw 응답 lifetime 안에서만 유효.
     /// 호출 패턴: const raw = fs.readdir(p); const entries = fs.parseEntries(raw, &buf);
     pub fn parseEntries(raw_response: []const u8, out: []DirEntry) ?usize {
-        if (util.extractJsonBool(raw_response, "success") orelse false == false) return null;
+        if (!(util.extractJsonBool(raw_response, "success") orelse false)) return null;
         const entries_start = std.mem.indexOf(u8, raw_response, "\"entries\":[") orelse return 0;
         var pos = entries_start + "\"entries\":[".len;
         var count: usize = 0;

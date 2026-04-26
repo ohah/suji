@@ -110,6 +110,24 @@ pub const Config = struct {
         return a.dupeZ(u8, s) catch @ptrCast(s);
     }
 
+    /// `~` / `~/path` 만 확장. `~user/foo` 같은 POSIX 형태는 명시 거부 (보안 — 잘못된
+    /// expand로 sandbox bypass 위험). "*" sentinel은 그대로 보존.
+    fn expandHomeAtLoad(a: std.mem.Allocator, raw: []const u8) [:0]const u8 {
+        if (raw.len == 0) return dupeStr(a, raw);
+        if (std.mem.eql(u8, raw, "*")) return dupeStr(a, raw);
+        if (raw[0] != '~') return dupeStr(a, raw);
+        if (raw.len > 1 and raw[1] != '/' and raw[1] != '\\') return dupeStr(a, raw);
+        const home_key: []const u8 = if (@import("builtin").os.tag == .windows) "USERPROFILE" else "HOME";
+        const home = runtime.env(home_key) orelse return dupeStr(a, raw);
+        const rest = raw[1..];
+        const total = home.len + rest.len;
+        const buf = a.alloc(u8, total + 1) catch return dupeStr(a, raw);
+        @memcpy(buf[0..home.len], home);
+        @memcpy(buf[home.len..total], rest);
+        buf[total] = 0;
+        return buf[0..total :0];
+    }
+
     // ============================================
     // JSON ObjectMap 필드 추출 헬퍼 — 16+ 회 반복되는 `if (m.get("X")) |v| if (v == .Y)` 패턴 단축.
     // 매 필드마다 (1) key 존재 (2) 타입 일치 두 가드를 하나로 묶음.
@@ -269,13 +287,15 @@ pub const Config = struct {
                 const fs_obj = fs_val.object;
                 if (fs_obj.get("allowedRoots")) |roots_val| {
                     if (roots_val == .array) {
-                        const arr = roots_val.array.items;
-                        if (a.alloc([:0]const u8, arr.len)) |roots| {
-                            for (arr, 0..) |item, i| {
-                                roots[i] = if (item == .string) dupeStr(a, item.string) else dupeStr(a, "");
-                            }
-                            config.fs.allowed_roots = roots;
-                        } else |_| {}
+                        var list = std.ArrayList([:0]const u8).empty;
+                        for (roots_val.array.items) |item| {
+                            if (item != .string) continue;
+                            // "*"는 escape hatch sentinel — expand 없이 그대로 보존.
+                            // 그 외는 ~ 사전 확장해 핫 패스에서 다시 resolve 안 하게.
+                            const expanded = expandHomeAtLoad(a, item.string);
+                            list.append(a, expanded) catch continue;
+                        }
+                        config.fs.allowed_roots = list.toOwnedSlice(a) catch &.{};
                     }
                 }
             }
@@ -294,3 +314,23 @@ pub const Config = struct {
         return 0;
     }
 };
+
+test "expandHomeAtLoad: ~ 단독 / ~/ prefix만 expand" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    // `*` sentinel은 그대로 (escape hatch).
+    try std.testing.expectEqualStrings("*", Config.expandHomeAtLoad(a, "*"));
+    // 빈 문자열은 그대로.
+    try std.testing.expectEqualStrings("", Config.expandHomeAtLoad(a, ""));
+    // 절대 경로는 그대로.
+    try std.testing.expectEqualStrings("/Users/x/myapp", Config.expandHomeAtLoad(a, "/Users/x/myapp"));
+    // ~user 같은 POSIX 형태는 expand 거부 — 이후 startsWith 매치 실패라 안전.
+    try std.testing.expectEqualStrings("~user/secret", Config.expandHomeAtLoad(a, "~user/secret"));
+    // ~ + ~/... 만 expand. HOME env 의존이라 결과 prefix만 검사.
+    const tilde = Config.expandHomeAtLoad(a, "~/Documents/myapp");
+    if (tilde[0] != '~') {
+        try std.testing.expect(std.mem.endsWith(u8, tilde, "/Documents/myapp"));
+    }
+}

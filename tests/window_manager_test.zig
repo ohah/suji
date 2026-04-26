@@ -3047,6 +3047,14 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "pub const Fs = struct") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "allowed_roots") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "allowedRoots") != null);
+    // Path traversal은 component 단위로 검사 (substring 아님 — false positive 방지).
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "hasParentTraversalSegment") != null);
+    // root prefix는 separator boundary 가드 — /foo/barX vs /foo/bar 차단.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "pathHasRootBoundary") != null);
+    // wildcard "*"는 element 순회 — ["*","..."] 같은 mixed config도 escape.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "if (std.mem.eql(u8, root, \"*\")) return true") != null);
+    // ~ 확장은 config load 시 사전 처리 — 핫 패스 expandHome 제거.
+    try std.testing.expect(std.mem.indexOf(u8, cfg_src, "expandHomeAtLoad") != null);
 }
 
 test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {
