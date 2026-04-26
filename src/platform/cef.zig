@@ -2860,12 +2860,13 @@ fn warnUnsupportedOptionsOnce(opts: WindowInitOpts) void {
 fn hasMacOnlyOption(opts: WindowInitOpts) bool {
     const ap = opts.appearance;
     const cs = opts.constraints;
+    // parent_id는 WindowInitOpts에 없음 — createWindow에서 별도 처리(line 390 인근).
+    // 본 함수는 WindowInitOpts에 들어오는 필드만 검사.
     return !ap.frame or ap.transparent or
         ap.background_color != null or ap.title_bar_style != .default or
         cs.always_on_top or cs.fullscreen or
         cs.min_width != 0 or cs.min_height != 0 or
-        cs.max_width != 0 or cs.max_height != 0 or
-        opts.parent_id != null;
+        cs.max_width != 0 or cs.max_height != 0;
 }
 
 // ============================================

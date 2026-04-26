@@ -121,11 +121,14 @@ fn setupLogFile(out_file: *std.Io.File) !void {
     var fname_buf: [128]u8 = undefined;
     var path_buf: [2048]u8 = undefined;
     var dir_buf2: [1024]u8 = undefined;
-    // std.c.getpid() — POSIX에선 pid_t 반환, Windows에선 opaque stub. 플랫폼별 분기.
-    const pid: i32 = if (builtin.os.tag == .windows)
-        @intCast(std.os.windows.kernel32.GetCurrentProcessId())
-    else
-        @intCast(std.c.getpid());
+    // std.c.getpid() — POSIX에선 pid_t 반환, Windows엔 없음. 플랫폼별 분기.
+    // Zig 0.16에서 std.os.windows.kernel32.GetCurrentProcessId가 제거돼 extern 직접 선언.
+    const pid: i32 = if (builtin.os.tag == .windows) blk: {
+        const k32 = struct {
+            extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) std.os.windows.DWORD;
+        };
+        break :blk @intCast(k32.GetCurrentProcessId());
+    } else @intCast(std.c.getpid());
     const full_path = try logger.buildLogFilePath(
         .{ .out = &path_buf, .dir = &dir_buf2, .fname = &fname_buf },
         home,
