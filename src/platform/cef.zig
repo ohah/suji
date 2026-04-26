@@ -3127,6 +3127,7 @@ fn msgSendVoid1(target: ?*anyopaque, sel_name: [:0]const u8, arg: ?*anyopaque) v
 /// onBeforeClose 시점엔 AppKit이 close-time 비동기 focus 재할당을 미루고 있어
 /// 즉시 makeKey가 덮어써짐 — afterDelay:0으로 다음 런루프 틱에 예약하면 안정.
 fn deferMakeKeyAndOrderFront(ns_win: *anyopaque) void {
+    if (!comptime is_macos) return;
     const sel_perform = objc.sel_registerName("performSelector:withObject:afterDelay:");
     const sel_make_key = objc.sel_registerName("makeKeyAndOrderFront:");
     const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, f64) callconv(.c) void =

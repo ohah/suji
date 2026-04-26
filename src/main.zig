@@ -57,7 +57,7 @@ pub fn main(init: std.process.Init) !void {
         if (log_file_opt) |f| f.close(runtime.io);
     }
 
-    log.info("suji starting pid={d} log_level={s}", .{ std.c.getpid(), @tagName(log_level) });
+    log.info("suji starting pid={d} log_level={s}", .{ getCurrentPid(), @tagName(log_level) });
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
 
@@ -96,6 +96,19 @@ pub fn main(init: std.process.Init) !void {
 }
 
 
+/// 현재 프로세스 PID — POSIX는 `std.c.getpid()`, Windows는 kernel32.GetCurrentProcessId.
+/// Zig 0.16 std.os.windows.kernel32에서 GetCurrentProcessId가 제거돼 extern 직접 선언.
+/// std.c.getpid()는 Windows에선 opaque stub(`?*anyopaque`)이라 직접 사용 시 fmt {d} 실패.
+fn getCurrentPid() i32 {
+    if (builtin.os.tag == .windows) {
+        const k32 = struct {
+            extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) std.os.windows.DWORD;
+        };
+        return @intCast(k32.GetCurrentProcessId());
+    }
+    return @intCast(std.c.getpid());
+}
+
 /// `~/.suji/logs/` 에 실행별 로그 파일 생성 + 7일 지난 오래된 로그 cleanup.
 /// 실패하면 파일 출력 없이 stderr만 사용 (호출자가 error를 삼킴).
 fn setupLogFile(out_file: *std.Io.File) !void {
@@ -121,14 +134,7 @@ fn setupLogFile(out_file: *std.Io.File) !void {
     var fname_buf: [128]u8 = undefined;
     var path_buf: [2048]u8 = undefined;
     var dir_buf2: [1024]u8 = undefined;
-    // std.c.getpid() — POSIX에선 pid_t 반환, Windows엔 없음. 플랫폼별 분기.
-    // Zig 0.16에서 std.os.windows.kernel32.GetCurrentProcessId가 제거돼 extern 직접 선언.
-    const pid: i32 = if (builtin.os.tag == .windows) blk: {
-        const k32 = struct {
-            extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) std.os.windows.DWORD;
-        };
-        break :blk @intCast(k32.GetCurrentProcessId());
-    } else @intCast(std.c.getpid());
+    const pid: i32 = getCurrentPid();
     const full_path = try logger.buildLogFilePath(
         .{ .out = &path_buf, .dir = &dir_buf2, .fname = &fname_buf },
         home,
