@@ -6,9 +6,9 @@ package windows
 
 import (
 	"fmt"
-	"strings"
 
 	suji "github.com/ohah/suji-go"
+	"github.com/ohah/suji-go/internal/jsonesc"
 )
 
 // Create a new window. optsJSON은 cmd 객체에 들어갈 필드 (예:
@@ -25,14 +25,14 @@ func Create(optsJSON string) string {
 
 // CreateSimple — 타이틀/URL만으로 익명 창 생성.
 func CreateSimple(title, url string) string {
-	opts := fmt.Sprintf(`"title":"%s","url":"%s"`, escapeJSON(title), escapeJSON(url))
+	opts := fmt.Sprintf(`"title":"%s","url":"%s"`, jsonesc.Full(title), jsonesc.Full(url))
 	return Create(opts)
 }
 
 func LoadURL(windowID uint32, url string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"load_url","windowId":%d,"url":"%s"}`,
-		windowID, escapeJSON(url),
+		windowID, jsonesc.Full(url),
 	))
 }
 
@@ -48,7 +48,7 @@ func Reload(windowID uint32, ignoreCache bool) string {
 func ExecuteJavaScript(windowID uint32, code string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"execute_javascript","windowId":%d,"code":"%s"}`,
-		windowID, escapeJSON(code),
+		windowID, jsonesc.Full(code),
 	))
 }
 
@@ -114,7 +114,7 @@ type FindOptions struct {
 func FindInPage(windowID uint32, text string, opts FindOptions) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"find_in_page","windowId":%d,"text":"%s","forward":%t,"matchCase":%t,"findNext":%t}`,
-		windowID, escapeJSON(text), opts.Forward, opts.MatchCase, opts.FindNext,
+		windowID, jsonesc.Full(text), opts.Forward, opts.MatchCase, opts.FindNext,
 	))
 }
 
@@ -129,14 +129,14 @@ func StopFindInPage(windowID uint32, clearSelection bool) string {
 func PrintToPDF(windowID uint32, path string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"print_to_pdf","windowId":%d,"path":"%s"}`,
-		windowID, escapeJSON(path),
+		windowID, jsonesc.Full(path),
 	))
 }
 
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,
-		windowID, escapeJSON(title),
+		windowID, jsonesc.Full(title),
 	))
 }
 
@@ -152,21 +152,3 @@ func SetBounds(windowID uint32, b SetBoundsArgs) string {
 	))
 }
 
-// escapeJSON — `"` `\\` 이스케이프 + control char drop. JSON 리터럴 안전성 보장.
-func escapeJSON(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '"':
-			b.WriteString(`\"`)
-		case r == '\\':
-			b.WriteString(`\\`)
-		case r < 0x20:
-			// drop
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}

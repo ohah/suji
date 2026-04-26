@@ -8,10 +8,8 @@ import (
 )
 
 // Full — `\n`/`\t`/`\r`/`\b`/`\f`을 escape sequence로 보존, 그 외 control char(< 0x20)는
-// `\u00XX`. 클립보드 / dialog 메시지처럼 줄바꿈/탭 의미가 있는 payload용.
-//
-// `windows.escapeJSON`(control char drop)과 의도적으로 다름 — 그쪽은 창 타이틀처럼
-// 줄바꿈이 무의미한 케이스용.
+// `\u00XX`. 모든 SDK 모듈 (clipboard/shell/notification/tray/dialog/fs/menu/global_shortcut/
+// windows)에서 공유하는 단일 escape 정책.
 func Full(s string) string {
 	var b strings.Builder
 	b.Grow(len(s) + 8)

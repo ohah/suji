@@ -1930,12 +1930,12 @@ fn parseApplicationMenuItems(arena: std.mem.Allocator, values: []const std.json.
 fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) MenuParseError!cef.ApplicationMenuItem {
     if (value != .object) return error.InvalidMenuItem;
     const obj = value.object;
-    const typ = jsonString(obj, "type") orelse "";
+    const typ = util.jsonObjectGetString(obj,"type") orelse "";
     if (std.mem.eql(u8, typ, "separator")) return .separator;
 
-    const label = jsonString(obj, "label") orelse "";
-    const click = jsonString(obj, "click") orelse "";
-    const enabled = jsonBool(obj, "enabled") orelse true;
+    const label = util.jsonObjectGetString(obj,"label") orelse "";
+    const click = util.jsonObjectGetString(obj,"click") orelse "";
+    const enabled = util.jsonObjectGetBool(obj,"enabled") orelse true;
 
     if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
         const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
@@ -1950,7 +1950,7 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
         return .{ .checkbox = .{
             .label = label,
             .click = click,
-            .checked = jsonBool(obj, "checked") orelse false,
+            .checked = util.jsonObjectGetBool(obj,"checked") orelse false,
             .enabled = enabled,
         } };
     }
@@ -1959,18 +1959,6 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
         .click = click,
         .enabled = enabled,
     } };
-}
-
-fn jsonString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
-    const v = obj.get(key) orelse return null;
-    if (v != .string) return null;
-    return v.string;
-}
-
-fn jsonBool(obj: std.json.ObjectMap, key: []const u8) ?bool {
-    const v = obj.get(key) orelse return null;
-    if (v != .bool) return null;
-    return v.bool;
 }
 
 /// notification id 카운터 — `suji-notif-{N}` 형식 식별자 발급.

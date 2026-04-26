@@ -241,6 +241,20 @@ pub fn extractJsonFloat(json: []const u8, key: []const u8) ?f64 {
     return std.fmt.parseFloat(f64, json[start..end]) catch null;
 }
 
+/// `std.json.ObjectMap`에서 string field 추출 — type 미스매치/누락 시 null.
+pub fn jsonObjectGetString(obj: std.json.ObjectMap, key: []const u8) ?[]const u8 {
+    const v = obj.get(key) orelse return null;
+    if (v != .string) return null;
+    return v.string;
+}
+
+/// `std.json.ObjectMap`에서 bool field 추출 — type 미스매치/누락 시 null.
+pub fn jsonObjectGetBool(obj: std.json.ObjectMap, key: []const u8) ?bool {
+    const v = obj.get(key) orelse return null;
+    if (v != .bool) return null;
+    return v.bool;
+}
+
 test "escapeJsonStrFull: newline/tab/CR 보존 (\\n/\\t/\\r) + 백슬래시/따옴표 이스케이프" {
     var dst: [128]u8 = undefined;
     const n = escapeJsonStrFull("a\nb\tc\rd\"e\\f", &dst).?;
