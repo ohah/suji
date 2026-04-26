@@ -196,3 +196,129 @@ describe("17-A.7: getChildViews", () => {
     expect(r.viewIds).toEqual([]);
   });
 });
+
+// ============================================
+// Phase 17-A.9: 보강 — 이벤트 frontend 도달 + 멀티 host 격리 + remove/re-add
+// ============================================
+
+describe("17-A.9: lifecycle 이벤트 frontend 도달", () => {
+  test("createView 시 window:view-created 이벤트가 frontend listener에 도달", async () => {
+    const host = await freshHost();
+    // listener 등록 — 다음 createView가 trigger.
+    await page.evaluate(() => {
+      (window as any).__viewCreatedEvents = [];
+      const sj = (window as any).suji ?? (window as any).__suji__;
+      sj.on?.("window:view-created", (data: unknown) => {
+        (window as any).__viewCreatedEvents.push(data);
+      });
+    });
+
+    const view = await mkView(host);
+
+    // 이벤트 propagation 대기 (CEF process message가 다음 런루프 틱에 도달)
+    await new Promise((r) => setTimeout(r, 100));
+    const events = (await page.evaluate(() => (window as any).__viewCreatedEvents)) as Array<
+      { viewId: number; hostId: number }
+    >;
+    const matched = events.find((e) => e.viewId === view && e.hostId === host);
+    expect(matched).toBeDefined();
+  });
+
+  test("destroyView 시 window:view-destroyed 이벤트가 frontend listener에 도달", async () => {
+    const host = await freshHost();
+    const view = await mkView(host);
+
+    await page.evaluate(() => {
+      (window as any).__viewDestroyedEvents = [];
+      const sj = (window as any).suji ?? (window as any).__suji__;
+      sj.on?.("window:view-destroyed", (data: unknown) => {
+        (window as any).__viewDestroyedEvents.push(data);
+      });
+    });
+
+    await coreCall({ cmd: "destroy_view", viewId: view });
+    await new Promise((r) => setTimeout(r, 100));
+    const events = (await page.evaluate(() => (window as any).__viewDestroyedEvents)) as Array<
+      { viewId: number; hostId: number }
+    >;
+    const matched = events.find((e) => e.viewId === view && e.hostId === host);
+    expect(matched).toBeDefined();
+  });
+});
+
+describe("17-A.9: multiple hosts isolation", () => {
+  test("두 host에 각각 view 만들면 cross-affect 없음", async () => {
+    const host_a = await freshHost();
+    const host_b = await freshHost();
+    const va = await mkView(host_a);
+    const vb1 = await mkView(host_b);
+    const vb2 = await mkView(host_b);
+
+    // host_a getChildViews는 [va], host_b는 [vb1, vb2]
+    const ra = (await coreCall({ cmd: "get_child_views", hostId: host_a })) as { viewIds: number[] };
+    const rb = (await coreCall({ cmd: "get_child_views", hostId: host_b })) as { viewIds: number[] };
+    expect(ra.viewIds).toEqual([va]);
+    expect(rb.viewIds).toEqual([vb1, vb2]);
+
+    // host_a의 view를 destroyView해도 host_b 영향 X
+    await coreCall({ cmd: "destroy_view", viewId: va });
+    const rb_after = (await coreCall({ cmd: "get_child_views", hostId: host_b })) as { viewIds: number[] };
+    expect(rb_after.viewIds).toEqual([vb1, vb2]);
+  });
+});
+
+describe("17-A.9: removeChildView 후 재부착", () => {
+  test("removeChildView → getChildViews에서 사라짐 → addChildView로 복원", async () => {
+    const host = await freshHost();
+    const view = await mkView(host);
+
+    await coreCall({ cmd: "remove_child_view", hostId: host, viewId: view });
+    const r1 = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
+    expect(r1.viewIds).toEqual([]);
+
+    await coreCall({ cmd: "add_child_view", hostId: host, viewId: view });
+    const r2 = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
+    expect(r2.viewIds).toEqual([view]);
+  });
+});
+
+describe("17-A.9: destroyView 후 getChildViews 감소", () => {
+  test("3 view 중 1 destroy → getChildViews 길이 2", async () => {
+    const host = await freshHost();
+    const a = await mkView(host);
+    const b = await mkView(host);
+    const c = await mkView(host);
+
+    const before = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
+    expect(before.viewIds).toEqual([a, b, c]);
+
+    await coreCall({ cmd: "destroy_view", viewId: b });
+    const after = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
+    expect(after.viewIds).toEqual([a, c]);
+  });
+});
+
+describe("17-A.9: webContents API view 호환 — executeJavaScript", () => {
+  test("executeJavaScript on viewId returns ok:true (실제 JS 실행)", async () => {
+    const host = await freshHost();
+    const view = await mkView(host, { width: 200, height: 200 });
+    const r = (await coreCall({
+      cmd: "execute_javascript",
+      windowId: view,
+      code: "1 + 1;",
+    })) as { ok: boolean };
+    expect(r.ok).toBe(true);
+  });
+
+  test("isLoading on viewId returns ok:true (webContents 응답 도달)", async () => {
+    const host = await freshHost();
+    const view = await mkView(host, { width: 200, height: 200 });
+    const r = (await coreCall({ cmd: "is_loading", windowId: view })) as {
+      ok: boolean;
+      loading: boolean;
+    };
+    // ok:true는 핸들러가 view를 .window와 똑같이 dispatch했다는 시그널 (17-A.5 회귀 가드).
+    // (getURL은 OnAddressChange가 view에 대해 cache 채우는 시점이 비결정적이라 별도 검증 X)
+    expect(r.ok).toBe(true);
+  });
+});

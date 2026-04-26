@@ -1389,3 +1389,122 @@ test "17-A.5: handleSetTitle on viewId returns ok:false (NotAWindow)" {
     try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
     try std.testing.expectEqual(@as(usize, 0), native.set_title_calls);
 }
+
+// ============================================
+// Phase 17-A.8: 누락 IPC 시나리오 — 응답 cmd 필드, ViewNotInHost, non-existent
+// ============================================
+
+test "17-A.8: 모든 view IPC 응답이 정확한 cmd 필드를 포함" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    const cases = [_]struct { out: []const u8, expected_cmd: []const u8 }{
+        .{ .out = ipc.handleDestroyView(view, &buf, &wm).?, .expected_cmd = "\"cmd\":\"destroy_view\"" },
+    };
+    for (cases) |c| {
+        try std.testing.expect(std.mem.indexOf(u8, c.out, c.expected_cmd) != null);
+    }
+
+    // destroyView 후 view는 destroyed 상태 — 새 view 만들어 나머지 cmd 검증
+    const v2 = try wm.createView(.{ .host_window_id = host });
+    var b2: [256]u8 = undefined;
+    const r_add = ipc.handleAddChildView(.{ .host_id = host, .view_id = v2, .index = 0 }, &b2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r_add, "\"cmd\":\"add_child_view\"") != null);
+    try std.testing.expectEqual(@as(?u32, 0), native.last_reorder_index);
+
+    const r_top = ipc.handleSetTopView(host, v2, &b2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r_top, "\"cmd\":\"set_top_view\"") != null);
+
+    const r_bounds = ipc.handleSetViewBounds(.{ .view_id = v2, .width = 100, .height = 100 }, &b2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r_bounds, "\"cmd\":\"set_view_bounds\"") != null);
+
+    const r_vis = ipc.handleSetViewVisible(v2, false, &b2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r_vis, "\"cmd\":\"set_view_visible\"") != null);
+
+    const r_rm = ipc.handleRemoveChildView(host, v2, &b2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r_rm, "\"cmd\":\"remove_child_view\"") != null);
+}
+
+test "17-A.8: handleAddChildView with explicit index 전달 (native에 그대로 도달)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    var buf: [256]u8 = undefined;
+    // index=0 (bottom)
+    _ = ipc.handleAddChildView(.{ .host_id = host, .view_id = v2, .index = 0 }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(?u32, 0), native.last_reorder_index);
+    // index=null (top)
+    _ = ipc.handleAddChildView(.{ .host_id = host, .view_id = v1, .index = null }, &buf, &wm).?;
+    // top 위치는 list.items.len = 2 → reorder index 1 (제거 후 끝 삽입)
+    try std.testing.expectEqual(@as(?u32, 1), native.last_reorder_index);
+}
+
+test "17-A.8: handleAddChildView with view from different host returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host_a = try wm.create(.{});
+    const host_b = try wm.create(.{});
+    const view_a = try wm.createView(.{ .host_window_id = host_a });
+
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleAddChildView(.{ .host_id = host_b, .view_id = view_a }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.reorder_view_calls);
+}
+
+test "17-A.8: handleDestroyView with non-existent viewId returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleDestroyView(99999, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_view_calls);
+}
+
+test "17-A.8: handleSetViewBounds with non-existent viewId returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleSetViewBounds(.{
+        .view_id = 99999,
+        .width = 100,
+        .height = 100,
+    }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_view_bounds_calls);
+}
+
+test "17-A.8: handleSetViewVisible with non-existent viewId returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+    const out = ipc.handleSetViewVisible(99999, true, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_view_visible_calls);
+}
+
+test "17-A.8: handleRemoveChildView with view never added returns ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    const host_a = try wm.create(.{});
+    const host_b = try wm.create(.{});
+    const view_a = try wm.createView(.{ .host_window_id = host_a });
+
+    var buf: [256]u8 = undefined;
+    // host_b로 view_a remove 시도 → ViewNotInHost → ok:false
+    const out = ipc.handleRemoveChildView(host_b, view_a, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
+}

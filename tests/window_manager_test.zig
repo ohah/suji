@@ -4434,3 +4434,190 @@ test "17-A.6: createView with InvalidName does NOT emit view-created" {
     }));
     try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
 }
+
+// ============================================
+// Phase 17-A.8: 누락 시나리오 — kind 분기 누락 메서드 / edge case / sink=null /
+// 자동 정리 전이 / deinit + live view
+// ============================================
+
+test "17-A.8: focus on view succeeds (kind 무관 webContents API)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try wm.focus(view);
+    try std.testing.expectEqual(@as(usize, 1), native.focus_calls);
+}
+
+test "17-A.8: tryClose on view returns NotAWindow" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try std.testing.expectError(window.Error.NotAWindow, wm.tryClose(view));
+}
+
+test "17-A.8: addChildView index 경계값 (0/middle/count/count+10)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+    const v3 = try wm.createView(.{ .host_window_id = host });
+    // 초기 순서: [v1, v2, v3]
+
+    // v3을 index=0 (bottom)으로
+    try wm.addChildView(host, v3, 0);
+    var ids = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(ids);
+    try std.testing.expectEqualSlices(u32, &.{ v3, v1, v2 }, ids);
+
+    // v1을 index=1 (middle)으로
+    try wm.addChildView(host, v1, 1);
+    std.testing.allocator.free(ids);
+    ids = try wm.getChildViews(host, std.testing.allocator);
+    try std.testing.expectEqualSlices(u32, &.{ v3, v1, v2 }, ids);
+
+    // v3을 index=count (10) — 끝(top) clamp
+    try wm.addChildView(host, v3, 10);
+    std.testing.allocator.free(ids);
+    ids = try wm.getChildViews(host, std.testing.allocator);
+    try std.testing.expectEqualSlices(u32, &.{ v1, v2, v3 }, ids);
+}
+
+test "17-A.8: createView/destroyView 이벤트 발화 sink=null에서도 crash X" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    // setEventSink 호출 안 함 — sink=null
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try wm.destroyView(view);
+    try wm.destroy(host);
+    // crash 없으면 통과
+}
+
+test "17-A.8: NativeCreateFailed 시 view-created 이벤트 X" {
+    var native = TestNative{ .fail_next_create_view = true };
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{};
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    sink.reset();
+    try std.testing.expectError(window.Error.NativeCreateFailed, wm.createView(.{ .host_window_id = host }));
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}
+
+test "17-A.8: close가 prevent됐을 때 view-destroyed 발화 X (host 살아있음)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    var sink = TestSink{ .prevent_for = "window:close" };
+    defer sink.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    sink.reset();
+
+    const proceeded = try wm.close(host);
+    try std.testing.expect(!proceeded);
+
+    var view_destroyed_count: usize = 0;
+    for (sink.events.items) |ev| {
+        if (std.mem.eql(u8, ev.name, "window:view-destroyed")) view_destroyed_count += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 0), view_destroyed_count);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_view_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.destroy_calls);
+}
+
+test "17-A.8: deinit 시 live view + window 모두 정리 (memory)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    const host = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host });
+    _ = try wm.createView(.{ .host_window_id = host });
+    wm.deinit();
+    // testing.allocator가 leak 검출 — view ArrayList + Window struct 모두 정리되어야
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_calls);
+    try std.testing.expectEqual(@as(usize, 2), native.destroy_view_calls);
+}
+
+test "17-A.8: destroyView가 같은 host의 다른 view에 영향 X" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+    try wm.destroyView(v1);
+
+    try std.testing.expect(wm.get(v1).?.destroyed);
+    try std.testing.expect(!wm.get(v2).?.destroyed);
+    const ids = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(ids);
+    try std.testing.expectEqualSlices(u32, &.{v2}, ids);
+}
+
+test "17-A.8: removeChildView 후 addChildView 다시 부착하면 visible 복원" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+
+    try wm.removeChildView(host, view);
+    try std.testing.expect(!wm.get(view).?.visible_in_host);
+    try std.testing.expectEqual(@as(?bool, false), native.last_set_view_visible);
+
+    try wm.addChildView(host, view, null);
+    try std.testing.expect(wm.get(view).?.visible_in_host);
+    // remove → false, add → was_visible=false라 setViewVisible(true) 호출
+    try std.testing.expectEqual(@as(?bool, true), native.last_set_view_visible);
+}
+
+test "17-A.8: 두 host가 view를 cross-affect 하지 않음 (host_a.destroy → host_b views 무사)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host_a = try wm.create(.{});
+    const host_b = try wm.create(.{});
+    _ = try wm.createView(.{ .host_window_id = host_a });
+    const v_b = try wm.createView(.{ .host_window_id = host_b });
+
+    try wm.destroy(host_a);
+
+    try std.testing.expect(wm.get(host_a).?.destroyed);
+    try std.testing.expect(!wm.get(host_b).?.destroyed);
+    try std.testing.expect(!wm.get(v_b).?.destroyed);
+    // host_b의 view list 그대로
+    const ids = try wm.getChildViews(host_b, std.testing.allocator);
+    defer std.testing.allocator.free(ids);
+    try std.testing.expectEqualSlices(u32, &.{v_b}, ids);
+}
+
+test "17-A.8: destroyView 후 같은 view id에 addChildView → WindowDestroyed" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try wm.destroyView(view);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.addChildView(host, view, null));
+}
+
+test "17-A.8: getChildViews on view (kind=.view) returns NotAWindow" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const view = try wm.createView(.{ .host_window_id = host });
+    try std.testing.expectError(window.Error.NotAWindow, wm.getChildViews(view, std.testing.allocator));
+}
