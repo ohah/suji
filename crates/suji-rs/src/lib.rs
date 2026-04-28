@@ -564,6 +564,20 @@ pub mod clipboard {
     pub fn available_formats() -> Option<String> {
         invoke("__core__", r#"{"cmd":"clipboard_available_formats"}"#)
     }
+
+    /// PNG 이미지 쓰기 — base64. 응답: `{"success":bool}`.
+    /// 한도: raw PNG ~8KB (1차).
+    pub fn write_image(png_base64: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &crate::serde_json::json!({ "cmd": "clipboard_write_image", "data": png_base64 }).to_string(),
+        )
+    }
+
+    /// PNG 이미지 읽기 (base64). raw JSON: `{"data":"..."}`.
+    pub fn read_image() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_read_image"}"#)
+    }
 }
 
 pub mod power_monitor {

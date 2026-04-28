@@ -877,6 +877,19 @@ test "shell.trashItem: path 필드 전송" {
     }.run);
 }
 
+test "clipboard.writeImage / readImage IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.writeImage("iVBORw0KGgo=");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_write_image\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "iVBORw0KGgo=") != null);
+
+            _ = app_mod.clipboard.readImage();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_read_image\"") != null);
+        }
+    }.run);
+}
+
 test "clipboard.has / availableFormats IPC" {
     try withInvokeCore(struct {
         fn run() !void {

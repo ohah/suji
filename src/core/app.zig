@@ -803,6 +803,21 @@ pub const clipboard = struct {
     pub fn availableFormats() ?[]const u8 {
         return coreCmd("clipboard_available_formats", "");
     }
+
+    /// PNG 이미지 쓰기 — base64 string. 응답: `{"success":bool}`.
+    /// 한도: raw PNG ~8KB (1차, base64 ~12KB request 한도). 큰 이미지는 후속.
+    pub fn writeImage(png_base64: []const u8) ?[]const u8 {
+        var d_buf: [12 * 1024]u8 = undefined;
+        const d_n = util.escapeJsonStrFull(png_base64, &d_buf) orelse return null;
+        var fields_buf: [12 * 1024 + 32]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"data\":\"{s}\"", .{d_buf[0..d_n]}) catch return null;
+        return coreCmd("clipboard_write_image", fields);
+    }
+
+    /// PNG 이미지 읽기 (base64). 응답: `{"data":"..."}` (없으면 빈 문자열).
+    pub fn readImage() ?[]const u8 {
+        return coreCmd("clipboard_read_image", "");
+    }
 };
 
 pub const powerMonitor = struct {

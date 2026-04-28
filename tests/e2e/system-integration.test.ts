@@ -232,6 +232,40 @@ describe("screen.getDisplayNearestPoint", () => {
   });
 });
 
+describe("clipboard.writeImage / readImage", () => {
+  // 1x1 transparent PNG (67 bytes). canonical valid PNG signature + IHDR + IDAT + IEND.
+  const PNG_1X1_TRANSPARENT_BASE64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+
+  test("PNG write → read round-trip (signature + 길이 매칭)", async () => {
+    const w = await core<{ success: boolean }>({ cmd: "clipboard_write_image", data: PNG_1X1_TRANSPARENT_BASE64 });
+    expect(w.success).toBe(true);
+
+    const r = await core<{ data: string }>({ cmd: "clipboard_read_image" });
+    expect(r.data.length).toBeGreaterThan(0);
+    // base64 decode 후 첫 8 byte = PNG signature 89 50 4E 47 0D 0A 1A 0A.
+    const decoded = Buffer.from(r.data, "base64");
+    expect(decoded[0]).toBe(0x89);
+    expect(decoded[1]).toBe(0x50);
+    expect(decoded[2]).toBe(0x4e);
+    expect(decoded[3]).toBe(0x47);
+
+    await core({ cmd: "clipboard_clear" });
+  });
+
+  test("PNG 없으면 readImage는 빈 문자열", async () => {
+    await core({ cmd: "clipboard_write_text", text: "no-image-here" });
+    const r = await core<{ data: string }>({ cmd: "clipboard_read_image" });
+    expect(r.data).toBe("");
+    await core({ cmd: "clipboard_clear" });
+  });
+
+  test("invalid base64는 success:false", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "clipboard_write_image", data: "!!!not-base64!!!" });
+    expect(r.success).toBe(false);
+  });
+});
+
 describe("clipboard.has / availableFormats", () => {
   test("HTML write 후 has('public.html') = true + 포맷 list 포함", async () => {
     await core({ cmd: "clipboard_write_html", html: "<i>x</i>" });

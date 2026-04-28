@@ -1175,6 +1175,44 @@ pub fn clipboardClear() void {
     _ = msgSend(pb, "clearContents");
 }
 
+const PASTEBOARD_TYPE_PNG: [*:0]const u8 = "public.png";
+
+/// 클립보드에 PNG 바이트 쓰기 (Electron `clipboard.writeImage`).
+/// 다른 type 함께 지움 (clearContents). NSPasteboard `setData:forType:`.
+pub fn clipboardWriteImagePng(png_bytes: []const u8) bool {
+    if (!comptime is_macos) return false;
+    if (png_bytes.len == 0) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    _ = msgSend(pb, "clearContents");
+
+    const data = CFDataCreate(null, png_bytes.ptr, @intCast(png_bytes.len)) orelse return false;
+    defer CFRelease(data);
+
+    const ns_type = nsStringFromCstr(PASTEBOARD_TYPE_PNG) orelse return false;
+    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return setFn(pb, @ptrCast(objc.sel_registerName("setData:forType:")), data, ns_type) != 0;
+}
+
+/// 클립보드에서 PNG 바이트 읽기 (Electron `clipboard.readImage`).
+/// out_buf 길이만큼 복사. 비어있거나 PNG 아니면 빈 slice.
+pub fn clipboardReadImagePng(out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const NSPasteboard = getClass("NSPasteboard") orelse return out_buf[0..0];
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return out_buf[0..0];
+    const ns_type = nsStringFromCstr(PASTEBOARD_TYPE_PNG) orelse return out_buf[0..0];
+    const dataFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const data = dataFn(pb, @ptrCast(objc.sel_registerName("dataForType:")), ns_type) orelse return out_buf[0..0];
+
+    const ptr = CFDataGetBytePtr(data);
+    const len: usize = @intCast(CFDataGetLength(data));
+    const n = @min(len, out_buf.len);
+    @memcpy(out_buf[0..n], ptr[0..n]);
+    return out_buf[0..n];
+}
+
 /// 클립보드에 주어진 type이 있는지 (Electron `clipboard.has(format)`).
 /// type_cstr는 NSPasteboard UTI ("public.utf8-plain-text" / "public.html" 등).
 pub fn clipboardHas(type_cstr: [*:0]const u8) bool {

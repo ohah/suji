@@ -1320,7 +1320,7 @@ suji build → 결과물:
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ (분량 중 — sqlite plugin) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
-| 클립보드 — 이미지/HTML/format 검사 | `clipboard.readImage` / `writeImage` / `readHTML` / `has` / `availableFormats` | -- | 🟡 HTML ✅ (`readHTML`/`writeHTML`) + format 검사 ✅ (`has(format)` / `availableFormats()` — UTI 배열). 이미지 (`public.png` / `public.tiff`)는 후속 |
+| 클립보드 — 이미지/HTML/format 검사 | `clipboard.readImage` / `writeImage` / `readHTML` / `has` / `availableFormats` | -- | ✅ HTML (`readHTML`/`writeHTML`) + format 검사 (`has`/`availableFormats`) + PNG image (`writeImage(base64)` / `readImage()` — NSPasteboard `public.png`, raw 한도 ~8KB 1차). TIFF/RTF는 후속 |
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
 | Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ❌ (현재 menu는 menubar/tray만 — 임의 위치 popup은 NSMenu `popUpMenuPositioningItem:atLocation:inView:`) |
 | 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |

@@ -49,3 +49,15 @@ func Has(format string) string {
 func AvailableFormats() string {
 	return suji.Invoke("__core__", `{"cmd":"clipboard_available_formats"}`)
 }
+
+// WriteImage writes a PNG image (base64-encoded). Limits: raw PNG ~8KB (1차).
+// Response: `{"success":bool}`.
+func WriteImage(pngBase64 string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_image","data":"%s"}`, jsonesc.Full(pngBase64)))
+}
+
+// ReadImage reads PNG bytes from clipboard as base64. Empty string if missing.
+// Response: `{"data":"..."}`.
+func ReadImage() string {
+	return suji.Invoke("__core__", `{"cmd":"clipboard_read_image"}`)
+}

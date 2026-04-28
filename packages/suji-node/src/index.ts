@@ -586,6 +586,18 @@ export const clipboard = {
     const r = await invoke<{ formats: string[] }>('__core__', { cmd: 'clipboard_available_formats' });
     return r.formats ?? [];
   },
+
+  /** PNG 이미지 쓰기 (base64). 한도: raw PNG ~8KB (1차). */
+  async writeImage(pngBase64: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_image', data: pngBase64 });
+    return r.success === true;
+  },
+
+  /** PNG 이미지 읽기 (base64). 없으면 빈 문자열. */
+  async readImage(): Promise<string> {
+    const r = await invoke<{ data: string }>('__core__', { cmd: 'clipboard_read_image' });
+    return r.data ?? '';
+  },
 };
 
 export const powerMonitor = {

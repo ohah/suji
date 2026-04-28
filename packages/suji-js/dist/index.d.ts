@@ -291,6 +291,10 @@ export declare const clipboard: {
     has(format: string): Promise<boolean>;
     /** 클립보드에 등록된 모든 format (UTI) 배열. */
     availableFormats(): Promise<string[]>;
+    /** PNG 이미지 쓰기 — base64 문자열. 다른 type 함께 지움. (Electron `writeImage`). */
+    writeImage(pngBase64: string): Promise<boolean>;
+    /** PNG 이미지 읽기 — base64 반환. PNG 아니면 빈 문자열. */
+    readImage(): Promise<string>;
 };
 export interface NotificationOptions {
     title: string;

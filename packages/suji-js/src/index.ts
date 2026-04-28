@@ -532,6 +532,18 @@ export const clipboard = {
     const r = await coreCall<{ formats: string[] }>({ cmd: "clipboard_available_formats" });
     return r.formats ?? [];
   },
+
+  /** PNG 이미지 쓰기 — base64 문자열. 다른 type 함께 지움. (Electron `writeImage`). */
+  async writeImage(pngBase64: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_image", data: pngBase64 });
+    return r.success === true;
+  },
+
+  /** PNG 이미지 읽기 — base64 반환. PNG 아니면 빈 문자열. */
+  async readImage(): Promise<string> {
+    const r = await coreCall<{ data: string }>({ cmd: "clipboard_read_image" });
+    return r.data ?? "";
+  },
 };
 
 // ============================================
