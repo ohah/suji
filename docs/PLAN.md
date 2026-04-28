@@ -1331,7 +1331,10 @@ suji build → 결과물:
 | 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | ❌ (분량 중 — CGWindowListCopyWindowInfo + ScreenCaptureKit) |
 | 크래시 리포터 | `crashReporter.start` | -- | ❌ (분량 중 — Apple Crashpad/Breakpad 연동) |
 | 인앱 결제 | `inAppPurchase` (Mac App Store) | -- | ❌ (분량 대 — App Store 의존) |
-| Mac dock badge | `app.dock.setBadge` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape round-trip 3 e2e |
+| Mac dock badge | `app.dock.setBadge` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape/멀티바이트(이모지+한글) round-trip 4 e2e |
+| dock 바운스 (사용자 주의 환기) | `app.requestUserAttention` | -- | ✅ macOS NSApp `requestUserAttention:` / `cancelUserAttentionRequest:` — `app_attention_request`/`app_attention_cancel` IPC, critical/informational + cancel guard 4 e2e (active app 시 id=0 lenient) |
+| 표준 디렉토리 경로 | `app.getPath(name)` | `path` 플러그인 | ✅ Electron 표준 7 키 (home/appData/userData/temp/desktop/documents/downloads) — `app_get_path` IPC + `resolveAppDataDir` OS 분기 (macOS/Linux/Windows/fallback). `buildAppCachePath`와 분기 공유. 5 SDK + e2e |
+| 휴지통 (trashItem) | `shell.trashItem` | `fs` 플러그인 | ✅ macOS NSFileManager `trashItemAtURL:resultingItemURL:error:` — `shell_trash_item` IPC, 임시 파일 trash + 비존재 경로 false 2 e2e |
 | 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | 🟡 `globalShortcut`로 가능, 전용 API 없음 |
 
 ### 개발자 경험 (DX)
@@ -1340,7 +1343,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
-| TypeScript 타입 자동 생성 | - | specta 연동 | ❌ |
+| TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`). `suji types` CLI 자동 추출은 후속 |
 | 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | 🟡 (`suji init` 존재, 제한적) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |
@@ -1369,9 +1372,19 @@ suji build → 결과물:
 11. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. **자동 업데이트** — 배포 후 유지보수에 필수
-14. **`child_process` / HTTP / SQLite SDK** — 흔한 use case (Zig std.process.Child / std.http 노출만 — 분량 소)
+14. 🟡 **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite plugin만 후속.
 15. 🟡 **`safeStorage` (Keychain 암호화) — macOS 부분 완료**. `safe_storage_set/get/delete` IPC 3개 + Keychain Services (SecItemAdd/CopyMatching/Delete). idempotent set + escape-safe value (e2e 4 케이스). Win DPAPI / Linux libsecret 후속.
-16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge/requestUserAttention) — 🟡 macOS 부분 완료. screen.getAllDisplays / dock badge / powerSaveBlocker / requestUserAttention(=dock bounce, NSApp `requestUserAttention:`) 모두 구현 + e2e (`tests/e2e/system-integration.test.ts`). powerMonitor (suspend/resume/lock NSWorkspace 알림) + Linux/Windows 후속.
+16. 🟡 **시스템 통합 (macOS 거의 완료)** — `tests/e2e/system-integration.test.ts` 33 e2e. 구현된 항목:
+    - `screen.getAllDisplays` (NSScreen)
+    - `app.dock.setBadge`/`getBadge` (NSDockTile, 멀티바이트 round-trip 포함)
+    - `powerSaveBlocker.start`/`stop` (IOPMAssertion, idempotent guard)
+    - `safeStorage.setItem`/`getItem`/`deleteItem` (Keychain Services, multi-service 격리)
+    - `app.requestUserAttention`/`cancelUserAttentionRequest` (NSApp dock bounce)
+    - `app.getPath` (7 표준 키: home/appData/userData/temp/desktop/documents/downloads)
+    - `shell.trashItem` (NSFileManager)
+    - `powerMonitor` (NSWorkspace 옵저버 4 채널 — sleep 시뮬레이션 어려워 단위/grep만)
+
+    Linux/Windows 후속: 모든 macOS-only 구현의 cross-platform 동등 구현 필요.
 17. 🟡 **`windows.createView` (Electron WebContentsView 동등) — Phase 17-A (macOS) 부분 완료**.
     한 창 contentView 안에 wrapper NSView + child NSView+CefBrowser 합성. id 풀 공유 +
     모든 webContents API view 호환. 8 SDK 메서드 + view-created/view-destroyed 이벤트 +
@@ -1381,8 +1394,17 @@ suji build → 결과물:
     close / NSView ops defer / setHidden only 모두 root 못 잡음. 권장 패턴: setViewVisible
     토글 + host close 시 자동 정리. 17-B에서 CEF Views API(`CefWindow` + `CefBrowserView`)로
     architecture migration 검토 — 자세한 plan: [docs/plans/17-B-cef-views-architecture.md](./plans/17-B-cef-views-architecture.md).
-18. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
-19. **TypeScript 타입 자동 생성** — Tauri specta 동등 (개발자 경험)
+18. ✅ **`webRequest` 인터셉트** — declarative URL glob blocklist + dynamic listener
+    (RV_CONTINUE_ASYNC + pending callback storage, 256개) cancel/allow round-trip.
+    `webRequest:before-request` / `webRequest:will-request` / `webRequest:completed` 3 채널.
+    5 SDK + e2e 13. timeout fallback은 후속.
+19. ✅ **스플래시 패턴** — 별도 API 없이 `windows.create` + `is_loading` polling + `destroy_window`
+    조합. e2e (`tests/e2e/run-splash.sh`).
+20. 🟡 **TypeScript 타입 자동 생성 (옵션 A 1차 + B 부분)** — frontend(`@suji/api`) /
+    Node(`@suji/node`) SujiHandlers augment + invoke conditional generic, Zig comptime
+    `typeToTs` + App.schema chain, Rust specta v2 re-export. `suji types` CLI는 후속.
+21. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
+22. **SQLite plugin** — 흔한 DB use case. 위 #14의 "SQLite SDK" 잔여 부분.
 
 ---
 
