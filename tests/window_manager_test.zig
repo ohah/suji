@@ -4735,3 +4735,92 @@ test "회귀: cef.zig가 Phase 5-2 public API 유지" {
         try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
     }
 }
+
+// ==================== Phase 5: show/hide 이벤트 ====================
+
+test "setVisible: false → true 전이 시 window:show, true → false 시 window:hide 발화" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset(); // 'window:created'는 이미 발화 — show/hide 검증 전 비움.
+
+    // 기본 상태가 visible=true이므로 다시 true는 no-op.
+    try wm.setVisible(id, true);
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+    try std.testing.expectEqual(@as(usize, 0), native.set_visible_calls);
+
+    // true → false
+    try wm.setVisible(id, false);
+    try std.testing.expectEqual(@as(usize, 1), native.set_visible_calls);
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:hide", sink.events.items[0].name);
+
+    // false → true
+    try wm.setVisible(id, true);
+    try std.testing.expectEqual(@as(usize, 2), native.set_visible_calls);
+    try std.testing.expectEqual(@as(usize, 2), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:show", sink.events.items[1].name);
+}
+
+test "setVisible 멱등 — 동일 상태 반복은 native 호출 + 이벤트 모두 X" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.reset();
+
+    try wm.setVisible(id, false);
+    try wm.setVisible(id, false);
+    try wm.setVisible(id, false);
+    try std.testing.expectEqual(@as(usize, 1), native.set_visible_calls);
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+}
+
+test "setVisible payload에 windowId + name 포함 (name 있을 때)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{ .name = "settings" });
+    sink.reset();
+
+    try wm.setVisible(id, false);
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"name\":\"settings\""));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"windowId\":1"));
+}
+
+test "show/hide 이벤트 채널 상수" {
+    try std.testing.expectEqualStrings("window:show", window.events.show);
+    try std.testing.expectEqualStrings("window:hide", window.events.hide);
+}
+
+test "setVisible: destroyed/unknown id 가드 — native 호출 X + 이벤트 X" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    sink.reset();
+
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setVisible(id, false));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setVisible(999, false));
+    try std.testing.expectEqual(@as(usize, 0), native.set_visible_calls);
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}

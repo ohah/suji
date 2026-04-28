@@ -695,6 +695,17 @@ pub fn handleSetFullscreen(req: SetFullscreenReq, response_buf: []u8, wm: *windo
     return respondWindowOp(response_buf, "set_fullscreen", req.window_id, ok);
 }
 
+pub const SetVisibleReq = struct {
+    window_id: u32,
+    visible: bool,
+};
+
+pub fn handleSetVisible(req: SetVisibleReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setVisible(req.window_id, req.visible)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_visible", req.window_id, ok);
+}
+
 const WmBoolGetFn = *const fn (*window.WindowManager, u32) window.Error!bool;
 
 fn handleStateGet(

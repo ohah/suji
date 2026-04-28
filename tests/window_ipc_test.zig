@@ -1607,3 +1607,42 @@ test "Phase 5 라이프사이클 핸들러: 작은 버퍼면 null (회귀)" {
     try std.testing.expectEqual(@as(usize, 0), native.minimize_calls);
     try std.testing.expectEqual(@as(usize, 0), native.set_fullscreen_calls);
 }
+
+// ==================== Phase 5-3: set_visible IPC ====================
+
+test "handleSetVisible: visible 전달 + ok 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    const r1 = ipc.handleSetVisible(.{ .window_id = 1, .visible = false }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"set_visible\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":true") != null);
+
+    // 동일 상태 반복은 멱등 — wm.setVisible 내부에서 early return이라 ok=true (요청 자체는 성공).
+    const r2 = ipc.handleSetVisible(.{ .window_id = 1, .visible = false }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":true") != null);
+}
+
+test "handleSetVisible: 알 수 없는 id면 ok:false (native 미호출)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+
+    const r = ipc.handleSetVisible(.{ .window_id = 999, .visible = true }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":false") != null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_visible_calls);
+}
+
+test "handleSetVisible: 작은 버퍼면 null (회귀)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var tiny: [3]u8 = undefined;
+    try std.testing.expect(ipc.handleSetVisible(.{ .window_id = 1, .visible = false }, &tiny, &wm) == null);
+    try std.testing.expectEqual(@as(usize, 0), native.set_visible_calls);
+}

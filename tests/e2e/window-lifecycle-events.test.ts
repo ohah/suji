@@ -335,6 +335,58 @@ describe("window lifecycle events", () => {
     await new Promise((r) => setTimeout(r, 200));
   });
 
+  // ==================== Phase 5: show / hide ====================
+
+  test("set_visible(false) → window:hide, set_visible(true) → window:show", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-show-hide",
+      x: 200, y: 200, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 500));
+
+    const hideCol = collect<{ windowId: number }>("window:hide", 1500);
+    await core({ cmd: "set_visible", windowId: id, visible: false });
+    const hideEvs = (await hideCol).filter((e) => e.windowId === id);
+    expect(hideEvs.length).toBeGreaterThan(0);
+
+    const showCol = collect<{ windowId: number }>("window:show", 1500);
+    await core({ cmd: "set_visible", windowId: id, visible: true });
+    const showEvs = (await showCol).filter((e) => e.windowId === id);
+    expect(showEvs.length).toBeGreaterThan(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  test("set_visible 멱등 — 동일 visible 두 번이면 두 번째는 이벤트 X", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-visible-idempotent",
+      x: 250, y: 250, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 시작 상태가 visible=true. 다시 true → no-op.
+    const showCol = collect<{ windowId: number }>("window:show", 800);
+    await core({ cmd: "set_visible", windowId: id, visible: true });
+    const showEvs = (await showCol).filter((e) => e.windowId === id);
+    expect(showEvs.length).toBe(0);
+
+    // false 한번 → hide. 다시 false → no-op.
+    await core({ cmd: "set_visible", windowId: id, visible: false });
+    await new Promise((r) => setTimeout(r, 300));
+    const hideCol = collect<{ windowId: number }>("window:hide", 800);
+    await core({ cmd: "set_visible", windowId: id, visible: false });
+    const hideEvs = (await hideCol).filter((e) => e.windowId === id);
+    expect(hideEvs.length).toBe(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
   test("page-title-updated payload escape — 따옴표/백슬래시 안전", async () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",

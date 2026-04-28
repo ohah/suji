@@ -1336,6 +1336,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const flag = util.extractJsonBool(req_clean, "flag") orelse false;
         return window_ipc.handleSetFullscreen(.{ .window_id = win_id, .flag = flag }, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "set_visible")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        // 누락 시 false — set_fullscreen과 일관성 (필드 명시 안 하면 안 변경 의도로 해석).
+        const visible = util.extractJsonBool(req_clean, "visible") orelse false;
+        return window_ipc.handleSetVisible(.{ .window_id = win_id, .visible = visible }, response_buf, wm);
+    }
     inline for (.{
         .{ "minimize", &window_ipc.handleMinimize },
         .{ "restore_window", &window_ipc.handleRestoreWindow },

@@ -54,6 +54,9 @@ pub const events = struct {
     pub const ready_to_show = "window:ready-to-show";
     /// 문서 `<title>` 변경 시. payload: `{"windowId":N,"title":"..."}`.
     pub const page_title_updated = "window:page-title-updated";
+    /// `setVisible(true/false)` 호출 시 상태 전이가 있을 때만 발화 (멱등).
+    pub const show = "window:show";
+    pub const hide = "window:hide";
 };
 
 /// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".
@@ -974,12 +977,24 @@ pub const WindowManager = struct {
         self.native.setBounds(win.native_handle, bounds);
     }
 
+    /// 창 표시/숨김. 멱등 — 동일 visible 상태면 native 호출 + 이벤트 발화 모두 skip.
+    /// 상태가 바뀐 경우만 `window:show` / `window:hide` 발화 (Electron 호환).
     pub fn setVisible(self: *WindowManager, id: u32, visible: bool) Error!void {
-        self.lock.lockUncancelable(self.io);
-        defer self.lock.unlock(self.io);
-        const win = try self.getLiveWindowLocked(id);
-        win.state.visible = visible;
-        self.native.setVisible(win.native_handle, visible);
+        // name은 lock 안에서 캡처 → lock 밖 emit에서 사용. Window는 lock 다시 잡기 전엔
+        // free되지 않으므로 slice 수명 안전 (close()/markClosedExternal과 동일 패턴).
+        const name_snapshot: ?[]const u8 = blk: {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            const win = try self.getLiveWindowLocked(id);
+            if (win.state.visible == visible) return;
+            win.state.visible = visible;
+            self.native.setVisible(win.native_handle, visible);
+            break :blk win.name;
+        };
+        const sink = self.sink orelse return;
+        var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
+        const payload = buildIdPayload(&buf, id, name_snapshot);
+        sink.emit(if (visible) events.show else events.hide, payload);
     }
 
     pub fn focus(self: *WindowManager, id: u32) Error!void {
