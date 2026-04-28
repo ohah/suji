@@ -1304,8 +1304,10 @@ pub fn screenGetAllDisplays(out_buf: []u8) []const u8 {
 // Dock badge API — NSDockTile (Electron `app.dock.setBadge`)
 // ============================================
 
-/// NSString.stringWithUTF8String + objc_msgSend pattern — clipboard/menu에 같은 패턴 반복.
-fn newNSString(cstr: [*:0]const u8) ?*anyopaque {
+/// 컴파일타임 cstring 리터럴용 NSString primitive. 동적 텍스트는 `nsStringFromSlice`(NUL-term
+/// 자동) 사용 — `nsStringFromCstr`는 `[*:0]`이 이미 보장된 케이스(IOPM 같은 외부 API에 넘기는
+/// 고정 문자열)에서 `nsStringFromSlice`의 4KB 스택 버퍼 비용 회피용.
+fn nsStringFromCstr(cstr: [*:0]const u8) ?*anyopaque {
     const NSString = getClass("NSString") orelse return null;
     const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     return fn_ptr(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr);
@@ -1326,10 +1328,7 @@ pub fn dockSetBadge(text: []const u8) void {
     const NSApp = getClass("NSApplication") orelse return;
     const app = msgSend(NSApp, "sharedApplication") orelse return;
     const dock_tile = msgSend(app, "dockTile") orelse return;
-
-    var text_buf: [256]u8 = undefined;
-    const text_z = util.nullTerminate(text, &text_buf);
-    const ns_str = newNSString(text_z.ptr) orelse return;
+    const ns_str = nsStringFromSlice(text) orelse return;
     msgSendVoid1(dock_tile, "setBadgeLabel:", ns_str);
 }
 
@@ -1370,8 +1369,8 @@ pub fn powerSaveBlockerStart(t: PowerSaveBlockerType) u32 {
         .prevent_app_suspension => "PreventUserIdleSystemSleep",
         .prevent_display_sleep => "PreventUserIdleDisplaySleep",
     };
-    const ns_type = newNSString(type_str) orelse return 0;
-    const ns_name = newNSString("Suji powerSaveBlocker") orelse return 0;
+    const ns_type = nsStringFromCstr(type_str) orelse return 0;
+    const ns_name = nsStringFromCstr("Suji powerSaveBlocker") orelse return 0;
     var id: u32 = 0;
     const r = IOPMAssertionCreateWithName(ns_type, kIOPMAssertionLevelOn, ns_name, &id);
     return if (r == 0) id else 0;

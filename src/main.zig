@@ -1453,9 +1453,10 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
 
     // Dock badge API. extractJsonString은 wire escape를 안 풀어주므로 unescape 후 NSDockTile에.
     // unescape 실패(text 한도 초과)면 graceful false — clipboard_write_text 패턴과 일관.
+    // 256B 버퍼 — NSDockTile은 짧은 label(6-10 chars) 용도 (Apple HIG). escape margin 포함 충분.
     if (std.mem.eql(u8, cmd, "dock_set_badge")) {
         const raw = util.extractJsonString(req_clean, "text") orelse "";
-        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        var unesc_buf: [256]u8 = undefined;
         const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |n| blk: {
             cef.dockSetBadge(unesc_buf[0..n]);
             break :blk true;
