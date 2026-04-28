@@ -614,6 +614,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
+    cef.nativeThemeInstall(&nativeThemeEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
@@ -796,6 +797,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
+    cef.nativeThemeInstall(&nativeThemeEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
@@ -2813,6 +2815,14 @@ fn powerMonitorEmitHandler(event: [*:0]const u8) callconv(.c) void {
     var ch_buf: [64]u8 = undefined;
     const channel = std.fmt.bufPrint(&ch_buf, "power:{s}", .{event_slice}) catch return;
     emitBusRaw(channel, "{}");
+}
+
+/// nativeTheme: NSAppearance KVO가 fire되면 현재 dark 여부를 payload로 emit.
+fn nativeThemeEmitHandler() callconv(.c) void {
+    const dark = cef.nativeThemeIsDark();
+    var buf: [64]u8 = undefined;
+    const payload = std.fmt.bufPrint(&buf, "{{\"dark\":{}}}", .{dark}) catch return;
+    emitBusRaw("nativeTheme:updated", payload);
 }
 
 /// webRequest: cef.zig의 onBeforeResourceLoad/onResourceLoadComplete가 IO thread에서

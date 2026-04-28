@@ -161,6 +161,11 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/platform/power_monitor.m"),
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
+        // nativetheme.m — NSApp.effectiveAppearance KVO 옵저버 (nativeTheme:updated).
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/nativetheme.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");

@@ -999,6 +999,43 @@ test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
     }
 }
 
+test "nativeTheme — KVO observer install + nativeTheme:updated emit" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "cef.nativeThemeInstall",
+        "nativeThemeEmitHandler",
+        "\"nativeTheme:updated\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn nativeThemeInstall",
+        "pub fn nativeThemeUninstall",
+        "suji_native_theme_install",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "src/platform/nativetheme.m",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(m_src);
+    inline for (.{
+        "addObserver:",
+        "@\"effectiveAppearance\"",
+        "observeValueForKeyPath:",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, m_src, needle) != null);
+    }
+}
+
 test "app.getPath IPC — main.zig dispatch + cef.zig 함수 + 7 키" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

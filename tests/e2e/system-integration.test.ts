@@ -511,6 +511,36 @@ describe("nativeTheme.setThemeSource", () => {
   });
 });
 
+describe("nativeTheme:updated 이벤트 (NSAppearance KVO)", () => {
+  test("setThemeSource light→dark 전환 시 nativeTheme:updated 도착 (dark:true 포함)", async () => {
+    // light 시작 + probe array 초기화 + 리스너 설치
+    await core({ cmd: "native_theme_set_source", source: "light" });
+    await page.evaluate(() => {
+      (window as any).__theme_probes = [];
+      (window as any).__suji__.on("nativeTheme:updated", (data: unknown) => {
+        (window as any).__theme_probes.push(typeof data === "string" ? JSON.parse(data) : data);
+      });
+    });
+
+    // dark로 전환 → KVO fire → 이벤트 dispatch
+    await core({ cmd: "native_theme_set_source", source: "dark" });
+
+    // 이벤트 도착 polling (KVO는 다음 runloop tick에 fire — 100ms 정도 충분).
+    const start = Date.now();
+    let probes: any[] = [];
+    while (Date.now() - start < 3000) {
+      probes = await page.evaluate(() => (window as any).__theme_probes ?? []);
+      if (probes.length > 0) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(probes.length).toBeGreaterThan(0);
+    expect(probes[probes.length - 1].dark).toBe(true);
+
+    // cleanup — system으로 복귀
+    await core({ cmd: "native_theme_set_source", source: "system" });
+  }, 10000);
+});
+
 describe("screen.getCursorScreenPoint", () => {
   test("x/y 숫자 필드 반환 (NSEvent.mouseLocation)", async () => {
     const r = await core<{ x: number; y: number }>({ cmd: "screen_get_cursor_point" });

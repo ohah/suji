@@ -1341,7 +1341,7 @@ suji build → 결과물:
 | 표준 디렉토리 경로 | `app.getPath(name)` | `path` 플러그인 | ✅ Electron 표준 7 키 (home/appData/userData/temp/desktop/documents/downloads) — `app_get_path` IPC + `resolveAppDataDir` OS 분기 (macOS/Linux/Windows/fallback). `buildAppCachePath`와 분기 공유. 5 SDK + e2e |
 | 휴지통 (trashItem) | `shell.trashItem` | `fs` 플러그인 | ✅ macOS NSFileManager `trashItemAtURL:resultingItemURL:error:` — `shell_trash_item` IPC, 임시 파일 trash + 비존재 경로 false 2 e2e |
 | 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | 🟡 `globalShortcut`로 가능, 전용 API 없음 |
-| 다크/라이트 테마 감지 + 강제 | `nativeTheme.shouldUseDarkColors` + `themeSource` setter + `updated` 이벤트 | `theme` 플러그인 | 🟡 macOS — `shouldUseDarkColors()` ✅ + `setThemeSource("light"\|"dark"\|"system")` ✅ (NSAppearance setAppearance:). `updated` 이벤트(KVO)는 후속 |
+| 다크/라이트 테마 감지 + 강제 | `nativeTheme.shouldUseDarkColors` + `themeSource` setter + `updated` 이벤트 | `theme` 플러그인 | ✅ macOS — `shouldUseDarkColors()` + `setThemeSource("light"\|"dark"\|"system")` (NSAppearance setAppearance:) + `nativeTheme:updated` 이벤트 (NSApp.effectiveAppearance KVO observer). 5 SDK + e2e (setThemeSource light→dark 트리거 시 이벤트 round-trip 검증) |
 | dock 진행률 표시 | `BrowserWindow.setProgressBar(0..1)` | -- | ✅ macOS NSDockTile.contentView NSProgressIndicator. progress<0=hide, 0~1=ratio, >1=clamp. 5 SDK + e2e |
 | 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | ✅ `screen.getCursorScreenPoint()` (NSEvent.mouseLocation, bottom-up) + `getDisplayNearestPoint({x,y})` (frame contains check, none이면 -1) |
 | 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ + `getSystemIdleState(threshold)` ✅ (`"active"\|"idle"`, idle_seconds ≥ threshold 비교). `"locked"` 상태는 lock-screen 이벤트 트래킹 후속 |

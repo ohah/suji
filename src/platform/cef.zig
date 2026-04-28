@@ -1788,6 +1788,20 @@ pub fn powerMonitorUninstall() void {
     suji_power_monitor_uninstall();
 }
 
+// nativeTheme — NSApp.effectiveAppearance KVO 옵저버 (Electron `nativeTheme.on('updated')` 동등).
+extern "c" fn suji_native_theme_install(cb: *const fn () callconv(.c) void) void;
+extern "c" fn suji_native_theme_uninstall() void;
+
+pub fn nativeThemeInstall(cb: *const fn () callconv(.c) void) void {
+    if (!comptime is_macos) return;
+    suji_native_theme_install(cb);
+}
+
+pub fn nativeThemeUninstall() void {
+    if (!comptime is_macos) return;
+    suji_native_theme_uninstall();
+}
+
 // ============================================
 // app.requestUserAttention — dock bounce (Electron `app.requestUserAttention`)
 // ============================================

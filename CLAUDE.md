@@ -74,6 +74,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")
+//   → suji.on("nativeTheme:updated", ({dark}) => ...) — NSAppearance KVO 자동 발신
 // suji.nativeImage.getSize("/path/to/img.png")  — {width, height} (NSImage)
 //   / toPng(path) / toJpeg(path, quality)        — base64 인코딩 (raw ~8KB)
 // suji.screen.getCursorScreenPoint()      — NSEvent.mouseLocation (bottom-up)
