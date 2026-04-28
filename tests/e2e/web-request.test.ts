@@ -268,43 +268,39 @@ describe("webRequest dynamic listener (RV_CONTINUE_ASYNC)", () => {
   // IO thread callback->cont 사이의 thread/timing race로 추정. 단위/grep + invalid
   // resolve + filter 미등록 path는 통과. listener round-trip 실 동작은 후속 디버깅
   // (예: cef.zig log + thread post task) 단계로 보류.
-  test.skip("listener가 callback({cancel:true})로 차단 → fetch fail", async () => {
+  test("listener가 callback({cancel:true})로 차단 → fetch fail", async () => {
     await core({
       cmd: "web_request_set_listener_filter",
       patterns: ["https://dynamic-cancel.suji.invalid/*"],
     });
 
     const result = await page.evaluate(async () => {
-      const sdk = (window as any).__suji_sdk__;
-      // listener: 매칭되는 모든 요청 cancel.
-      let resolved: any = null;
-      const onceListener = (window as any).__suji__.on(
+      const off = (window as any).__suji__.on(
         "webRequest:will-request",
-        async (payload: string) => {
-          const ev = JSON.parse(payload);
-          await sdk.webRequest && (window as any).__suji__.core(JSON.stringify({
+        (payload: any) => {
+          const ev = typeof payload === "string" ? JSON.parse(payload) : payload;
+          (window as any).__suji__.core(JSON.stringify({
             cmd: "web_request_resolve",
             id: ev.id,
             cancel: true,
           }));
-          resolved = ev;
         },
       );
       try {
         try {
           await fetch("https://dynamic-cancel.suji.invalid/x");
-          return { ok: true, resolved };
+          return { ok: true };
         } catch {
-          return { ok: false, resolved };
+          return { ok: false };
         }
       } finally {
-        onceListener();
+        off();
       }
     });
     expect(result.ok).toBe(false);
   });
 
-  test.skip("listener가 callback({})로 통과 시키면 fetch 정상 완료 (404 OK)", async () => {
+  test("listener가 callback({})로 통과 시키면 fetch 정상 완료 (404 OK)", async () => {
     // localhost vite는 404 반환하지만 fetch 자체는 통과 — listener allow 검증용.
     await core({
       cmd: "web_request_set_listener_filter",
@@ -312,11 +308,11 @@ describe("webRequest dynamic listener (RV_CONTINUE_ASYNC)", () => {
     });
 
     const result = await page.evaluate(async () => {
-      const onceListener = (window as any).__suji__.on(
+      const off = (window as any).__suji__.on(
         "webRequest:will-request",
-        async (payload: string) => {
-          const ev = JSON.parse(payload);
-          await (window as any).__suji__.core(JSON.stringify({
+        (payload: any) => {
+          const ev = typeof payload === "string" ? JSON.parse(payload) : payload;
+          (window as any).__suji__.core(JSON.stringify({
             cmd: "web_request_resolve",
             id: ev.id,
             cancel: false,
@@ -331,7 +327,7 @@ describe("webRequest dynamic listener (RV_CONTINUE_ASYNC)", () => {
           return { ok: false, error: String(e.message ?? e) };
         }
       } finally {
-        onceListener();
+        off();
       }
     });
     expect(result.ok).toBe(true);

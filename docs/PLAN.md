@@ -1288,7 +1288,7 @@ suji build → 결과물:
 | iframe sandbox / origin allowlist | CSP `frame-src` 수동 + `<webview>` partition | `tauri.conf.json` `app.security.csp` | ✅ `security.iframeAllowedOrigins` config — CSP frame-src 자동 합성. default block (`'none'`) + `["*"]` escape |
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |
-| webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | 🟡 declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max). dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) IPC + 5 SDK 노출 — `webRequest.onBeforeRequest({urls}, listener)` API. listener round-trip e2e는 IO↔V8 thread marshal race로 2 케이스 skip — 단위/grep + invalid resolve + filter 미등록 path는 통과 (11 pass) |
+| webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ✅ declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max) + dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) — `webRequest.onBeforeRequest({urls}, listener)`로 cancel/allow round-trip. 5 SDK 노출 + e2e 13 케이스 (cancel/allow round-trip 포함). timeout fallback은 미구현 |
 | safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | 🟡 macOS만 (`safe_storage_set/get/delete` — Keychain Services). Win DPAPI / Linux libsecret 미구현 |
 
 ### 앱 배포 & 패키징
