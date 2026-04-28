@@ -154,7 +154,6 @@ pub const App = struct {
 /// comptime — Zig 타입을 TypeScript 표현으로 변환. void/bool/숫자/string/struct/
 /// optional/slice/enum 매핑 (1차). union/error/pointer-non-slice는 후속.
 pub fn typeToTs(comptime T: type) []const u8 {
-    if (T == void) return "void";
     const info = @typeInfo(T);
     return switch (info) {
         .void => "void",
@@ -197,26 +196,13 @@ pub fn buildSchemaTs(comptime channel: []const u8, comptime Req: type, comptime 
 /// runtime — 등록된 모든 schema를 SujiHandlers declaration으로 emit.
 /// caller가 dst slice에 결과 길이만큼 쓰고 byte 길이 반환. 부족하면 0.
 pub fn emitSchemaTs(app_ptr: *const App, dst: []u8) usize {
-    const header = "// auto-generated — do not edit\ndeclare module '@suji/api' {\n  interface SujiHandlers {\n";
-    const footer = "  }\n}\n";
-    var offset: usize = 0;
-    if (header.len + footer.len > dst.len) return 0;
-    @memcpy(dst[offset .. offset + header.len], header);
-    offset += header.len;
+    var w: std.Io.Writer = .fixed(dst);
+    w.writeAll("// auto-generated — do not edit\ndeclare module '@suji/api' {\n  interface SujiHandlers {\n") catch return 0;
     for (app_ptr.handler_schemas[0..app_ptr.schema_count]) |s| {
-        const indent = "    ";
-        const need = indent.len + s.schema_ts.len + 1; // \n
-        if (offset + need + footer.len > dst.len) return 0;
-        @memcpy(dst[offset .. offset + indent.len], indent);
-        offset += indent.len;
-        @memcpy(dst[offset .. offset + s.schema_ts.len], s.schema_ts);
-        offset += s.schema_ts.len;
-        dst[offset] = '\n';
-        offset += 1;
+        w.print("    {s}\n", .{s.schema_ts}) catch return 0;
     }
-    @memcpy(dst[offset .. offset + footer.len], footer);
-    offset += footer.len;
-    return offset;
+    w.writeAll("  }\n}\n") catch return 0;
+    return w.end;
 }
 
 /// IPC 요청
