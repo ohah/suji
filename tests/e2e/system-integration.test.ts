@@ -435,6 +435,44 @@ describe("session.clearCookies / flushStore", () => {
 // app.exit는 실제 호출 시 dev server 종료 → 후속 테스트 모두 fail.
 // IPC handler 등록은 cef_ipc_test.zig grep + app_test.zig InvokeSpy로 커버.
 
+describe("clipboard RTF / Buffer", () => {
+  test("RTF write → read round-trip", async () => {
+    const rtf = "{\\rtf1\\ansi hello suji}";
+    const w = await core<{ success: boolean }>({ cmd: "clipboard_write_rtf", rtf });
+    expect(w.success).toBe(true);
+
+    const r = await core<{ rtf: string }>({ cmd: "clipboard_read_rtf" });
+    expect(r.rtf).toBe(rtf);
+  });
+
+  test("Buffer write → read round-trip (public.html UTI)", async () => {
+    // base64("hello buffer") = aGVsbG8gYnVmZmVy
+    const data = "aGVsbG8gYnVmZmVy";
+    const w = await core<{ success: boolean }>({
+      cmd: "clipboard_write_buffer",
+      format: "public.html",
+      data,
+    });
+    expect(w.success).toBe(true);
+
+    const r = await core<{ data: string }>({
+      cmd: "clipboard_read_buffer",
+      format: "public.html",
+    });
+    expect(r.data).toBe(data);
+  });
+
+  test("Buffer read 비존재 format → 빈 data", async () => {
+    // 새 type write 안하고 read하면 비어있음 (앞 테스트들이 다른 type 모두 clear).
+    await core({ cmd: "clipboard_write_text", text: "anything" });
+    const r = await core<{ data: string }>({
+      cmd: "clipboard_read_buffer",
+      format: "public.opaque-no-such-uti",
+    });
+    expect(r.data).toBe("");
+  });
+});
+
 describe("clipboard HTML", () => {
   test("HTML write → read round-trip", async () => {
     const html = "<b>hello <i>suji</i></b>";

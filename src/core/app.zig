@@ -802,6 +802,41 @@ pub const clipboard = struct {
         return coreCmd("clipboard_write_html", fields);
     }
 
+    /// RTF 읽기 (Electron `clipboard.readRTF`). 응답: `{"rtf":"..."}`.
+    pub fn readRtf() ?[]const u8 {
+        return coreCmd("clipboard_read_rtf", "");
+    }
+
+    /// RTF 쓰기 (Electron `clipboard.writeRTF`). 응답: `{"success":bool}`.
+    pub fn writeRtf(rtf: []const u8) ?[]const u8 {
+        var t_buf: [16384]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(rtf, &t_buf) orelse return null;
+        var fields_buf: [16400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"rtf\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
+        return coreCmd("clipboard_write_rtf", fields);
+    }
+
+    /// 임의 UTI raw bytes 쓰기 (Electron `clipboard.writeBuffer(format, buffer)`).
+    /// data는 base64 인코딩된 문자열. 응답: `{"success":bool}`.
+    pub fn writeBuffer(format: []const u8, data_b64: []const u8) ?[]const u8 {
+        var f_buf: [256]u8 = undefined;
+        const f_n = util.escapeJsonStrFull(format, &f_buf) orelse return null;
+        var d_buf: [16384]u8 = undefined;
+        const d_n = util.escapeJsonStrFull(data_b64, &d_buf) orelse return null;
+        var fields_buf: [16800]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"format\":\"{s}\",\"data\":\"{s}\"", .{ f_buf[0..f_n], d_buf[0..d_n] }) catch return null;
+        return coreCmd("clipboard_write_buffer", fields);
+    }
+
+    /// 임의 UTI raw bytes 읽기 (Electron `clipboard.readBuffer(format)`). 응답: `{"data":"<base64>"}`.
+    pub fn readBuffer(format: []const u8) ?[]const u8 {
+        var f_buf: [256]u8 = undefined;
+        const f_n = util.escapeJsonStrFull(format, &f_buf) orelse return null;
+        var fields_buf: [320]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"format\":\"{s}\"", .{f_buf[0..f_n]}) catch return null;
+        return coreCmd("clipboard_read_buffer", fields);
+    }
+
     /// format(UTI)이 클립보드에 있는지. 응답: `{"present":bool}`.
     pub fn has(format: []const u8) ?[]const u8 {
         var f_buf: [256]u8 = undefined;

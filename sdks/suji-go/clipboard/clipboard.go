@@ -61,3 +61,27 @@ func WriteImage(pngBase64 string) string {
 func ReadImage() string {
 	return suji.Invoke("__core__", `{"cmd":"clipboard_read_image"}`)
 }
+
+// ReadRTF reads RTF text from clipboard (Electron `clipboard.readRTF`).
+// Response: `{"rtf":"..."}`.
+func ReadRTF() string {
+	return suji.Invoke("__core__", `{"cmd":"clipboard_read_rtf"}`)
+}
+
+// WriteRTF writes RTF text to clipboard (Electron `clipboard.writeRTF`).
+// Response: `{"success":bool}`.
+func WriteRTF(rtf string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_rtf","rtf":"%s"}`, jsonesc.Full(rtf)))
+}
+
+// WriteBuffer writes raw bytes (base64-encoded) to clipboard for arbitrary UTI.
+// Response: `{"success":bool}`.
+func WriteBuffer(format, dataBase64 string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_buffer","format":"%s","data":"%s"}`, jsonesc.Full(format), jsonesc.Full(dataBase64)))
+}
+
+// ReadBuffer reads raw bytes from clipboard as base64. Empty string if missing.
+// Response: `{"data":"..."}`.
+func ReadBuffer(format string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_read_buffer","format":"%s"}`, jsonesc.Full(format)))
+}

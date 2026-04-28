@@ -1298,6 +1298,54 @@ pub fn clipboardWriteHtml(html: []const u8) bool {
     return clipboardWriteType(html, PASTEBOARD_TYPE_HTML);
 }
 
+const PASTEBOARD_TYPE_RTF: [*:0]const u8 = "public.rtf";
+
+/// 클립보드 RTF 읽기 (Electron `clipboard.readRTF`). NSString 기반 — non-RTF면 빈 slice.
+pub fn clipboardReadRtf(buf: []u8) []const u8 {
+    return clipboardReadType(buf, PASTEBOARD_TYPE_RTF);
+}
+
+/// 클립보드 RTF 쓰기 (Electron `clipboard.writeRTF`). 다른 type 지움.
+pub fn clipboardWriteRtf(rtf: []const u8) bool {
+    return clipboardWriteType(rtf, PASTEBOARD_TYPE_RTF);
+}
+
+/// 클립보드 임의 UTI raw bytes 쓰기 (Electron `clipboard.writeBuffer(format, buffer)`).
+/// type_str: UTI ("public.png", "public.html", 등). bytes는 raw — caller가 base64 decode 후 전달.
+pub fn clipboardWriteBuffer(bytes: []const u8, type_str: []const u8) bool {
+    if (!comptime is_macos) return false;
+    if (bytes.len == 0) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    _ = msgSend(pb, "clearContents");
+
+    const data = CFDataCreate(null, bytes.ptr, @intCast(bytes.len)) orelse return false;
+    defer CFRelease(data);
+
+    const ns_type = nsStringFromSlice(type_str) orelse return false;
+    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return setFn(pb, @ptrCast(objc.sel_registerName("setData:forType:")), data, ns_type) != 0;
+}
+
+/// 클립보드 임의 UTI raw bytes 읽기 (Electron `clipboard.readBuffer(format)`).
+/// out_buf 부족 또는 type missing 시 빈 slice (truncation 회피).
+pub fn clipboardReadBuffer(out_buf: []u8, type_str: []const u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const NSPasteboard = getClass("NSPasteboard") orelse return out_buf[0..0];
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return out_buf[0..0];
+    const ns_type = nsStringFromSlice(type_str) orelse return out_buf[0..0];
+    const dataFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const data = dataFn(pb, @ptrCast(objc.sel_registerName("dataForType:")), ns_type) orelse return out_buf[0..0];
+
+    const ptr = CFDataGetBytePtr(data);
+    const len: usize = @intCast(CFDataGetLength(data));
+    if (len > out_buf.len) return out_buf[0..0];
+    @memcpy(out_buf[0..len], ptr[0..len]);
+    return out_buf[0..len];
+}
+
 /// 메인 번들 경로 (Electron `app.getAppPath` 동등). macOS NSBundle.mainBundle.bundlePath.
 /// dev mode (raw binary)에선 binary가 위치한 디렉토리, .app 번들 실행 시 ".../MyApp.app".
 pub fn appGetBundlePath(buf: []u8) []const u8 {

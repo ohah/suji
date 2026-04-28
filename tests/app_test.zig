@@ -1018,6 +1018,25 @@ test "clipboard.readHtml / writeHtml IPC" {
     }.run);
 }
 
+test "clipboard.readRtf / writeRtf / readBuffer / writeBuffer IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.readRtf();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_read_rtf\"") != null);
+
+            _ = app_mod.clipboard.writeRtf("{\\rtf1 hi}");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_write_rtf\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "rtf1 hi") != null);
+
+            _ = app_mod.clipboard.readBuffer("public.png");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_read_buffer\",\"format\":\"public.png\"") != null);
+
+            _ = app_mod.clipboard.writeBuffer("public.png", "AAAA");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_write_buffer\",\"format\":\"public.png\",\"data\":\"AAAA\"") != null);
+        }
+    }.run);
+}
+
 test "powerMonitor.getSystemIdleTime IPC" {
     try withInvokeCore(struct {
         fn run() !void {

@@ -590,6 +590,30 @@ export const clipboard = {
     return r.success === true;
   },
 
+  /** RTF read (Electron `clipboard.readRTF`). */
+  async readRTF(): Promise<string> {
+    const r = await invoke<{ rtf: string }>('__core__', { cmd: 'clipboard_read_rtf' });
+    return r.rtf ?? '';
+  },
+
+  /** RTF write (Electron `clipboard.writeRTF`). */
+  async writeRTF(rtf: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_rtf', rtf });
+    return r.success === true;
+  },
+
+  /** 임의 UTI raw bytes 쓰기 — data는 base64 (raw ~8KB 한도). */
+  async writeBuffer(format: string, data: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_buffer', format, data });
+    return r.success === true;
+  },
+
+  /** 임의 UTI raw bytes 읽기 — base64 string 반환. */
+  async readBuffer(format: string): Promise<string> {
+    const r = await invoke<{ data: string }>('__core__', { cmd: 'clipboard_read_buffer', format });
+    return r.data ?? '';
+  },
+
   /** 클립보드에 format(UTI)이 있는지. */
   async has(format: string): Promise<boolean> {
     const r = await invoke<{ present: boolean }>('__core__', { cmd: 'clipboard_has', format });

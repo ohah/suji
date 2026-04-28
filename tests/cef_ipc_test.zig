@@ -1376,6 +1376,38 @@ test "app.requestUserAttention IPC — NSApp request/cancel" {
     }
 }
 
+test "clipboard RTF + Buffer IPC + cef pasteboard" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"clipboard_read_rtf\"",
+        "\"clipboard_write_rtf\"",
+        "\"clipboard_read_buffer\"",
+        "\"clipboard_write_buffer\"",
+        "cef.clipboardReadRtf",
+        "cef.clipboardWriteRtf",
+        "cef.clipboardReadBuffer",
+        "cef.clipboardWriteBuffer",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn clipboardReadRtf",
+        "pub fn clipboardWriteRtf",
+        "pub fn clipboardReadBuffer",
+        "pub fn clipboardWriteBuffer",
+        "PASTEBOARD_TYPE_RTF",
+        "public.rtf",
+        "setData:forType:",
+        "dataForType:",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "app.isPackaged + getAppPath IPC + cef NSBundle" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

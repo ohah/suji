@@ -1465,6 +1465,59 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ok},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "clipboard_read_rtf")) {
+        var raw_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const rtf = cef.clipboardReadRtf(&raw_buf);
+        var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const esc_len = util.escapeJsonStrFull(rtf, &esc_buf) orelse return null;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_rtf\",\"rtf\":\"{s}\"}}",
+            .{esc_buf[0..esc_len]},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_write_rtf")) {
+        const raw = util.extractJsonString(req_clean, "rtf") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.clipboardWriteRtf(unesc_buf[0..unesc_len])
+        else
+            false;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_rtf\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
+    // clipboard buffer (raw bytes for arbitrary UTI). raw 한도 ~8KB (image와 동일 IPC 제약).
+    if (std.mem.eql(u8, cmd, "clipboard_write_buffer")) {
+        const raw_type = util.extractJsonString(req_clean, "format") orelse "";
+        var type_buf: [256]u8 = undefined;
+        const type_n = util.unescapeJsonStr(raw_type, &type_buf) orelse return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        const b64_raw = util.extractJsonString(req_clean, "data") orelse "";
+        var b64_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const b64_n = util.unescapeJsonStr(b64_raw, &b64_buf) orelse return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        var raw_buf: [8 * 1024]u8 = undefined;
+        const decoded_size = std.base64.standard.Decoder.calcSizeForSlice(b64_buf[0..b64_n]) catch {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        };
+        if (decoded_size > raw_buf.len) {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        }
+        std.base64.standard.Decoder.decode(raw_buf[0..decoded_size], b64_buf[0..b64_n]) catch {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        };
+        const ok = cef.clipboardWriteBuffer(raw_buf[0..decoded_size], type_buf[0..type_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_read_buffer")) {
+        const raw_type = util.extractJsonString(req_clean, "format") orelse "";
+        var type_buf: [256]u8 = undefined;
+        const type_n = util.unescapeJsonStr(raw_type, &type_buf) orelse 0;
+        var raw_buf: [8 * 1024]u8 = undefined;
+        const bytes = cef.clipboardReadBuffer(&raw_buf, type_buf[0..type_n]);
+        return respondBase64Data(response_buf, "clipboard_read_buffer", bytes);
+    }
     if (std.mem.eql(u8, cmd, "power_monitor_get_idle_time")) {
         const seconds = cef.powerMonitorIdleSeconds();
         return std.fmt.bufPrint(

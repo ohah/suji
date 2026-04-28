@@ -69,6 +69,8 @@ fn onAllClosed(_: suji.Event) void {
 //   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip
 //   / has("public.html") / availableFormats()  — format 검사 (UTI)
 //   / writeImage(base64) / readImage() — PNG round-trip (raw ~8KB 1차)
+//   / readRtf() / writeRtf("{\\rtf1...}")  — RTF round-trip (NSPasteboard public.rtf)
+//   / readBuffer(uti) / writeBuffer(uti, base64)  — 임의 UTI raw bytes (raw ~8KB)
 // suji.powerMonitor.getSystemIdleTime()  — 유휴 초 (CGEventSource)
 // suji.powerMonitor.getSystemIdleState(60)  — "active" | "idle" (idle_seconds ≥ threshold)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)

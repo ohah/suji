@@ -568,6 +568,45 @@ pub mod clipboard {
         )
     }
 
+    /// RTF 읽기 (Electron `clipboard.readRTF`). raw JSON: `{"rtf":"..."}`.
+    pub fn read_rtf() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_read_rtf"}"#)
+    }
+
+    /// RTF 쓰기 (Electron `clipboard.writeRTF`). raw JSON: `{"success":bool}`.
+    pub fn write_rtf(rtf: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_write_rtf","rtf":"{}"}}"#,
+                escape_json_full(rtf)
+            ),
+        )
+    }
+
+    /// 임의 UTI raw bytes 쓰기. data_b64는 base64 인코딩된 문자열.
+    pub fn write_buffer(format: &str, data_b64: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_write_buffer","format":"{}","data":"{}"}}"#,
+                escape_json_full(format),
+                escape_json_full(data_b64)
+            ),
+        )
+    }
+
+    /// 임의 UTI raw bytes 읽기. raw JSON: `{"data":"<base64>"}`.
+    pub fn read_buffer(format: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_read_buffer","format":"{}"}}"#,
+                escape_json_full(format)
+            ),
+        )
+    }
+
     /// format(UTI)이 클립보드에 있는지. 응답: `{"present":bool}`.
     pub fn has(format: &str) -> Option<String> {
         invoke(

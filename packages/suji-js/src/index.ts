@@ -545,6 +545,31 @@ export const clipboard = {
     return r.success === true;
   },
 
+  /** RTF read (Electron `clipboard.readRTF`). 비어 있거나 non-rtf면 빈 문자열. */
+  async readRTF(): Promise<string> {
+    const r = await coreCall<{ rtf: string }>({ cmd: "clipboard_read_rtf" });
+    return r.rtf ?? "";
+  },
+
+  /** RTF write (Electron `clipboard.writeRTF`). 다른 type 지움. */
+  async writeRTF(rtf: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_rtf", rtf });
+    return r.success === true;
+  },
+
+  /** 임의 UTI raw bytes 쓰기 (Electron `clipboard.writeBuffer(format, buffer)`).
+   *  data는 base64 인코딩된 문자열 (raw ~8KB 한도). */
+  async writeBuffer(format: string, data: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_buffer", format, data });
+    return r.success === true;
+  },
+
+  /** 임의 UTI raw bytes 읽기 (Electron `clipboard.readBuffer(format)`). base64 string 반환. */
+  async readBuffer(format: string): Promise<string> {
+    const r = await coreCall<{ data: string }>({ cmd: "clipboard_read_buffer", format });
+    return r.data ?? "";
+  },
+
   /** 클립보드에 주어진 format이 있는지 (Electron `clipboard.has(format)`).
    *  format은 macOS UTI ("public.utf8-plain-text", "public.html" 등). */
   async has(format: string): Promise<boolean> {
