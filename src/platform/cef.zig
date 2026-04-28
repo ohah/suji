@@ -462,8 +462,14 @@ pub const CefNative = struct {
             .height = @intCast(opts.bounds.height),
         };
 
+        // CEF는 빈 URL이면 페이지 로드 자체를 skip → OnLoadEnd 미발화. about:blank로
+        // fallback해서 ready-to-show / page-title-updated 등 라이프사이클 이벤트 보장.
         var cef_url: c.cef_string_t = .{};
-        if (url_z.len > 0) setCefString(&cef_url, url_z);
+        if (url_z.len > 0) {
+            setCefString(&cef_url, url_z);
+        } else {
+            setCefString(&cef_url, "about:blank");
+        }
 
         var browser_settings: c.cef_browser_settings_t = undefined;
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
@@ -604,8 +610,14 @@ pub const CefNative = struct {
         });
         setCefString(&window_info.window_name, title_z);
 
+        // CEF는 빈 URL이면 페이지 로드 자체를 skip → OnLoadEnd 미발화. about:blank로
+        // fallback해서 ready-to-show / page-title-updated 등 라이프사이클 이벤트 보장.
         var cef_url: c.cef_string_t = .{};
-        if (url_z.len > 0) setCefString(&cef_url, url_z);
+        if (url_z.len > 0) {
+            setCefString(&cef_url, url_z);
+        } else {
+            setCefString(&cef_url, "about:blank");
+        }
 
         var browser_settings: c.cef_browser_settings_t = undefined;
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
