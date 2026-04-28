@@ -20,6 +20,21 @@ pub use serde;
 pub use serde_json;
 pub use suji_macros::command as handle;
 
+/// `specta` crate re-export — Rust 타입 → TypeScript 변환을 위한 derive macro 제공.
+/// 사용자는 `#[derive(suji::Type)]`로 req/res struct에 attach 후 `specta::ts::export::<T>()`로
+/// ts 시그니처 emit. SujiHandlers declaration manual 작성 (`@suji/api` interface
+/// augmentation)에 그대로 사용.
+///
+/// ```
+/// use suji::Type;
+///
+/// #[derive(Type, serde::Serialize, serde::Deserialize)]
+/// pub struct GreetReq { pub name: String }
+/// #[derive(Type, serde::Serialize, serde::Deserialize)]
+/// pub struct GreetRes { pub greeting: String }
+/// ```
+pub use specta::{self, Type};
+
 /// IPC 요청의 sender 창 컨텍스트 — Electron의 `event.sender`/`BrowserWindow.fromWebContents` 대응.
 ///
 /// 2-arity 핸들러 `fn(..., event: InvokeEvent)`의 두 번째 파라미터로 받는다.
@@ -1586,6 +1601,27 @@ mod tests {
             serde_json::from_str(&crate::dock::set_badge_request("a\"b")).unwrap();
         assert_eq!(v["cmd"], "dock_set_badge");
         assert_eq!(v["text"], "a\"b");
+    }
+
+    #[test]
+    fn specta_type_derive_compiles() {
+        use crate::Type;
+
+        // 사용자가 작성할 패턴 — Type derive로 specta::Type trait 자동 구현.
+        #[derive(Type)]
+        #[allow(dead_code)]
+        struct GreetReq {
+            name: String,
+        }
+        #[derive(Type)]
+        #[allow(dead_code)]
+        struct GreetRes {
+            greeting: String,
+        }
+
+        // Type trait 구현이 컴파일되면 specta가 향후 ts export에 사용 가능.
+        let _ = std::any::type_name::<GreetReq>();
+        let _ = std::any::type_name::<GreetRes>();
     }
 
     #[test]

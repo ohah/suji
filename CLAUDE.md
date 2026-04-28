@@ -130,6 +130,8 @@ suji::export_handlers!(ping);
 // suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
+// #[derive(suji::Type)] struct GreetReq { name: String }   — specta re-export로
+//   타입을 ts emit 가능 (specta::ts::export::<T>()로 시그니처 추출)
 ```
 
 ```go
