@@ -4710,3 +4710,28 @@ test "라이프사이클 이벤트 채널 상수: window: prefix" {
     try std.testing.expectEqualStrings("window:enter-full-screen", window.events.enter_full_screen);
     try std.testing.expectEqualStrings("window:leave-full-screen", window.events.leave_full_screen);
 }
+
+test "ready-to-show + page-title-updated 이벤트 채널 상수" {
+    try std.testing.expectEqualStrings("window:ready-to-show", window.events.ready_to_show);
+    try std.testing.expectEqualStrings("window:page-title-updated", window.events.page_title_updated);
+}
+
+test "회귀: cef.zig가 Phase 5-2 public API 유지" {
+    // public symbol만 검증 — 내부 구현 디테일은 e2e가 동작 검증. rename 시 컴파일 에러로
+    // 잡히지만, public API 시그니처 회귀(struct → 인자, 상수 제거 등)는 grep이 빠르게 detect.
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    inline for (.{
+        "pub fn setWindowDisplayHandlers(handlers: WindowDisplayHandlers)",
+        "pub const WindowDisplayHandlers = struct",
+        "pub const MAX_TITLE_BYTES",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
+    }
+}

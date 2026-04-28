@@ -275,4 +275,89 @@ describe("window lifecycle events", () => {
     await core({ cmd: "destroy_window", windowId: id });
     await new Promise((r) => setTimeout(r, 200));
   });
+
+  // ==================== Phase 5: ready-to-show + page-title-updated ====================
+
+  test("새 창 생성 → window:ready-to-show 1회 발화", async () => {
+    const readyCol = collect<{ windowId: number }>("window:ready-to-show", 3000);
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-ready",
+      x: 100, y: 100, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    const readyEvs = (await readyCol).filter((e) => e.windowId === id);
+    expect(readyEvs.length).toBeGreaterThan(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  test("ready-to-show는 1회만 — reload 후엔 다시 안 옴 (Electron 호환)", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-ready-once",
+      x: 200, y: 200, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    // 첫 ready 이벤트가 떨어질 시간 대기 (load_url + paint).
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const readyCol = collect<{ windowId: number }>("window:ready-to-show", 1500);
+    await core({ cmd: "reload", windowId: id, ignoreCache: false });
+    await new Promise((r) => setTimeout(r, 1500));
+    const readyEvs = (await readyCol).filter((e) => e.windowId === id);
+    expect(readyEvs.length).toBe(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  test("document.title 변경 → window:page-title-updated 발화", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-title-old",
+      x: 300, y: 300, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const titleCol = collect<{ windowId: number; title: string }>("window:page-title-updated", 2000);
+    await core({
+      cmd: "execute_javascript",
+      windowId: id,
+      code: "document.title = 'updated-title'",
+    });
+    const titleEvs = (await titleCol).filter((e) => e.windowId === id && e.title === "updated-title");
+    expect(titleEvs.length).toBeGreaterThan(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  test("page-title-updated payload escape — 따옴표/백슬래시 안전", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-title-escape",
+      x: 350, y: 350, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 1500));
+
+    const titleCol = collect<{ windowId: number; title: string }>("window:page-title-updated", 2000);
+    // 따옴표 + 백슬래시 + UTF-8(이모지) 포함 — escape 안전성 검증.
+    await core({
+      cmd: "execute_javascript",
+      windowId: id,
+      code: 'document.title = "a\\"b\\\\c \\u{1F680}"',
+    });
+    const titleEvs = (await titleCol).filter((e) => e.windowId === id);
+    expect(titleEvs.length).toBeGreaterThan(0);
+    const last = titleEvs[titleEvs.length - 1];
+    // 정확한 round-trip 검증 — 이중/누락 escape 회귀 차단 (단순 contain만으론 detect 안 됨).
+    expect(last.title).toBe('a"b\\c \u{1F680}');
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
 });

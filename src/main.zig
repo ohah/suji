@@ -614,6 +614,10 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
+    cef.setWindowDisplayHandlers(.{
+        .ready_to_show = &windowReadyToShowHandler,
+        .title_change = &windowTitleChangeHandler,
+    });
     // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
     if (config.security.csp) |csp_val| {
         cef.setCspValue(csp_val);
@@ -789,6 +793,10 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
+    cef.setWindowDisplayHandlers(.{
+        .ready_to_show = &windowReadyToShowHandler,
+        .title_change = &windowTitleChangeHandler,
+    });
     // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
     if (config.security.csp) |csp_val| {
         cef.setCspValue(csp_val);
@@ -2265,10 +2273,11 @@ fn nextNotificationId() u32 {
 
 /// cef.zig native click target이 NSApp UI thread에서 호출 → BackendRegistry.global 안전 access.
 /// data는 호출자가 std.fmt 포맷으로 미리 빌드한 JSON 페이로드.
+/// 4KB 버퍼 — 일반 emit은 ~50B지만 page-title-updated는 escape worst-case로 ~3KB까지.
 fn emitToBus(channel: []const u8, comptime fmt: []const u8, args: anytype) void {
     const registry = suji.BackendRegistry.global orelse return;
     const bus = registry.event_bus orelse return;
-    var data_buf: [512]u8 = undefined;
+    var data_buf: [4096]u8 = undefined;
     const data = std.fmt.bufPrint(&data_buf, fmt, args) catch return;
     bus.emit(channel, data);
 }
@@ -2345,6 +2354,28 @@ fn windowEnterFullScreenHandler(handle: u64) void {
 }
 fn windowLeaveFullScreenHandler(handle: u64) void {
     emitWindowIdEvent(window_mod.events.leave_full_screen, handle);
+}
+
+fn windowReadyToShowHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.ready_to_show, handle);
+}
+
+fn windowTitleChangeHandler(handle: u64, title: []const u8) void {
+    const win_id = windowIdFromHandle(handle) orelse return;
+    // JSON escape 최악 6×(`\uXXXX`) + 닫는 따옴표/null 마진 — cef.MAX_TITLE_BYTES와 페어.
+    var title_esc: [cef.MAX_TITLE_BYTES * 6 + 2]u8 = undefined;
+    const title_n = util.escapeJsonStrFull(title, &title_esc) orelse {
+        std.debug.print(
+            "[suji] page-title-updated: escape overflow (title bytes={d}) — event dropped\n",
+            .{title.len},
+        );
+        return;
+    };
+    emitToBus(
+        window_mod.events.page_title_updated,
+        "{{\"windowId\":{d},\"title\":\"{s}\"}}",
+        .{ win_id, title_esc[0..title_n] },
+    );
 }
 
 const window_lifecycle_handlers: cef.WindowLifecycleHandlers = .{

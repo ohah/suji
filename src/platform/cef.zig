@@ -310,6 +310,10 @@ pub const CefNative = struct {
         /// CEF가 계산한 `-webkit-app-region` rectangle들. browser id별로 보관하고
         /// macOS NSWindow.sendEvent:에서 native drag hit-test에 사용.
         drag_regions: []drag_region.DragRegion = &.{},
+        /// `window:ready-to-show`는 main frame 첫 로드 완료시 1회만 발화 (Electron 호환).
+        /// 이후 reload/navigate에서는 발화 X — caller는 `did-finish-load` 패턴이 필요하면
+        /// load_url 응답을 직접 사용.
+        ready_to_show_fired: bool = false,
     };
 
     allocator: std.mem.Allocator,
@@ -2524,6 +2528,7 @@ fn initClient(client_ptr: *c.cef_client_t) void {
     client_ptr.get_keyboard_handler = &getKeyboardHandler;
     client_ptr.get_drag_handler = &getDragHandler;
     client_ptr.get_display_handler = &getDisplayHandler;
+    client_ptr.get_load_handler = &getLoadHandler;
     client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
 }
 
@@ -2551,6 +2556,7 @@ fn ensureDisplayHandler() void {
     zeroCefStruct(c.cef_display_handler_t, &g_display_handler);
     initBaseRefCounted(&g_display_handler.base);
     g_display_handler.on_address_change = &onAddressChange;
+    g_display_handler.on_title_change = &onTitleChange;
     g_display_handler_initialized = true;
 }
 
@@ -2581,6 +2587,87 @@ fn onAddressChange(
     const utf8_len = cefStringToUtf8(u, &entry.url_cache_buf).len;
     // 256 byte 초과 URL은 캐시 무효화 → 폴백 (frame.get_url) 사용.
     entry.url_cache_len = if (utf8_len > 0 and utf8_len < entry.url_cache_buf.len) utf8_len else 0;
+}
+
+/// 문서 `<title>` 최대 길이 (UTF-8 바이트). 초과 시 cefStringToUtf8가 truncate.
+/// 256은 일반 페이지 title에 충분 — 여기서 escape 후 worst-case ~1.5KB까지 부풀고
+/// main.zig의 emitToBus 4KB 버퍼와 함께 페이로드(`{windowId,title}`) 안전하게 수용.
+pub const MAX_TITLE_BYTES: usize = 256;
+
+/// 문서 `<title>`이 변경될 때 호출. payload UTF-8 변환 후 main.zig handler로 forward.
+fn onTitleChange(
+    _: ?*c._cef_display_handler_t,
+    browser: ?*c._cef_browser_t,
+    title: [*c]const c.cef_string_t,
+) callconv(.c) void {
+    const br = browser orelse return;
+    const t = title orelse return;
+    const handler = g_window_title_change_handler orelse return;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+    var buf: [MAX_TITLE_BYTES]u8 = undefined;
+    const slice = cefStringToUtf8(t, &buf);
+    handler(handle, slice);
+}
+
+// ============================================
+// CEF Load Handler — main frame 첫 로드 완료 → window:ready-to-show
+// ============================================
+
+var g_load_handler: c.cef_load_handler_t = undefined;
+var g_load_handler_initialized: bool = false;
+
+fn ensureLoadHandler() void {
+    if (g_load_handler_initialized) return;
+    zeroCefStruct(c.cef_load_handler_t, &g_load_handler);
+    initBaseRefCounted(&g_load_handler.base);
+    g_load_handler.on_load_end = &onLoadEnd;
+    g_load_handler_initialized = true;
+}
+
+fn getLoadHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_load_handler_t {
+    ensureLoadHandler();
+    return &g_load_handler;
+}
+
+/// main frame이 처음으로 load 완료되는 순간 ready-to-show 1회 발화 (Electron 호환).
+/// reload/navigate에선 다시 발화 X — `ready_to_show_fired` 플래그로 멱등성 보장.
+fn onLoadEnd(
+    _: ?*c._cef_load_handler_t,
+    browser: ?*c._cef_browser_t,
+    frame: ?*c._cef_frame_t,
+    _: c_int,
+) callconv(.c) void {
+    const br = browser orelse return;
+    const f = frame orelse return;
+    const is_main = if (f.is_main) |fn_ptr| fn_ptr(f) == 1 else false;
+    if (!is_main) return;
+
+    const native = g_cef_native orelse return;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+    const entry = native.browsers.getPtr(handle) orelse return;
+    if (entry.ready_to_show_fired) return;
+    entry.ready_to_show_fired = true;
+    if (g_window_ready_to_show_handler) |h| h(handle);
+}
+
+pub const WindowReadyToShowHandler = *const fn (handle: u64) void;
+pub const WindowTitleChangeHandler = *const fn (handle: u64, title: []const u8) void;
+
+pub var g_window_ready_to_show_handler: ?WindowReadyToShowHandler = null;
+pub var g_window_title_change_handler: ?WindowTitleChangeHandler = null;
+
+pub const WindowDisplayHandlers = struct {
+    ready_to_show: ?WindowReadyToShowHandler = null,
+    title_change: ?WindowTitleChangeHandler = null,
+};
+
+/// main.zig가 ready-to-show / page-title-updated emit 핸들러를 주입.
+/// cef.zig가 EventBus(loader/main)에 직접 의존하지 않도록 한 단계 indirection.
+/// lifecycle handlers와 동일하게 struct 패턴 — Phase 5+ 추가 핸들러(did-finish-load 등)
+/// 도입 시 비파괴적 확장 가능.
+pub fn setWindowDisplayHandlers(handlers: WindowDisplayHandlers) void {
+    g_window_ready_to_show_handler = handlers.ready_to_show;
+    g_window_title_change_handler = handlers.title_change;
 }
 
 // ============================================

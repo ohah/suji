@@ -50,6 +50,10 @@ pub const events = struct {
     pub const unmaximize = "window:unmaximize";
     pub const enter_full_screen = "window:enter-full-screen";
     pub const leave_full_screen = "window:leave-full-screen";
+    /// CEF main frame 첫 load 완료 시 1회 발화 (Electron 호환). reload/navigate 후엔 X.
+    pub const ready_to_show = "window:ready-to-show";
+    /// 문서 `<title>` 변경 시. payload: `{"windowId":N,"title":"..."}`.
+    pub const page_title_updated = "window:page-title-updated";
 };
 
 /// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".
