@@ -1105,6 +1105,33 @@ pub const dock = struct {
     }
 };
 
+// ============================================
+// process — Zig std.process.run wrap (백엔드 only, frontend 미노출 — 보안).
+// ============================================
+
+pub const process = struct {
+    pub const RunResult = struct {
+        /// Process exit code. 정상 종료가 아니면 -1.
+        code: i32,
+        /// Caller가 allocator로 free. 빈 slice면 출력 없음.
+        stdout: []u8,
+        stderr: []u8,
+    };
+
+    /// 외부 명령 실행 (Electron `child_process.spawn` + stdout/stderr capture 동등).
+    /// argv[0]은 PATH 또는 절대 경로. allocator가 result.stdout/stderr 소유 → caller가
+    /// 사용 후 free. cwd는 부모 프로세스 cwd 상속. io는 caller가 주입 — backend는
+    /// `suji.io()`, test는 `std.testing.io` 등.
+    pub fn run(allocator: std.mem.Allocator, run_io: std.Io, argv: []const []const u8) !RunResult {
+        const result = try std.process.run(allocator, run_io, .{ .argv = argv });
+        const code: i32 = switch (result.term) {
+            .exited => |c| @intCast(c),
+            else => -1,
+        };
+        return .{ .code = code, .stdout = result.stdout, .stderr = result.stderr };
+    }
+};
+
 /// Electron `app.getPath` 동등. name = "home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads".
 /// 응답: `{"path":"..."}` (unknown name은 빈 문자열).
 pub fn getPath(name: []const u8) ?[]const u8 {

@@ -1158,6 +1158,23 @@ test "notification.close: notificationId 전송" {
 // screen / powerSaveBlocker / safeStorage / dock / requestUserAttention SDK
 // ============================================
 
+test "process.run: echo 명령 실행 + stdout capture + exit code 0" {
+    const result = app_mod.process.run(std.testing.allocator, std.testing.io, &.{ "/bin/echo", "hello" }) catch |err| {
+        std.debug.print("process.run skipped: {}\n", .{err});
+        return error.SkipZigTest;
+    };
+    defer std.testing.allocator.free(result.stdout);
+    defer std.testing.allocator.free(result.stderr);
+
+    try std.testing.expectEqual(@as(i32, 0), result.code);
+    try std.testing.expect(std.mem.startsWith(u8, result.stdout, "hello"));
+}
+
+test "process.run: 존재하지 않는 명령은 error 반환" {
+    const r = app_mod.process.run(std.testing.allocator, std.testing.io, &.{"/nonexistent/binary/xyz"});
+    try std.testing.expectError(error.FileNotFound, r);
+}
+
 test "app.getPath: name 필드 escape + cmd 전송" {
     try withInvokeCore(struct {
         fn run() !void {

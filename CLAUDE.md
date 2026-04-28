@@ -85,6 +85,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
 //                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
+// suji.process.run(allocator, suji.io(), &.{ "echo", "hi" })  — std.process.run wrap (백엔드 only)
+//   → RunResult { code, stdout, stderr }, caller가 stdout/stderr free
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
