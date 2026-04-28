@@ -282,8 +282,9 @@ describe("window lifecycle events", () => {
 
   test("새 창 생성 → window:ready-to-show 1회 발화", async () => {
     // 새 창은 다른 V8 context — main 페이지의 listener가 EventBus broadcast를 받음.
-    // CEF가 새 main frame load + first paint 완료까지 충분히 대기 (5000ms).
+    // collect는 비동기로 listener 등록 — create_window 전에 등록 완료 보장 위해 wait.
     const readyCol = collect<{ windowId: number }>("window:ready-to-show", 5000);
+    await new Promise((r) => setTimeout(r, 200));
     const created = await core<{ windowId: number }>({
       cmd: "create_window",
       title: "lifecycle-ready",
@@ -434,6 +435,7 @@ describe("window lifecycle events", () => {
     await new Promise((r) => setTimeout(r, 1500));
 
     const titleCol = collect<{ windowId: number; title: string }>("window:page-title-updated", 2000);
+    await new Promise((r) => setTimeout(r, 200)); // listener 등록 round-trip 보장
     // 따옴표 + 백슬래시 + UTF-8(이모지) 포함 — escape 안전성 검증.
     await core({
       cmd: "execute_javascript",
