@@ -1508,25 +1508,24 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     }
 
     // app.requestUserAttention — dock bounce. critical=true는 활성화까지 반복, false는 1회.
-    if (std.mem.eql(u8, cmd, "app_request_user_attention")) {
+    if (std.mem.eql(u8, cmd, "app_attention_request")) {
         const critical = util.extractJsonBool(req_clean, "critical") orelse true;
         const id = cef.appRequestUserAttention(critical);
         return std.fmt.bufPrint(
             response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"app_request_user_attention\",\"id\":{d}}}",
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_attention_request\",\"id\":{d}}}",
             .{id},
         ) catch null;
     }
-    if (std.mem.eql(u8, cmd, "app_cancel_user_attention_request")) {
+    if (std.mem.eql(u8, cmd, "app_attention_cancel")) {
         const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
         const ok = cef.appCancelUserAttentionRequest(util.nonNegU32(id_n));
         return std.fmt.bufPrint(
             response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"app_cancel_user_attention_request\",\"success\":{}}}",
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_attention_cancel\",\"success\":{}}}",
             .{ok},
         ) catch null;
     }
-
 
     // safeStorage — Keychain Services. service/account/value 셋 다 unescape 필요 (wire JSON).
     if (std.mem.eql(u8, cmd, "safe_storage_set")) {

@@ -1474,13 +1474,14 @@ pub fn powerSaveBlockerStop(id: u32) bool {
 // ============================================
 // app.requestUserAttention — dock bounce (Electron `app.requestUserAttention`)
 // ============================================
-// NSApp `requestUserAttention:` / `cancelUserAttentionRequest:` raw wrap.
-// 반환된 request_id로 cancel 가능 (NSApp 내부에 큐잉). Linux/Windows는 후속.
+// 반환된 request_id로 cancel 가능 (NSApp 내부 큐). 호출 시점에 앱이 이미 active면
+// NSApp가 0을 반환 (no-op) — wrapper도 0 그대로 노출. Linux/Windows는 후속.
 
 /// NSRequestUserAttentionType — `<AppKit/NSApplication.h>`.
 const kNSCriticalRequest: c_long = 0; // 활성화될 때까지 반복 바운스
 const kNSInformationalRequest: c_long = 10; // 1회 바운스
 
+/// dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 request_id.
 pub fn appRequestUserAttention(critical: bool) u32 {
     if (!comptime is_macos) return 0;
     const NSApplication = getClass("NSApplication") orelse return 0;
@@ -1491,6 +1492,8 @@ pub fn appRequestUserAttention(critical: bool) u32 {
     return if (id > 0) @intCast(id) else 0;
 }
 
+/// dock 바운스 취소. NSApp `cancelUserAttentionRequest:`가 void라 stale/never-issued
+/// nonzero id도 true 반환 — id == 0만 false (guard). 사용자는 stale 검증 불가.
 pub fn appCancelUserAttentionRequest(id: u32) bool {
     if (!comptime is_macos) return false;
     if (id == 0) return false;

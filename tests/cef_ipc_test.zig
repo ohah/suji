@@ -905,8 +905,8 @@ test "app.requestUserAttention IPC — NSApp request/cancel" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
     inline for (.{
-        "\"app_request_user_attention\"",
-        "\"app_cancel_user_attention_request\"",
+        "\"app_attention_request\"",
+        "\"app_attention_cancel\"",
         "cef.appRequestUserAttention",
         "cef.appCancelUserAttentionRequest",
     }) |needle| {

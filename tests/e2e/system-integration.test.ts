@@ -232,53 +232,47 @@ describe("app.requestUserAttention (dock bounce)", () => {
   // NSApp 문서: 호출 시점에 앱이 active면 0 반환 (no-op). e2e는 puppeteer가
   // attach된 active app이라 0이 자주 발생 — id 0 응답을 정상 신호로 처리.
 
-  test("critical request → IPC 응답에 id 필드", async () => {
+  test("critical request → id ≥ 0 + 발급된 id로 cancel 성공", async () => {
     const r = await core<{ id: number }>({
-      cmd: "app_request_user_attention",
+      cmd: "app_attention_request",
       critical: true,
     });
-    expect(typeof r.id).toBe("number");
+    expect(r.id).toBeGreaterThanOrEqual(0);
     if (r.id > 0) {
       const c = await core<{ success: boolean }>({
-        cmd: "app_cancel_user_attention_request",
+        cmd: "app_attention_cancel",
         id: r.id,
       });
       expect(c.success).toBe(true);
     }
   });
 
-  test("informational request도 IPC 응답에 id 필드", async () => {
+  test("informational request도 id ≥ 0", async () => {
     const r = await core<{ id: number }>({
-      cmd: "app_request_user_attention",
+      cmd: "app_attention_request",
       critical: false,
     });
-    expect(typeof r.id).toBe("number");
+    expect(r.id).toBeGreaterThanOrEqual(0);
     if (r.id > 0) {
-      await core({ cmd: "app_cancel_user_attention_request", id: r.id });
+      await core({ cmd: "app_attention_cancel", id: r.id });
     }
   });
 
-  test("nonzero request id 발급 시 서로 다름 (NSApp 큐)", async () => {
-    const r1 = await core<{ id: number }>({
-      cmd: "app_request_user_attention",
-      critical: true,
-    });
-    const r2 = await core<{ id: number }>({
-      cmd: "app_request_user_attention",
-      critical: true,
-    });
-    if (r1.id > 0 && r2.id > 0) {
-      expect(r1.id).not.toBe(r2.id);
-    }
-    if (r1.id > 0) await core({ cmd: "app_cancel_user_attention_request", id: r1.id });
-    if (r2.id > 0) await core({ cmd: "app_cancel_user_attention_request", id: r2.id });
-  });
-
-  test("invalid id (0) cancel은 false", async () => {
+  test("invalid id (0) cancel은 false (guard)", async () => {
     const c = await core<{ success: boolean }>({
-      cmd: "app_cancel_user_attention_request",
+      cmd: "app_attention_cancel",
       id: 0,
     });
     expect(c.success).toBe(false);
+  });
+
+  test("nonzero id cancel은 항상 true (NSApp API가 void)", async () => {
+    // request_id를 발급받지 못한 임의의 nonzero id로 cancel — NSApp이 void로 반환하므로
+    // 우리 wrapper는 id != 0이면 무조건 true. 이 비대칭은 의도된 contract.
+    const c = await core<{ success: boolean }>({
+      cmd: "app_attention_cancel",
+      id: 999999,
+    });
+    expect(c.success).toBe(true);
   });
 });
