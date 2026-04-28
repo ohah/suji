@@ -487,6 +487,16 @@ export const powerMonitor = {
     const r = await coreCall<{ seconds: number }>({ cmd: "power_monitor_get_idle_time" });
     return r.seconds;
   },
+
+  /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
+   *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등 (lock 상태는 미트래킹). */
+  async getSystemIdleState(threshold: number): Promise<"active" | "idle"> {
+    const r = await coreCall<{ state: "active" | "idle" }>({
+      cmd: "power_monitor_get_idle_state",
+      threshold,
+    });
+    return r.state;
+  },
 };
 
 export const clipboard = {

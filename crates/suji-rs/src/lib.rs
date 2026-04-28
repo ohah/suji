@@ -581,11 +581,19 @@ pub mod clipboard {
 }
 
 pub mod power_monitor {
-    use crate::invoke;
+    use crate::{invoke, serde_json};
 
     /// 시스템 유휴 시간 raw JSON. `{"seconds":f64}`.
     pub fn get_system_idle_time() -> Option<String> {
         invoke("__core__", r#"{"cmd":"power_monitor_get_idle_time"}"#)
+    }
+
+    /// 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". raw JSON: `{"state":"active"|"idle"}`.
+    pub fn get_system_idle_state(threshold: i64) -> Option<String> {
+        invoke(
+            "__core__",
+            &serde_json::json!({ "cmd": "power_monitor_get_idle_state", "threshold": threshold }).to_string(),
+        )
     }
 }
 

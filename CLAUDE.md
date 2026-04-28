@@ -70,6 +70,7 @@ fn onAllClosed(_: suji.Event) void {
 //   / has("public.html") / availableFormats()  — format 검사 (UTI)
 //   / writeImage(base64) / readImage() — PNG round-trip (raw ~8KB 1차)
 // suji.powerMonitor.getSystemIdleTime()  — 유휴 초 (CGEventSource)
+// suji.powerMonitor.getSystemIdleState(60)  — "active" | "idle" (idle_seconds ≥ threshold)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")

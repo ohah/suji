@@ -1444,6 +1444,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{seconds},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "power_monitor_get_idle_state")) {
+        const threshold = util.extractJsonInt(req_clean, "threshold") orelse 0;
+        const seconds = cef.powerMonitorIdleSeconds();
+        const state: []const u8 = if (@as(i64, @intFromFloat(seconds)) >= threshold) "idle" else "active";
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_get_idle_state\",\"state\":\"{s}\"}}",
+            .{state},
+        ) catch null;
+    }
 
     // Shell API — NSWorkspace 기본 핸들러 / NSBeep.
     if (std.mem.eql(u8, cmd, "shell_open_external")) {

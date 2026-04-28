@@ -407,6 +407,28 @@ describe("powerMonitor.getSystemIdleTime", () => {
   });
 });
 
+describe("powerMonitor.getSystemIdleState", () => {
+  test("threshold=0 → 'idle' (idle_seconds >= 0 항상 참)", async () => {
+    const r = await core<{ state: string }>({ cmd: "power_monitor_get_idle_state", threshold: 0 });
+    expect(r.state).toBe("idle");
+  });
+
+  // 동적 threshold — 현재 idle_seconds + 1000초면 항상 그 미만이라 active 보장.
+  test("threshold > 현재 idle_seconds → 'active'", async () => {
+    const cur = await core<{ seconds: number }>({ cmd: "power_monitor_get_idle_time" });
+    const r = await core<{ state: string }>({
+      cmd: "power_monitor_get_idle_state",
+      threshold: Math.ceil(cur.seconds) + 1000,
+    });
+    expect(r.state).toBe("active");
+  });
+
+  test("threshold 미지정 → 0 fallback → 'idle'", async () => {
+    const r = await core<{ state: string }>({ cmd: "power_monitor_get_idle_state" });
+    expect(r.state).toBe("idle");
+  });
+});
+
 describe("shell.openPath", () => {
   test("존재하는 경로 → success:true (실제 앱 열림은 환경 의존)", async () => {
     const r = await core<{ success: boolean }>({ cmd: "shell_open_path", path: "/tmp" });

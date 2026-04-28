@@ -1344,7 +1344,7 @@ suji build → 결과물:
 | 다크/라이트 테마 감지 + 강제 | `nativeTheme.shouldUseDarkColors` + `themeSource` setter + `updated` 이벤트 | `theme` 플러그인 | 🟡 macOS — `shouldUseDarkColors()` ✅ + `setThemeSource("light"\|"dark"\|"system")` ✅ (NSAppearance setAppearance:). `updated` 이벤트(KVO)는 후속 |
 | dock 진행률 표시 | `BrowserWindow.setProgressBar(0..1)` | -- | ✅ macOS NSDockTile.contentView NSProgressIndicator. progress<0=hide, 0~1=ratio, >1=clamp. 5 SDK + e2e |
 | 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | ✅ `screen.getCursorScreenPoint()` (NSEvent.mouseLocation, bottom-up) + `getDisplayNearestPoint({x,y})` (frame contains check, none이면 -1) |
-| 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ (`CGEventSourceSecondsSinceLastEventType`, 초). `getSystemIdleState(threshold)` (active/idle/locked enum)는 후속 |
+| 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ + `getSystemIdleState(threshold)` ✅ (`"active"\|"idle"`, idle_seconds ≥ threshold 비교). `"locked"` 상태는 lock-screen 이벤트 트래킹 후속 |
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
 | 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
 | nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | 🟡 `nativeImage.getSize(path)` ✅ (NSImage initWithContentsOfFile + .size). `toPNG`/`toJPEG` encode는 후속 |

@@ -825,6 +825,13 @@ pub const powerMonitor = struct {
     pub fn getSystemIdleTime() ?[]const u8 {
         return coreCmd("power_monitor_get_idle_time", "");
     }
+
+    /// 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". 응답: `{"state":"active"|"idle"}`.
+    pub fn getSystemIdleState(threshold: i64) ?[]const u8 {
+        var buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&buf, "\"threshold\":{d}", .{threshold}) catch return null;
+        return coreCmd("power_monitor_get_idle_state", fields);
+    }
 };
 
 pub const shell = struct {

@@ -1221,6 +1221,7 @@ test "clipboard HTML + powerMonitor idle IPC + cef.zig 함수" {
         "\"clipboard_read_html\"",
         "\"clipboard_write_html\"",
         "\"power_monitor_get_idle_time\"",
+        "\"power_monitor_get_idle_state\"",
         "cef.clipboardReadHtml",
         "cef.clipboardWriteHtml",
         "cef.powerMonitorIdleSeconds",

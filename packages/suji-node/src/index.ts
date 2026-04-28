@@ -606,6 +606,15 @@ export const powerMonitor = {
     const r = await invoke<{ seconds: number }>('__core__', { cmd: 'power_monitor_get_idle_time' });
     return r.seconds;
   },
+
+  /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". (lock 상태는 미트래킹) */
+  async getSystemIdleState(threshold: number): Promise<'active' | 'idle'> {
+    const r = await invoke<{ state: 'active' | 'idle' }>('__core__', {
+      cmd: 'power_monitor_get_idle_state',
+      threshold,
+    });
+    return r.state;
+  },
 };
 
 export const shell = {

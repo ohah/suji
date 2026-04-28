@@ -987,6 +987,16 @@ test "powerMonitor.getSystemIdleTime IPC" {
     }.run);
 }
 
+test "powerMonitor.getSystemIdleState IPC + threshold" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.powerMonitor.getSystemIdleState(60);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"power_monitor_get_idle_state\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"threshold\":60") != null);
+        }
+    }.run);
+}
+
 test "shell.openPath: path 필드 + cmd 전송" {
     try withInvokeCore(struct {
         fn run() !void {
