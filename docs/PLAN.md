@@ -548,7 +548,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               `documents/dialog.mdx`. 4개 SDK 노출.
         - **새로 깔린 인프라**: `.m` 파일 컴파일 룰 (build.zig + `-fobjc-arc`) — 향후 ObjC block
               필요 API (Notification completion, NSAnimation, vibrancy 등) 재사용 가능.
-  - [ ] Phase 5: 라이프사이클 이벤트 (resize/close/focus/blur, quitOnAllWindowsClosed)
+  - [x] **Phase 5: 라이프사이클 이벤트** — close/closed/all-closed/resized/moved/focus/blur는
+        Phase 2에서 완료. Phase 5-1~5-5에서 minimize/restore/maximize/unmaximize/enter·leave-
+        full-screen/show/hide/ready-to-show/page-title-updated/will-resize 추가 + quit-policy
+        (`app.quitOnAllWindowsClosed`) 옵션. SDK 호환성 (5 SDK 모두 EventBus 통해 자동) + 단위
+        47개 + e2e 13 pass / 4 skip / 0 fail. 4 skip은 e2e 환경 한계 — `docs/WINDOW_API.md#
+        phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
+        will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
+        미발화). frameless drag 라우팅은 macOS 완료 — Linux/Windows는 후속.
   - [x] **Phase 5-B: Tray v1** — NSStatusItem + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
         (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
@@ -565,7 +572,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         `menu.setApplicationMenu/resetApplicationMenu`, `submenu/item/checkbox/separator`,
         `menu:click {click}` 이벤트 라우팅. Frontend `@suji/api` + Zig/Rust/Go/Node SDK 노출.
         회귀 테스트 + SDK 단위 + `tests/e2e/menu.test.ts`. `documents/menu.mdx`.
-  - [ ] **Phase 5-E: 글로벌 단축키** (NSEvent.addGlobalMonitorForEvents) — Electron `globalShortcut`.
+  - [x] **Phase 5-E: 글로벌 단축키** — macOS Carbon RegisterEventHotKey (NSEvent monitor가 아닌
+        Carbon path, 권한 불필요). 5 SDK 모두 노출(`globalShortcut.{register/unregister/
+        unregisterAll/isRegistered}`) + accelerator 파싱 + `globalShortcut:trigger` 이벤트.
+        `src/platform/global_shortcut.m` + 5 SDK + e2e.
   - [x] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
         Frontend JS + Zig/Rust/Go/Node SDK wrapper, 단위/회귀/E2E 테스트, 문서 추가.
         프론트는 IPC, 백엔드는 std lib 직접 + 공통 typed wrapper.
@@ -1348,7 +1358,9 @@ suji build → 결과물:
 4. ✅ **트레이 + 알림 + 메뉴바 API** — Phase 5-B/C/D 완료, 데스크톱 앱 기본 요소
 5. ✅ **파일 시스템 API** — Phase 5-F 완료. 백엔드/프론트 공통 `fs` wrapper + E2E
 6. ✅ **글로벌 단축키** — Phase 5-E 완료. macOS Carbon Hot Key (권한 불필요) + 5 SDK + accelerator 파싱
-7. ✅ **라이프사이클 이벤트** — Phase 5 완료. resize/focus/blur/move (macOS NSWindowDelegate 자동 부착)
+7. ✅ **라이프사이클 이벤트** — Phase 5 완료. minimize/restore/maximize/unmaximize/enter·leave-
+    full-screen/show/hide/ready-to-show/page-title-updated/will-resize + quit-policy. e2e 4 skip은
+    환경 한계로 단위 테스트가 cover (`docs/WINDOW_API.md` 매핑 표).
 8. ✅ **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
 9. ✅ **보안 모델** (Phase 7: fs sandbox + cache 격리 + IPC 검증 + CSP + contextIsolation audit) — Phase 7 핵심 완료
 10. **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — 진입 장벽 즉각 해소
