@@ -3188,6 +3188,109 @@ fn urlMatchesAnyBlockedPattern(url: []const u8) bool {
     return false;
 }
 
+// ============================================
+// webRequest dynamic listener — RV_CONTINUE_ASYNC pending callback storage.
+// ============================================
+// Electron `session.webRequest.onBeforeRequest({urls}, listener)` — listener가 callback
+// (decision)으로 cancel 결정. CEF는 OnBeforeResourceLoad에서 RV_CONTINUE_ASYNC 반환
+// → callback->cont/cancel을 외부에서 호출할 때까지 요청 hold. listener 응답 IPC가
+// resolve(id, cancel)로 callback 결정.
+//
+// 주의: listener가 응답하지 않으면 요청 영원히 hold. timeout fallback은 후속 (caller
+// 측에서 책임).
+
+var g_listener_url_patterns: [MAX_WEB_REQUEST_PATTERNS][MAX_WEB_REQUEST_PATTERN_LEN]u8 = undefined;
+var g_listener_url_lens: [MAX_WEB_REQUEST_PATTERNS]usize = .{0} ** MAX_WEB_REQUEST_PATTERNS;
+var g_listener_url_count: usize = 0;
+
+const MAX_PENDING_CALLBACKS: usize = 256;
+
+const PendingCallback = struct {
+    id: u64,
+    callback: *c._cef_callback_t,
+};
+
+var g_pending_callbacks: [MAX_PENDING_CALLBACKS]PendingCallback = undefined;
+var g_pending_count: usize = 0;
+var g_pending_lock: std.atomic.Value(bool) = .init(false);
+var g_request_id_counter: std.atomic.Value(u64) = .init(0);
+
+fn pendingLock() void {
+    while (g_pending_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+        std.atomic.spinLoopHint();
+    }
+}
+fn pendingUnlock() void {
+    g_pending_lock.store(false, .release);
+}
+
+/// listener filter pattern 등록. blocklist와 별도 — 이 filter에 매칭되면
+/// `webRequest:will-request` 이벤트 발화 + RV_CONTINUE_ASYNC. 빈 list = listener 없음.
+pub fn webRequestSetListenerFilter(patterns: []const []const u8) usize {
+    webRequestLock();
+    defer webRequestUnlock();
+    const n = @min(patterns.len, MAX_WEB_REQUEST_PATTERNS);
+    for (0..n) |i| {
+        const p = patterns[i];
+        const len = @min(p.len, MAX_WEB_REQUEST_PATTERN_LEN);
+        @memcpy(g_listener_url_patterns[i][0..len], p[0..len]);
+        g_listener_url_lens[i] = len;
+    }
+    @atomicStore(usize, &g_listener_url_count, n, .release);
+    return n;
+}
+
+fn urlMatchesAnyListenerPattern(url: []const u8) bool {
+    if (@atomicLoad(usize, &g_listener_url_count, .acquire) == 0) return false;
+    webRequestLock();
+    defer webRequestUnlock();
+    for (0..g_listener_url_count) |i| {
+        const pat = g_listener_url_patterns[i][0..g_listener_url_lens[i]];
+        if (util.matchGlob(pat, url)) return true;
+    }
+    return false;
+}
+
+/// CEF callback을 pending pool에 저장 후 id 반환. caller가 add_ref 보장.
+/// 가득 차면 0 (resolve 안 된 채로 buffer overflow 방지).
+fn pendingPush(callback: *c._cef_callback_t) u64 {
+    pendingLock();
+    defer pendingUnlock();
+    if (g_pending_count >= MAX_PENDING_CALLBACKS) return 0;
+    const id = g_request_id_counter.fetchAdd(1, .monotonic) + 1;
+    g_pending_callbacks[g_pending_count] = .{ .id = id, .callback = callback };
+    g_pending_count += 1;
+    return id;
+}
+
+/// pending pool에서 id로 callback 추출 (consume). 없으면 null.
+fn pendingTake(id: u64) ?*c._cef_callback_t {
+    pendingLock();
+    defer pendingUnlock();
+    var i: usize = 0;
+    while (i < g_pending_count) : (i += 1) {
+        if (g_pending_callbacks[i].id == id) {
+            const cb = g_pending_callbacks[i].callback;
+            g_pending_callbacks[i] = g_pending_callbacks[g_pending_count - 1];
+            g_pending_count -= 1;
+            return cb;
+        }
+    }
+    return null;
+}
+
+/// listener 응답 — id로 pending callback 찾아 cont/cancel 호출. 없는 id면 false.
+pub fn webRequestResolve(id: u64, cancel_request: bool) bool {
+    const cb = pendingTake(id) orelse return false;
+    if (cancel_request) {
+        if (cb.cancel) |fp| fp(cb);
+    } else {
+        if (cb.cont) |fp| fp(cb);
+    }
+    if (cb.base.release) |rel| _ = rel(&cb.base);
+    return true;
+}
+
 var g_request_handler: c.cef_request_handler_t = undefined;
 var g_request_handler_initialized: bool = false;
 
@@ -3249,7 +3352,7 @@ fn onBeforeResourceLoad(
     _: ?*c._cef_browser_t,
     _: ?*c._cef_frame_t,
     request: ?*c._cef_request_t,
-    _: ?*c._cef_callback_t,
+    callback: ?*c._cef_callback_t,
 ) callconv(.c) c.cef_return_value_t {
     const req = request orelse return c.RV_CONTINUE;
     const get_url = req.get_url orelse return c.RV_CONTINUE;
@@ -3257,9 +3360,32 @@ fn onBeforeResourceLoad(
     const url = cefUserfreeToUtf8(get_url(req), &url_buf);
     if (url.len == 0) return c.RV_CONTINUE;
 
-    emitWebRequestEvent("webRequest:before-request", url, "");
+    // 1. blocklist 우선 — 매칭되면 비동기 listener 거치지 않고 즉시 cancel.
+    if (urlMatchesAnyBlockedPattern(url)) {
+        emitWebRequestEvent("webRequest:before-request", url, "");
+        return c.RV_CANCEL;
+    }
 
-    if (urlMatchesAnyBlockedPattern(url)) return c.RV_CANCEL;
+    // 2. listener filter 매칭 — async pending. add_ref 후 pool에 저장 + JS listener emit.
+    if (callback) |cb| {
+        if (urlMatchesAnyListenerPattern(url)) {
+            if (cb.base.add_ref) |add_ref| _ = add_ref(&cb.base);
+            const id = pendingPush(cb);
+            if (id == 0) {
+                // pending pool 가득 — fallback to 즉시 release + 통과.
+                if (cb.base.release) |rel| _ = rel(&cb.base);
+                emitWebRequestEvent("webRequest:before-request", url, "");
+                return c.RV_CONTINUE;
+            }
+            var extra_buf: [64]u8 = undefined;
+            const extra = std.fmt.bufPrint(&extra_buf, "\"id\":{d}", .{id}) catch "";
+            emitWebRequestEvent("webRequest:will-request", url, extra);
+            return c.RV_CONTINUE_ASYNC;
+        }
+    }
+
+    // 3. 일반 — fire-and-forget before-request 이벤트만.
+    emitWebRequestEvent("webRequest:before-request", url, "");
     return c.RV_CONTINUE;
 }
 

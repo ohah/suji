@@ -917,6 +917,19 @@ export const webRequest = {
     const r = await invoke<{ count: number }>('__core__', { cmd: 'web_request_set_blocked_urls', patterns });
     return r.count;
   },
+
+  /** dynamic listener filter. 매칭 요청은 RV_CONTINUE_ASYNC + webRequest:will-request 이벤트.
+   *  consumer가 resolve(id, cancel) 호출 전까지 hold. */
+  async setListenerFilter(patterns: string[]): Promise<number> {
+    const r = await invoke<{ count: number }>('__core__', { cmd: 'web_request_set_listener_filter', patterns });
+    return r.count;
+  },
+
+  /** pending 요청 결정 (Electron callback). cancel=true면 차단, false면 통과. */
+  async resolve(id: number, cancel: boolean): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'web_request_resolve', id, cancel });
+    return r.success === true;
+  },
 };
 
 export type PowerSaveBlockerType = 'prevent_app_suspension' | 'prevent_display_sleep';

@@ -473,9 +473,32 @@ export declare const dialog: {
     /** Sync 변종 — 취소면 `undefined`, 아니면 `string`. windowId 첫 인자 지원. */
     showSaveDialogSync(arg1?: SaveDialogOptions | number, arg2?: SaveDialogOptions): Promise<string | undefined>;
 };
+export interface WebRequestDetails {
+    url: string;
+    /** resolve용 internal id — `webRequest.resolve`에 그대로 전달. */
+    id: number;
+}
+export interface WebRequestDecision {
+    /** true면 요청 cancel, false/생략이면 통과. */
+    cancel?: boolean;
+}
+type WebRequestListener = (details: WebRequestDetails, callback: (decision: WebRequestDecision) => void) => void;
 export declare const webRequest: {
     /** blocklist 패턴 list 갱신 (전체 교체). 빈 list = 모든 요청 통과. 최대 32개, 256자/패턴. */
     setBlockedUrls(patterns: string[]): Promise<number>;
+    /**
+     * Electron `session.webRequest.onBeforeRequest({urls}, listener)` 동등.
+     * filter.urls glob 매칭 시 listener가 비동기 결정 — `callback({ cancel: true })`로 차단,
+     * `callback({})`로 통과. callback 호출 안 하면 요청 영원히 hold (timeout fallback 미구현).
+     *
+     * 한 번에 1 listener만 active — 새로 등록 시 이전 listener detach.
+     * filter null 또는 빈 listener는 detach.
+     */
+    onBeforeRequest(filter: {
+        urls: string[];
+    } | null, listener: WebRequestListener | null): Promise<void>;
+    /** listener 직접 detach (파라미터 없는 onBeforeRequest와 동등). */
+    clearListener(): Promise<void>;
 };
 export interface Display {
     index: number;

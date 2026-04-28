@@ -1558,6 +1558,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "web_request_set_blocked_urls")) {
         return handleWebRequestSetBlockedUrls(req_clean, response_buf);
     }
+    if (std.mem.eql(u8, cmd, "web_request_set_listener_filter")) {
+        return handleWebRequestSetListenerFilter(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "web_request_resolve")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        const cancel_request = util.extractJsonBool(req_clean, "cancel") orelse false;
+        const ok = if (id_n > 0) cef.webRequestResolve(@intCast(id_n), cancel_request) else false;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"web_request_resolve\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
 
     if (std.mem.eql(u8, cmd, "app_attention_cancel")) {
         const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
@@ -2362,6 +2375,30 @@ fn handleWebRequestSetBlockedUrls(req_clean: []const u8, response_buf: []u8) ?[]
     return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_blocked_urls\",\"count\":{d}}}",
+        .{n},
+    ) catch null;
+}
+
+fn handleWebRequestSetListenerFilter(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(WebRequestSetBlockedUrlsJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_listener_filter\",\"success\":false,\"error\":\"parse\"}}",
+            .{},
+        ) catch null;
+    };
+    defer parsed.deinit();
+
+    const n = cef.webRequestSetListenerFilter(parsed.value.patterns);
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_listener_filter\",\"count\":{d}}}",
         .{n},
     ) catch null;
 }

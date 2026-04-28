@@ -11,19 +11,40 @@ import (
 // SetBlockedUrls registers URL glob patterns. `*` wildcard only.
 // Response: `{"count":N}` (등록된 개수).
 func SetBlockedUrls(patterns []string) string {
-	return suji.Invoke("__core__", buildSetBlockedUrlsRequest(patterns))
+	return suji.Invoke("__core__", buildPatternsRequest("web_request_set_blocked_urls", patterns))
 }
 
-func buildSetBlockedUrlsRequest(patterns []string) string {
+// SetListenerFilter registers dynamic listener filter. 매칭 요청은 RV_CONTINUE_ASYNC +
+// webRequest:will-request 이벤트. consumer가 Resolve(id, cancel) 호출 전까지 hold.
+func SetListenerFilter(patterns []string) string {
+	return suji.Invoke("__core__", buildPatternsRequest("web_request_set_listener_filter", patterns))
+}
+
+// Resolve confirms or cancels a pending request by id (from will-request event).
+func Resolve(id uint64, cancel bool) string {
+	body, _ := json.Marshal(map[string]any{
+		"cmd":    "web_request_resolve",
+		"id":     id,
+		"cancel": cancel,
+	})
+	return suji.Invoke("__core__", string(body))
+}
+
+func buildPatternsRequest(cmd string, patterns []string) string {
 	if patterns == nil {
 		patterns = []string{}
 	}
 	body, err := json.Marshal(map[string]any{
-		"cmd":      "web_request_set_blocked_urls",
+		"cmd":      cmd,
 		"patterns": patterns,
 	})
 	if err != nil {
-		return `{"cmd":"web_request_set_blocked_urls","patterns":[]}`
+		return `{"cmd":"` + cmd + `","patterns":[]}`
 	}
 	return string(body)
+}
+
+// Deprecated: use buildPatternsRequest. Kept for backwards-compat with existing tests.
+func buildSetBlockedUrlsRequest(patterns []string) string {
+	return buildPatternsRequest("web_request_set_blocked_urls", patterns)
 }

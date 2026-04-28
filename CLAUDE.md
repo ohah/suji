@@ -244,6 +244,8 @@ suji.platform                                                // "macos" | "linux
 // await app.cancelUserAttentionRequest(reqId)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])                     (CEF ResourceRequestHandler)
 //   → suji.on('webRequest:completed', ({url, statusCode, ...}) => ...)
+// await webRequest.onBeforeRequest({urls:["https://*.tracker/*"]}, (details, cb) => cb({cancel:true}))
+//   → RV_CONTINUE_ASYNC + listener round-trip (현재 IO↔V8 race로 e2e 2 skip)
 ```
 
 ## suji.json 설정

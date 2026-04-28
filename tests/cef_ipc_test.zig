@@ -930,6 +930,33 @@ test "webRequest — CefRequestHandler wiring + URL glob blocklist + 2 이벤트
     }
 }
 
+test "webRequest dynamic listener — RV_CONTINUE_ASYNC + pending callback storage" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"web_request_set_listener_filter\"",
+        "\"web_request_resolve\"",
+        "cef.webRequestSetListenerFilter",
+        "cef.webRequestResolve",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn webRequestSetListenerFilter",
+        "pub fn webRequestResolve",
+        "PendingCallback",
+        "pendingPush",
+        "pendingTake",
+        "RV_CONTINUE_ASYNC",
+        "\"webRequest:will-request\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

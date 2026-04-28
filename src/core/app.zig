@@ -1204,6 +1204,23 @@ pub const webRequest = struct {
     /// patterns는 glob 패턴 (`*` wildcard). 응답: `{"count":N}` (등록된 개수).
     /// 최대 32개 / 256자per. 빈 list로 호출하면 모든 패턴 제거.
     pub fn setBlockedUrls(patterns: []const []const u8) ?[]const u8 {
+        return setUrlPatternsCmd("web_request_set_blocked_urls", patterns);
+    }
+
+    /// dynamic listener filter — 매칭 요청은 RV_CONTINUE_ASYNC + `webRequest:will-request`
+    /// 이벤트. consumer가 resolve(id, cancel) 호출 전까지 hold.
+    pub fn setListenerFilter(patterns: []const []const u8) ?[]const u8 {
+        return setUrlPatternsCmd("web_request_set_listener_filter", patterns);
+    }
+
+    /// pending 요청 결정 (Electron callback). cancel=true면 차단, false면 통과.
+    pub fn resolve(id: u64, cancel_request: bool) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"id\":{d},\"cancel\":{}", .{ id, cancel_request }) catch return null;
+        return coreCmd("web_request_resolve", fields);
+    }
+
+    fn setUrlPatternsCmd(cmd: []const u8, patterns: []const []const u8) ?[]const u8 {
         var fields_buf: [8192]u8 = undefined;
         var w: std.Io.Writer = .fixed(&fields_buf);
         w.writeAll("\"patterns\":[") catch return null;
@@ -1216,7 +1233,7 @@ pub const webRequest = struct {
             w.writeAll("\"") catch return null;
         }
         w.writeAll("]") catch return null;
-        return coreCmd("web_request_set_blocked_urls", w.buffered());
+        return coreCmd(cmd, w.buffered());
     }
 };
 

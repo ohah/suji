@@ -486,20 +486,7 @@ export const dialog = {
         return r.canceled ? undefined : r.filePath;
     },
 };
-// ============================================
-// webRequest — URL glob blocklist (Electron `session.webRequest`)
-// ============================================
-// declarative 패턴만 지원 — JS callback decision은 후속 (sync IPC deadlock 방지).
-// 매칭 시 fetch/XHR/이미지 등 모든 요청 cancel. `*` wildcard만 지원.
-//
-// 이벤트 (suji.on(...)으로 listen):
-//   `webRequest:before-request` — { url } (모든 요청, 자체 페이지 asset/HMR 포함 — 노이즈
-//                                   많음. consumer가 prefix/regex로 필터 권장)
-//   `webRequest:completed` — { url, statusCode, requestStatus, receivedBytes }
-//                             requestStatus: 0=UNKNOWN 1=SUCCESS 2=IO_PENDING 3=CANCELED 4=FAILED.
-//                             blocklist 매칭 차단 시 statusCode=0 + requestStatus=FAILED(4)
-//                             — CEF가 handler-initiated cancel을 FAILED로 보고 (CANCELED는
-//                             user-initiated만).
+let activeListenerOff = null;
 export const webRequest = {
     /** blocklist 패턴 list 갱신 (전체 교체). 빈 list = 모든 요청 통과. 최대 32개, 256자/패턴. */
     async setBlockedUrls(patterns) {
@@ -508,6 +495,43 @@ export const webRequest = {
             patterns,
         });
         return r.count;
+    },
+    /**
+     * Electron `session.webRequest.onBeforeRequest({urls}, listener)` 동등.
+     * filter.urls glob 매칭 시 listener가 비동기 결정 — `callback({ cancel: true })`로 차단,
+     * `callback({})`로 통과. callback 호출 안 하면 요청 영원히 hold (timeout fallback 미구현).
+     *
+     * 한 번에 1 listener만 active — 새로 등록 시 이전 listener detach.
+     * filter null 또는 빈 listener는 detach.
+     */
+    async onBeforeRequest(filter, listener) {
+        if (activeListenerOff) {
+            activeListenerOff();
+            activeListenerOff = null;
+        }
+        const patterns = filter && listener ? filter.urls : [];
+        await coreCall({ cmd: "web_request_set_listener_filter", patterns });
+        if (!listener || patterns.length === 0)
+            return;
+        activeListenerOff = on("webRequest:will-request", (payload) => {
+            try {
+                const ev = typeof payload === "string" ? JSON.parse(payload) : payload;
+                listener({ url: ev.url, id: ev.id }, async (decision) => {
+                    await coreCall({
+                        cmd: "web_request_resolve",
+                        id: ev.id,
+                        cancel: !!decision?.cancel,
+                    });
+                });
+            }
+            catch {
+                // malformed payload는 무시 — listener 깨지지 않게.
+            }
+        });
+    },
+    /** listener 직접 detach (파라미터 없는 onBeforeRequest와 동등). */
+    async clearListener() {
+        return this.onBeforeRequest(null, null);
     },
 };
 export const screen = {

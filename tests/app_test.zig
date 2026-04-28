@@ -1263,6 +1263,23 @@ test "webRequest.setBlockedUrls: 빈 list" {
     }.run);
 }
 
+test "webRequest.setListenerFilter / resolve: dynamic listener IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.webRequest.setListenerFilter(&.{"https://*.tracker.com/*"});
+            const r1 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"web_request_set_listener_filter\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"https://*.tracker.com/*\"") != null);
+
+            _ = app_mod.webRequest.resolve(42, true);
+            const r2 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"cmd\":\"web_request_resolve\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"id\":42") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"cancel\":true") != null);
+        }
+    }.run);
+}
+
 test "screen.getAllDisplays: 인자 없는 cmd" {
     try withInvokeCore(struct {
         fn run() !void {

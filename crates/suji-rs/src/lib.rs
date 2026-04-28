@@ -1098,10 +1098,37 @@ pub mod web_request {
         .to_string()
     }
 
+    pub(crate) fn set_listener_filter_request(patterns: &[&str]) -> String {
+        serde_json::json!({
+            "cmd": "web_request_set_listener_filter",
+            "patterns": patterns,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn resolve_request(id: u64, cancel: bool) -> String {
+        serde_json::json!({
+            "cmd": "web_request_resolve",
+            "id": id,
+            "cancel": cancel,
+        })
+        .to_string()
+    }
+
     /// URL glob blocklist 등록 (Electron `session.webRequest.onBeforeRequest({urls})`).
     /// `*` wildcard만. 응답: `{"count":N}`.
     pub fn set_blocked_urls(patterns: &[&str]) -> Option<String> {
         invoke("__core__", &set_blocked_urls_request(patterns))
+    }
+
+    /// dynamic listener filter. 매칭 요청은 RV_CONTINUE_ASYNC + webRequest:will-request 이벤트.
+    pub fn set_listener_filter(patterns: &[&str]) -> Option<String> {
+        invoke("__core__", &set_listener_filter_request(patterns))
+    }
+
+    /// pending 요청 결정 — id는 will-request 이벤트의 id 필드.
+    pub fn resolve(id: u64, cancel: bool) -> Option<String> {
+        invoke("__core__", &resolve_request(id, cancel))
     }
 }
 
