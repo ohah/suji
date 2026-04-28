@@ -29,6 +29,25 @@ pub const State = packed struct {
     visible: bool = true,
 };
 
+/// 윈도우 라이프사이클 이벤트 채널 상수.
+///
+/// **이름 규칙**: Electron BrowserWindow 이벤트 1:1 매핑 — single-token (`minimize`,
+/// `show`)과 hyphenated (`enter-full-screen`, `page-title-updated`)가 섞인 것은 의도적.
+/// "정규화"하지 말 것 — Electron 호환이 깨짐.
+///
+/// **3가지 발화 경로** (origin에 따라 다름):
+///   1. **NSWindowDelegate → main.zig 트램폴린**: minimize/restore/maximize/
+///      unmaximize/enter·leave-full-screen/resized/moved/focus/blur/will-resize.
+///      OS가 진실의 원천이라 WM API는 emit 안 함 (programmatic + traffic-light 둘 다
+///      delegate 통과).
+///   2. **CEF handler → main.zig 트램폴린**: ready-to-show(load_handler), page-title-
+///      updated(display_handler).
+///   3. **WM API 인라인 emit**: show/hide(setVisible 상태 전이), created/close/closed/
+///      all-closed(WindowManager 라이프사이클).
+///
+/// **will-move 미구현**: docs/WINDOW_API.md에 listed되어 있으나 macOS NSWindowDelegate가
+/// `windowWillMove:` (sync cancellable)를 제공하지 않아 macOS에선 발화 불가. Electron도
+/// macOS에선 안 발화 (Windows `WM_MOVING`만 호출). Linux/Windows native 작업과 함께 재평가.
 pub const events = struct {
     pub const created = "window:created";
     pub const close = "window:close";
@@ -465,7 +484,16 @@ pub fn applyWillResize(
         window_id,
         @as(i64, @intFromFloat(proposed_w.*)),
         @as(i64, @intFromFloat(proposed_h.*)),
-    }) catch return;
+    }) catch {
+        // 256B 버퍼는 i64 max(20)*2 + framing(~40) = 100B 안에 충분. 도달하면 회귀.
+        // cancelable 이벤트 silent drop은 listener의 preventDefault를 막아 사용자 surprise →
+        // 명시적 경고. is_test 가드로 zig 0.16 test runner의 IPC 노이즈 회피.
+        if (!builtin.is_test) std.debug.print(
+            "[suji] will-resize: payload format failed (window_id={d}) — cancellation silently disabled\n",
+            .{window_id},
+        );
+        return;
+    };
     var ev: SujiEvent = .{};
     sink.emitCancelable(events.will_resize, w.buffered(), &ev);
     if (ev.default_prevented) {

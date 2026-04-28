@@ -176,30 +176,35 @@ static void ensure_delegate(void) {
     if (g_delegate == nil) g_delegate = [[SujiWindowLifecycleDelegate alloc] init];
 }
 
-void suji_window_lifecycle_set_callbacks(
-    void (*resized)(uint64_t, double, double, double, double),
-    void (*moved)(uint64_t, double, double),
-    void (*focus)(uint64_t),
-    void (*blur)(uint64_t),
-    void (*minimize)(uint64_t),
-    void (*restore)(uint64_t),
-    void (*maximize)(uint64_t),
-    void (*unmaximize)(uint64_t),
-    void (*enter_fullscreen)(uint64_t),
-    void (*leave_fullscreen)(uint64_t),
-    void (*will_resize)(uint64_t, double, double, double *, double *)
-) {
-    g_resized_cb = resized;
-    g_moved_cb = moved;
-    g_focus_cb = focus;
-    g_blur_cb = blur;
-    g_minimize_cb = minimize;
-    g_restore_cb = restore;
-    g_maximize_cb = maximize;
-    g_unmaximize_cb = unmaximize;
-    g_enter_fullscreen_cb = enter_fullscreen;
-    g_leave_fullscreen_cb = leave_fullscreen;
-    g_will_resize_cb = will_resize;
+/// 11개 콜백을 한 struct로 — 6개가 동일 시그니처 `void(uint64_t)`라 위치 기반 인자
+/// 전달 시 silent mis-routing(예: minimize 자리에 maximize 함수)을 컴파일 타임에 차단.
+typedef struct {
+    void (*resized)(uint64_t, double, double, double, double);
+    void (*moved)(uint64_t, double, double);
+    void (*focus)(uint64_t);
+    void (*blur)(uint64_t);
+    void (*minimize)(uint64_t);
+    void (*restore)(uint64_t);
+    void (*maximize)(uint64_t);
+    void (*unmaximize)(uint64_t);
+    void (*enter_fullscreen)(uint64_t);
+    void (*leave_fullscreen)(uint64_t);
+    void (*will_resize)(uint64_t, double, double, double *, double *);
+} suji_window_lifecycle_callbacks_t;
+
+void suji_window_lifecycle_set_callbacks(const suji_window_lifecycle_callbacks_t *cbs) {
+    if (cbs == NULL) return;
+    g_resized_cb = cbs->resized;
+    g_moved_cb = cbs->moved;
+    g_focus_cb = cbs->focus;
+    g_blur_cb = cbs->blur;
+    g_minimize_cb = cbs->minimize;
+    g_restore_cb = cbs->restore;
+    g_maximize_cb = cbs->maximize;
+    g_unmaximize_cb = cbs->unmaximize;
+    g_enter_fullscreen_cb = cbs->enter_fullscreen;
+    g_leave_fullscreen_cb = cbs->leave_fullscreen;
+    g_will_resize_cb = cbs->will_resize;
     ensure_delegate();
 }
 

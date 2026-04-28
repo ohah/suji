@@ -494,3 +494,60 @@ test "applyWillResize: cancelable + 일반 listener 동시 발화 — 일반은 
     try std.testing.expectEqual(@as(f64, 600), w);
     try std.testing.expectEqual(@as(f64, 400), h);
 }
+
+// ============================================
+// Phase 5: SDK 호환성 — 모든 SDK가 EventBus 통해 자동 호환
+// ============================================
+
+// Rust/Go/Node SDK는 같은 EventBus를 통해 listener 등록. 한 channel을 EventBus.onC →
+// emit으로 round-trip하면 모든 SDK 호환 (단일 진실의 원천 — channel-name string).
+test "SDK 호환: Phase 5 모든 채널이 C-ABI listener로 수신 가능" {
+    var bus = newBus();
+    defer bus.deinit();
+
+    inline for (.{
+        window.events.minimize,
+        window.events.restore,
+        window.events.maximize,
+        window.events.unmaximize,
+        window.events.enter_full_screen,
+        window.events.leave_full_screen,
+        window.events.ready_to_show,
+        window.events.page_title_updated,
+        window.events.show,
+        window.events.hide,
+        window.events.will_resize,
+    }) |channel| {
+        var rec = BusRecorder{};
+        _ = bus.onC(channel, &BusRecorder.callback, &rec);
+        bus.emit(channel, "{\"windowId\":1}");
+        try std.testing.expectEqual(@as(usize, 1), rec.call_count);
+        try std.testing.expectEqualStrings("{\"windowId\":1}", rec.recordedData());
+    }
+}
+
+// 한 채널에 다중 listener 등록 — 5 SDK 모두 같은 채널 동시 구독 시나리오 시뮬레이션.
+// 모든 listener가 호출되어야 cross-SDK fan-out 보장.
+test "SDK 호환: 한 Phase 5 채널에 다중 listener — 모두 호출" {
+    var bus = newBus();
+    defer bus.deinit();
+
+    var rec1 = BusRecorder{};
+    var rec2 = BusRecorder{};
+    var rec3 = BusRecorder{};
+    var rec4 = BusRecorder{};
+    var rec5 = BusRecorder{};
+    _ = bus.onC(window.events.show, &BusRecorder.callback, &rec1);
+    _ = bus.onC(window.events.show, &BusRecorder.callback, &rec2);
+    _ = bus.onC(window.events.show, &BusRecorder.callback, &rec3);
+    _ = bus.onC(window.events.show, &BusRecorder.callback, &rec4);
+    _ = bus.onC(window.events.show, &BusRecorder.callback, &rec5);
+
+    bus.emit(window.events.show, "{\"windowId\":7}");
+
+    try std.testing.expectEqual(@as(usize, 1), rec1.call_count);
+    try std.testing.expectEqual(@as(usize, 1), rec2.call_count);
+    try std.testing.expectEqual(@as(usize, 1), rec3.call_count);
+    try std.testing.expectEqual(@as(usize, 1), rec4.call_count);
+    try std.testing.expectEqual(@as(usize, 1), rec5.call_count);
+}

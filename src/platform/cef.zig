@@ -1707,17 +1707,19 @@ pub const WindowSimpleHandler = *const fn (handle: u64) void;
 /// listener가 preventDefault 시 curr 값으로 덮어쓰면 cancellation.
 pub const WindowWillResizeHandler = *const fn (handle: u64, curr_w: f64, curr_h: f64, proposed_w: *f64, proposed_h: *f64) void;
 
-pub var g_window_resized_handler: ?WindowResizedHandler = null;
-pub var g_window_moved_handler: ?WindowMovedHandler = null;
-pub var g_window_focus_handler: ?WindowFocusHandler = null;
-pub var g_window_blur_handler: ?WindowBlurHandler = null;
-pub var g_window_minimize_handler: ?WindowSimpleHandler = null;
-pub var g_window_restore_handler: ?WindowSimpleHandler = null;
-pub var g_window_maximize_handler: ?WindowSimpleHandler = null;
-pub var g_window_unmaximize_handler: ?WindowSimpleHandler = null;
-pub var g_window_enter_fullscreen_handler: ?WindowSimpleHandler = null;
-pub var g_window_leave_fullscreen_handler: ?WindowSimpleHandler = null;
-pub var g_window_will_resize_handler: ?WindowWillResizeHandler = null;
+// 11개 lifecycle handler globals — 같은 파일의 C 트램폴린 (`windowMinimizeC` 등)만
+// 참조. 외부 노출 없음 → `pub` 제거로 모듈 표면 정리.
+var g_window_resized_handler: ?WindowResizedHandler = null;
+var g_window_moved_handler: ?WindowMovedHandler = null;
+var g_window_focus_handler: ?WindowFocusHandler = null;
+var g_window_blur_handler: ?WindowBlurHandler = null;
+var g_window_minimize_handler: ?WindowSimpleHandler = null;
+var g_window_restore_handler: ?WindowSimpleHandler = null;
+var g_window_maximize_handler: ?WindowSimpleHandler = null;
+var g_window_unmaximize_handler: ?WindowSimpleHandler = null;
+var g_window_enter_fullscreen_handler: ?WindowSimpleHandler = null;
+var g_window_leave_fullscreen_handler: ?WindowSimpleHandler = null;
+var g_window_will_resize_handler: ?WindowWillResizeHandler = null;
 
 fn windowResizedC(handle: u64, x: f64, y: f64, width: f64, height: f64) callconv(.c) void {
     if (g_window_resized_handler) |h| h(handle, x, y, width, height);
@@ -1780,19 +1782,20 @@ pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
     g_window_enter_fullscreen_handler = h.enter_fullscreen;
     g_window_leave_fullscreen_handler = h.leave_fullscreen;
     g_window_will_resize_handler = h.will_resize;
-    suji_window_lifecycle_set_callbacks(
-        &windowResizedC,
-        &windowMovedC,
-        &windowFocusC,
-        &windowBlurC,
-        &windowMinimizeC,
-        &windowRestoreC,
-        &windowMaximizeC,
-        &windowUnmaximizeC,
-        &windowEnterFullscreenC,
-        &windowLeaveFullscreenC,
-        &windowWillResizeC,
-    );
+    const cbs: SujiWindowLifecycleCallbacks = .{
+        .resized = &windowResizedC,
+        .moved = &windowMovedC,
+        .focus = &windowFocusC,
+        .blur = &windowBlurC,
+        .minimize = &windowMinimizeC,
+        .restore = &windowRestoreC,
+        .maximize = &windowMaximizeC,
+        .unmaximize = &windowUnmaximizeC,
+        .enter_fullscreen = &windowEnterFullscreenC,
+        .leave_fullscreen = &windowLeaveFullscreenC,
+        .will_resize = &windowWillResizeC,
+    };
+    suji_window_lifecycle_set_callbacks(&cbs);
 }
 
 fn attachWindowLifecycle(ns_window: ?*anyopaque, handle: u64) void {
@@ -1838,8 +1841,9 @@ extern "c" fn suji_global_shortcut_unregister(accelerator: [*:0]const u8) i32;
 extern "c" fn suji_global_shortcut_unregister_all() void;
 extern "c" fn suji_global_shortcut_is_registered(accelerator: [*:0]const u8) i32;
 
-// window_lifecycle.m — NSWindowDelegate. typed callbacks per event 타입.
-extern "c" fn suji_window_lifecycle_set_callbacks(
+// window_lifecycle.m — NSWindowDelegate. struct로 묶어 silent mis-routing 차단
+// (6개가 동일 시그니처 `*const fn (u64) callconv(.c) void`).
+const SujiWindowLifecycleCallbacks = extern struct {
     resized: *const fn (u64, f64, f64, f64, f64) callconv(.c) void,
     moved: *const fn (u64, f64, f64) callconv(.c) void,
     focus: *const fn (u64) callconv(.c) void,
@@ -1851,7 +1855,8 @@ extern "c" fn suji_window_lifecycle_set_callbacks(
     enter_fullscreen: *const fn (u64) callconv(.c) void,
     leave_fullscreen: *const fn (u64) callconv(.c) void,
     will_resize: *const fn (u64, f64, f64, *f64, *f64) callconv(.c) void,
-) void;
+};
+extern "c" fn suji_window_lifecycle_set_callbacks(cbs: *const SujiWindowLifecycleCallbacks) void;
 extern "c" fn suji_window_lifecycle_attach(ns_window: ?*anyopaque, handle: u64) i32;
 extern "c" fn suji_window_lifecycle_detach(ns_window: ?*anyopaque) void;
 extern "c" fn suji_window_lifecycle_minimize(ns_window: ?*anyopaque) void;
@@ -2672,8 +2677,8 @@ fn onLoadEnd(
 pub const WindowReadyToShowHandler = *const fn (handle: u64) void;
 pub const WindowTitleChangeHandler = *const fn (handle: u64, title: []const u8) void;
 
-pub var g_window_ready_to_show_handler: ?WindowReadyToShowHandler = null;
-pub var g_window_title_change_handler: ?WindowTitleChangeHandler = null;
+var g_window_ready_to_show_handler: ?WindowReadyToShowHandler = null;
+var g_window_title_change_handler: ?WindowTitleChangeHandler = null;
 
 pub const WindowDisplayHandlers = struct {
     ready_to_show: ?WindowReadyToShowHandler = null,

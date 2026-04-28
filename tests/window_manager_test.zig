@@ -5001,3 +5001,57 @@ test "applyWillResize: 매우 큰 값 — payload truncate 안 됨 (256 byte 안
     try std.testing.expect(contains(data, "999999999"));
     try std.testing.expect(contains(data, "888888888"));
 }
+
+// ============================================
+// Phase 5 채널 무결성 — SDK 호환성 정적 검증
+// ============================================
+
+// Phase 5에서 추가한 11개 채널이 모든 SDK(Zig/Rust/Go/Node/Frontend)에서 자동 호출
+// 가능함을 정적으로 검증. EventBus는 채널명 string 기반 라우팅이라 형식만 일관되면
+// 모든 SDK가 동일하게 구독 가능.
+// 검증 항목:
+//   - "window:" prefix (frontend SDK가 window.* namespace로 노출)
+//   - JSON-safe chars only (wire payload에 안전하게 임베드)
+//   - 0 < len ≤ MAX_NAME_LEN (등록 가능)
+test "Phase 5 채널 무결성: 모든 SDK에서 EventBus 구독 가능 형식" {
+    inline for (.{
+        window.events.minimize,
+        window.events.restore,
+        window.events.maximize,
+        window.events.unmaximize,
+        window.events.enter_full_screen,
+        window.events.leave_full_screen,
+        window.events.ready_to_show,
+        window.events.page_title_updated,
+        window.events.show,
+        window.events.hide,
+        window.events.will_resize,
+    }) |channel| {
+        try std.testing.expect(std.mem.startsWith(u8, channel, "window:"));
+        try std.testing.expect(window.isJsonSafeChars(channel));
+        try std.testing.expect(channel.len > 0 and channel.len <= window.MAX_NAME_LEN);
+    }
+}
+
+// 회귀: 채널명 단일 출처 — 같은 channel이 두 events 필드에 매핑되면 SDK간 listener 라우팅 깨짐.
+test "Phase 5 채널 중복 없음" {
+    const channels = [_][]const u8{
+        window.events.minimize,
+        window.events.restore,
+        window.events.maximize,
+        window.events.unmaximize,
+        window.events.enter_full_screen,
+        window.events.leave_full_screen,
+        window.events.ready_to_show,
+        window.events.page_title_updated,
+        window.events.show,
+        window.events.hide,
+        window.events.will_resize,
+    };
+    for (channels, 0..) |a, i| {
+        for (channels[i + 1 ..]) |b| {
+            try std.testing.expect(!std.mem.eql(u8, a, b));
+        }
+    }
+}
+
