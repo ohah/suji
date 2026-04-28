@@ -1320,6 +1320,11 @@ suji build → 결과물:
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ (분량 중 — sqlite plugin) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
+| 클립보드 — 이미지/HTML | `clipboard.readImage` / `writeImage` / `readHTML` | -- | ❌ (현재 plain text만 — NSPasteboard `public.png` / `public.html` UTI 후속) |
+| `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ❌ (`shell.openExternal`은 URL만, 로컬 파일은 별도 — NSWorkspace `openURL:` for fileURLWithPath:) |
+| Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ❌ (현재 menu는 menubar/tray만 — 임의 위치 popup은 NSMenu `popUpMenuPositioningItem:atLocation:inView:`) |
+| 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |
+| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ❌ (CEF `cef_cookie_manager_t.set_cookie` / `delete_cookies` / `cef_request_context_t.clear_certificate_exceptions` 등 — 가장 자주 쓰는 API 중 하나) |
 
 ### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
 
@@ -1336,6 +1341,13 @@ suji build → 결과물:
 | 표준 디렉토리 경로 | `app.getPath(name)` | `path` 플러그인 | ✅ Electron 표준 7 키 (home/appData/userData/temp/desktop/documents/downloads) — `app_get_path` IPC + `resolveAppDataDir` OS 분기 (macOS/Linux/Windows/fallback). `buildAppCachePath`와 분기 공유. 5 SDK + e2e |
 | 휴지통 (trashItem) | `shell.trashItem` | `fs` 플러그인 | ✅ macOS NSFileManager `trashItemAtURL:resultingItemURL:error:` — `shell_trash_item` IPC, 임시 파일 trash + 비존재 경로 false 2 e2e |
 | 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | 🟡 `globalShortcut`로 가능, 전용 API 없음 |
+| 다크/라이트 테마 감지 | `nativeTheme.shouldUseDarkColors` + `updated` 이벤트 | `theme` 플러그인 | ❌ (macOS NSApp.effectiveAppearance + KVO) |
+| dock 진행률 표시 | `BrowserWindow.setProgressBar(0..1)` | -- | ❌ (macOS NSDockTile setBadgeLabel "" + custom view, Win/Linux 별도) |
+| 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | ❌ (NSEvent.mouseLocation + NSScreen 매칭) |
+| 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | ❌ (macOS IOHIDIdleTime) |
+| Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
+| 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
+| nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | ❌ (CGImage / NSImage wrapping) |
 
 ### 개발자 경험 (DX)
 
