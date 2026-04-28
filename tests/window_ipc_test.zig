@@ -1414,7 +1414,6 @@ test "17-A.8: 모든 view IPC 응답이 정확한 cmd 필드를 포함" {
     var b2: [256]u8 = undefined;
     const r_add = ipc.handleAddChildView(.{ .host_id = host, .view_id = v2, .index = 0 }, &b2, &wm).?;
     try std.testing.expect(std.mem.indexOf(u8, r_add, "\"cmd\":\"add_child_view\"") != null);
-    try std.testing.expectEqual(@as(?u32, 0), native.last_reorder_index);
 
     const r_top = ipc.handleSetTopView(host, v2, &b2, &wm).?;
     try std.testing.expect(std.mem.indexOf(u8, r_top, "\"cmd\":\"set_top_view\"") != null);
@@ -1429,7 +1428,7 @@ test "17-A.8: 모든 view IPC 응답이 정확한 cmd 필드를 포함" {
     try std.testing.expect(std.mem.indexOf(u8, r_rm, "\"cmd\":\"remove_child_view\"") != null);
 }
 
-test "17-A.8: handleAddChildView with explicit index 전달 (native에 그대로 도달)" {
+test "17-A.8: handleAddChildView with explicit index — list 순서가 native sequential reorder로 반영" {
     var native = TestNative{};
     var wm = newWm(&native);
     defer wm.deinit();
@@ -1438,13 +1437,14 @@ test "17-A.8: handleAddChildView with explicit index 전달 (native에 그대로
     const v2 = try wm.createView(.{ .host_window_id = host });
 
     var buf: [256]u8 = undefined;
-    // index=0 (bottom)
+    // index=0 (bottom): list = [v2, v1]
     _ = ipc.handleAddChildView(.{ .host_id = host, .view_id = v2, .index = 0 }, &buf, &wm).?;
-    try std.testing.expectEqual(@as(?u32, 0), native.last_reorder_index);
-    // index=null (top)
+    // 마지막 reorder 호출은 v1 (list 끝 = top)
+    try std.testing.expectEqual(@as(?u64, wm.get(v1).?.native_handle), native.last_reorder_view_handle);
+
+    // index=null (top): list = [v2, v1] → v1 제거 후 끝 → 그대로 [v2, v1]
     _ = ipc.handleAddChildView(.{ .host_id = host, .view_id = v1, .index = null }, &buf, &wm).?;
-    // top 위치는 list.items.len = 2 → reorder index 1 (제거 후 끝 삽입)
-    try std.testing.expectEqual(@as(?u32, 1), native.last_reorder_index);
+    try std.testing.expectEqual(@as(?u64, wm.get(v1).?.native_handle), native.last_reorder_view_handle);
 }
 
 test "17-A.8: handleAddChildView with view from different host returns ok:false" {

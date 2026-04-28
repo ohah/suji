@@ -1230,8 +1230,13 @@ pub const WindowManager = struct {
 
         const was_visible = view.visible_in_host;
         view.visible_in_host = true;
-        self.native.reorderView(host.native_handle, view.native_handle, @intCast(insert_idx));
-        // visible 상태 변경됐을 때만 native 호출 — 매번 reorder마다 setHidden walk를 트리거하면 비용.
+        // contentView.subviews에 우리 view들 + main browser CEF view가 함께 있어 우리 list의
+        // index와 contentView.subviews index가 다른 namespace. 단일 reorder API로는 정확한 z-order
+        // 유지 불가 — list 순서대로 모든 view를 sequential reorder하면 마지막 호출된 view가 top.
+        for (list_ptr.items) |item_view_id| {
+            const item = self.windows.get(item_view_id) orelse continue;
+            self.native.reorderView(host.native_handle, item.native_handle, 0);
+        }
         if (!was_visible) self.native.setViewVisible(view.native_handle, true);
     }
 

@@ -156,10 +156,12 @@ suji.platform                                                // "macos" | "linux
 // await windows.undo(id) / copy(id) / paste(id) / findInPage(id, "x", {})  (Phase 4-E)
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
 // await windows.createView({hostId, url, bounds}) → {viewId}              (Phase 17-A WebContentsView)
-// await windows.addChildView(host, view, index?) / setTopView / removeChildView / destroyView
+// await windows.addChildView(host, view, index?) / setTopView / removeChildView
 // await windows.setViewBounds(viewId, {...}) / setViewVisible(viewId, bool) / getChildViews(host)
 //   viewId는 windowId와 같은 풀 — windows.loadURL(viewId,...) / executeJavaScript / openDevTools
 //   등 모든 webContents API가 view에도 동작.
+//   ⚠️ destroyView는 known limitation (render subprocess race) — host 창 close 시 자동 정리 권장,
+//   동적 hide/show는 setViewVisible 사용. 17-B에서 안정화.
 
 // import { clipboard, shell, dialog } from '@suji/api';
 // await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard)

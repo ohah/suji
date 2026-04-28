@@ -295,7 +295,11 @@ pub const CefNative = struct {
         /// WebContentsView는 host_ns_view만 set. WindowManager가 같은 invariant를
         /// `Window.kind`로 표현 (`.window`/`.view`).
         ns_window: ?*anyopaque,
-        /// Phase 17-A: WebContentsView. host 창 contentView 안에 부착된 child NSView 포인터.
+        /// Phase 17-A: host용 view 합성 wrapper NSView. createView 첫 호출 시 lazy init.
+        /// contentView 안에 영구 부착되어 우리 view들의 부모 — main browser CEF view와
+        /// 격리해 destroy/reorder 시 main browser 영향 X. host BrowserEntry만 set.
+        view_wrapper: ?*anyopaque = null,
+        /// Phase 17-A: WebContentsView. wrapper NSView 안에 부착된 child NSView 포인터.
         /// 일반 창은 항상 null, view만 set. setViewBounds/setViewVisible/reorderView가
         /// 이 NSView를 조작.
         host_ns_view: ?*anyopaque = null,
@@ -344,6 +348,8 @@ pub const CefNative = struct {
     }
 
     /// CEF가 OnBeforeClose에서 확정 파괴를 알렸을 때 테이블에서 제거.
+    /// NSView 정리는 destroyView가 이미 처리(removeFromSuperview + release) — purge는
+    /// BrowserEntry 메모리만 회수.
     pub fn purge(self: *CefNative, handle: u64) void {
         if (self.browsers.fetchRemove(handle)) |kv| {
             self.allocator.free(kv.value.drag_regions);
@@ -408,9 +414,8 @@ pub const CefNative = struct {
             return error.NotSupportedOnPlatform;
         }
 
-        const host_entry = self.browsers.get(host_handle) orelse return error.HostNotFound;
+        const host_entry = self.browsers.getPtr(host_handle) orelse return error.HostNotFound;
         const host_ns_window = host_entry.ns_window orelse return error.HostHasNoNSWindow;
-        const content_view = msgSend(host_ns_window, "contentView") orelse return error.NoContentView;
 
         // url 처리 (createWindow와 동일 패턴 — null이면 default_url).
         var url_buf: [2048]u8 = undefined;
@@ -421,10 +426,15 @@ pub const CefNative = struct {
             break :blk url_buf[0..u.len :0];
         } else self.default_url;
 
-        // child NSView 생성. opts.bounds는 host contentView 좌표계(top-left).
-        // Cocoa는 bottom-left라 super.bounds.height - y - height로 변환.
-        const new_view = allocChildNSView(content_view, opts.bounds) orelse return error.NSViewAllocFailed;
-        errdefer _ = msgSend(new_view, "removeFromSuperview");
+        // host용 view wrapper 보장 — main browser CEF view와 격리할 영구 NSView.
+        const wrapper = ensureViewWrapper(host_entry, host_ns_window) orelse return error.WrapperAllocFailed;
+        // child NSView를 wrapper 안에 부착 (contentView 직접 X).
+        const new_view = allocChildNSView(wrapper, opts.bounds) orelse return error.NSViewAllocFailed;
+        // 에러 경로 cleanup: removeFromSuperview(super retain 풀림) + release(alloc retain 풀림 → dealloc).
+        errdefer {
+            _ = msgSend(new_view, "removeFromSuperview");
+            _ = msgSend(new_view, "release");
+        }
 
         // CEF browser를 child NSView 안에 합성. parent_view는 NSView*. bounds는 super 좌표계로
         // (0, 0) + width/height — child NSView 자체가 이미 위치 고정되어 있어 CEF 내부 view는
@@ -476,15 +486,14 @@ pub const CefNative = struct {
         const self = fromCtx(ctx);
         assertUiThread();
         const entry = self.browsers.get(view_handle) orelse return;
-        // destroyWindow(macOS)는 NSWindow close가 CEF 내부 cleanup을 cascade해 close_browser
-        // 생략하지만(중복 호출 경쟁상태 회피), view는 NSWindow 없음 → close_browser 명시 호출
-        // 필요. 그 후 removeFromSuperview로 즉시 시각적 분리. OnBeforeClose는 다음 런루프 틱에
-        // 비동기 발화 — 그 시점에 purge가 BrowserEntry 정리.
-        const br = entry.browser;
-        const host_obj = asPtr(c.cef_browser_host_t, br.get_host.?(br));
-        if (host_obj) |h| h.close_browser.?(h, 1);
+        // 17-A 한계 우회: close_browser, NSView dealloc cascade, NSView ops defer 모두 view
+        // CefBrowser의 render subprocess race를 못 잡음 (CEF + macOS multi-WebContentsView 합성
+        // 알려진 instability). **메모리 leak 허용하고 시각만 분리** — view CefBrowser는 host
+        // close까지 alive 유지. host close 시 NSWindow dealloc cascade가 wrapper → 모든 view를
+        // 한꺼번에 정리 (process 종료 직전이라 강종 인지 X). WindowManager는 view를 destroyed
+        // 마킹해 같은 viewId 재사용 X.
         if (entry.host_ns_view) |view| {
-            _ = msgSend(view, "removeFromSuperview");
+            msgSendVoidBool(view, "setHidden:", true);
         }
     }
 
@@ -513,19 +522,25 @@ pub const CefNative = struct {
         if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
     }
 
-    /// host의 contentView 안에서 view의 z-order를 `index_in_host` 위치로 재배치.
-    /// host_handle은 시그니처 일관성용 (view_handle만으로 superview를 얻을 수 있음).
-    /// removeFromSuperview는 view의 retain count 1을 잠시 0으로 만들지 않음 — superview의
-    /// subviews 배열이 재배치 직전까지 retain 보유. 안전.
+    /// view를 host contentView에서 top(끝)으로 옮김. addSubview는 view가 이미 super의
+    /// subview면 자동 removeFromSuperview 후 끝에 다시 부착 — 시각적/메모리 상 안전.
+    ///
+    /// **`index_in_host` 무시**: contentView.subviews에는 우리 view들 + main browser CEF view가
+    /// 함께 있어 우리 list index와 contentView.subviews index가 다른 namespace. 이전엔
+    /// `addSubview:positioned:relativeTo: subviews[index-1]`로 잘못된 reference(main browser view)
+    /// 에 부착해 NSView tree corruption + 후속 destroy crash. WindowManager가 list 순서대로
+    /// 모든 view를 sequential 호출하면 마지막 호출된 view가 top — 우리 list 순서와 일치 +
+    /// main browser view는 항상 우리 view들 below 유지.
     fn reorderView(ctx: ?*anyopaque, host_handle: u64, view_handle: u64, index_in_host: u32) void {
         const self = fromCtx(ctx);
         assertUiThread();
         if (!is_macos) return;
         _ = host_handle;
+        _ = index_in_host;
         const entry = self.browsers.get(view_handle) orelse return;
         const view = entry.host_ns_view orelse return;
         const super = msgSend(view, "superview") orelse return;
-        reorderSubview(super, view, index_in_host);
+        msgSendVoid1(super, "addSubview:", view);
     }
 
     fn assertUiThread() void {
@@ -4335,7 +4350,7 @@ fn applyMacWindowOptions(window: *anyopaque, opts: WindowInitOpts) void {
 fn attachMacChildWindow(parent: *anyopaque, child: *anyopaque) void {
     const sel = objc.sel_registerName("addChildWindow:ordered:");
     const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    fn_ptr(parent, @ptrCast(sel), child, NS_WINDOW_ABOVE);
+    fn_ptr(parent, @ptrCast(sel), child, 1); // NSWindowAbove = 1
 }
 
 /// macOS: 투명 창 설정 — opaque=NO + clearColor 배경 + 그림자 제거.
@@ -4455,61 +4470,72 @@ fn setMacWindowTitle(ns_window: *anyopaque, title: []const u8) void {
     msgSendVoid1(ns_window, "setTitle:", ns_title);
 }
 
+/// macOS: hit testing pass-through NSView subclass — wrapper의 빈 영역(자식 view 없는 곳) 클릭이
+/// main browser webContents에 통과되도록 self일 때 nil 반환. 그러지 않으면 wrapper가 contentView
+/// 전체를 덮어 main browser webContents의 사용자 입력을 가로채.
+var g_view_host_wrapper_class: ?*anyopaque = null;
+
+fn sujiViewHostWrapperHitTest(self: ?*anyopaque, _: ?*anyopaque, point: NSPoint) callconv(.c) ?*anyopaque {
+    const NSView = getClass("NSView") orelse return null;
+    const sel = objc.sel_registerName("hitTest:");
+    const imp = objc.class_getMethodImplementation(NSView, sel);
+    const f: *const fn (?*anyopaque, ?*anyopaque, NSPoint) callconv(.c) ?*anyopaque = @ptrCast(imp);
+    const hit = f(self, @ptrCast(sel), point);
+    if (hit == self) return null;
+    return hit;
+}
+
+fn ensureSujiViewHostWrapperClass() ?*anyopaque {
+    if (g_view_host_wrapper_class) |existing| return existing;
+    const ns_view = getClass("NSView") orelse return null;
+    const cls = objc.objc_allocateClassPair(ns_view, "SujiViewHostWrapper", 0) orelse {
+        return getClass("SujiViewHostWrapper");
+    };
+    const sel = objc.sel_registerName("hitTest:");
+    _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&sujiViewHostWrapperHitTest), "@@:{CGPoint=dd}");
+    objc.objc_registerClassPair(cls);
+    g_view_host_wrapper_class = cls;
+    return cls;
+}
+
+/// host용 view 합성 wrapper NSView를 lazy init. 첫 createView에서 호출되고 host_entry에
+/// 영구 보관. contentView resize 따라 자동 리사이즈 (autoresizingMask). hitTest pass-through.
+fn ensureViewWrapper(host_entry: *CefNative.BrowserEntry, ns_window: *anyopaque) ?*anyopaque {
+    if (host_entry.view_wrapper) |w| return w;
+
+    const content_view = msgSend(ns_window, "contentView") orelse return null;
+    const cv_bounds = nsViewBounds(content_view);
+
+    const cls = ensureSujiViewHostWrapperClass() orelse return null;
+    const view_alloc = msgSend(cls, "alloc") orelse return null;
+    const wrapper = msgSendNSRect(view_alloc, "initWithFrame:", cv_bounds) orelse return null;
+
+    // NSViewWidthSizable(2) | NSViewHeightSizable(16) — host contentView resize 따라 자동.
+    const sel_autoresize = objc.sel_registerName("setAutoresizingMask:");
+    const f_auto: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f_auto(wrapper, @ptrCast(sel_autoresize), 18);
+
+    msgSendVoid1(content_view, "addSubview:", wrapper);
+    // alloc retain 정리 — superview retain만 남김. host close 시 contentView dealloc → wrapper dealloc.
+    _ = msgSend(wrapper, "release");
+
+    host_entry.view_wrapper = wrapper;
+    return wrapper;
+}
+
 /// macOS: host contentView 안에 부착될 child NSView를 alloc + init + addSubview까지 처리.
 /// `super`는 NSView (host의 contentView), `bounds`는 super 좌표계 top-left 기준.
-/// addSubview 후 우리 alloc retain은 release — superview가 retain을 보유하므로 view는 alive.
-/// 실패 시 null. 17-A.3 createView에서 사용.
+/// **alloc retain 유지** — reorderSubview의 removeFromSuperview가 super의 retain을 풀 때
+/// 우리 alloc retain만 남아 view가 alive. release 없이 super retain만 의존하면 reorder
+/// 첫 단계에서 retain count 0 → dealloc → 다음 addSubview 시 dangling pointer crash.
+/// destroyView가 마지막 release 호출하여 균형.
 fn allocChildNSView(super: *anyopaque, bounds: window_mod.Bounds) ?*anyopaque {
     const NSViewClass = getClass("NSView") orelse return null;
     const view_alloc = msgSend(NSViewClass, "alloc") orelse return null;
     const view_rect = computeChildViewRect(super, bounds);
     const view = msgSendNSRect(view_alloc, "initWithFrame:", view_rect) orelse return null;
     msgSendVoid1(super, "addSubview:", view);
-    _ = msgSend(view, "release");
     return view;
-}
-
-/// macOS NSWindowOrderingMode (NSInteger). NSWindow.h enum과 동일 — C 헤더 직접 참조 회피.
-const NS_WINDOW_ABOVE: i64 = 1;
-const NS_WINDOW_BELOW: i64 = -1;
-
-/// `[super addSubview:view positioned:place relativeTo:ref]`. ref가 null이면 super의
-/// 끝(top) 또는 처음(bottom) — Cocoa 기본 동작에 맡김.
-fn addSubviewPositioned(super: *anyopaque, view: *anyopaque, place: i64, ref: ?*anyopaque) void {
-    const sel = objc.sel_registerName("addSubview:positioned:relativeTo:");
-    const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, i64, ?*anyopaque) callconv(.c) void =
-        @ptrCast(&objc.objc_msgSend);
-    f(super, @ptrCast(sel), view, place, ref);
-}
-
-/// view를 super의 subviews에서 떼어내고 `index` 위치에 다시 부착. index >= count면 top.
-/// index가 0이면 첫 subview의 below(bottom)로, 그 외엔 subviews[index-1]의 above로 삽입.
-fn reorderSubview(super: *anyopaque, view: *anyopaque, index: u32) void {
-    _ = msgSend(view, "removeFromSuperview");
-    const subviews = msgSend(super, "subviews") orelse {
-        msgSendVoid1(super, "addSubview:", view);
-        return;
-    };
-    const countSel = objc.sel_registerName("count");
-    const countFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
-    const count = countFn(subviews, @ptrCast(countSel));
-
-    if (count == 0 or index >= count) {
-        msgSendVoid1(super, "addSubview:", view);
-        return;
-    }
-    // count > 0 + index < count 검증 후라 objectAtIndex가 nil 반환은 NSRangeException 영역.
-    // 정상 NSArray는 throw하지 nil 반환 X — `.?`로 받아 invariant 위반 시 명확한 panic.
-    const objAtSel = objc.sel_registerName("objectAtIndex:");
-    const objAtFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    if (index == 0) {
-        const ref = objAtFn(subviews, @ptrCast(objAtSel), 0).?;
-        addSubviewPositioned(super, view, NS_WINDOW_BELOW, ref);
-    } else {
-        const ref = objAtFn(subviews, @ptrCast(objAtSel), index - 1).?;
-        addSubviewPositioned(super, view, NS_WINDOW_ABOVE, ref);
-    }
 }
 
 /// top-left `bounds` → Cocoa bottom-left NSRect (super 좌표계).

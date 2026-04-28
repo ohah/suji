@@ -4012,8 +4012,9 @@ test "17-A: addChildView re-call moves view to top (Electron idiom)" {
     defer std.testing.allocator.free(children);
     try std.testing.expectEqual(v2, children[0]);
     try std.testing.expectEqual(v1, children[1]);
-    try std.testing.expectEqual(@as(usize, 1), native.reorder_view_calls);
-    try std.testing.expectEqual(@as(u32, 1), native.last_reorder_index.?); // top index = 1
+    // list 순서대로 모든 view sequential reorder — 2 view니까 2 호출. 마지막 호출된 게 v1 (top).
+    try std.testing.expectEqual(@as(usize, 2), native.reorder_view_calls);
+    try std.testing.expectEqual(@as(?u64, wm.get(v1).?.native_handle), native.last_reorder_view_handle);
 }
 
 test "17-A: addChildView with explicit index inserts at that position" {
