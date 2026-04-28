@@ -925,52 +925,42 @@ pub const CefNative = struct {
     }
 
     fn setOpacityImpl(ctx: ?*anyopaque, handle: u64, opacity: f64) void {
+        if (!comptime is_macos) return;
         assertUiThread();
-        if (!is_macos) return;
-        const self = fromCtx(ctx);
-        const entry = self.browsers.get(handle) orelse return;
-        const ns_window = entry.ns_window orelse return;
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
         const sel = objc.sel_registerName("setAlphaValue:");
         const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, f64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-        fn_ptr(ns_window, @ptrCast(sel), opacity);
+        fn_ptr(ns, @ptrCast(sel), opacity);
     }
 
     fn getOpacityImpl(ctx: ?*anyopaque, handle: u64) f64 {
-        if (!is_macos) return 1;
-        const self = fromCtx(ctx);
-        const entry = self.browsers.get(handle) orelse return 1;
-        const ns_window = entry.ns_window orelse return 1;
+        if (!comptime is_macos) return 1;
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return 1;
         const sel = objc.sel_registerName("alphaValue");
         const fn_ptr: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) f64 = @ptrCast(&objc.objc_msgSend);
-        return fn_ptr(ns_window, @ptrCast(sel));
+        return fn_ptr(ns, @ptrCast(sel));
     }
 
     fn setBackgroundColorImpl(ctx: ?*anyopaque, handle: u64, hex: []const u8) void {
+        if (!comptime is_macos) return;
         assertUiThread();
-        if (!is_macos) return;
-        const self = fromCtx(ctx);
-        const entry = self.browsers.get(handle) orelse return;
-        const ns_window = entry.ns_window orelse return;
-        applyBackgroundColor(ns_window, hex);
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
+        applyBackgroundColor(ns, hex);
     }
 
     fn setHasShadowImpl(ctx: ?*anyopaque, handle: u64, has: bool) void {
+        if (!comptime is_macos) return;
         assertUiThread();
-        if (!is_macos) return;
-        const self = fromCtx(ctx);
-        const entry = self.browsers.get(handle) orelse return;
-        const ns_window = entry.ns_window orelse return;
-        msgSendVoidBool(ns_window, "setHasShadow:", has);
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
+        msgSendVoidBool(ns, "setHasShadow:", has);
     }
 
     fn hasShadowImpl(ctx: ?*anyopaque, handle: u64) bool {
-        if (!is_macos) return false;
-        const self = fromCtx(ctx);
-        const entry = self.browsers.get(handle) orelse return false;
-        const ns_window = entry.ns_window orelse return false;
+        if (!comptime is_macos) return false;
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return false;
         const sel = objc.sel_registerName("hasShadow");
         const fn_ptr: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
-        return fn_ptr(ns_window, @ptrCast(sel)) != 0;
+        return fn_ptr(ns, @ptrCast(sel)) != 0;
     }
 
     // ==================== Phase 4-E: 편집 (frame 위임) + 검색 ====================
@@ -1247,42 +1237,15 @@ pub fn clipboardClear() void {
     _ = msgSend(pb, "clearContents");
 }
 
-const PASTEBOARD_TYPE_PNG: [*:0]const u8 = "public.png";
-
-/// 클립보드에 PNG 바이트 쓰기 (Electron `clipboard.writeImage`).
-/// 다른 type 함께 지움 (clearContents). NSPasteboard `setData:forType:`.
+/// 클립보드에 PNG 바이트 쓰기 (Electron `clipboard.writeImage`). clipboardWriteBuffer wrapper.
 pub fn clipboardWriteImagePng(png_bytes: []const u8) bool {
-    if (!comptime is_macos) return false;
-    if (png_bytes.len == 0) return false;
-    const NSPasteboard = getClass("NSPasteboard") orelse return false;
-    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
-    _ = msgSend(pb, "clearContents");
-
-    const data = CFDataCreate(null, png_bytes.ptr, @intCast(png_bytes.len)) orelse return false;
-    defer CFRelease(data);
-
-    const ns_type = nsStringFromCstr(PASTEBOARD_TYPE_PNG) orelse return false;
-    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
-        @ptrCast(&objc.objc_msgSend);
-    return setFn(pb, @ptrCast(objc.sel_registerName("setData:forType:")), data, ns_type) != 0;
+    return clipboardWriteBuffer(png_bytes, "public.png");
 }
 
-/// 클립보드에서 PNG 바이트 읽기 (Electron `clipboard.readImage`).
-/// out_buf 길이만큼 복사. 비어있거나 PNG 아니면 빈 slice.
+/// 클립보드에서 PNG 바이트 읽기 (Electron `clipboard.readImage`). clipboardReadBuffer wrapper.
+/// out_buf 부족 시 잘린 garbage 대신 빈 slice (clipboardReadBuffer 동작과 동일).
 pub fn clipboardReadImagePng(out_buf: []u8) []const u8 {
-    if (!comptime is_macos) return out_buf[0..0];
-    const NSPasteboard = getClass("NSPasteboard") orelse return out_buf[0..0];
-    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return out_buf[0..0];
-    const ns_type = nsStringFromCstr(PASTEBOARD_TYPE_PNG) orelse return out_buf[0..0];
-    const dataFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const data = dataFn(pb, @ptrCast(objc.sel_registerName("dataForType:")), ns_type) orelse return out_buf[0..0];
-
-    const ptr = CFDataGetBytePtr(data);
-    const len: usize = @intCast(CFDataGetLength(data));
-    const n = @min(len, out_buf.len);
-    @memcpy(out_buf[0..n], ptr[0..n]);
-    return out_buf[0..n];
+    return clipboardReadBuffer(out_buf, "public.png");
 }
 
 /// 클립보드에 주어진 type이 있는지 (Electron `clipboard.has(format)`).

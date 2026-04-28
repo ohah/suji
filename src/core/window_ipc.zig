@@ -453,19 +453,7 @@ pub fn handleSetAudioMuted(window_id: u32, muted: bool, response_buf: []u8, wm: 
 }
 
 pub fn handleIsAudioMuted(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const muted = wm.isAudioMuted(window_id) catch {
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"is_audio_muted\",\"windowId\":{d},\"ok\":false,\"muted\":false}}",
-            .{window_id},
-        ) catch null;
-    };
-    return std.fmt.bufPrint(
-        response_buf,
-        "{{\"from\":\"zig-core\",\"cmd\":\"is_audio_muted\",\"windowId\":{d},\"ok\":true,\"muted\":{}}}",
-        .{ window_id, muted },
-    ) catch null;
+    return handleStateGet("is_audio_muted", "muted", &window.WindowManager.isAudioMuted, window_id, response_buf, wm);
 }
 
 // ==================== Window opacity / background / shadow ====================
@@ -491,19 +479,7 @@ pub fn handleSetHasShadow(window_id: u32, has: bool, response_buf: []u8, wm: *wi
 }
 
 pub fn handleHasShadow(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
-    if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const has = wm.hasShadow(window_id) catch {
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"has_shadow\",\"windowId\":{d},\"ok\":false,\"hasShadow\":false}}",
-            .{window_id},
-        ) catch null;
-    };
-    return std.fmt.bufPrint(
-        response_buf,
-        "{{\"from\":\"zig-core\",\"cmd\":\"has_shadow\",\"windowId\":{d},\"ok\":true,\"hasShadow\":{}}}",
-        .{ window_id, has },
-    ) catch null;
+    return handleStateGet("has_shadow", "hasShadow", &window.WindowManager.hasShadow, window_id, response_buf, wm);
 }
 
 // ============================================

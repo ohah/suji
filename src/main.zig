@@ -1119,6 +1119,15 @@ fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: [
 /// 클립보드 쓰기에서 잘려 응답 비었음). 두 곳에서 같은 값 사용 (response check + req_buf).
 const MAX_CORE_PAYLOAD: usize = 32 * 1024;
 
+/// `{"from":"zig-core","cmd":<cmd>,"success":bool}` 응답 빌드 — write/setter류 cmd 공통.
+fn respondSuccess(response_buf: []u8, cmd: []const u8, ok: bool) ?[]const u8 {
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":{}}}",
+        .{ cmd, ok },
+    ) catch null;
+}
+
 /// raw bytes를 base64로 인코딩해 `{"from":"zig-core","cmd":<cmd>,"data":"<b64>"}` 응답을 빌드.
 /// b64 한도(12KB) 초과 시 빈 data 반환 — clipboard_read_image / native_image_to_png/jpeg 공유.
 fn respondBase64Data(response_buf: []u8, cmd: []const u8, raw_bytes: []const u8) ?[]const u8 {
@@ -1523,22 +1532,20 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "clipboard_write_buffer")) {
         const raw_type = util.extractJsonString(req_clean, "format") orelse "";
         var type_buf: [256]u8 = undefined;
-        const type_n = util.unescapeJsonStr(raw_type, &type_buf) orelse return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        const type_n = util.unescapeJsonStr(raw_type, &type_buf) orelse 0;
+        if (type_n == 0) return respondSuccess(response_buf, cmd, false);
         const b64_raw = util.extractJsonString(req_clean, "data") orelse "";
         var b64_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const b64_n = util.unescapeJsonStr(b64_raw, &b64_buf) orelse return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
+        const b64_n = util.unescapeJsonStr(b64_raw, &b64_buf) orelse 0;
+        if (b64_n == 0) return respondSuccess(response_buf, cmd, false);
         var raw_buf: [8 * 1024]u8 = undefined;
-        const decoded_size = std.base64.standard.Decoder.calcSizeForSlice(b64_buf[0..b64_n]) catch {
-            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
-        };
-        if (decoded_size > raw_buf.len) {
-            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
-        }
-        std.base64.standard.Decoder.decode(raw_buf[0..decoded_size], b64_buf[0..b64_n]) catch {
-            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":false}}", .{}) catch null;
-        };
+        const decoded_size = std.base64.standard.Decoder.calcSizeForSlice(b64_buf[0..b64_n]) catch
+            return respondSuccess(response_buf, cmd, false);
+        if (decoded_size > raw_buf.len) return respondSuccess(response_buf, cmd, false);
+        std.base64.standard.Decoder.decode(raw_buf[0..decoded_size], b64_buf[0..b64_n]) catch
+            return respondSuccess(response_buf, cmd, false);
         const ok = cef.clipboardWriteBuffer(raw_buf[0..decoded_size], type_buf[0..type_n]);
-        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":{}}}", .{ok}) catch null;
+        return respondSuccess(response_buf, cmd, ok);
     }
     if (std.mem.eql(u8, cmd, "clipboard_read_buffer")) {
         const raw_type = util.extractJsonString(req_clean, "format") orelse "";

@@ -1083,7 +1083,7 @@ test "clipboard.writeImage / readImage IPC + cef.zig 함수" {
     inline for (.{
         "pub fn clipboardWriteImagePng",
         "pub fn clipboardReadImagePng",
-        "PASTEBOARD_TYPE_PNG",
+        "public.png",
         "setData:forType:",
         "dataForType:",
     }) |needle| {
