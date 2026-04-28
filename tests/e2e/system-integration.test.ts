@@ -375,13 +375,8 @@ describe("session.clearCookies / flushStore", () => {
   });
 });
 
-describe("app.exit", () => {
-  // 실제 exit 호출은 dev server 종료 → 후속 테스트 모두 fail. IPC handler 등록만 검증.
-  // (Electron `app.exit(code)` 동등 — code 인자는 무시)
-  test("app_exit cmd 핸들러가 main.zig에 등록되어 있다 (실제 호출은 process 종료)", () => {
-    expect(true).toBe(true);
-  });
-});
+// app.exit는 실제 호출 시 dev server 종료 → 후속 테스트 모두 fail.
+// IPC handler 등록은 cef_ipc_test.zig grep + app_test.zig InvokeSpy로 커버.
 
 describe("clipboard HTML", () => {
   test("HTML write → read round-trip", async () => {

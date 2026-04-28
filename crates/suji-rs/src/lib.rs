@@ -1329,6 +1329,21 @@ pub mod dock {
     }
 }
 
+/// Electron `session.cookies.*`. CEF cookie_manager fire-and-forget.
+pub mod session {
+    use crate::invoke;
+
+    /// 모든 cookie 삭제. 실 cleanup은 비동기.
+    pub fn clear_cookies() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"session_clear_cookies"}"#)
+    }
+
+    /// disk store flush.
+    pub fn flush_store() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
+    }
+}
+
 pub(crate) fn get_path_request(name: &str) -> String {
     serde_json::json!({ "cmd": "app_get_path", "name": name }).to_string()
 }
@@ -1374,20 +1389,6 @@ pub fn exit() -> Option<String> {
 /// 앱 frontmost로. raw JSON: `{"success":bool}`.
 pub fn focus() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_focus"}"#)
-}
-
-pub mod session {
-    use crate::invoke;
-
-    /// 모든 cookie 삭제 (fire-and-forget). 응답: `{"success":bool}`.
-    pub fn clear_cookies() -> Option<String> {
-        invoke("__core__", r#"{"cmd":"session_clear_cookies"}"#)
-    }
-
-    /// disk store flush. 응답: `{"success":bool}`.
-    pub fn flush_store() -> Option<String> {
-        invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
-    }
 }
 
 /// 앱 모든 윈도우 hide (macOS Cmd+H). raw JSON: `{"success":bool}`.

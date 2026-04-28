@@ -1396,6 +1396,19 @@ pub const process = struct {
     }
 };
 
+/// Electron `session.cookies.*`. CEF cookie_manager fire-and-forget.
+pub const session = struct {
+    /// 모든 cookie 삭제. 실 cleanup은 비동기 (CEF 내부).
+    pub fn clearCookies() ?[]const u8 {
+        return coreCmd("session_clear_cookies", "");
+    }
+
+    /// disk store flush.
+    pub fn flushStore() ?[]const u8 {
+        return coreCmd("session_flush_store", "");
+    }
+};
+
 /// suji.json `app.name` 반환. 응답: `{"name":"..."}`.
 pub fn getName() ?[]const u8 {
     return coreCmd("app_get_name", "");
@@ -1424,22 +1437,10 @@ pub fn setProgressBar(progress: f64) ?[]const u8 {
     return coreCmd("app_set_progress_bar", fields);
 }
 
-/// 앱 강제 종료. 응답: `{"success":bool}` 후 process 종료.
+/// 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시.
 pub fn exit() ?[]const u8 {
     return coreCmd("app_exit", "");
 }
-
-pub const session = struct {
-    /// 모든 cookie 삭제 (fire-and-forget). 응답: `{"success":bool}`.
-    pub fn clearCookies() ?[]const u8 {
-        return coreCmd("session_clear_cookies", "");
-    }
-
-    /// disk store flush. 응답: `{"success":bool}`.
-    pub fn flushStore() ?[]const u8 {
-        return coreCmd("session_flush_store", "");
-    }
-};
 
 /// 앱 frontmost로. 응답: `{"success":bool}`.
 pub fn focus() ?[]const u8 {
