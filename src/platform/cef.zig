@@ -1135,10 +1135,7 @@ fn clipboardReadType(buf: []u8, type_cstr: [*:0]const u8) []const u8 {
     if (!comptime is_macos) return buf[0..0];
     const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return buf[0..0];
-    const NSString = getClass("NSString") orelse return buf[0..0];
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), type_cstr) orelse return buf[0..0];
+    const ns_type = nsStringFromCstr(type_cstr) orelse return buf[0..0];
     const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
     const ns_str = stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) orelse return buf[0..0];
@@ -1152,17 +1149,8 @@ fn clipboardWriteType(text: []const u8, type_cstr: [*:0]const u8) bool {
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
     _ = msgSend(pb, "clearContents");
 
-    var stack_buf: [CLIPBOARD_MAX_TEXT]u8 = undefined;
-    if (text.len + 1 > stack_buf.len) return false;
-    @memcpy(stack_buf[0..text.len], text);
-    stack_buf[text.len] = 0;
-    const cstr: [*:0]const u8 = @ptrCast(&stack_buf);
-
-    const NSString = getClass("NSString") orelse return false;
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_text = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr) orelse return false;
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), type_cstr) orelse return false;
+    const ns_text = nsStringFromSlice(text) orelse return false;
+    const ns_type = nsStringFromCstr(type_cstr) orelse return false;
     const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
         @ptrCast(&objc.objc_msgSend);
     return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_text, ns_type) != 0;
@@ -1193,10 +1181,7 @@ pub fn clipboardHas(type_cstr: [*:0]const u8) bool {
     if (!comptime is_macos) return false;
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
-    const NSString = getClass("NSString") orelse return false;
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), type_cstr) orelse return false;
+    const ns_type = nsStringFromCstr(type_cstr) orelse return false;
     const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
     return stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) != null;
