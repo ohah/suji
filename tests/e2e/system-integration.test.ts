@@ -1,10 +1,13 @@
 /**
  * 시스템 통합 e2e — screen.getAllDisplays / dock badge / powerSaveBlocker / safeStorage /
- * requestUserAttention.
+ * requestUserAttention. 또한 동일 IPC를 wrap한 @suji/api SDK도 Blob URL로 주입해
+ * round-trip 동작 검증.
  *
  * 실행: ./tests/e2e/run-system-integration.sh
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 let browser: Browser;
@@ -26,6 +29,18 @@ beforeAll(async () => {
   expect(pages.length).toBeGreaterThan(0);
   page = pages[0];
   page.setDefaultTimeout(30000);
+
+  // @suji/api dist Blob URL 주입 — wrapper logic을 페이지 안에서 직접 호출해 round-trip 검증.
+  const sdkSrc = fs.readFileSync(
+    path.resolve(__dirname, "../../packages/suji-js/dist/index.js"),
+    "utf-8",
+  );
+  await page.evaluate(async (code) => {
+    const blob = new Blob([code], { type: "text/javascript" });
+    const url = URL.createObjectURL(blob);
+    const m = await import(/* @vite-ignore */ url);
+    (window as any).__suji_sdk__ = m;
+  }, sdkSrc);
 });
 
 afterAll(async () => {
@@ -274,5 +289,62 @@ describe("app.requestUserAttention (dock bounce)", () => {
       id: 999999,
     });
     expect(c.success).toBe(true);
+  });
+});
+
+// ============================================
+// @suji/api SDK wrapper 검증 — dist/index.js를 페이지에 Blob URL로 import.
+// ============================================
+
+const sdk = <T = unknown>(fn: string): Promise<T> =>
+  page.evaluate(
+    new Function("return (window).__suji_sdk__." + fn) as () => Promise<T>,
+  ) as Promise<T>;
+
+describe("@suji/api SDK — round-trip", () => {
+  test("screen.getAllDisplays returns array", async () => {
+    const r = await sdk<any[]>("screen.getAllDisplays()");
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.length).toBeGreaterThan(0);
+    expect(r[0]).toHaveProperty("scaleFactor");
+  });
+
+  test("app.dock setBadge → getBadge round-trip", async () => {
+    await sdk("app.dock.setBadge('z')");
+    const t = await sdk<string>("app.dock.getBadge()");
+    expect(t).toBe("z");
+    await sdk("app.dock.setBadge('')");
+  });
+
+  test("powerSaveBlocker.start → stop", async () => {
+    const id = await sdk<number>(
+      "powerSaveBlocker.start('prevent_display_sleep')",
+    );
+    expect(id).toBeGreaterThan(0);
+    const ok = await sdk<boolean>(`powerSaveBlocker.stop(${id})`);
+    expect(ok).toBe(true);
+  });
+
+  test("safeStorage setItem/getItem/deleteItem", async () => {
+    const acc = `sdk-${Date.now()}`;
+    await sdk(`safeStorage.setItem('Suji-sdk-test', '${acc}', 'v1')`);
+    const v = await sdk<string>(
+      `safeStorage.getItem('Suji-sdk-test', '${acc}')`,
+    );
+    expect(v).toBe("v1");
+    const del = await sdk<boolean>(
+      `safeStorage.deleteItem('Suji-sdk-test', '${acc}')`,
+    );
+    expect(del).toBe(true);
+  });
+
+  test("app.requestUserAttention → cancel (id ≥ 0 lenient)", async () => {
+    const id = await sdk<number>("app.requestUserAttention(true)");
+    expect(id).toBeGreaterThanOrEqual(0);
+    if (id > 0) {
+      const ok = await sdk<boolean>(`app.cancelUserAttentionRequest(${id})`);
+      expect(ok).toBe(true);
+    }
+    expect(await sdk<boolean>("app.cancelUserAttentionRequest(0)")).toBe(false);
   });
 });

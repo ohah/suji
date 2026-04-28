@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -251,5 +251,95 @@ describe("error handling", () => {
     }
 
     (window as any).__suji__ = original;
+  });
+});
+
+describe("screen.getAllDisplays", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("calls screen_get_all_displays + returns displays array", async () => {
+    mockBridge.core.mockResolvedValueOnce({ displays: [{ index: 0, isPrimary: true, x: 0, y: 0, width: 1920, height: 1080, visibleX: 0, visibleY: 0, visibleWidth: 1920, visibleHeight: 1055, scaleFactor: 2 }] });
+    const r = await screen.getAllDisplays();
+    expect(mockBridge.core).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0]).cmd).toBe("screen_get_all_displays");
+    expect(r.length).toBe(1);
+    expect(r[0].isPrimary).toBe(true);
+    expect(r[0].scaleFactor).toBe(2);
+  });
+});
+
+describe("powerSaveBlocker", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("start sends type + returns id", async () => {
+    mockBridge.core.mockResolvedValueOnce({ id: 7 });
+    const id = await powerSaveBlocker.start("prevent_display_sleep");
+    const req = JSON.parse(mockBridge.core.mock.calls[0][0]);
+    expect(req).toEqual({ cmd: "power_save_blocker_start", type: "prevent_display_sleep" });
+    expect(id).toBe(7);
+  });
+
+  it("stop sends id + maps success to bool", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await powerSaveBlocker.stop(7)).toBe(true);
+    mockBridge.core.mockResolvedValueOnce({ success: false });
+    expect(await powerSaveBlocker.stop(0)).toBe(false);
+  });
+});
+
+describe("safeStorage", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("setItem sends service/account/value", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await safeStorage.setItem("svc", "acc", "v")).toBe(true);
+    const req = JSON.parse(mockBridge.core.mock.calls[0][0]);
+    expect(req).toEqual({ cmd: "safe_storage_set", service: "svc", account: "acc", value: "v" });
+  });
+
+  it("getItem returns value field", async () => {
+    mockBridge.core.mockResolvedValueOnce({ value: "secret" });
+    expect(await safeStorage.getItem("svc", "acc")).toBe("secret");
+  });
+
+  it("deleteItem maps success", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await safeStorage.deleteItem("svc", "acc")).toBe(true);
+  });
+});
+
+describe("app", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("requestUserAttention default critical=true", async () => {
+    mockBridge.core.mockResolvedValueOnce({ id: 42 });
+    const id = await app.requestUserAttention();
+    const req = JSON.parse(mockBridge.core.mock.calls[0][0]);
+    expect(req).toEqual({ cmd: "app_attention_request", critical: true });
+    expect(id).toBe(42);
+  });
+
+  it("requestUserAttention informational", async () => {
+    mockBridge.core.mockResolvedValueOnce({ id: 1 });
+    await app.requestUserAttention(false);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0]).critical).toBe(false);
+  });
+
+  it("cancelUserAttentionRequest maps success", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await app.cancelUserAttentionRequest(42)).toBe(true);
+    mockBridge.core.mockResolvedValueOnce({ success: false });
+    expect(await app.cancelUserAttentionRequest(0)).toBe(false);
+  });
+
+  it("dock.setBadge sends text", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    await app.dock.setBadge("99");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "dock_set_badge", text: "99" });
+  });
+
+  it("dock.getBadge returns text field", async () => {
+    mockBridge.core.mockResolvedValueOnce({ text: "9" });
+    expect(await app.dock.getBadge()).toBe("9");
   });
 });

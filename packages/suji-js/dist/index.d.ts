@@ -439,6 +439,50 @@ export declare const dialog: {
     /** Sync 변종 — 취소면 `undefined`, 아니면 `string`. windowId 첫 인자 지원. */
     showSaveDialogSync(arg1?: SaveDialogOptions | number, arg2?: SaveDialogOptions): Promise<string | undefined>;
 };
+export interface Display {
+    index: number;
+    isPrimary: boolean;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    visibleX: number;
+    visibleY: number;
+    visibleWidth: number;
+    visibleHeight: number;
+    scaleFactor: number;
+}
+export declare const screen: {
+    /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
+    getAllDisplays(): Promise<Display[]>;
+};
+export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
+export declare const powerSaveBlocker: {
+    /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
+    start(type: PowerSaveBlockerType): Promise<number>;
+    /** start로 받은 id를 해제. unknown id는 false. */
+    stop(id: number): Promise<boolean>;
+};
+export declare const safeStorage: {
+    /** service+account에 utf-8 value 저장. 같은 키면 update (idempotent). */
+    setItem(service: string, account: string, value: string): Promise<boolean>;
+    /** service+account로 저장된 value read. 없으면 빈 문자열. */
+    getItem(service: string, account: string): Promise<string>;
+    /** service+account 삭제. 존재하지 않아도 true (idempotent). */
+    deleteItem(service: string, account: string): Promise<boolean>;
+};
+export declare const app: {
+    /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
+    requestUserAttention(critical?: boolean): Promise<number>;
+    /** requestUserAttention으로 받은 id 취소. id == 0은 false (guard). */
+    cancelUserAttentionRequest(id: number): Promise<boolean>;
+    dock: {
+        /** dock 배지 텍스트 — 빈 문자열로 제거. macOS만. */
+        setBadge(text: string): Promise<void>;
+        /** 현재 배지 텍스트. 미설정이면 빈 문자열. */
+        getBadge(): Promise<string>;
+    };
+};
 /**
  * 여러 백엔드에 동시 요청
  */

@@ -910,6 +910,123 @@ export const dialog = {
   },
 };
 
+// ============================================
+// screen — 디스플레이 정보 (Electron `screen.getAllDisplays`)
+// ============================================
+
+export interface Display {
+  index: number;
+  isPrimary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  visibleX: number;
+  visibleY: number;
+  visibleWidth: number;
+  visibleHeight: number;
+  scaleFactor: number;
+}
+
+export const screen = {
+  /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
+  async getAllDisplays(): Promise<Display[]> {
+    const r = await coreCall<{ displays: Display[] }>({ cmd: "screen_get_all_displays" });
+    return r.displays;
+  },
+};
+
+// ============================================
+// powerSaveBlocker — 화면/시스템 sleep 차단 (Electron `powerSaveBlocker`)
+// ============================================
+
+export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
+
+export const powerSaveBlocker = {
+  /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
+  async start(type: PowerSaveBlockerType): Promise<number> {
+    const r = await coreCall<{ id: number }>({ cmd: "power_save_blocker_start", type });
+    return r.id;
+  },
+
+  /** start로 받은 id를 해제. unknown id는 false. */
+  async stop(id: number): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "power_save_blocker_stop", id });
+    return r.success === true;
+  },
+};
+
+// ============================================
+// safeStorage — macOS Keychain 저장소 (Electron `safeStorage`의 키체인 변종)
+// ============================================
+// Electron API는 encryptString/decryptString 패턴이지만 Suji는 service+account
+// 키체인 직접 wrap. macOS만 동작 (Linux libsecret / Win DPAPI는 후속).
+
+export const safeStorage = {
+  /** service+account에 utf-8 value 저장. 같은 키면 update (idempotent). */
+  async setItem(service: string, account: string, value: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({
+      cmd: "safe_storage_set",
+      service,
+      account,
+      value,
+    });
+    return r.success === true;
+  },
+
+  /** service+account로 저장된 value read. 없으면 빈 문자열. */
+  async getItem(service: string, account: string): Promise<string> {
+    const r = await coreCall<{ value: string }>({
+      cmd: "safe_storage_get",
+      service,
+      account,
+    });
+    return r.value;
+  },
+
+  /** service+account 삭제. 존재하지 않아도 true (idempotent). */
+  async deleteItem(service: string, account: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({
+      cmd: "safe_storage_delete",
+      service,
+      account,
+    });
+    return r.success === true;
+  },
+};
+
+// ============================================
+// app — 애플리케이션 레벨 API (dock 바운스 등 NSApp wrap)
+// ============================================
+// Electron `app.requestUserAttention` / `app.dock.setBadge` 동등 (macOS).
+
+export const app = {
+  /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
+  async requestUserAttention(critical = true): Promise<number> {
+    const r = await coreCall<{ id: number }>({ cmd: "app_attention_request", critical });
+    return r.id;
+  },
+
+  /** requestUserAttention으로 받은 id 취소. id == 0은 false (guard). */
+  async cancelUserAttentionRequest(id: number): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_attention_cancel", id });
+    return r.success === true;
+  },
+
+  dock: {
+    /** dock 배지 텍스트 — 빈 문자열로 제거. macOS만. */
+    async setBadge(text: string): Promise<void> {
+      await coreCall({ cmd: "dock_set_badge", text });
+    },
+
+    /** 현재 배지 텍스트. 미설정이면 빈 문자열. */
+    async getBadge(): Promise<string> {
+      const r = await coreCall<{ text: string }>({ cmd: "dock_get_badge" });
+      return r.text;
+    },
+  },
+};
+
 /**
  * 여러 백엔드에 동시 요청
  */
