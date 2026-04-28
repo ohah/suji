@@ -35,6 +35,11 @@ func IsReady() string {
 	return suji.Invoke("__core__", `{"cmd":"app_is_ready"}`)
 }
 
+// GetLocale returns system locale in BCP 47 (e.g., "en-US"). raw JSON: `{"locale":"..."}`.
+func GetLocale() string {
+	return suji.Invoke("__core__", `{"cmd":"app_get_locale"}`)
+}
+
 // Focus brings the app frontmost. raw JSON: `{"success":bool}`.
 func Focus() string {
 	return suji.Invoke("__core__", `{"cmd":"app_focus"}`)

@@ -1240,6 +1240,12 @@ export const app = {
     return r.ready === true;
   },
 
+  /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
+  async getLocale(): Promise<string> {
+    const r = await coreCall<{ locale: string }>({ cmd: "app_get_locale" });
+    return r.locale;
+  },
+
   /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
   async focus(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_focus" });

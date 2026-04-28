@@ -1385,6 +1385,11 @@ pub fn isReady() ?[]const u8 {
     return coreCmd("app_is_ready", "");
 }
 
+/// 시스템 locale (BCP 47, e.g. "en-US"). 응답: `{"locale":"..."}`.
+pub fn getLocale() ?[]const u8 {
+    return coreCmd("app_get_locale", "");
+}
+
 /// 앱 frontmost로. 응답: `{"success":bool}`.
 pub fn focus() ?[]const u8 {
     return coreCmd("app_focus", "");

@@ -669,6 +669,11 @@ export const app = {
         const r = await coreCall({ cmd: "app_is_ready" });
         return r.ready === true;
     },
+    /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
+    async getLocale() {
+        const r = await coreCall({ cmd: "app_get_locale" });
+        return r.locale;
+    },
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
     async focus() {
         const r = await coreCall({ cmd: "app_focus" });

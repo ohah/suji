@@ -579,6 +579,8 @@ export declare const app: {
     getVersion(): Promise<string>;
     /** 앱 init 완료 여부 (V8 binding이 호출 가능한 시점은 항상 true). Electron 동등. */
     isReady(): Promise<boolean>;
+    /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
+    getLocale(): Promise<string>;
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
     focus(): Promise<boolean>;
     /** 모든 윈도우 hide (macOS Cmd+H 동등). */

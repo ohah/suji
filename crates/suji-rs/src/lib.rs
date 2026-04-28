@@ -1327,6 +1327,11 @@ pub fn is_ready() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_is_ready"}"#)
 }
 
+/// 시스템 locale (BCP 47) raw JSON. `{"locale":"en-US"}`.
+pub fn get_locale() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_locale"}"#)
+}
+
 /// 앱 frontmost로. raw JSON: `{"success":bool}`.
 pub fn focus() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_focus"}"#)

@@ -253,6 +253,17 @@ describe("clipboard.has / availableFormats", () => {
   });
 });
 
+describe("app.getLocale", () => {
+  test("BCP 47 형식 locale (xx 또는 xx-XX 패턴)", async () => {
+    const r = await core<{ locale: string }>({ cmd: "app_get_locale" });
+    expect(typeof r.locale).toBe("string");
+    expect(r.locale.length).toBeGreaterThan(0);
+    // BCP 47: 언어 코드 (2-3자) + 선택적 -지역. underscore 없어야 (POSIX→BCP 47 변환).
+    expect(r.locale).not.toContain("_");
+    expect(r.locale).toMatch(/^[a-z]{2,3}(-[A-Z][a-zA-Z0-9]*)*$/);
+  });
+});
+
 describe("app.isReady / focus / hide", () => {
   test("isReady는 항상 true (V8 호출 시점)", async () => {
     const r = await core<{ ready: boolean }>({ cmd: "app_is_ready" });

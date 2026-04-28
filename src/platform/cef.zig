@@ -1783,6 +1783,20 @@ pub fn appCancelUserAttentionRequest(id: u32) bool {
     return true;
 }
 
+/// 시스템 locale (Electron `app.getLocale()`). 예: "en-US", "ko-KR".
+/// `[NSLocale currentLocale] localeIdentifier` 반환 — POSIX style ("en_US")이라
+/// underscore → hyphen 치환해 BCP 47 형식으로 통일.
+pub fn appGetLocale(out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const NSLocale = getClass("NSLocale") orelse return out_buf[0..0];
+    const locale = msgSend(NSLocale, "currentLocale") orelse return out_buf[0..0];
+    const id_obj = msgSend(locale, "localeIdentifier") orelse return out_buf[0..0];
+    const raw = nsStringToUtf8Buf(id_obj, out_buf);
+    // POSIX → BCP 47 (en_US → en-US).
+    for (out_buf[0..raw.len]) |*c2| if (c2.* == '_') { c2.* = '-'; };
+    return raw;
+}
+
 /// 앱을 frontmost로 (Electron `app.focus()`). NSApp `activateIgnoringOtherApps:`.
 pub fn appFocus() bool {
     if (!comptime is_macos) return false;

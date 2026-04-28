@@ -1074,6 +1074,12 @@ export const app = {
     return r.ready === true;
   },
 
+  /** 시스템 locale (BCP 47, e.g. "en-US"). */
+  async getLocale(): Promise<string> {
+    const r = await invoke<{ locale: string }>('__core__', { cmd: 'app_get_locale' });
+    return r.locale;
+  },
+
   /** 앱 frontmost로. */
   async focus(): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_focus' });
