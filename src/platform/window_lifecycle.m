@@ -71,16 +71,9 @@ static WindowEntry *entry_for_window(NSWindow *win) {
     WindowEntry *e = entry_for_window(win);
     if (e == NULL) return;
 
-    // maximize/unmaximize 검출 — isZoomed 상태 전이만 emit. 사용자 드래그 중엔 zoom
-    // 상태가 변하지 않으므로 in_live_resize=YES면 skip (60Hz ObjC 콜 절약).
-    if (!e->in_live_resize) {
-        BOOL is_zoomed_now = [win isZoomed];
-        if (is_zoomed_now != e->last_zoomed) {
-            if (is_zoomed_now && g_maximize_cb) g_maximize_cb(e->handle);
-            else if (!is_zoomed_now && g_unmaximize_cb) g_unmaximize_cb(e->handle);
-            e->last_zoomed = is_zoomed_now;
-        }
-    }
+    // maximize/unmaximize는 우리 API 호출(suji_window_lifecycle_maximize)에서 직접
+    // emit — NSWindow zoom delegate가 없어 windowDidResize 기반 검출은 신뢰 불가.
+    // last_zoomed는 baseline만 유지 (traffic light/programmatic zoom 추적용 historical).
 
     if (g_resized_cb == NULL) return;
     NSRect f = win.frame;
@@ -224,6 +217,9 @@ int suji_window_lifecycle_attach(void *ns_window, uint64_t handle) {
     NSWindow *win = (__bridge NSWindow *)ns_window;
     // attach 시점에 zoom baseline 캡처 — 첫 windowDidResize에서도 transition 정확.
     e->last_zoomed = [win isZoomed];
+    // toggleFullScreen이 동작하려면 collectionBehavior에 FullScreenPrimary 비트 필수.
+    // CEF 기본 NSWindow는 0x0 — set 안 하면 toggleFullScreen은 no-op.
+    [win setCollectionBehavior:[win collectionBehavior] | NSWindowCollectionBehaviorFullScreenPrimary];
     win.delegate = g_delegate;
     return 1;
 }
@@ -257,16 +253,31 @@ void suji_window_lifecycle_deminiaturize(void *ns_window) {
 }
 
 /// 이미 zoomed면 no-op. NSWindow.zoom:은 toggle이라 사전 검사 필수.
+/// `[win zoom:]`은 windowWillStartLiveResize → 여러 windowDidResize → windowDidEndLiveResize
+/// 시퀀스를 발화. 우리는 windowDidResize의 isZoomed 전이로 검출하지만 in_live_resize 가드에
+/// 막힘 + zoom 애니메이션 끝까지 isZoomed=true 안 됨. NSWindow에 zoom 완료 delegate가 없어
+/// (windowShouldZoom:toFrame:만 있음) 우리 API 호출 시 직접 cb 발화 + last_zoomed 갱신.
+/// traffic light green은 macOS 11+ fullscreen으로 매핑되어 사실상 deprecated path.
 void suji_window_lifecycle_maximize(void *ns_window) {
     if (ns_window == NULL) return;
     NSWindow *win = (__bridge NSWindow *)ns_window;
-    if (![win isZoomed]) [win zoom:nil];
+    if ([win isZoomed]) return;
+    [win zoom:nil];
+    WindowEntry *e = entry_for_window(win);
+    if (e == NULL) return;
+    e->last_zoomed = YES;
+    if (g_maximize_cb) g_maximize_cb(e->handle);
 }
 
 void suji_window_lifecycle_unmaximize(void *ns_window) {
     if (ns_window == NULL) return;
     NSWindow *win = (__bridge NSWindow *)ns_window;
-    if ([win isZoomed]) [win zoom:nil];
+    if (![win isZoomed]) return;
+    [win zoom:nil];
+    WindowEntry *e = entry_for_window(win);
+    if (e == NULL) return;
+    e->last_zoomed = NO;
+    if (g_unmaximize_cb) g_unmaximize_cb(e->handle);
 }
 
 /// `[win toggleFullScreen:]`도 toggle이라 사전 검사로 멱등 보장.
