@@ -1130,36 +1130,28 @@ const PASTEBOARD_TYPE_STRING: [*:0]const u8 = "public.utf8-plain-text";
 /// 사용하므로 여기 한도를 넘는 입력은 caller 단에서 이미 잘려 있음.
 const CLIPBOARD_MAX_TEXT: usize = 16384;
 
-/// 시스템 클립보드에서 plain text 읽기 — buf에 복사 후 slice 반환. 비어 있거나
-/// non-text content면 빈 슬라이스. buf보다 긴 텍스트는 잘림.
-pub fn clipboardReadText(buf: []u8) []const u8 {
+/// generalPasteboard에서 주어진 type의 string 추출 — 빈 slice면 missing/non-string.
+fn clipboardReadType(buf: []u8, type_cstr: [*:0]const u8) []const u8 {
     if (!comptime is_macos) return buf[0..0];
     const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return buf[0..0];
     const NSString = getClass("NSString") orelse return buf[0..0];
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_STRING) orelse return buf[0..0];
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), type_cstr) orelse return buf[0..0];
     const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
     const ns_str = stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) orelse return buf[0..0];
-    const utf8Fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 =
-        @ptrCast(&objc.objc_msgSend);
-    const cstr = utf8Fn(ns_str, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return buf[0..0];
-    const len = std.mem.span(cstr).len;
-    const copy_len = @min(len, buf.len);
-    @memcpy(buf[0..copy_len], cstr[0..copy_len]);
-    return buf[0..copy_len];
+    return nsStringToUtf8Buf(ns_str, buf);
 }
 
-/// 시스템 클립보드에 plain text 쓰기. clear 후 setString:forType: 호출. 성공 시 true.
-pub fn clipboardWriteText(text: []const u8) bool {
+/// generalPasteboard에 주어진 type으로 text 쓰기 — clearContents 호출 (다른 type 함께 제거).
+fn clipboardWriteType(text: []const u8, type_cstr: [*:0]const u8) bool {
     if (!comptime is_macos) return false;
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
     _ = msgSend(pb, "clearContents");
 
-    // stringWithUTF8String은 null-terminated 요구 — 스택 버퍼로 복사.
     var stack_buf: [CLIPBOARD_MAX_TEXT]u8 = undefined;
     if (text.len + 1 > stack_buf.len) return false;
     @memcpy(stack_buf[0..text.len], text);
@@ -1170,10 +1162,21 @@ pub fn clipboardWriteText(text: []const u8) bool {
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
     const ns_text = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr) orelse return false;
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_STRING) orelse return false;
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), type_cstr) orelse return false;
     const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
         @ptrCast(&objc.objc_msgSend);
     return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_text, ns_type) != 0;
+}
+
+/// 시스템 클립보드에서 plain text 읽기 — buf에 복사 후 slice 반환. 비어 있거나
+/// non-text content면 빈 슬라이스. buf보다 긴 텍스트는 잘림.
+pub fn clipboardReadText(buf: []u8) []const u8 {
+    return clipboardReadType(buf, PASTEBOARD_TYPE_STRING);
+}
+
+/// 시스템 클립보드에 plain text 쓰기. clear 후 setString:forType: 호출. 성공 시 true.
+pub fn clipboardWriteText(text: []const u8) bool {
+    return clipboardWriteType(text, PASTEBOARD_TYPE_STRING);
 }
 
 /// 시스템 클립보드 비우기 (clearContents).
@@ -1188,40 +1191,12 @@ const PASTEBOARD_TYPE_HTML: [*:0]const u8 = "public.html";
 
 /// 클립보드 HTML 읽기 (Electron `clipboard.readHTML`). 동일 cap (CLIPBOARD_MAX_TEXT).
 pub fn clipboardReadHtml(buf: []u8) []const u8 {
-    if (!comptime is_macos) return buf[0..0];
-    const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
-    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return buf[0..0];
-    const NSString = getClass("NSString") orelse return buf[0..0];
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_HTML) orelse return buf[0..0];
-    const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_str = stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) orelse return buf[0..0];
-    return nsStringToUtf8Buf(ns_str, buf);
+    return clipboardReadType(buf, PASTEBOARD_TYPE_HTML);
 }
 
 /// 클립보드 HTML 쓰기 (Electron `clipboard.writeHTML`). 다른 type (text)도 함께 지움.
 pub fn clipboardWriteHtml(html: []const u8) bool {
-    if (!comptime is_macos) return false;
-    const NSPasteboard = getClass("NSPasteboard") orelse return false;
-    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
-    _ = msgSend(pb, "clearContents");
-
-    var stack_buf: [CLIPBOARD_MAX_TEXT]u8 = undefined;
-    if (html.len + 1 > stack_buf.len) return false;
-    @memcpy(stack_buf[0..html.len], html);
-    stack_buf[html.len] = 0;
-    const cstr: [*:0]const u8 = @ptrCast(&stack_buf);
-
-    const NSString = getClass("NSString") orelse return false;
-    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_html = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr) orelse return false;
-    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_HTML) orelse return false;
-    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
-        @ptrCast(&objc.objc_msgSend);
-    return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_html, ns_type) != 0;
+    return clipboardWriteType(html, PASTEBOARD_TYPE_HTML);
 }
 
 // ============================================
@@ -1329,18 +1304,7 @@ pub fn shellOpenExternal(url: []const u8) bool {
 /// 대체).
 pub fn shellShowItemInFolder(path: []const u8) bool {
     if (!comptime is_macos) return false;
-    const ns_path = nsStringFromSlice(path) orelse return false;
-
-    const NSFileManager = getClass("NSFileManager") orelse return false;
-    const fm = msgSend(NSFileManager, "defaultManager") orelse return false;
-    const existsFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
-        @ptrCast(&objc.objc_msgSend);
-    if (existsFn(fm, @ptrCast(objc.sel_registerName("fileExistsAtPath:")), ns_path) == 0) return false;
-
-    const NSURL = getClass("NSURL") orelse return false;
-    const fileUrlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const ns_url = fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path) orelse return false;
+    const ns_url = nsFileUrlIfExists(path) orelse return false;
 
     const NSArray = getClass("NSArray") orelse return false;
     const arrayFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
@@ -1359,24 +1323,29 @@ pub fn shellBeep() void {
     objc.NSBeep();
 }
 
-/// 파일 기본 앱으로 열기 (Electron `shell.openPath` — `openExternal`은 URL용,
-/// 이건 로컬 파일/폴더 path용). 존재하지 않는 경로는 false. file:// URL 변환 후
-/// NSWorkspace `openURL:` 호출.
-pub fn shellOpenPath(path: []const u8) bool {
-    if (!comptime is_macos) return false;
-    const ns_path = nsStringFromSlice(path) orelse return false;
+/// path → NSURL fileURLWithPath: 변환. 존재 검증 통과 시만 NSURL 반환, 아니면 null.
+/// shellOpenPath / showItemInFolder가 공유 (TOCTOU race는 conventional — caller가 즉시 사용).
+fn nsFileUrlIfExists(path: []const u8) ?*anyopaque {
+    if (!comptime is_macos) return null;
+    const ns_path = nsStringFromSlice(path) orelse return null;
 
-    const NSFileManager = getClass("NSFileManager") orelse return false;
-    const fm = msgSend(NSFileManager, "defaultManager") orelse return false;
+    const NSFileManager = getClass("NSFileManager") orelse return null;
+    const fm = msgSend(NSFileManager, "defaultManager") orelse return null;
     const existsFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
         @ptrCast(&objc.objc_msgSend);
-    if (existsFn(fm, @ptrCast(objc.sel_registerName("fileExistsAtPath:")), ns_path) == 0) return false;
+    if (existsFn(fm, @ptrCast(objc.sel_registerName("fileExistsAtPath:")), ns_path) == 0) return null;
 
-    const NSURL = getClass("NSURL") orelse return false;
+    const NSURL = getClass("NSURL") orelse return null;
     const fileUrlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
-    const ns_url = fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path) orelse return false;
+    return fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path);
+}
 
+/// 파일 기본 앱으로 열기 (Electron `shell.openPath` — `openExternal`은 URL용,
+/// 이건 로컬 파일/폴더 path용). 존재하지 않는 경로는 false.
+pub fn shellOpenPath(path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const ns_url = nsFileUrlIfExists(path) orelse return false;
     const NSWorkspace = getClass("NSWorkspace") orelse return false;
     const ws = msgSend(NSWorkspace, "sharedWorkspace") orelse return false;
     const openFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
@@ -1507,15 +1476,12 @@ pub fn nativeThemeIsDark() bool {
 
 /// 마우스 포인터 화면 좌표 (Electron `screen.getCursorScreenPoint`).
 /// macOS는 bottom-up 좌표계 (NSEvent.mouseLocation) — y는 main display height에서 반전 필요할 수
-/// 있음. Electron 호환성 위해 그대로 NSPoint 반환 (caller가 필요 시 변환).
-const ScreenPoint = extern struct { x: f64, y: f64 };
-
-pub fn screenGetCursorPoint() ScreenPoint {
+/// 있음. caller가 필요 시 변환.
+pub fn screenGetCursorPoint() NSPoint {
     if (!comptime is_macos) return .{ .x = 0, .y = 0 };
     const NSEvent = getClass("NSEvent") orelse return .{ .x = 0, .y = 0 };
     const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
-    const p = f(NSEvent, @ptrCast(objc.sel_registerName("mouseLocation")));
-    return .{ .x = p.x, .y = p.y };
+    return f(NSEvent, @ptrCast(objc.sel_registerName("mouseLocation")));
 }
 
 /// 주어진 (x, y) 좌표에 가장 가까운 display index 반환 (Electron `screen.getDisplayNearestPoint`).
