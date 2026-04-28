@@ -124,29 +124,18 @@ pub fn executeSubprocess() void {
     }
 }
 
-/// CEF 초기화
-/// OS 표준 user-data 디렉토리 + 앱 이름 (Electron `app.getPath('userData')` 동등).
-/// macOS: ~/Library/Application Support/&lt;app&gt;/Cache
-/// Linux: ~/.config/&lt;app&gt;/Cache
-/// Windows: %APPDATA%/&lt;app&gt;/Cache (없으면 %USERPROFILE%/AppData/Roaming/&lt;app&gt;/Cache)
+/// CEF 초기화 — OS 표준 user-data dir + `<app>/Cache` (Electron `app.getPath('userData') + Cache`).
+/// macOS: ~/Library/Application Support/<app>/Cache
+/// Linux: $XDG_CONFIG_HOME or ~/.config / <app>/Cache
+/// Windows: %APPDATA% or %USERPROFILE%/AppData/Roaming / <app>/Cache
+/// other: ~/.suji/<app>/Cache (fallback)
+///
+/// resolveAppDataDir과 OS 분기를 공유 — `<app_data>/<app>/Cache`만 합쳐 cef 디렉토리 포지션.
 fn buildAppCachePath(buf: []u8, home: []const u8, app_name: []const u8) ?[]const u8 {
-    const result = switch (builtin.os.tag) {
-        .macos => std.fmt.bufPrint(buf, "{s}/Library/Application Support/{s}/Cache", .{ home, app_name }),
-        .linux => blk: {
-            // XDG Base Directory Specification — $XDG_CONFIG_HOME 우선, fallback ~/.config
-            const xdg = runtime.env("XDG_CONFIG_HOME");
-            if (xdg) |x| if (x.len > 0) break :blk std.fmt.bufPrint(buf, "{s}/{s}/Cache", .{ x, app_name });
-            break :blk std.fmt.bufPrint(buf, "{s}/.config/{s}/Cache", .{ home, app_name });
-        },
-        .windows => blk: {
-            // %APPDATA% (보통 ~/AppData/Roaming) 우선, fallback %USERPROFILE%/AppData/Roaming
-            const appdata = runtime.env("APPDATA");
-            if (appdata) |a| break :blk std.fmt.bufPrint(buf, "{s}\\{s}\\Cache", .{ a, app_name });
-            break :blk std.fmt.bufPrint(buf, "{s}\\AppData\\Roaming\\{s}\\Cache", .{ home, app_name });
-        },
-        else => std.fmt.bufPrint(buf, "{s}/.suji/cef/{s}/Cache", .{ home, app_name }),
-    } catch return null;
-    return result;
+    var ad_buf: [512]u8 = undefined;
+    const app_data = resolveAppDataDir(&ad_buf, home) orelse return null;
+    const sep: []const u8 = if (builtin.os.tag == .windows) "\\" else "/";
+    return std.fmt.bufPrint(buf, "{s}{s}{s}{s}Cache", .{ app_data, sep, app_name, sep }) catch null;
 }
 
 test "buildAppCachePath: 현재 OS 표준 경로 + app_name 포함" {

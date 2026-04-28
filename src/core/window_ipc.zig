@@ -592,6 +592,18 @@ pub fn handleDestroyView(view_id: u32, response_buf: []u8, wm: *window.WindowMan
     return respondViewOp(response_buf, "destroy_view", view_id, ok);
 }
 
+/// 정책적 close — `window:close` cancelable 발화 후 destroy + `window:closed` 발화.
+/// listener가 preventDefault 시 success=false. 미존재 windowId도 false.
+pub fn handleDestroyWindow(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = wm.close(window_id) catch false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"destroy_window\",\"windowId\":{d},\"success\":{}}}",
+        .{ window_id, ok },
+    ) catch null;
+}
+
 pub const AddChildViewReq = struct {
     host_id: u32,
     view_id: u32,

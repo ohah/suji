@@ -385,6 +385,33 @@ describe("@suji/api SDK — round-trip", () => {
     expect(del).toBe(true);
   });
 
+  test("app.getPath round-trip — userData/home/documents 절대경로", async () => {
+    const home = await sdk<string>("app.getPath", "home");
+    expect(home.startsWith("/")).toBe(true);
+
+    const userData = await sdk<string>("app.getPath", "userData");
+    expect(userData).toContain("Multi Backend Example");
+
+    const documents = await sdk<string>("app.getPath", "documents");
+    expect(documents.endsWith("/Documents")).toBe(true);
+
+    const unknown = await sdk<string>("app.getPath", "unknown_key_xyz");
+    expect(unknown).toBe("");
+  });
+
+  test("shell.trashItem round-trip — 임시 파일 trash + 비존재 false", async () => {
+    const tmp = `/tmp/suji-sdk-trash-${Date.now()}.txt`;
+    fs.writeFileSync(tmp, "sdk");
+    expect(fs.existsSync(tmp)).toBe(true);
+
+    const ok = await sdk<boolean>("shell.trashItem", tmp);
+    expect(ok).toBe(true);
+    expect(fs.existsSync(tmp)).toBe(false);
+
+    const missing = await sdk<boolean>("shell.trashItem", "/tmp/suji-sdk-trash-no-such-xyz");
+    expect(missing).toBe(false);
+  });
+
   test("app.requestUserAttention → cancel (id ≥ 0 lenient)", async () => {
     const id = await sdk<number>("app.requestUserAttention", true);
     expect(id).toBeGreaterThanOrEqual(0);

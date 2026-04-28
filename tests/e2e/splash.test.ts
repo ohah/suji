@@ -60,9 +60,12 @@ describe("splash window 패턴", () => {
     }
     expect(loaded).toBe(true);
 
-    // 3. splash 종료 — destroy_window IPC는 현재 silent (response 검증 없이 호출만).
-    //    실제 패턴에서는 cleanup point. window destroy IPC 미구현 (TODO #known).
-    await core({ cmd: "destroy_window", windowId: splash.windowId });
+    // 3. splash 종료 — destroy_window IPC가 cancelable `window:close` → destroy + `window:closed`.
+    const closed = await core<{ success: boolean }>({
+      cmd: "destroy_window",
+      windowId: splash.windowId,
+    });
+    expect(closed.success).toBe(true);
 
     // 4. 원본 메인 창은 그대로 — windowId=1 getURL 정상 응답.
     const mainUrl = await core<{ url: string }>({ cmd: "get_url", windowId: 1 });
