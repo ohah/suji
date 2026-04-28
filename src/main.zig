@@ -613,6 +613,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
+    cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -793,6 +794,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
+    cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -2475,6 +2477,15 @@ fn menuEmitHandler(click: []const u8) void {
     var click_esc: [256]u8 = undefined;
     const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
     emitToBus("menu:click", "{{\"click\":\"{s}\"}}", .{click_esc[0..click_n]});
+}
+
+/// powerMonitor: power_monitor.m이 dispatch한 4 이벤트(suspend/resume/lock-screen/unlock-screen)
+/// 를 `power:<event>` 채널로 emit. event는 "suspend"|"resume"|"lock-screen"|"unlock-screen".
+fn powerMonitorEmitHandler(event: [*:0]const u8) callconv(.c) void {
+    const event_slice = std.mem.span(event);
+    var ch_buf: [64]u8 = undefined;
+    const channel = std.fmt.bufPrint(&ch_buf, "power:{s}", .{event_slice}) catch return;
+    emitBusRaw(channel, "{}");
 }
 
 fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {

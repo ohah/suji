@@ -156,6 +156,11 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/platform/window_lifecycle.m"),
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
+        // power_monitor.m — NSWorkspace 전원 알림 옵저버 (powerMonitor).
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/power_monitor.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");

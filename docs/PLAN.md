@@ -1315,18 +1315,18 @@ suji build → 결과물:
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
-| 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | ❌ (Zig `std.process.Child` 노출만 — 분량 소) |
-| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ❌ (Zig `std.http` 노출만 — 분량 소) |
+| 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
+| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ (분량 중 — sqlite plugin) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
-| 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ❌ (분량 소) |
+| 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
 
 ### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 디스플레이 정보 | `screen.getAllDisplays` / `getPrimaryDisplay` | -- | ✅ macOS NSScreen — `screen_get_all_displays` IPC, frame/visibleFrame/scaleFactor + isPrimary 3 e2e |
-| 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | ❌ (분량 소 — IOPMSchedulePowerEvent / DBus / WM_POWERBROADCAST) |
+| 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | 🟡 macOS만 — `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen` 4 채널 자동 발신 (NSWorkspace 옵저버). Linux/Windows 후속 |
 | 슬립 차단 | `powerSaveBlocker.start` | -- | ✅ macOS IOPMAssertion — `power_save_blocker_start/stop` IPC, prevent_app_suspension / prevent_display_sleep + idempotent guard 4 e2e |
 | 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | ❌ (분량 중 — CGWindowListCopyWindowInfo + ScreenCaptureKit) |
 | 크래시 리포터 | `crashReporter.start` | -- | ❌ (분량 중 — Apple Crashpad/Breakpad 연동) |

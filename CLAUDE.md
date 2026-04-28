@@ -85,6 +85,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
 //                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
+// powerMonitor 이벤트 — 자동 install (NSWorkspace 옵저버), 4 채널 발신:
+//   `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen`
+//   → suji.on("power:suspend", cb) / 다른 SDK도 동일 채널명으로 listen
 // suji.process.run(allocator, suji.io(), &.{ "echo", "hi" })  — std.process.run wrap (백엔드 only)
 //   → RunResult { code, stdout, stderr }, caller가 stdout/stderr free
 // suji.http.fetch(allocator, suji.io(), "https://...", null)   — std.http.Client.fetch wrap
