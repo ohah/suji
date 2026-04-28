@@ -286,6 +286,11 @@ export declare const clipboard: {
     readHTML(): Promise<string>;
     /** HTML write — write 시 다른 type (text 등)도 함께 지움. */
     writeHTML(html: string): Promise<boolean>;
+    /** 클립보드에 주어진 format이 있는지 (Electron `clipboard.has(format)`).
+     *  format은 macOS UTI ("public.utf8-plain-text", "public.html" 등). */
+    has(format: string): Promise<boolean>;
+    /** 클립보드에 등록된 모든 format (UTI) 배열. */
+    availableFormats(): Promise<string[]>;
 };
 export interface NotificationOptions {
     title: string;
@@ -565,6 +570,12 @@ export declare const app: {
     getName(): Promise<string>;
     /** suji.json `app.version` 반환 (Electron `app.getVersion`). */
     getVersion(): Promise<string>;
+    /** 앱 init 완료 여부 (V8 binding이 호출 가능한 시점은 항상 true). Electron 동등. */
+    isReady(): Promise<boolean>;
+    /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
+    focus(): Promise<boolean>;
+    /** 모든 윈도우 hide (macOS Cmd+H 동등). */
+    hide(): Promise<boolean>;
     /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
     getPath(name: AppPathName): Promise<string>;
     /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */

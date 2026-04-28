@@ -574,6 +574,18 @@ export const clipboard = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_html', html });
     return r.success === true;
   },
+
+  /** 클립보드에 format(UTI)이 있는지. */
+  async has(format: string): Promise<boolean> {
+    const r = await invoke<{ present: boolean }>('__core__', { cmd: 'clipboard_has', format });
+    return r.present === true;
+  },
+
+  /** 클립보드 등록된 format 배열. */
+  async availableFormats(): Promise<string[]> {
+    const r = await invoke<{ formats: string[] }>('__core__', { cmd: 'clipboard_available_formats' });
+    return r.formats ?? [];
+  },
 };
 
 export const powerMonitor = {
@@ -1040,6 +1052,24 @@ export const app = {
   async getVersion(): Promise<string> {
     const r = await invoke<{ version: string }>('__core__', { cmd: 'app_get_version' });
     return r.version;
+  },
+
+  /** 앱 init 완료 여부 (V8 binding 호출 가능 시점이면 항상 true). */
+  async isReady(): Promise<boolean> {
+    const r = await invoke<{ ready: boolean }>('__core__', { cmd: 'app_is_ready' });
+    return r.ready === true;
+  },
+
+  /** 앱 frontmost로. */
+  async focus(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_focus' });
+    return r.success === true;
+  },
+
+  /** 모든 윈도우 hide (macOS Cmd+H). */
+  async hide(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_hide' });
+    return r.success === true;
   },
 
   /** Electron `app.getPath` 동등. unknown 키는 빈 문자열. */

@@ -877,6 +877,32 @@ test "shell.trashItem: path 필드 전송" {
     }.run);
 }
 
+test "clipboard.has / availableFormats IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.has("public.html");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_has\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"format\":\"public.html\"") != null);
+
+            _ = app_mod.clipboard.availableFormats();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_available_formats\"") != null);
+        }
+    }.run);
+}
+
+test "app.isReady / focus / hide IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.isReady();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_is_ready\"") != null);
+            _ = app_mod.focus();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_focus\"") != null);
+            _ = app_mod.hide();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_hide\"") != null);
+        }
+    }.run);
+}
+
 test "clipboard.readHtml / writeHtml IPC" {
     try withInvokeCore(struct {
         fn run() !void {

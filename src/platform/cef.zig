@@ -1187,6 +1187,64 @@ pub fn clipboardClear() void {
     _ = msgSend(pb, "clearContents");
 }
 
+/// 클립보드에 주어진 type이 있는지 (Electron `clipboard.has(format)`).
+/// type_cstr는 NSPasteboard UTI ("public.utf8-plain-text" / "public.html" 등).
+pub fn clipboardHas(type_cstr: [*:0]const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    const NSString = getClass("NSString") orelse return false;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), type_cstr) orelse return false;
+    const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    return stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) != null;
+}
+
+/// 클립보드에 등록된 모든 type을 JSON 배열로 빌드 (Electron `clipboard.availableFormats`).
+/// macOS는 UTI 이름을 그대로 반환 (e.g. "public.utf8-plain-text", "public.html").
+pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
+    if (!comptime is_macos) {
+        const empty = "[]";
+        const n = @min(empty.len, out_buf.len);
+        @memcpy(out_buf[0..n], empty[0..n]);
+        return out_buf[0..n];
+    }
+    var w: std.Io.Writer = .fixed(out_buf);
+    w.writeByte('[') catch return out_buf[0..1];
+
+    const NSPasteboard = getClass("NSPasteboard") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const types = msgSend(pb, "types") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
+    const count = count_fn(types, @ptrCast(objc.sel_registerName("count")));
+
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const obj_fn: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+        const type_obj = obj_fn(types, @ptrCast(objc.sel_registerName("objectAtIndex:")), i) orelse continue;
+        var name_buf: [256]u8 = undefined;
+        const name = nsStringToUtf8Buf(type_obj, &name_buf);
+        if (name.len == 0) continue;
+        if (i > 0) w.writeByte(',') catch return w.buffered();
+        var esc_buf: [512]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(name, &esc_buf) orelse continue;
+        w.print("\"{s}\"", .{esc_buf[0..esc_n]}) catch return w.buffered();
+    }
+    w.writeByte(']') catch return w.buffered();
+    return w.buffered();
+}
+
 const PASTEBOARD_TYPE_HTML: [*:0]const u8 = "public.html";
 
 /// 클립보드 HTML 읽기 (Electron `clipboard.readHTML`). 동일 cap (CLIPBOARD_MAX_TEXT).
@@ -1708,6 +1766,25 @@ pub fn appCancelUserAttentionRequest(id: u32) bool {
     const sel = objc.sel_registerName("cancelUserAttentionRequest:");
     const f: *const fn (?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     f(app, @ptrCast(sel), @intCast(id));
+    return true;
+}
+
+/// 앱을 frontmost로 (Electron `app.focus()`). NSApp `activateIgnoringOtherApps:`.
+pub fn appFocus() bool {
+    if (!comptime is_macos) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const f: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(app, @ptrCast(objc.sel_registerName("activateIgnoringOtherApps:")), 1);
+    return true;
+}
+
+/// 앱 모든 윈도우 hide (Electron `app.hide()` macOS-only — Cmd+H 동등).
+pub fn appHide() bool {
+    if (!comptime is_macos) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    msgSendVoid1(app, "hide:", null);
     return true;
 }
 

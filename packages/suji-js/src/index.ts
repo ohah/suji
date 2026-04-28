@@ -519,6 +519,19 @@ export const clipboard = {
     const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_html", html });
     return r.success === true;
   },
+
+  /** 클립보드에 주어진 format이 있는지 (Electron `clipboard.has(format)`).
+   *  format은 macOS UTI ("public.utf8-plain-text", "public.html" 등). */
+  async has(format: string): Promise<boolean> {
+    const r = await coreCall<{ present: boolean }>({ cmd: "clipboard_has", format });
+    return r.present === true;
+  },
+
+  /** 클립보드에 등록된 모든 format (UTI) 배열. */
+  async availableFormats(): Promise<string[]> {
+    const r = await coreCall<{ formats: string[] }>({ cmd: "clipboard_available_formats" });
+    return r.formats ?? [];
+  },
 };
 
 // ============================================
@@ -1203,6 +1216,24 @@ export const app = {
   async getVersion(): Promise<string> {
     const r = await coreCall<{ version: string }>({ cmd: "app_get_version" });
     return r.version;
+  },
+
+  /** 앱 init 완료 여부 (V8 binding이 호출 가능한 시점은 항상 true). Electron 동등. */
+  async isReady(): Promise<boolean> {
+    const r = await coreCall<{ ready: boolean }>({ cmd: "app_is_ready" });
+    return r.ready === true;
+  },
+
+  /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
+  async focus(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_focus" });
+    return r.success === true;
+  },
+
+  /** 모든 윈도우 hide (macOS Cmd+H 동등). */
+  async hide(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_hide" });
+    return r.success === true;
   },
 
   /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */

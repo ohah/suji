@@ -67,6 +67,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
 //   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip
+//   / has("public.html") / availableFormats()  — format 검사 (UTI)
 // suji.powerMonitor.getSystemIdleTime()  — 유휴 초 (CGEventSource)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
@@ -89,6 +90,7 @@ fn onAllClosed(_: suji.Event) void {
 //                                       (macOS Keychain Services)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
 // suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
+// suji.isReady() / suji.focus() / suji.hide()  — 앱 init/frontmost/Cmd+H
 // suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
 // suji.screen.getCursorScreenPoint() / suji.screen.getDisplayNearestPoint(x, y)
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)

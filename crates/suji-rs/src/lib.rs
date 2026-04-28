@@ -548,6 +548,22 @@ pub mod clipboard {
             ),
         )
     }
+
+    /// format(UTI)이 클립보드에 있는지. 응답: `{"present":bool}`.
+    pub fn has(format: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_has","format":"{}"}}"#,
+                escape_json_full(format)
+            ),
+        )
+    }
+
+    /// 클립보드 등록된 format 배열. 응답: `{"formats":[...]}`.
+    pub fn available_formats() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_available_formats"}"#)
+    }
 }
 
 pub mod power_monitor {
@@ -1293,6 +1309,21 @@ pub fn get_name() -> Option<String> {
 /// suji.json `app.version` 반환. raw JSON: `{"version":"..."}`.
 pub fn get_version() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_get_version"}"#)
+}
+
+/// 앱 init 완료 여부 raw JSON. `{"ready":bool}`.
+pub fn is_ready() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_is_ready"}"#)
+}
+
+/// 앱 frontmost로. raw JSON: `{"success":bool}`.
+pub fn focus() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_focus"}"#)
+}
+
+/// 앱 모든 윈도우 hide (macOS Cmd+H). raw JSON: `{"success":bool}`.
+pub fn hide() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_hide"}"#)
 }
 
 pub(crate) fn attention_request_json(critical: bool) -> String {

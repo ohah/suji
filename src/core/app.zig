@@ -789,6 +789,20 @@ pub const clipboard = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"html\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
         return coreCmd("clipboard_write_html", fields);
     }
+
+    /// format(UTI)이 클립보드에 있는지. 응답: `{"present":bool}`.
+    pub fn has(format: []const u8) ?[]const u8 {
+        var f_buf: [256]u8 = undefined;
+        const f_n = util.escapeJsonStrFull(format, &f_buf) orelse return null;
+        var fields_buf: [320]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"format\":\"{s}\"", .{f_buf[0..f_n]}) catch return null;
+        return coreCmd("clipboard_has", fields);
+    }
+
+    /// 클립보드 등록된 format 배열. 응답: `{"formats":[...]}`.
+    pub fn availableFormats() ?[]const u8 {
+        return coreCmd("clipboard_available_formats", "");
+    }
 };
 
 pub const powerMonitor = struct {
@@ -1355,6 +1369,21 @@ pub fn getName() ?[]const u8 {
 /// suji.json `app.version` 반환. 응답: `{"version":"..."}`.
 pub fn getVersion() ?[]const u8 {
     return coreCmd("app_get_version", "");
+}
+
+/// 앱 init 완료 여부 (V8 binding 호출 가능 시점이면 항상 true). 응답: `{"ready":bool}`.
+pub fn isReady() ?[]const u8 {
+    return coreCmd("app_is_ready", "");
+}
+
+/// 앱 frontmost로. 응답: `{"success":bool}`.
+pub fn focus() ?[]const u8 {
+    return coreCmd("app_focus", "");
+}
+
+/// 앱 모든 윈도우 hide (Cmd+H). 응답: `{"success":bool}`.
+pub fn hide() ?[]const u8 {
+    return coreCmd("app_hide", "");
 }
 
 /// Electron `app.getPath` 동등. name = "home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads".

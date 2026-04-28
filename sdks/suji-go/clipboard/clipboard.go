@@ -37,3 +37,15 @@ func ReadHTML() string {
 func WriteHTML(html string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_html","html":"%s"}`, jsonesc.Full(html)))
 }
+
+// Has checks if clipboard contains the given format (UTI).
+// Response: `{"present":bool}`.
+func Has(format string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_has","format":"%s"}`, jsonesc.Full(format)))
+}
+
+// AvailableFormats returns the list of registered formats (UTI strings).
+// Response: `{"formats":[...]}`.
+func AvailableFormats() string {
+	return suji.Invoke("__core__", `{"cmd":"clipboard_available_formats"}`)
+}

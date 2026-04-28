@@ -29,3 +29,18 @@ func GetName() string {
 func GetVersion() string {
 	return suji.Invoke("__core__", `{"cmd":"app_get_version"}`)
 }
+
+// IsReady returns app init readiness. raw JSON: `{"ready":bool}` (always true).
+func IsReady() string {
+	return suji.Invoke("__core__", `{"cmd":"app_is_ready"}`)
+}
+
+// Focus brings the app frontmost. raw JSON: `{"success":bool}`.
+func Focus() string {
+	return suji.Invoke("__core__", `{"cmd":"app_focus"}`)
+}
+
+// Hide hides all app windows (macOS Cmd+H). raw JSON: `{"success":bool}`.
+func Hide() string {
+	return suji.Invoke("__core__", `{"cmd":"app_hide"}`)
+}
