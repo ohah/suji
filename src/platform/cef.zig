@@ -1044,7 +1044,6 @@ fn evalJsOnBrowser(browser: *c.cef_browser_t, js: [:0]const u8) void {
 ///   (살아있는 매핑 없으면 silent no-op — Electron과 동일)
 pub fn evalJs(target: ?u32, js: [:0]const u8) void {
     const native = g_cef_native orelse {
-        // 초기화 전 또는 단위 테스트 경로 — 과거 동작 유지: 첫 브라우저 fallback.
         if (g_browser) |br| evalJsOnBrowser(br, js);
         return;
     };

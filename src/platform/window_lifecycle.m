@@ -287,6 +287,9 @@ void suji_window_lifecycle_set_fullscreen(void *ns_window, int flag) {
     BOOL is_fs = ([win styleMask] & NSWindowStyleMaskFullScreen) != 0;
     BOOL want = flag != 0;
     if (is_fs == want) return;
+    // toggleFullScreen은 key window 상태에서만 안정 동작 — 새 창이 background일 때
+    // makeKeyAndOrderFront로 활성화 후 toggle. NSApp activationPolicy=Regular이면 가능.
+    [win makeKeyAndOrderFront:nil];
     [win toggleFullScreen:nil];
 }
 
