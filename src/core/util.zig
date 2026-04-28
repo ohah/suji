@@ -478,3 +478,72 @@ test "extractJsonFloat basic + negative" {
     try std.testing.expectApproxEqAbs(@as(f64, 1.5), extractJsonFloat("{\"v\":1.5}", "v").?, 1e-9);
     try std.testing.expectApproxEqAbs(@as(f64, -2.25), extractJsonFloat("{\"v\":-2.25}", "v").?, 1e-9);
 }
+
+/// glob pattern 매칭 — `*` wildcard만 지원 (any chars). `?` / 문자 클래스는 미지원.
+/// 사용처: webRequest URL filter (Electron `urls: ['https://*.example.com/*']`).
+/// 단순 backtracking — 패턴은 짧고 (≤256자) URL은 길어야 ~2KB. O(N*M) acceptable.
+pub fn matchGlob(pattern: []const u8, text: []const u8) bool {
+    var pi: usize = 0;
+    var ti: usize = 0;
+    var star_pi: ?usize = null;
+    var star_ti: usize = 0;
+    while (ti < text.len) {
+        if (pi < pattern.len and pattern[pi] == '*') {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if (pi < pattern.len and pattern[pi] == text[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if (star_pi) |sp| {
+            pi = sp + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+    while (pi < pattern.len and pattern[pi] == '*') pi += 1;
+    return pi == pattern.len;
+}
+
+test "matchGlob: 정확한 매칭" {
+    try std.testing.expect(matchGlob("foo", "foo"));
+    try std.testing.expect(!matchGlob("foo", "bar"));
+}
+
+test "matchGlob: prefix wildcard" {
+    try std.testing.expect(matchGlob("https://*", "https://example.com/path"));
+    try std.testing.expect(!matchGlob("https://*", "http://example.com/"));
+}
+
+test "matchGlob: middle + suffix wildcard" {
+    try std.testing.expect(matchGlob("https://*.example.com/*", "https://api.example.com/users"));
+    try std.testing.expect(matchGlob("https://*.example.com/*", "https://a.b.example.com/"));
+    try std.testing.expect(!matchGlob("https://*.example.com/*", "https://example.com/"));
+    try std.testing.expect(!matchGlob("https://*.example.com/*", "https://api.other.com/"));
+}
+
+test "matchGlob: full wildcard" {
+    try std.testing.expect(matchGlob("*", ""));
+    try std.testing.expect(matchGlob("*", "anything"));
+    try std.testing.expect(matchGlob("**", "x"));
+}
+
+test "matchGlob: 빈 텍스트 + 빈 패턴" {
+    try std.testing.expect(matchGlob("", ""));
+    try std.testing.expect(!matchGlob("a", ""));
+    try std.testing.expect(!matchGlob("", "a"));
+}
+
+test "matchGlob: 패턴이 텍스트보다 짧지 않음" {
+    try std.testing.expect(!matchGlob("hello", "hi"));
+    try std.testing.expect(!matchGlob("foo*bar", "foo"));
+}
+
+test "matchGlob: backtracking 정확성" {
+    // foo*bar*baz — `*`가 두 개라 그리디로 뒷부분 안 맞으면 백트래킹.
+    try std.testing.expect(matchGlob("foo*bar*baz", "foozzbarxxbaz"));
+    try std.testing.expect(matchGlob("foo*bar*baz", "foobarbaz"));
+    try std.testing.expect(!matchGlob("foo*bar*baz", "foobarbax"));
+}

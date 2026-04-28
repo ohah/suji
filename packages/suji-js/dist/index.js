@@ -484,6 +484,25 @@ export const dialog = {
         return r.canceled ? undefined : r.filePath;
     },
 };
+// ============================================
+// webRequest — URL glob blocklist (Electron `session.webRequest`)
+// ============================================
+// declarative 패턴만 지원 — JS callback decision은 후속 (sync IPC deadlock 방지).
+// 매칭 시 fetch/XHR/이미지 등 모든 요청 cancel. `*` wildcard만 지원.
+//
+// 이벤트:
+//   `webRequest:before-request` — { url } (모든 요청)
+//   `webRequest:completed` — { url, statusCode, requestStatus, receivedBytes }
+export const webRequest = {
+    /** blocklist 패턴 list 갱신 (전체 교체). 빈 list = 모든 요청 통과. 최대 32개, 256자/패턴. */
+    async setBlockedUrls(patterns) {
+        const r = await coreCall({
+            cmd: "web_request_set_blocked_urls",
+            patterns,
+        });
+        return r.count;
+    },
+};
 export const screen = {
     /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
     async getAllDisplays() {

@@ -1106,6 +1106,31 @@ pub const dock = struct {
 };
 
 // ============================================
+// webRequest — URL glob blocklist (Electron `session.webRequest`).
+// ============================================
+// frontend `@suji/api`와 동일 cmd. raw JSON 응답 — caller가 std.json으로 파싱.
+
+pub const webRequest = struct {
+    /// patterns는 glob 패턴 (`*` wildcard). 응답: `{"count":N}` (등록된 개수).
+    /// 최대 32개 / 256자per. 빈 list로 호출하면 모든 패턴 제거.
+    pub fn setBlockedUrls(patterns: []const []const u8) ?[]const u8 {
+        var fields_buf: [8192]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&fields_buf);
+        w.writeAll("\"patterns\":[") catch return null;
+        for (patterns, 0..) |p, i| {
+            if (i > 0) w.writeAll(",") catch return null;
+            w.writeAll("\"") catch return null;
+            var p_buf: [512]u8 = undefined;
+            const p_n = util.escapeJsonStrFull(p, &p_buf) orelse return null;
+            w.writeAll(p_buf[0..p_n]) catch return null;
+            w.writeAll("\"") catch return null;
+        }
+        w.writeAll("]") catch return null;
+        return coreCmd("web_request_set_blocked_urls", w.buffered());
+    }
+};
+
+// ============================================
 // http — Zig std.http.Client.fetch wrap (백엔드 only, frontend 미노출 — 보안).
 // ============================================
 

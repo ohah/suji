@@ -1072,6 +1072,24 @@ pub mod screen {
     }
 }
 
+pub mod web_request {
+    use crate::{invoke, serde_json};
+
+    pub(crate) fn set_blocked_urls_request(patterns: &[&str]) -> String {
+        serde_json::json!({
+            "cmd": "web_request_set_blocked_urls",
+            "patterns": patterns,
+        })
+        .to_string()
+    }
+
+    /// URL glob blocklist 등록 (Electron `session.webRequest.onBeforeRequest({urls})`).
+    /// `*` wildcard만. 응답: `{"count":N}`.
+    pub fn set_blocked_urls(patterns: &[&str]) -> Option<String> {
+        invoke("__core__", &set_blocked_urls_request(patterns))
+    }
+}
+
 pub mod power_save_blocker {
     use crate::{invoke, serde_json};
 
@@ -1502,6 +1520,16 @@ mod tests {
 
         let resp_who = whoami_test(serde_json::json!({}));
         assert_eq!(resp_who, serde_json::json!({ "id": 0, "name": null }));
+    }
+
+    #[test]
+    fn web_request_set_blocked_urls_carries_patterns() {
+        let v: serde_json::Value = serde_json::from_str(
+            &crate::web_request::set_blocked_urls_request(&["https://*.example.com/*"]),
+        )
+        .unwrap();
+        assert_eq!(v["cmd"], "web_request_set_blocked_urls");
+        assert_eq!(v["patterns"][0], "https://*.example.com/*");
     }
 
     #[test]

@@ -852,6 +852,15 @@ export const screen = {
   },
 };
 
+export const webRequest = {
+  /** URL glob blocklist 등록 (Electron `session.webRequest`). `*` wildcard만 지원.
+   *  최대 32개/256자per. 빈 list 호출 시 모든 패턴 제거. */
+  async setBlockedUrls(patterns: string[]): Promise<number> {
+    const r = await invoke<{ count: number }>('__core__', { cmd: 'web_request_set_blocked_urls', patterns });
+    return r.count;
+  },
+};
+
 export type PowerSaveBlockerType = 'prevent_app_suspension' | 'prevent_display_sleep';
 
 export const powerSaveBlocker = {

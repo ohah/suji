@@ -901,6 +901,35 @@ test "safeStorage IPC — Keychain set/get/delete + Security framework" {
     try std.testing.expect(std.mem.indexOf(u8, build_src, "Security") != null);
 }
 
+test "webRequest — CefRequestHandler wiring + URL glob blocklist + 2 이벤트 채널" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"web_request_set_blocked_urls\"",
+        "cef.webRequestSetBlockedUrls",
+        "cef.setWebRequestEmitHandler",
+        "webRequestEmitHandler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn webRequestSetBlockedUrls",
+        "pub fn setWebRequestEmitHandler",
+        "ensureRequestHandler",
+        "ensureResourceRequestHandler",
+        "on_before_resource_load",
+        "on_resource_load_complete",
+        "client_ptr.get_request_handler",
+        "\"webRequest:before-request\"",
+        "\"webRequest:completed\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

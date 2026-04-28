@@ -27,6 +27,7 @@ bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-A WebContentsView (createView/z-order/lifecycle)
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
 bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows.create + isLoading polling)
+bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
 ```
 
 E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어
@@ -92,6 +93,8 @@ fn onAllClosed(_: suji.Event) void {
 //   → RunResult { code, stdout, stderr }, caller가 stdout/stderr free
 // suji.http.fetch(allocator, suji.io(), "https://...", null)   — std.http.Client.fetch wrap
 //   → FetchResult { status, body }, payload null이면 GET / non-null이면 POST
+// suji.webRequest.setBlockedUrls(&.{ "https://*.ad/*" })   — URL glob blocklist
+//   → 매칭 요청 cancel + `webRequest:before-request` / `webRequest:completed` 이벤트
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
@@ -123,6 +126,7 @@ suji::export_handlers!(ping);
 // suji::safe_storage::{set_item(s,a,"v"), get_item(s,a), delete_item(s,a)}
 // suji::dock::{set_badge("99"), get_badge()}
 // suji::get_path("userData") / get_path("home") ...
+// suji::web_request::set_blocked_urls(&["https://*.ad/*"])  — URL glob blocklist
 // suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
@@ -168,6 +172,8 @@ var _ = suji.Bind(&App{})
 // app.GetPath("userData")
 // import "github.com/ohah/suji-go/attention"
 // attention.RequestUser(true) / attention.CancelUserRequest(id)
+// import "github.com/ohah/suji-go/webrequest"
+// webrequest.SetBlockedUrls([]string{"https://*.ad/*"})
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -213,7 +219,7 @@ suji.platform                                                // "macos" | "linux
 // await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 
-// import { screen, powerSaveBlocker, safeStorage, app } from '@suji/api';
+// import { screen, powerSaveBlocker, safeStorage, app, webRequest } from '@suji/api';
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
 // const id = await powerSaveBlocker.start("prevent_display_sleep")
 // await powerSaveBlocker.stop(id)                                         (macOS IOPMAssertion)
@@ -223,6 +229,8 @@ suji.platform                                                // "macos" | "linux
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
+// await webRequest.setBlockedUrls(["https://*.ad/*"])                     (CEF ResourceRequestHandler)
+//   → suji.on('webRequest:completed', ({url, statusCode, ...}) => ...)
 ```
 
 ## suji.json 설정
@@ -286,13 +294,14 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
 // await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
-// import { screen, powerSaveBlocker, safeStorage, app } from '@suji/node'
+// import { screen, powerSaveBlocker, safeStorage, app, webRequest } from '@suji/node'
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
 // const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 // await app.dock.setBadge("99") / app.dock.getBadge()
 // await app.getPath("userData") — Electron app.getPath
 // const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
+// await webRequest.setBlockedUrls(["https://*.ad/*"])
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.

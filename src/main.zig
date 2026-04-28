@@ -614,6 +614,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
+    cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -795,6 +796,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
+    cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -1552,6 +1554,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{id},
         ) catch null;
     }
+    // webRequest — URL glob blocklist (Electron `session.webRequest.onBeforeRequest({urls}, listener)`).
+    if (std.mem.eql(u8, cmd, "web_request_set_blocked_urls")) {
+        return handleWebRequestSetBlockedUrls(req_clean, response_buf);
+    }
+
     if (std.mem.eql(u8, cmd, "app_attention_cancel")) {
         const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
         const ok = cef.appCancelUserAttentionRequest(util.nonNegU32(id_n));
@@ -2328,6 +2335,38 @@ fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
 }
 
 // ============================================
+// webRequest — URL glob blocklist 등록
+// ============================================
+
+const WebRequestSetBlockedUrlsJson = struct {
+    patterns: []const []const u8 = &.{},
+};
+
+fn handleWebRequestSetBlockedUrls(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(WebRequestSetBlockedUrlsJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_blocked_urls\",\"success\":false,\"error\":\"parse\"}}",
+            .{},
+        ) catch null;
+    };
+    defer parsed.deinit();
+
+    const n = cef.webRequestSetBlockedUrls(parsed.value.patterns);
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_blocked_urls\",\"count\":{d}}}",
+        .{n},
+    ) catch null;
+}
+
+// ============================================
 // Global shortcut handlers
 // ============================================
 
@@ -2491,6 +2530,14 @@ fn powerMonitorEmitHandler(event: [*:0]const u8) callconv(.c) void {
     var ch_buf: [64]u8 = undefined;
     const channel = std.fmt.bufPrint(&ch_buf, "power:{s}", .{event_slice}) catch return;
     emitBusRaw(channel, "{}");
+}
+
+/// webRequest: cef.zig의 onBeforeResourceLoad/onResourceLoadComplete가 IO thread에서
+/// 호출. EventBus.emit이 mutex로 thread-safe하므로 그대로 dispatch.
+fn webRequestEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void {
+    const ch = std.mem.span(channel);
+    const data = std.mem.span(payload);
+    emitBusRaw(ch, data);
 }
 
 fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {

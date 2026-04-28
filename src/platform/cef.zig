@@ -2940,6 +2940,7 @@ fn initClient(client_ptr: *c.cef_client_t) void {
     client_ptr.get_display_handler = &getDisplayHandler;
     client_ptr.get_load_handler = &getLoadHandler;
     client_ptr.get_find_handler = &getFindHandler;
+    client_ptr.get_request_handler = &getRequestHandler;
     client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
 }
 
@@ -3120,6 +3121,169 @@ fn onFindResult(
     const handler = g_window_find_result_handler orelse return;
     const handle: u64 = @intCast(br.get_identifier.?(br));
     handler(handle, identifier, count, active_match_ordinal, final_update != 0);
+}
+
+// ============================================
+// CEF Request Handler — webRequest URL filter (Electron `session.webRequest`)
+// ============================================
+// blocked_urls 글롭 패턴 매칭 시 OnBeforeResourceLoad가 RV_CANCEL 반환.
+// `webRequest:before-request` (URL/method) + `webRequest:completed` (URL/status/error)
+// 두 채널을 EventBus로 비동기 emit. 패턴 list는 process global + mutex.
+
+const WebRequestEmitFn = *const fn (channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void;
+var g_webrequest_emit_fn: ?WebRequestEmitFn = null;
+
+pub fn setWebRequestEmitHandler(fn_ptr: WebRequestEmitFn) void {
+    g_webrequest_emit_fn = fn_ptr;
+}
+
+/// 매번 alloc 피하기 위해 fixed-size pool. 패턴 1개당 ≤ 256 bytes, 32개까지.
+const MAX_WEB_REQUEST_PATTERNS: usize = 32;
+const MAX_WEB_REQUEST_PATTERN_LEN: usize = 256;
+
+var g_blocked_url_patterns: [MAX_WEB_REQUEST_PATTERNS][MAX_WEB_REQUEST_PATTERN_LEN]u8 = undefined;
+var g_blocked_url_lens: [MAX_WEB_REQUEST_PATTERNS]usize = .{0} ** MAX_WEB_REQUEST_PATTERNS;
+var g_blocked_url_count: usize = 0;
+
+/// Zig 0.16에서 std.Thread.Mutex 제거 — IO thread에서 패턴 list read는 매 요청마다,
+/// write는 IPC 핸들러에서 드물게. 짧은 critical section이라 atomic spinlock으로 충분.
+var g_blocked_url_lock: std.atomic.Value(bool) = .init(false);
+
+fn webRequestLock() void {
+    while (g_blocked_url_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+        std.atomic.spinLoopHint();
+    }
+}
+fn webRequestUnlock() void {
+    g_blocked_url_lock.store(false, .release);
+}
+
+/// 등록된 패턴을 모두 교체 — 매 호출이 atomic. 빈 list = 모든 요청 통과.
+pub fn webRequestSetBlockedUrls(patterns: []const []const u8) usize {
+    webRequestLock();
+    defer webRequestUnlock();
+    const n = @min(patterns.len, MAX_WEB_REQUEST_PATTERNS);
+    for (0..n) |i| {
+        const p = patterns[i];
+        const len = @min(p.len, MAX_WEB_REQUEST_PATTERN_LEN);
+        @memcpy(g_blocked_url_patterns[i][0..len], p[0..len]);
+        g_blocked_url_lens[i] = len;
+    }
+    g_blocked_url_count = n;
+    return n;
+}
+
+fn urlMatchesAnyBlockedPattern(url: []const u8) bool {
+    webRequestLock();
+    defer webRequestUnlock();
+    for (0..g_blocked_url_count) |i| {
+        const pat = g_blocked_url_patterns[i][0..g_blocked_url_lens[i]];
+        if (util.matchGlob(pat, url)) return true;
+    }
+    return false;
+}
+
+var g_request_handler: c.cef_request_handler_t = undefined;
+var g_request_handler_initialized: bool = false;
+
+fn ensureRequestHandler() void {
+    if (g_request_handler_initialized) return;
+    zeroCefStruct(c.cef_request_handler_t, &g_request_handler);
+    initBaseRefCounted(&g_request_handler.base);
+    g_request_handler.get_resource_request_handler = &getResourceRequestHandler;
+    g_request_handler_initialized = true;
+}
+
+fn getRequestHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_request_handler_t {
+    ensureRequestHandler();
+    return &g_request_handler;
+}
+
+var g_resource_request_handler: c.cef_resource_request_handler_t = undefined;
+var g_resource_request_handler_initialized: bool = false;
+
+fn ensureResourceRequestHandler() void {
+    if (g_resource_request_handler_initialized) return;
+    zeroCefStruct(c.cef_resource_request_handler_t, &g_resource_request_handler);
+    initBaseRefCounted(&g_resource_request_handler.base);
+    g_resource_request_handler.on_before_resource_load = &onBeforeResourceLoad;
+    g_resource_request_handler.on_resource_load_complete = &onResourceLoadComplete;
+    g_resource_request_handler_initialized = true;
+}
+
+fn getResourceRequestHandler(
+    _: ?*c._cef_request_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    _: ?*c._cef_request_t,
+    _: c_int,
+    _: c_int,
+    _: [*c]const c.cef_string_t,
+    disable_default_handling: [*c]c_int,
+) callconv(.c) ?*c._cef_resource_request_handler_t {
+    if (disable_default_handling != null) disable_default_handling.* = 0;
+    ensureResourceRequestHandler();
+    return &g_resource_request_handler;
+}
+
+fn emitWebRequestEvent(channel_cstr: [*:0]const u8, url: []const u8, extra_json: []const u8) void {
+    const emit = g_webrequest_emit_fn orelse return;
+    var payload_buf: [3072]u8 = undefined;
+    var url_esc_buf: [2048]u8 = undefined;
+    const url_esc_n = util.escapeJsonStrFull(url, &url_esc_buf) orelse return;
+    const payload = std.fmt.bufPrintZ(
+        &payload_buf,
+        "{{\"url\":\"{s}\"{s}{s}}}",
+        .{ url_esc_buf[0..url_esc_n], if (extra_json.len > 0) "," else "", extra_json },
+    ) catch return;
+    emit(channel_cstr, payload.ptr);
+}
+
+fn onBeforeResourceLoad(
+    _: ?*c._cef_resource_request_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    request: ?*c._cef_request_t,
+    _: ?*c._cef_callback_t,
+) callconv(.c) c.cef_return_value_t {
+    const req = request orelse return c.RV_CONTINUE;
+    const get_url = req.get_url orelse return c.RV_CONTINUE;
+    var url_buf: [2048]u8 = undefined;
+    const url = cefUserfreeToUtf8(get_url(req), &url_buf);
+    if (url.len == 0) return c.RV_CONTINUE;
+
+    emitWebRequestEvent("webRequest:before-request", url, "");
+
+    if (urlMatchesAnyBlockedPattern(url)) return c.RV_CANCEL;
+    return c.RV_CONTINUE;
+}
+
+fn onResourceLoadComplete(
+    _: ?*c._cef_resource_request_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    request: ?*c._cef_request_t,
+    response: ?*c._cef_response_t,
+    status: c.cef_urlrequest_status_t,
+    received_content_length: i64,
+) callconv(.c) void {
+    const req = request orelse return;
+    const get_url = req.get_url orelse return;
+    var url_buf: [2048]u8 = undefined;
+    const url = cefUserfreeToUtf8(get_url(req), &url_buf);
+    if (url.len == 0) return;
+
+    var status_code: c_int = 0;
+    if (response) |resp| {
+        if (resp.get_status) |get_status| status_code = get_status(resp);
+    }
+    var extra_buf: [128]u8 = undefined;
+    const extra = std.fmt.bufPrint(
+        &extra_buf,
+        "\"statusCode\":{d},\"requestStatus\":{d},\"receivedBytes\":{d}",
+        .{ status_code, @as(i32, @intCast(status)), received_content_length },
+    ) catch return;
+    emitWebRequestEvent("webRequest:completed", url, extra);
 }
 
 // ============================================

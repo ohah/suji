@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -269,6 +269,24 @@ describe("shell.trashItem", () => {
   it("returns false when success:false", async () => {
     mockBridge.core.mockResolvedValueOnce({ success: false });
     expect(await shell.trashItem("/missing")).toBe(false);
+  });
+});
+
+describe("webRequest.setBlockedUrls", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("sends patterns array + returns count", async () => {
+    mockBridge.core.mockResolvedValueOnce({ count: 2 });
+    const n = await webRequest.setBlockedUrls(["https://a/*", "https://b/*"]);
+    expect(n).toBe(2);
+    const req = JSON.parse(mockBridge.core.mock.calls[0][0]);
+    expect(req.cmd).toBe("web_request_set_blocked_urls");
+    expect(req.patterns).toEqual(["https://a/*", "https://b/*"]);
+  });
+
+  it("empty list clears patterns", async () => {
+    mockBridge.core.mockResolvedValueOnce({ count: 0 });
+    expect(await webRequest.setBlockedUrls([])).toBe(0);
   });
 });
 

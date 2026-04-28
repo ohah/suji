@@ -441,6 +441,10 @@ export declare const dialog: {
     /** Sync 변종 — 취소면 `undefined`, 아니면 `string`. windowId 첫 인자 지원. */
     showSaveDialogSync(arg1?: SaveDialogOptions | number, arg2?: SaveDialogOptions): Promise<string | undefined>;
 };
+export declare const webRequest: {
+    /** blocklist 패턴 list 갱신 (전체 교체). 빈 list = 모든 요청 통과. 최대 32개, 256자/패턴. */
+    setBlockedUrls(patterns: string[]): Promise<number>;
+};
 export interface Display {
     index: number;
     isPrimary: boolean;

@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, type InvokeEvent } from './index';
+import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -200,6 +200,19 @@ describe('shell.trashItem', () => {
   it('returns false when success:false', async () => {
     bridge.invoke.mockResolvedValueOnce('{"success":false}');
     expect(await shell.trashItem('/missing')).toBe(false);
+  });
+});
+
+describe('webRequest', () => {
+  it('setBlockedUrls sends patterns + returns count', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"count":1}');
+    expect(await webRequest.setBlockedUrls(['https://x/*'])).toBe(1);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"web_request_set_blocked_urls","patterns":["https://x/*"]}');
+  });
+
+  it('setBlockedUrls empty list', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"count":0}');
+    expect(await webRequest.setBlockedUrls([])).toBe(0);
   });
 });
 

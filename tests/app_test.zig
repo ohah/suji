@@ -1198,6 +1198,29 @@ test "app.getPath: name 필드 escape + cmd 전송" {
     }.run);
 }
 
+test "webRequest.setBlockedUrls: patterns 배열 + escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.webRequest.setBlockedUrls(&.{ "https://*.example.com/*", "https://ad\"s/*" });
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"web_request_set_blocked_urls\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"https://*.example.com/*\"") != null);
+            // 따옴표 escape 검증
+            try std.testing.expect(std.mem.indexOf(u8, r, "https://ad\\\"s/*") != null);
+        }
+    }.run);
+}
+
+test "webRequest.setBlockedUrls: 빈 list" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.webRequest.setBlockedUrls(&.{});
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"patterns\":[]") != null);
+        }
+    }.run);
+}
+
 test "screen.getAllDisplays: 인자 없는 cmd" {
     try withInvokeCore(struct {
         fn run() !void {
