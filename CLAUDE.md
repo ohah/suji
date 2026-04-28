@@ -313,6 +313,11 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await app.getPath("userData") — Electron app.getPath
 // const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])
+
+// TypeScript type-safe — `@suji/node`도 SujiHandlers augment 지원.
+//   await call('zig', 'greet', { name: 'x' })   // res: string 추론
+//   const v = callSync('zig', 'ping')           // sync 변형, res: { msg: string } 추론
+//   await invoke<T>('zig', { cmd: 'foo' })      // 기존 untyped 그대로 동작 (backwards compat)
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.

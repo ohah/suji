@@ -118,9 +118,26 @@ export function handle<TReq = unknown, TRes = unknown>(
 // ============================================
 
 /**
- * 다른 백엔드 비동기 호출 (Promise 반환, event loop 비블록)
+ * 사용자 핸들러 타입 declaration. @suji/api와 동일 SujiHandlers 패턴 — 사용자가
+ * declaration merging으로 채우면 invoke/invokeSync가 cmd/req/res를 추론.
  *
- * 핸들러 밖에서 사용. 핸들러 안에서는 invokeSync 사용.
+ * frontend/backend 양쪽이 같은 SujiHandlers를 채우려면 보통 root에 단일 .d.ts 두고
+ * 두 패키지 각각 augment.
+ *
+ * ```ts
+ * declare module '@suji/node' {
+ *   interface SujiHandlers {
+ *     ping: { req: void; res: { msg: string } };
+ *     greet: { req: { name: string }; res: string };
+ *   }
+ * }
+ * ```
+ */
+export interface SujiHandlers {}
+
+/**
+ * 다른 백엔드 비동기 호출 (Promise 반환, event loop 비블록). untyped — type-safe는
+ * `call` 사용. 핸들러 밖에서 사용. 핸들러 안에서는 invokeSync.
  *
  * @example
  * const result = await invoke('zig', { cmd: 'ping' });
@@ -138,7 +155,7 @@ export async function invoke<T = unknown>(
 }
 
 /**
- * 다른 백엔드 동기 호출 (핸들러 내부용)
+ * 다른 백엔드 동기 호출 (핸들러 내부용). untyped — type-safe는 `callSync`.
  *
  * event loop을 블록하므로 핸들러 안에서만 사용할 것.
  *
@@ -158,6 +175,47 @@ export function invokeSync<T = unknown>(
   } catch {
     return raw as unknown as T;
   }
+}
+
+/** SujiHandlers 등록된 cmd만 typed (req/res 추론). */
+type CallArgs<K extends keyof SujiHandlers & string> =
+  SujiHandlers[K] extends { req: infer R }
+    ? [R] extends [void | undefined]
+      ? []
+      : [data: R]
+    : [data?: Record<string, unknown>];
+
+type CallRes<K extends keyof SujiHandlers & string> =
+  SujiHandlers[K] extends { res: infer R } ? R : unknown;
+
+/**
+ * Type-safe `invoke` wrapper — SujiHandlers 등록된 cmd만 호출 가능.
+ *
+ * @example
+ * declare module '@suji/node' {
+ *   interface SujiHandlers {
+ *     greet: { req: { name: string }; res: string };
+ *   }
+ * }
+ * const greeting = await call('zig', 'greet', { name: 'Suji' });  // res: string 추론
+ */
+export async function call<K extends keyof SujiHandlers & string>(
+  backend: string,
+  cmd: K,
+  ...args: CallArgs<K>
+): Promise<CallRes<K>> {
+  const data = args[0];
+  return invoke<CallRes<K>>(backend, { cmd, ...(data ?? {}) });
+}
+
+/** sync 변형 — 핸들러 내부용. */
+export function callSync<K extends keyof SujiHandlers & string>(
+  backend: string,
+  cmd: K,
+  ...args: CallArgs<K>
+): CallRes<K> {
+  const data = args[0];
+  return invokeSync<CallRes<K>>(backend, { cmd, ...(data ?? {}) });
 }
 
 // ============================================
