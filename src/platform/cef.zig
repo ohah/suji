@@ -3141,51 +3141,58 @@ pub fn setWebRequestEmitHandler(fn_ptr: WebRequestEmitFn) void {
 const MAX_WEB_REQUEST_PATTERNS: usize = 32;
 const MAX_WEB_REQUEST_PATTERN_LEN: usize = 256;
 
-var g_blocked_url_patterns: [MAX_WEB_REQUEST_PATTERNS][MAX_WEB_REQUEST_PATTERN_LEN]u8 = undefined;
-var g_blocked_url_lens: [MAX_WEB_REQUEST_PATTERNS]usize = .{0} ** MAX_WEB_REQUEST_PATTERNS;
-var g_blocked_url_count: usize = 0;
+/// Generic glob 패턴 pool — set/match. blocked + listener filter 두 인스턴스로 사용.
+/// 각자 자기 lock + count(atomic)로 fast path는 lock-free.
+/// Zig 0.16에서 std.Thread.Mutex 제거 — IO thread read/IPC write 짧은 critical section은
+/// atomic spinlock으로 충분.
+const UrlGlobPool = struct {
+    patterns: [MAX_WEB_REQUEST_PATTERNS][MAX_WEB_REQUEST_PATTERN_LEN]u8 = undefined,
+    lens: [MAX_WEB_REQUEST_PATTERNS]usize = .{0} ** MAX_WEB_REQUEST_PATTERNS,
+    count: usize = 0,
+    lock_flag: std.atomic.Value(bool) = .init(false),
 
-/// Zig 0.16에서 std.Thread.Mutex 제거 — IO thread에서 패턴 list read는 매 요청마다,
-/// write는 IPC 핸들러에서 드물게. 짧은 critical section이라 atomic spinlock으로 충분.
-var g_blocked_url_lock: std.atomic.Value(bool) = .init(false);
-
-fn webRequestLock() void {
-    while (g_blocked_url_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
-        std.atomic.spinLoopHint();
+    fn lock(self: *UrlGlobPool) void {
+        while (self.lock_flag.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+            std.atomic.spinLoopHint();
+        }
     }
-}
-fn webRequestUnlock() void {
-    g_blocked_url_lock.store(false, .release);
-}
+    fn unlock(self: *UrlGlobPool) void {
+        self.lock_flag.store(false, .release);
+    }
 
-/// 등록된 패턴을 모두 교체 — 매 호출이 atomic. 빈 list = 모든 요청 통과.
-/// count는 atomic store — `urlMatchesAnyBlockedPattern`의 fast path가 spinlock 없이
-/// 검사할 수 있도록.
+    /// 패턴 list 전체 교체 (atomic). 빈 list = 모든 요청 통과. count는 atomic store —
+    /// `matchesAny`의 fast path가 spinlock 없이 검사 가능.
+    fn set(self: *UrlGlobPool, items: []const []const u8) usize {
+        self.lock();
+        defer self.unlock();
+        const n = @min(items.len, MAX_WEB_REQUEST_PATTERNS);
+        for (0..n) |i| {
+            const p = items[i];
+            const len = @min(p.len, MAX_WEB_REQUEST_PATTERN_LEN);
+            @memcpy(self.patterns[i][0..len], p[0..len]);
+            self.lens[i] = len;
+        }
+        @atomicStore(usize, &self.count, n, .release);
+        return n;
+    }
+
+    fn matchesAny(self: *UrlGlobPool, url: []const u8) bool {
+        // Fast path — 패턴 없는 보통의 앱은 spinlock 회피.
+        if (@atomicLoad(usize, &self.count, .acquire) == 0) return false;
+        self.lock();
+        defer self.unlock();
+        for (0..self.count) |i| {
+            const pat = self.patterns[i][0..self.lens[i]];
+            if (util.matchGlob(pat, url)) return true;
+        }
+        return false;
+    }
+};
+
+var g_blocked_url_pool: UrlGlobPool = .{};
+
 pub fn webRequestSetBlockedUrls(patterns: []const []const u8) usize {
-    webRequestLock();
-    defer webRequestUnlock();
-    const n = @min(patterns.len, MAX_WEB_REQUEST_PATTERNS);
-    for (0..n) |i| {
-        const p = patterns[i];
-        const len = @min(p.len, MAX_WEB_REQUEST_PATTERN_LEN);
-        @memcpy(g_blocked_url_patterns[i][0..len], p[0..len]);
-        g_blocked_url_lens[i] = len;
-    }
-    @atomicStore(usize, &g_blocked_url_count, n, .release);
-    return n;
-}
-
-fn urlMatchesAnyBlockedPattern(url: []const u8) bool {
-    // Fast path — 패턴 없는 보통의 앱은 spinlock 회피. count는 set 시 atomic하게 갱신,
-    // tear는 unsigned write라 race 시 stale read만 가능 (false negative ≤ 1 요청, 무시).
-    if (@atomicLoad(usize, &g_blocked_url_count, .acquire) == 0) return false;
-    webRequestLock();
-    defer webRequestUnlock();
-    for (0..g_blocked_url_count) |i| {
-        const pat = g_blocked_url_patterns[i][0..g_blocked_url_lens[i]];
-        if (util.matchGlob(pat, url)) return true;
-    }
-    return false;
+    return g_blocked_url_pool.set(patterns);
 }
 
 // ============================================
@@ -3199,9 +3206,7 @@ fn urlMatchesAnyBlockedPattern(url: []const u8) bool {
 // 주의: listener가 응답하지 않으면 요청 영원히 hold. timeout fallback은 후속 (caller
 // 측에서 책임).
 
-var g_listener_url_patterns: [MAX_WEB_REQUEST_PATTERNS][MAX_WEB_REQUEST_PATTERN_LEN]u8 = undefined;
-var g_listener_url_lens: [MAX_WEB_REQUEST_PATTERNS]usize = .{0} ** MAX_WEB_REQUEST_PATTERNS;
-var g_listener_url_count: usize = 0;
+var g_listener_url_pool: UrlGlobPool = .{};
 
 const MAX_PENDING_CALLBACKS: usize = 256;
 
@@ -3214,6 +3219,8 @@ var g_pending_callbacks: [MAX_PENDING_CALLBACKS]PendingCallback = undefined;
 var g_pending_count: usize = 0;
 var g_pending_lock: std.atomic.Value(bool) = .init(false);
 var g_request_id_counter: std.atomic.Value(u64) = .init(0);
+/// pool overflow drop 카운터 (diagnostics) — 256 동시 pending 초과 시 RV_CONTINUE fallback.
+var g_pending_drops: std.atomic.Value(u64) = .init(0);
 
 fn pendingLock() void {
     while (g_pending_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
@@ -3227,28 +3234,12 @@ fn pendingUnlock() void {
 /// listener filter pattern 등록. blocklist와 별도 — 이 filter에 매칭되면
 /// `webRequest:will-request` 이벤트 발화 + RV_CONTINUE_ASYNC. 빈 list = listener 없음.
 pub fn webRequestSetListenerFilter(patterns: []const []const u8) usize {
-    webRequestLock();
-    defer webRequestUnlock();
-    const n = @min(patterns.len, MAX_WEB_REQUEST_PATTERNS);
-    for (0..n) |i| {
-        const p = patterns[i];
-        const len = @min(p.len, MAX_WEB_REQUEST_PATTERN_LEN);
-        @memcpy(g_listener_url_patterns[i][0..len], p[0..len]);
-        g_listener_url_lens[i] = len;
-    }
-    @atomicStore(usize, &g_listener_url_count, n, .release);
-    return n;
+    return g_listener_url_pool.set(patterns);
 }
 
-fn urlMatchesAnyListenerPattern(url: []const u8) bool {
-    if (@atomicLoad(usize, &g_listener_url_count, .acquire) == 0) return false;
-    webRequestLock();
-    defer webRequestUnlock();
-    for (0..g_listener_url_count) |i| {
-        const pat = g_listener_url_patterns[i][0..g_listener_url_lens[i]];
-        if (util.matchGlob(pat, url)) return true;
-    }
-    return false;
+/// 진단용 — pending pool overflow drop 카운터. 0이 정상.
+pub fn webRequestPendingDrops() u64 {
+    return g_pending_drops.load(.monotonic);
 }
 
 /// CEF callback을 pending pool에 저장 후 id 반환. caller가 add_ref 보장.
@@ -3361,18 +3352,19 @@ fn onBeforeResourceLoad(
     if (url.len == 0) return c.RV_CONTINUE;
 
     // 1. blocklist 우선 — 매칭되면 비동기 listener 거치지 않고 즉시 cancel.
-    if (urlMatchesAnyBlockedPattern(url)) {
+    if (g_blocked_url_pool.matchesAny(url)) {
         emitWebRequestEvent("webRequest:before-request", url, "");
         return c.RV_CANCEL;
     }
 
     // 2. listener filter 매칭 — async pending. add_ref 후 pool에 저장 + JS listener emit.
     if (callback) |cb| {
-        if (urlMatchesAnyListenerPattern(url)) {
+        if (g_listener_url_pool.matchesAny(url)) {
             if (cb.base.add_ref) |add_ref| _ = add_ref(&cb.base);
             const id = pendingPush(cb);
             if (id == 0) {
-                // pending pool 가득 — fallback to 즉시 release + 통과.
+                // pending pool 가득 — fallback to 즉시 release + 통과 + drop 카운터 증가.
+                _ = g_pending_drops.fetchAdd(1, .monotonic);
                 if (cb.base.release) |rel| _ = rel(&cb.base);
                 emitWebRequestEvent("webRequest:before-request", url, "");
                 return c.RV_CONTINUE;

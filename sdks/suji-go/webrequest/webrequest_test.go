@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestBuildSetBlockedUrlsRequest(t *testing.T) {
+func TestBuildPatternsRequest(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildSetBlockedUrlsRequest([]string{"https://*.example.com/*", "https://blocked/*"})), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildPatternsRequest("web_request_set_blocked_urls", []string{"https://*.example.com/*", "https://blocked/*"})), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "web_request_set_blocked_urls" {
@@ -22,10 +22,13 @@ func TestBuildSetBlockedUrlsRequest(t *testing.T) {
 	}
 }
 
-func TestBuildSetBlockedUrlsRequestEmpty(t *testing.T) {
+func TestBuildPatternsRequestEmpty(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildSetBlockedUrlsRequest(nil)), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildPatternsRequest("web_request_set_listener_filter", nil)), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
+	}
+	if got["cmd"] != "web_request_set_listener_filter" {
+		t.Fatalf("cmd = %v", got["cmd"])
 	}
 	patterns := got["patterns"].([]any)
 	if len(patterns) != 0 {

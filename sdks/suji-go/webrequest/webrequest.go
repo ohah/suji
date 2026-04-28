@@ -44,7 +44,3 @@ func buildPatternsRequest(cmd string, patterns []string) string {
 	return string(body)
 }
 
-// Deprecated: use buildPatternsRequest. Kept for backwards-compat with existing tests.
-func buildSetBlockedUrlsRequest(patterns []string) string {
-	return buildPatternsRequest("web_request_set_blocked_urls", patterns)
-}
