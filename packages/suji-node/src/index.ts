@@ -586,6 +586,20 @@ export const shell = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_trash_item', path });
     return r.success === true;
   },
+
+  /** 파일/폴더를 기본 앱으로 열기. 존재하지 않는 경로는 false. */
+  async openPath(path: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_open_path', path });
+    return r.success === true;
+  },
+};
+
+export const nativeTheme = {
+  /** 시스템 다크 모드 활성 여부 (macOS NSApp.effectiveAppearance). */
+  async shouldUseDarkColors(): Promise<boolean> {
+    const r = await invoke<{ dark: boolean }>('__core__', { cmd: 'native_theme_should_use_dark_colors' });
+    return r.dark === true;
+  },
 };
 
 // ============================================
@@ -907,6 +921,12 @@ export const screen = {
   async getAllDisplays(): Promise<Display[]> {
     const r = await invoke<{ displays: Display[] }>('__core__', { cmd: 'screen_get_all_displays' });
     return r.displays;
+  },
+
+  /** 마우스 포인터 화면 좌표 (NSEvent.mouseLocation, bottom-up). */
+  async getCursorScreenPoint(): Promise<{ x: number; y: number }> {
+    const r = await invoke<{ x: number; y: number }>('__core__', { cmd: 'screen_get_cursor_point' });
+    return { x: r.x, y: r.y };
   },
 };
 

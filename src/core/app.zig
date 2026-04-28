@@ -807,6 +807,22 @@ pub const shell = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
         return coreCmd("shell_trash_item", fields);
     }
+
+    /// 로컬 파일/폴더를 기본 앱으로 열기. 응답: `{"success":bool}`.
+    pub fn openPath(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("shell_open_path", fields);
+    }
+};
+
+pub const nativeTheme = struct {
+    /// 시스템 다크 모드 여부. 응답: `{"dark":bool}`.
+    pub fn shouldUseDarkColors() ?[]const u8 {
+        return coreCmd("native_theme_should_use_dark_colors", "");
+    }
 };
 
 pub const fs = struct {
@@ -1108,6 +1124,11 @@ pub const screen = struct {
     /// 모든 모니터 정보. 응답: `{"from","cmd","displays":[{...}]}`.
     pub fn getAllDisplays() ?[]const u8 {
         return coreCmd("screen_get_all_displays", "");
+    }
+
+    /// 마우스 포인터 화면 좌표 (NSEvent.mouseLocation, bottom-up). 응답: `{"x":..,"y":..}`.
+    pub fn getCursorScreenPoint() ?[]const u8 {
+        return coreCmd("screen_get_cursor_point", "");
     }
 };
 

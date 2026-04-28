@@ -1027,6 +1027,33 @@ test "app.getPath IPC — main.zig dispatch + cef.zig 함수 + 7 키" {
     }
 }
 
+test "shell.openPath / nativeTheme / screen.getCursorPoint IPC + cef.zig 함수" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"shell_open_path\"",
+        "\"native_theme_should_use_dark_colors\"",
+        "\"screen_get_cursor_point\"",
+        "cef.shellOpenPath",
+        "cef.nativeThemeIsDark",
+        "cef.screenGetCursorPoint",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn shellOpenPath",
+        "pub fn nativeThemeIsDark",
+        "pub fn screenGetCursorPoint",
+        "effectiveAppearance",
+        "mouseLocation",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "shell.trashItem IPC — main.zig dispatch + cef.zig 함수" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

@@ -30,3 +30,9 @@ func Beep() string {
 func TrashItem(path string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"shell_trash_item","path":"%s"}`, jsonesc.Full(path)))
 }
+
+// OpenPath opens a local file/folder with the default application.
+// Response: `{"success":bool}`.
+func OpenPath(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"shell_open_path","path":"%s"}`, jsonesc.Full(path)))
+}

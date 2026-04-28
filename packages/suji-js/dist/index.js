@@ -371,6 +371,20 @@ export const shell = {
         const r = await coreCall({ cmd: "shell_trash_item", path });
         return r.success === true;
     },
+    /** 파일/폴더를 기본 앱으로 열기 (`openExternal`은 URL용, 이건 로컬 path용).
+     *  존재하지 않는 경로는 false. macOS NSWorkspace `openURL:` (file://). */
+    async openPath(path) {
+        const r = await coreCall({ cmd: "shell_open_path", path });
+        return r.success === true;
+    },
+};
+export const nativeTheme = {
+    /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).
+     *  macOS NSApp.effectiveAppearance.name이 Dark 계열이면 true. */
+    async shouldUseDarkColors() {
+        const r = await coreCall({ cmd: "native_theme_should_use_dark_colors" });
+        return r.dark === true;
+    },
 };
 export const fs = {
     async readFile(path) {
@@ -539,6 +553,11 @@ export const screen = {
     async getAllDisplays() {
         const r = await coreCall({ cmd: "screen_get_all_displays" });
         return r.displays;
+    },
+    /** 마우스 포인터 화면 좌표 (macOS NSEvent.mouseLocation). bottom-up 좌표계. */
+    async getCursorScreenPoint() {
+        const r = await coreCall({ cmd: "screen_get_cursor_point" });
+        return { x: r.x, y: r.y };
     },
 };
 export const powerSaveBlocker = {

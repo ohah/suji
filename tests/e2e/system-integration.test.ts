@@ -196,6 +196,40 @@ describe("app.getPath", () => {
   });
 });
 
+describe("shell.openPath", () => {
+  test("존재하는 경로 → success:true (실제 앱 열림은 환경 의존)", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "shell_open_path", path: "/tmp" });
+    expect(r.success).toBe(true);
+  });
+
+  test("존재하지 않는 경로는 false", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "shell_open_path",
+      path: "/tmp/suji-open-no-such-path-xyz",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
+describe("nativeTheme.shouldUseDarkColors", () => {
+  test("dark boolean 필드 반환", async () => {
+    const r = await core<{ dark: boolean }>({ cmd: "native_theme_should_use_dark_colors" });
+    expect(typeof r.dark).toBe("boolean");
+  });
+});
+
+describe("screen.getCursorScreenPoint", () => {
+  test("x/y 숫자 필드 반환 (NSEvent.mouseLocation)", async () => {
+    const r = await core<{ x: number; y: number }>({ cmd: "screen_get_cursor_point" });
+    expect(typeof r.x).toBe("number");
+    expect(typeof r.y).toBe("number");
+    // bottom-up 좌표라 음수는 비-primary display 또는 메뉴바 위. 0 이상은 흔하지만
+    // 환경에 따라 다양 — 단순 finite 검증.
+    expect(Number.isFinite(r.x)).toBe(true);
+    expect(Number.isFinite(r.y)).toBe(true);
+  });
+});
+
 describe("shell.trashItem", () => {
   test("임시 파일 생성 → trash → 원본 경로 사라짐", async () => {
     const tmp = `/tmp/suji-trash-${Date.now()}.txt`;

@@ -877,6 +877,34 @@ test "shell.trashItem: path 필드 전송" {
     }.run);
 }
 
+test "shell.openPath: path 필드 + cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.shell.openPath("/tmp/y");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"shell_open_path\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"path\":\"/tmp/y\"") != null);
+        }
+    }.run);
+}
+
+test "nativeTheme.shouldUseDarkColors: 인자 없는 cmd" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.nativeTheme.shouldUseDarkColors();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"native_theme_should_use_dark_colors\"") != null);
+        }
+    }.run);
+}
+
+test "screen.getCursorScreenPoint: 인자 없는 cmd" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.screen.getCursorScreenPoint();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"screen_get_cursor_point\"") != null);
+        }
+    }.run);
+}
+
 test "shell.openExternal: url 필드 전송" {
     try withInvokeCore(struct {
         fn run() !void {

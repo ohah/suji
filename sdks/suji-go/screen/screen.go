@@ -9,3 +9,8 @@ import suji "github.com/ohah/suji-go"
 func GetAllDisplays() string {
 	return suji.Invoke("__core__", `{"cmd":"screen_get_all_displays"}`)
 }
+
+// GetCursorScreenPoint returns mouse cursor location. raw JSON: `{"x":..,"y":..}`.
+func GetCursorScreenPoint() string {
+	return suji.Invoke("__core__", `{"cmd":"screen_get_cursor_point"}`)
+}

@@ -1304,6 +1304,31 @@ pub fn shellBeep() void {
     objc.NSBeep();
 }
 
+/// 파일 기본 앱으로 열기 (Electron `shell.openPath` — `openExternal`은 URL용,
+/// 이건 로컬 파일/폴더 path용). 존재하지 않는 경로는 false. file:// URL 변환 후
+/// NSWorkspace `openURL:` 호출.
+pub fn shellOpenPath(path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const ns_path = nsStringFromSlice(path) orelse return false;
+
+    const NSFileManager = getClass("NSFileManager") orelse return false;
+    const fm = msgSend(NSFileManager, "defaultManager") orelse return false;
+    const existsFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    if (existsFn(fm, @ptrCast(objc.sel_registerName("fileExistsAtPath:")), ns_path) == 0) return false;
+
+    const NSURL = getClass("NSURL") orelse return false;
+    const fileUrlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_url = fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path) orelse return false;
+
+    const NSWorkspace = getClass("NSWorkspace") orelse return false;
+    const ws = msgSend(NSWorkspace, "sharedWorkspace") orelse return false;
+    const openFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return openFn(ws, @ptrCast(objc.sel_registerName("openURL:")), ns_url) != 0;
+}
+
 /// 휴지통으로 이동 (Electron `shell.trashItem`). 동기 — NSFileManager
 /// `trashItemAtURL:resultingItemURL:error:` BOOL 반환. 존재하지 않는 경로/권한 부족 등
 /// 은 false. resultingItemURL/error는 nil 전달 (caller가 결과 path 필요 없음).
@@ -1409,6 +1434,33 @@ fn nsStringToUtf8Buf(ns_str: ?*anyopaque, out: []u8) []const u8 {
     const n = @min(len, out.len);
     @memcpy(out[0..n], cstr[0..n]);
     return out[0..n];
+}
+
+/// 다크 모드 감지 (Electron `nativeTheme.shouldUseDarkColors`).
+/// macOS 10.14+ NSApp.effectiveAppearance.name이 "Dark"를 포함하면 dark.
+/// (NSAppearanceNameDarkAqua / NSAppearanceNameVibrantDark 둘 다 "Dark" 포함).
+pub fn nativeThemeIsDark() bool {
+    if (!comptime is_macos) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const appearance = msgSend(app, "effectiveAppearance") orelse return false;
+    const name_obj = msgSend(appearance, "name") orelse return false;
+    var buf: [128]u8 = undefined;
+    const name = nsStringToUtf8Buf(name_obj, &buf);
+    return std.mem.indexOf(u8, name, "Dark") != null;
+}
+
+/// 마우스 포인터 화면 좌표 (Electron `screen.getCursorScreenPoint`).
+/// macOS는 bottom-up 좌표계 (NSEvent.mouseLocation) — y는 main display height에서 반전 필요할 수
+/// 있음. Electron 호환성 위해 그대로 NSPoint 반환 (caller가 필요 시 변환).
+const ScreenPoint = extern struct { x: f64, y: f64 };
+
+pub fn screenGetCursorPoint() ScreenPoint {
+    if (!comptime is_macos) return .{ .x = 0, .y = 0 };
+    const NSEvent = getClass("NSEvent") orelse return .{ .x = 0, .y = 0 };
+    const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
+    const p = f(NSEvent, @ptrCast(objc.sel_registerName("mouseLocation")));
+    return .{ .x = p.x, .y = p.y };
 }
 
 /// Dock 아이콘 badge 텍스트 설정. 빈 문자열이면 badge 제거.

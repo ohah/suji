@@ -1460,6 +1460,34 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ok},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "shell_open_path")) {
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.shellOpenPath(unesc_buf[0..unesc_len])
+        else
+            false;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"shell_open_path\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "native_theme_should_use_dark_colors")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"native_theme_should_use_dark_colors\",\"dark\":{}}}",
+            .{cef.nativeThemeIsDark()},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "screen_get_cursor_point")) {
+        const p = cef.screenGetCursorPoint();
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"screen_get_cursor_point\",\"x\":{d},\"y\":{d}}}",
+            .{ p.x, p.y },
+        ) catch null;
+    }
 
     // app.getPath — Electron 표준 키 7개. config.app.name이 userData 경로에 들어감.
     if (std.mem.eql(u8, cmd, "app_get_path")) {

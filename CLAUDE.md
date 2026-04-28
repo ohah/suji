@@ -67,6 +67,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
+//   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
+// suji.nativeTheme.shouldUseDarkColors()  — macOS NSApp.effectiveAppearance
+// suji.screen.getCursorScreenPoint()      — NSEvent.mouseLocation (bottom-up)
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
 // suji.dialog.showErrorBox("Title", "content")

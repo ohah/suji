@@ -367,6 +367,14 @@ export declare const shell: {
     beep(): Promise<boolean>;
     /** 휴지통으로 이동. macOS NSFileManager `trashItemAtURL:`. 실패하면 false. */
     trashItem(path: string): Promise<boolean>;
+    /** 파일/폴더를 기본 앱으로 열기 (`openExternal`은 URL용, 이건 로컬 path용).
+     *  존재하지 않는 경로는 false. macOS NSWorkspace `openURL:` (file://). */
+    openPath(path: string): Promise<boolean>;
+};
+export declare const nativeTheme: {
+    /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).
+     *  macOS NSApp.effectiveAppearance.name이 Dark 계열이면 true. */
+    shouldUseDarkColors(): Promise<boolean>;
 };
 export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
 export interface FsStat {
@@ -516,6 +524,11 @@ export interface Display {
 export declare const screen: {
     /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
     getAllDisplays(): Promise<Display[]>;
+    /** 마우스 포인터 화면 좌표 (macOS NSEvent.mouseLocation). bottom-up 좌표계. */
+    getCursorScreenPoint(): Promise<{
+        x: number;
+        y: number;
+    }>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {
