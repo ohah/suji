@@ -773,6 +773,19 @@ export const nativeImage = {
     const r = await coreCall<{ width: number; height: number }>({ cmd: "native_image_get_size", path });
     return { width: r.width, height: r.height };
   },
+
+  /** 이미지 파일 → PNG base64 (raw ~8KB 한도, 작은 아이콘용 1차).
+   *  Electron `nativeImage.createFromPath(path).toPNG()` → base64.toString('base64'). */
+  async toPng(path: string): Promise<string> {
+    const r = await coreCall<{ data: string }>({ cmd: "native_image_to_png", path });
+    return r.data ?? "";
+  },
+
+  /** 이미지 파일 → JPEG base64. quality 0~100 (기본 90). */
+  async toJpeg(path: string, quality: number = 90): Promise<string> {
+    const r = await coreCall<{ data: string }>({ cmd: "native_image_to_jpeg", path, quality });
+    return r.data ?? "";
+  },
 };
 
 export type ThemeSource = "system" | "light" | "dark";

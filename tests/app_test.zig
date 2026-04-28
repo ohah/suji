@@ -913,6 +913,20 @@ test "nativeImage.getSize: path 필드 + cmd 전송" {
     }.run);
 }
 
+test "nativeImage.toPng / toJpeg IPC + quality 필드" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.nativeImage.toPng("/tmp/x.png");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"native_image_to_png\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"path\":\"/tmp/x.png\"") != null);
+
+            _ = app_mod.nativeImage.toJpeg("/tmp/y.png", 85);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"native_image_to_jpeg\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"quality\":85") != null);
+        }
+    }.run);
+}
+
 test "app.setProgressBar: progress 필드" {
     try withInvokeCore(struct {
         fn run() !void {

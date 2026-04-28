@@ -1662,6 +1662,31 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ sz.width, sz.height },
         ) catch null;
     }
+    // nativeImage 인코딩 — clipboard image와 같은 16KB response 한도. raw ~8KB까지.
+    if (std.mem.eql(u8, cmd, "native_image_to_png") or std.mem.eql(u8, cmd, "native_image_to_jpeg")) {
+        const is_jpeg = std.mem.eql(u8, cmd, "native_image_to_jpeg");
+        const cmd_label: []const u8 = if (is_jpeg) "native_image_to_jpeg" else "native_image_to_png";
+        const raw_path = util.extractJsonString(req_clean, "path") orelse "";
+        var path_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const path_n = util.unescapeJsonStr(raw_path, &path_buf) orelse {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"\"}}", .{cmd_label}) catch null;
+        };
+        const quality = util.extractJsonFloat(req_clean, "quality") orelse 90;
+        const file_type: cef.NSBitmapImageFileType = if (is_jpeg) .jpeg else .png;
+        var raw_buf: [8 * 1024]u8 = undefined;
+        const bytes = cef.nativeImageEncodeFromPath(path_buf[0..path_n], file_type, quality, &raw_buf);
+        const enc_size = std.base64.standard.Encoder.calcSize(bytes.len);
+        var b64_buf: [12 * 1024]u8 = undefined;
+        if (enc_size > b64_buf.len) {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"\"}}", .{cmd_label}) catch null;
+        }
+        const encoded = std.base64.standard.Encoder.encode(b64_buf[0..enc_size], bytes);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"{s}\"}}",
+            .{ cmd_label, encoded },
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "app_exit")) {
         cef.quit();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_exit\",\"success\":true}}", .{}) catch null;

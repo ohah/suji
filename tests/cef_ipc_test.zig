@@ -1074,6 +1074,30 @@ test "nativeImage.getSize IPC + cef.zig 함수" {
     }
 }
 
+test "nativeImage.toPNG/toJPEG IPC + cef.zig encoder" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"native_image_to_png\"",
+        "\"native_image_to_jpeg\"",
+        "cef.nativeImageEncodeFromPath",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn nativeImageEncodeFromPath",
+        "NSBitmapImageFileType",
+        "imageRepWithData:",
+        "representationUsingType:properties:",
+        "NSImageCompressionFactor",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "app.setProgressBar IPC + cef.zig 함수" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

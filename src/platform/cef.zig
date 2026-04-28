@@ -1822,6 +1822,76 @@ pub fn appCancelUserAttentionRequest(id: u32) bool {
     return true;
 }
 
+/// NSBitmapImageFileType. AppKit 헤더 값과 일치 — `representationUsingType:` 첫 인자.
+pub const NSBitmapImageFileType = enum(c_long) {
+    tiff = 0,
+    bmp = 1,
+    gif = 2,
+    jpeg = 3,
+    png = 4,
+    jpeg2000 = 5,
+};
+
+/// 이미지 파일 → 인코딩된 bytes (Electron `nativeImage.createFromPath(path).toPNG()` /
+/// `.toJPEG(quality)`). NSImage TIFF → NSBitmapImageRep → 지정 type 인코딩.
+/// jpeg_quality는 0~100 (PNG 호출 시 무시). out_buf 부족 또는 디코딩 실패 시 빈 slice.
+pub fn nativeImageEncodeFromPath(
+    path: []const u8,
+    file_type: NSBitmapImageFileType,
+    jpeg_quality: f64,
+    out_buf: []u8,
+) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const ns_path = nsStringFromSlice(path) orelse return out_buf[0..0];
+    const NSImage = getClass("NSImage") orelse return out_buf[0..0];
+    const alloc = msgSend(NSImage, "alloc") orelse return out_buf[0..0];
+    const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const img = init_fn(alloc, @ptrCast(objc.sel_registerName("initWithContentsOfFile:")), ns_path) orelse
+        return out_buf[0..0];
+
+    // NSImage → TIFF NSData → NSBitmapImageRep — bitmap rep 우회 경로 (NSImage가 vector든 bitmap이든 통일).
+    const tiff = msgSend(img, "TIFFRepresentation") orelse return out_buf[0..0];
+    const NSBitmapImageRep = getClass("NSBitmapImageRep") orelse return out_buf[0..0];
+    const rep_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const rep = rep_fn(NSBitmapImageRep, @ptrCast(objc.sel_registerName("imageRepWithData:")), tiff) orelse
+        return out_buf[0..0];
+
+    // properties: JPEG일 때만 NSImageCompressionFactor dict, 아니면 nil.
+    var props: ?*anyopaque = null;
+    if (file_type == .jpeg) {
+        const NSNumber = getClass("NSNumber") orelse return out_buf[0..0];
+        const num_fn: *const fn (?*anyopaque, ?*anyopaque, f64) callconv(.c) ?*anyopaque =
+            @ptrCast(&objc.objc_msgSend);
+        const factor = num_fn(NSNumber, @ptrCast(objc.sel_registerName("numberWithDouble:")), jpeg_quality / 100.0) orelse
+            return out_buf[0..0];
+        const NSDict = getClass("NSDictionary") orelse return out_buf[0..0];
+        const factor_key = nsStringFromCstr("NSImageCompressionFactor") orelse return out_buf[0..0];
+        const dict_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+            @ptrCast(&objc.objc_msgSend);
+        props = dict_fn(NSDict, @ptrCast(objc.sel_registerName("dictionaryWithObject:forKey:")), factor, factor_key);
+    }
+
+    const repr_fn: *const fn (?*anyopaque, ?*anyopaque, c_long, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const data = repr_fn(
+        rep,
+        @ptrCast(objc.sel_registerName("representationUsingType:properties:")),
+        @intFromEnum(file_type),
+        props,
+    ) orelse return out_buf[0..0];
+
+    const len_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
+    const len = len_fn(data, @ptrCast(objc.sel_registerName("length")));
+    const bytes_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) [*c]const u8 = @ptrCast(&objc.objc_msgSend);
+    const bytes = bytes_fn(data, @ptrCast(objc.sel_registerName("bytes")));
+    if (bytes == null) return out_buf[0..0];
+    const n = @min(len, out_buf.len);
+    @memcpy(out_buf[0..n], bytes[0..n]);
+    return out_buf[0..n];
+}
+
 /// 이미지 파일 → dimensions (Electron `nativeImage.createFromPath(path).getSize()`).
 /// macOS NSImage initWithContentsOfFile: + size (point 단위). pixel은 representation
 /// 사용 (1차 후속). file 없거나 디코딩 실패 시 width/height = 0.

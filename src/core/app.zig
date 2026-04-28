@@ -884,6 +884,24 @@ pub const nativeImage = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
         return coreCmd("native_image_get_size", fields);
     }
+
+    /// 이미지 파일 → PNG base64. 응답: `{"data":"..."}` (raw ~8KB 한도).
+    pub fn toPng(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("native_image_to_png", fields);
+    }
+
+    /// 이미지 파일 → JPEG base64. quality는 0~100 (기본 90).
+    pub fn toJpeg(path: []const u8, quality: f64) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4300]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\",\"quality\":{d}", .{ p_buf[0..p_n], quality }) catch return null;
+        return coreCmd("native_image_to_jpeg", fields);
+    }
 };
 
 pub const nativeTheme = struct {

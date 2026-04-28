@@ -653,6 +653,22 @@ pub mod native_image {
             &serde_json::json!({ "cmd": "native_image_get_size", "path": path }).to_string(),
         )
     }
+
+    /// 이미지 파일 → PNG base64. raw JSON: `{"data":"..."}` (raw ~8KB 한도).
+    pub fn to_png(path: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &serde_json::json!({ "cmd": "native_image_to_png", "path": path }).to_string(),
+        )
+    }
+
+    /// 이미지 파일 → JPEG base64. quality는 0~100.
+    pub fn to_jpeg(path: &str, quality: f64) -> Option<String> {
+        invoke(
+            "__core__",
+            &serde_json::json!({ "cmd": "native_image_to_jpeg", "path": path, "quality": quality }).to_string(),
+        )
+    }
 }
 
 pub mod native_theme {

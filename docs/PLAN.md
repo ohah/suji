@@ -1347,7 +1347,7 @@ suji build → 결과물:
 | 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ + `getSystemIdleState(threshold)` ✅ (`"active"\|"idle"`, idle_seconds ≥ threshold 비교). `"locked"` 상태는 lock-screen 이벤트 트래킹 후속 |
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
 | 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
-| nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | 🟡 `nativeImage.getSize(path)` ✅ (NSImage initWithContentsOfFile + .size). `toPNG`/`toJPEG` encode는 후속 |
+| nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | ✅ `nativeImage.getSize(path)` + `toPng(path)` + `toJpeg(path, quality)` (NSImage → NSBitmapImageRep `representationUsingType:properties:`). raw bytes ~8KB 한도 (16KB IPC response). 5 SDK + e2e 3 케이스 (PNG/JPEG signature 검증) |
 | 앱 강제 종료 | `app.exit(code)` | `process::exit` | ✅ `app.exit()` (Electron app.exit code 무시 — cef.quit 경유 process 종료). 5 SDK + e2e (IPC handler grep만 — 실제 호출은 process 종료라 e2e 불가) |
 
 ### 개발자 경험 (DX)

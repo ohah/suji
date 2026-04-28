@@ -259,6 +259,46 @@ describe("nativeImage.getSize", () => {
     expect(r.width).toBe(0);
     expect(r.height).toBe(0);
   });
+
+  test("toPNG: 1x1 PNG 파일 → base64 비어있지 않고 PNG signature 시작", async () => {
+    const tmp = `/tmp/suji-topng-${Date.now()}.png`;
+    fs.writeFileSync(tmp, PNG_1X1);
+    try {
+      const r = await core<{ data: string }>({ cmd: "native_image_to_png", path: tmp });
+      expect(r.data.length).toBeGreaterThan(0);
+      const decoded = Buffer.from(r.data, "base64");
+      // PNG magic: 89 50 4E 47 0D 0A 1A 0A
+      expect(decoded[0]).toBe(0x89);
+      expect(decoded[1]).toBe(0x50);
+      expect(decoded[2]).toBe(0x4e);
+      expect(decoded[3]).toBe(0x47);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  test("toJPEG: 1x1 PNG 파일 → base64, JPEG SOI(FF D8) 시작", async () => {
+    const tmp = `/tmp/suji-tojpg-${Date.now()}.png`;
+    fs.writeFileSync(tmp, PNG_1X1);
+    try {
+      const r = await core<{ data: string }>({ cmd: "native_image_to_jpeg", path: tmp, quality: 80 });
+      expect(r.data.length).toBeGreaterThan(0);
+      const decoded = Buffer.from(r.data, "base64");
+      // JPEG SOI marker: FF D8
+      expect(decoded[0]).toBe(0xff);
+      expect(decoded[1]).toBe(0xd8);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  test("toPNG: 존재하지 않는 파일은 빈 data", async () => {
+    const r = await core<{ data: string }>({
+      cmd: "native_image_to_png",
+      path: "/tmp/suji-no-such-encode.png",
+    });
+    expect(r.data).toBe("");
+  });
 });
 
 describe("clipboard.writeImage / readImage", () => {

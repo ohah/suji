@@ -653,6 +653,18 @@ export const nativeImage = {
     const r = await invoke<{ width: number; height: number }>('__core__', { cmd: 'native_image_get_size', path });
     return { width: r.width, height: r.height };
   },
+
+  /** 이미지 파일 → PNG base64 (raw ~8KB 한도). */
+  async toPng(path: string): Promise<string> {
+    const r = await invoke<{ data: string }>('__core__', { cmd: 'native_image_to_png', path });
+    return r.data ?? '';
+  },
+
+  /** 이미지 파일 → JPEG base64. quality 0~100. */
+  async toJpeg(path: string, quality: number = 90): Promise<string> {
+    const r = await invoke<{ data: string }>('__core__', { cmd: 'native_image_to_jpeg', path, quality });
+    return r.data ?? '';
+  },
 };
 
 export type ThemeSource = 'system' | 'light' | 'dark';
