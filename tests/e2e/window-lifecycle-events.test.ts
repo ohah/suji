@@ -167,4 +167,112 @@ describe("window lifecycle events", () => {
       expect(evs.every((e) => e.windowId !== id)).toBe(true);
     }
   });
+
+  // ==================== Phase 5: minimize/maximize/fullscreen ====================
+  // 새 창을 만들고 IPC로 NSWindow를 조작 → NSWindowDelegate가 이벤트 발화.
+  // CI runner는 dock 동작이 비결정적이라 toBeGreaterThan(0)만 검증 (정확한 횟수 X).
+
+  test("minimize → window:minimize 이벤트, restore_window → window:restore", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-minimize",
+      x: 600, y: 300, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    const minCol = collect<{ windowId: number }>("window:minimize", 1500);
+    await core({ cmd: "minimize", windowId: id });
+    const minEvs = (await minCol).filter((e) => e.windowId === id);
+    expect(minEvs.length).toBeGreaterThan(0);
+
+    // IPC isMinimized로 상태 reflective 검증.
+    const isMin = await core<{ minimized: boolean }>({ cmd: "is_minimized", windowId: id });
+    expect(isMin.minimized).toBe(true);
+
+    const restCol = collect<{ windowId: number }>("window:restore", 1500);
+    await core({ cmd: "restore_window", windowId: id });
+    const restEvs = (await restCol).filter((e) => e.windowId === id);
+    expect(restEvs.length).toBeGreaterThan(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  test("maximize → window:maximize 이벤트, unmaximize → window:unmaximize", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-maximize",
+      x: 100, y: 100, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    const maxCol = collect<{ windowId: number }>("window:maximize", 1500);
+    await core({ cmd: "maximize", windowId: id });
+    const maxEvs = (await maxCol).filter((e) => e.windowId === id);
+    expect(maxEvs.length).toBeGreaterThan(0);
+
+    const isMax = await core<{ maximized: boolean }>({ cmd: "is_maximized", windowId: id });
+    expect(isMax.maximized).toBe(true);
+
+    const unmaxCol = collect<{ windowId: number }>("window:unmaximize", 1500);
+    await core({ cmd: "unmaximize", windowId: id });
+    const unmaxEvs = (await unmaxCol).filter((e) => e.windowId === id);
+    expect(unmaxEvs.length).toBeGreaterThan(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
+  test("set_fullscreen → enter-full-screen / leave-full-screen 이벤트", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-fullscreen",
+      x: 200, y: 200, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    const enterCol = collect<{ windowId: number }>("window:enter-full-screen", 3000);
+    await core({ cmd: "set_fullscreen", windowId: id, flag: true });
+    // toggleFullScreen 애니메이션 ~1s
+    const enterEvs = (await enterCol).filter((e) => e.windowId === id);
+    expect(enterEvs.length).toBeGreaterThan(0);
+
+    const isFs = await core<{ fullscreen: boolean }>({ cmd: "is_fullscreen", windowId: id });
+    expect(isFs.fullscreen).toBe(true);
+
+    const leaveCol = collect<{ windowId: number }>("window:leave-full-screen", 3000);
+    await core({ cmd: "set_fullscreen", windowId: id, flag: false });
+    const leaveEvs = (await leaveCol).filter((e) => e.windowId === id);
+    expect(leaveEvs.length).toBeGreaterThan(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 500));
+  });
+
+  test("set_fullscreen 멱등 — 같은 flag 두 번이면 두 번째는 이벤트 발화 안 함", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-fullscreen-idempotent",
+      x: 200, y: 200, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    await core({ cmd: "set_fullscreen", windowId: id, flag: true });
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // 이미 fullscreen인 상태에서 다시 true → toggle 미발생 → 이벤트 X.
+    const enterCol = collect<{ windowId: number }>("window:enter-full-screen", 800);
+    await core({ cmd: "set_fullscreen", windowId: id, flag: true });
+    const enterEvs = (await enterCol).filter((e) => e.windowId === id);
+    expect(enterEvs.length).toBe(0);
+
+    await core({ cmd: "set_fullscreen", windowId: id, flag: false });
+    await new Promise((r) => setTimeout(r, 1500));
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
 });

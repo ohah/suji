@@ -1508,3 +1508,102 @@ test "17-A.8: handleRemoveChildView with view never added returns ok:false" {
     const out = ipc.handleRemoveChildView(host_b, view_a, &buf, &wm).?;
     try std.testing.expect(std.mem.indexOf(u8, out, "\"ok\":false") != null);
 }
+
+// ==================== Phase 5: 라이프사이클 제어 ====================
+
+test "handleMinimize/Restore/Maximize/Unmaximize: native까지 전달 + ok 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    const r1 = ipc.handleMinimize(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"minimize\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.minimize_calls);
+
+    const r2 = ipc.handleRestoreWindow(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"cmd\":\"restore_window\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.restore_calls);
+
+    const r3 = ipc.handleMaximize(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r3, "\"cmd\":\"maximize\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r3, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.maximize_calls);
+
+    const r4 = ipc.handleUnmaximize(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r4, "\"cmd\":\"unmaximize\"") != null);
+    try std.testing.expectEqual(@as(usize, 1), native.unmaximize_calls);
+}
+
+test "handleSetFullscreen: flag 전달 + ok 응답" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    const r1 = ipc.handleSetFullscreen(.{ .window_id = 1, .flag = true }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"set_fullscreen\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(?bool, true), native.last_set_fullscreen_flag);
+
+    const r2 = ipc.handleSetFullscreen(.{ .window_id = 1, .flag = false }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(?bool, false), native.last_set_fullscreen_flag);
+}
+
+test "handleIs* 게터: stub 반영해서 minimized/maximized/fullscreen 필드" {
+    var native = TestNative{ .stub_minimized = true, .stub_maximized = false, .stub_fullscreen = true };
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var buf: [256]u8 = undefined;
+
+    const r1 = ipc.handleIsMinimized(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"minimized\":true") != null);
+    const r2 = ipc.handleIsMaximized(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"maximized\":false") != null);
+    const r3 = ipc.handleIsFullscreen(1, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r3, "\"fullscreen\":true") != null);
+}
+
+test "Phase 5 라이프사이클 핸들러: 알 수 없는 id면 ok:false (native 미호출)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    var buf: [256]u8 = undefined;
+
+    const r1 = ipc.handleMinimize(999, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r1, "\"ok\":false") != null);
+    const r2 = ipc.handleSetFullscreen(.{ .window_id = 999, .flag = true }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":false") != null);
+    const r3 = ipc.handleIsMinimized(999, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r3, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r3, "\"minimized\":false") != null);
+
+    try std.testing.expectEqual(@as(usize, 0), native.minimize_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.set_fullscreen_calls);
+}
+
+test "Phase 5 라이프사이클 핸들러: 작은 버퍼면 null (회귀)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+    var tiny: [3]u8 = undefined;
+
+    try std.testing.expect(ipc.handleMinimize(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleRestoreWindow(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleMaximize(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleUnmaximize(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleSetFullscreen(.{ .window_id = 1, .flag = true }, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleIsMinimized(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleIsMaximized(1, &tiny, &wm) == null);
+    try std.testing.expect(ipc.handleIsFullscreen(1, &tiny, &wm) == null);
+
+    try std.testing.expectEqual(@as(usize, 0), native.minimize_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.set_fullscreen_calls);
+}

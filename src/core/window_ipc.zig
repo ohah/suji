@@ -664,3 +664,68 @@ pub fn handleGetChildViews(host_id: u32, response_buf: []u8, wm: *window.WindowM
     w.writeAll("]}") catch return null;
     return w.buffered();
 }
+
+// ============================================
+// Phase 5: 라이프사이클 제어 (minimize/maximize/fullscreen + 게터)
+// 4-C DevTools와 같은 voidFn 패턴 — windowId 단일 입력 + ok 4-필드 응답.
+// is_*는 별도 필드(minimized/maximized/fullscreen) 응답.
+// ============================================
+
+pub fn handleMinimize(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("minimize", &window.WindowManager.minimize, window_id, response_buf, wm);
+}
+pub fn handleRestoreWindow(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("restore_window", &window.WindowManager.restoreWindow, window_id, response_buf, wm);
+}
+pub fn handleMaximize(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("maximize", &window.WindowManager.maximize, window_id, response_buf, wm);
+}
+pub fn handleUnmaximize(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("unmaximize", &window.WindowManager.unmaximize, window_id, response_buf, wm);
+}
+
+pub const SetFullscreenReq = struct {
+    window_id: u32,
+    flag: bool,
+};
+
+pub fn handleSetFullscreen(req: SetFullscreenReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setFullscreen(req.window_id, req.flag)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_fullscreen", req.window_id, ok);
+}
+
+const WmBoolGetFn = *const fn (*window.WindowManager, u32) window.Error!bool;
+
+fn handleStateGet(
+    cmd: []const u8,
+    field: []const u8,
+    method: WmBoolGetFn,
+    window_id: u32,
+    response_buf: []u8,
+    wm: *window.WindowManager,
+) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const value = method(wm, window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":false,\"{s}\":false}}",
+            .{ cmd, window_id, field },
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":true,\"{s}\":{}}}",
+        .{ cmd, window_id, field, value },
+    ) catch null;
+}
+
+pub fn handleIsMinimized(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_minimized", "minimized", &window.WindowManager.isMinimized, window_id, response_buf, wm);
+}
+pub fn handleIsMaximized(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_maximized", "maximized", &window.WindowManager.isMaximized, window_id, response_buf, wm);
+}
+pub fn handleIsFullscreen(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_fullscreen", "fullscreen", &window.WindowManager.isFullscreen, window_id, response_buf, wm);
+}

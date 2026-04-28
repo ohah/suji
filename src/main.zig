@@ -613,7 +613,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
-    cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
+    cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
     if (config.security.csp) |csp_val| {
         cef.setCspValue(csp_val);
@@ -788,7 +788,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
-    cef.setWindowLifecycleHandlers(&windowResizedHandler, &windowMovedHandler, &windowFocusHandler, &windowBlurHandler);
+    cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
     if (config.security.csp) |csp_val| {
         cef.setCspValue(csp_val);
@@ -1318,6 +1318,30 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         var arena_buf: [4096]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
         return window_ipc.handleGetChildViews(host_id, response_buf, wm, fba.allocator());
+    }
+    // Phase 5: 라이프사이클 제어 — minimize/maximize/restore_window/unmaximize 4 voidFn
+    // + is_minimized/is_maximized/is_fullscreen 3 게터. 모두 (windowId, buf, wm) 시그니처라
+    // 4-E 편집 핸들러와 동일한 dispatch 테이블. set_fullscreen만 flag 인자로 별도 분기.
+    if (std.mem.eql(u8, cmd, "set_fullscreen")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const flag = util.extractJsonBool(req_clean, "flag") orelse false;
+        return window_ipc.handleSetFullscreen(.{ .window_id = win_id, .flag = flag }, response_buf, wm);
+    }
+    inline for (.{
+        .{ "minimize", &window_ipc.handleMinimize },
+        .{ "restore_window", &window_ipc.handleRestoreWindow },
+        .{ "maximize", &window_ipc.handleMaximize },
+        .{ "unmaximize", &window_ipc.handleUnmaximize },
+        .{ "is_minimized", &window_ipc.handleIsMinimized },
+        .{ "is_maximized", &window_ipc.handleIsMaximized },
+        .{ "is_fullscreen", &window_ipc.handleIsFullscreen },
+    }) |entry| {
+        if (std.mem.eql(u8, cmd, entry[0])) {
+            const wm = window_mod.WindowManager.global orelse return null;
+            const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+            return entry[1](win_id, response_buf, wm);
+        }
     }
     if (std.mem.eql(u8, cmd, "quit")) {
         cef.quit();
@@ -2291,15 +2315,50 @@ fn windowMovedHandler(handle: u64, x: f64, y: f64) void {
     emitToBus("window:moved", "{{\"windowId\":{d},\"x\":{d},\"y\":{d}}}", .{ win_id, @as(i64, @intFromFloat(x)), @as(i64, @intFromFloat(y)) });
 }
 
-fn windowFocusHandler(handle: u64) void {
+/// `{windowId}` 단일 필드 이벤트 발화 — focus/blur/minimize/restore/maximize/
+/// unmaximize/enter-full-screen/leave-full-screen 공통.
+fn emitWindowIdEvent(comptime channel: []const u8, handle: u64) void {
     const win_id = windowIdFromHandle(handle) orelse return;
-    emitToBus("window:focus", "{{\"windowId\":{d}}}", .{win_id});
+    emitToBus(channel, "{{\"windowId\":{d}}}", .{win_id});
 }
 
-fn windowBlurHandler(handle: u64) void {
-    const win_id = windowIdFromHandle(handle) orelse return;
-    emitToBus("window:blur", "{{\"windowId\":{d}}}", .{win_id});
+fn windowFocusHandler(handle: u64) void {
+    emitWindowIdEvent("window:focus", handle);
 }
+fn windowBlurHandler(handle: u64) void {
+    emitWindowIdEvent("window:blur", handle);
+}
+fn windowMinimizeHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.minimize, handle);
+}
+fn windowRestoreHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.restore, handle);
+}
+fn windowMaximizeHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.maximize, handle);
+}
+fn windowUnmaximizeHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.unmaximize, handle);
+}
+fn windowEnterFullScreenHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.enter_full_screen, handle);
+}
+fn windowLeaveFullScreenHandler(handle: u64) void {
+    emitWindowIdEvent(window_mod.events.leave_full_screen, handle);
+}
+
+const window_lifecycle_handlers: cef.WindowLifecycleHandlers = .{
+    .resized = &windowResizedHandler,
+    .moved = &windowMovedHandler,
+    .focus = &windowFocusHandler,
+    .blur = &windowBlurHandler,
+    .minimize = &windowMinimizeHandler,
+    .restore = &windowRestoreHandler,
+    .maximize = &windowMaximizeHandler,
+    .unmaximize = &windowUnmaximizeHandler,
+    .enter_fullscreen = &windowEnterFullScreenHandler,
+    .leave_fullscreen = &windowLeaveFullScreenHandler,
+};
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;

@@ -394,6 +394,14 @@ pub const CefNative = struct {
         .set_view_bounds = setViewBounds,
         .set_view_visible = setViewVisible,
         .reorder_view = reorderView,
+        .minimize = minimizeImpl,
+        .restore_window = restoreWindowImpl,
+        .maximize = maximizeImpl,
+        .unmaximize = unmaximizeImpl,
+        .set_fullscreen = setFullscreenImpl,
+        .is_minimized = isMinimizedImpl,
+        .is_maximized = isMaximizedImpl,
+        .is_fullscreen = isFullscreenImpl,
     };
 
     fn fromCtx(ctx: ?*anyopaque) *CefNative {
@@ -890,6 +898,55 @@ pub const CefNative = struct {
         ensurePdfCallback();
         const print = host.print_to_pdf orelse return;
         print(host, &cef_path, &settings, &g_pdf_callback);
+    }
+
+    fn nsWindowFor(self: *CefNative, handle: u64) ?*anyopaque {
+        const entry = self.browsers.get(handle) orelse return null;
+        return entry.ns_window;
+    }
+
+    /// 비-macOS / unknown handle / null ns_window 시 no-op로 흡수.
+    /// 모든 NSWindow 조작은 UI thread에서만 안전 — getter도 동일.
+    fn callOnNs(ctx: ?*anyopaque, handle: u64, comptime native_fn: anytype) void {
+        if (!comptime is_macos) return;
+        assertUiThread();
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
+        native_fn(ns);
+    }
+
+    fn callOnNsBool(ctx: ?*anyopaque, handle: u64, comptime native_fn: anytype) bool {
+        if (!comptime is_macos) return false;
+        assertUiThread();
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return false;
+        return native_fn(ns) != 0;
+    }
+
+    fn minimizeImpl(ctx: ?*anyopaque, handle: u64) void {
+        callOnNs(ctx, handle, suji_window_lifecycle_minimize);
+    }
+    fn restoreWindowImpl(ctx: ?*anyopaque, handle: u64) void {
+        callOnNs(ctx, handle, suji_window_lifecycle_deminiaturize);
+    }
+    fn maximizeImpl(ctx: ?*anyopaque, handle: u64) void {
+        callOnNs(ctx, handle, suji_window_lifecycle_maximize);
+    }
+    fn unmaximizeImpl(ctx: ?*anyopaque, handle: u64) void {
+        callOnNs(ctx, handle, suji_window_lifecycle_unmaximize);
+    }
+    fn setFullscreenImpl(ctx: ?*anyopaque, handle: u64, flag: bool) void {
+        if (!comptime is_macos) return;
+        assertUiThread();
+        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
+        suji_window_lifecycle_set_fullscreen(ns, @intFromBool(flag));
+    }
+    fn isMinimizedImpl(ctx: ?*anyopaque, handle: u64) bool {
+        return callOnNsBool(ctx, handle, suji_window_lifecycle_is_minimized);
+    }
+    fn isMaximizedImpl(ctx: ?*anyopaque, handle: u64) bool {
+        return callOnNsBool(ctx, handle, suji_window_lifecycle_is_maximized);
+    }
+    fn isFullscreenImpl(ctx: ?*anyopaque, handle: u64) bool {
+        return callOnNsBool(ctx, handle, suji_window_lifecycle_is_fullscreen);
     }
 };
 
@@ -1641,11 +1698,18 @@ pub const WindowResizedHandler = *const fn (handle: u64, x: f64, y: f64, width: 
 pub const WindowMovedHandler = *const fn (handle: u64, x: f64, y: f64) void;
 pub const WindowFocusHandler = *const fn (handle: u64) void;
 pub const WindowBlurHandler = *const fn (handle: u64) void;
+pub const WindowSimpleHandler = *const fn (handle: u64) void;
 
 pub var g_window_resized_handler: ?WindowResizedHandler = null;
 pub var g_window_moved_handler: ?WindowMovedHandler = null;
 pub var g_window_focus_handler: ?WindowFocusHandler = null;
 pub var g_window_blur_handler: ?WindowBlurHandler = null;
+pub var g_window_minimize_handler: ?WindowSimpleHandler = null;
+pub var g_window_restore_handler: ?WindowSimpleHandler = null;
+pub var g_window_maximize_handler: ?WindowSimpleHandler = null;
+pub var g_window_unmaximize_handler: ?WindowSimpleHandler = null;
+pub var g_window_enter_fullscreen_handler: ?WindowSimpleHandler = null;
+pub var g_window_leave_fullscreen_handler: ?WindowSimpleHandler = null;
 
 fn windowResizedC(handle: u64, x: f64, y: f64, width: f64, height: f64) callconv(.c) void {
     if (g_window_resized_handler) |h| h(handle, x, y, width, height);
@@ -1659,14 +1723,62 @@ fn windowFocusC(handle: u64) callconv(.c) void {
 fn windowBlurC(handle: u64) callconv(.c) void {
     if (g_window_blur_handler) |h| h(handle);
 }
+fn windowMinimizeC(handle: u64) callconv(.c) void {
+    if (g_window_minimize_handler) |h| h(handle);
+}
+fn windowRestoreC(handle: u64) callconv(.c) void {
+    if (g_window_restore_handler) |h| h(handle);
+}
+fn windowMaximizeC(handle: u64) callconv(.c) void {
+    if (g_window_maximize_handler) |h| h(handle);
+}
+fn windowUnmaximizeC(handle: u64) callconv(.c) void {
+    if (g_window_unmaximize_handler) |h| h(handle);
+}
+fn windowEnterFullscreenC(handle: u64) callconv(.c) void {
+    if (g_window_enter_fullscreen_handler) |h| h(handle);
+}
+fn windowLeaveFullscreenC(handle: u64) callconv(.c) void {
+    if (g_window_leave_fullscreen_handler) |h| h(handle);
+}
 
-pub fn setWindowLifecycleHandlers(resized: WindowResizedHandler, moved: WindowMovedHandler, focus: WindowFocusHandler, blur: WindowBlurHandler) void {
+pub const WindowLifecycleHandlers = struct {
+    resized: WindowResizedHandler,
+    moved: WindowMovedHandler,
+    focus: WindowFocusHandler,
+    blur: WindowBlurHandler,
+    minimize: WindowSimpleHandler,
+    restore: WindowSimpleHandler,
+    maximize: WindowSimpleHandler,
+    unmaximize: WindowSimpleHandler,
+    enter_fullscreen: WindowSimpleHandler,
+    leave_fullscreen: WindowSimpleHandler,
+};
+
+pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
     if (!comptime is_macos) return;
-    g_window_resized_handler = resized;
-    g_window_moved_handler = moved;
-    g_window_focus_handler = focus;
-    g_window_blur_handler = blur;
-    suji_window_lifecycle_set_callbacks(&windowResizedC, &windowMovedC, &windowFocusC, &windowBlurC);
+    g_window_resized_handler = h.resized;
+    g_window_moved_handler = h.moved;
+    g_window_focus_handler = h.focus;
+    g_window_blur_handler = h.blur;
+    g_window_minimize_handler = h.minimize;
+    g_window_restore_handler = h.restore;
+    g_window_maximize_handler = h.maximize;
+    g_window_unmaximize_handler = h.unmaximize;
+    g_window_enter_fullscreen_handler = h.enter_fullscreen;
+    g_window_leave_fullscreen_handler = h.leave_fullscreen;
+    suji_window_lifecycle_set_callbacks(
+        &windowResizedC,
+        &windowMovedC,
+        &windowFocusC,
+        &windowBlurC,
+        &windowMinimizeC,
+        &windowRestoreC,
+        &windowMaximizeC,
+        &windowUnmaximizeC,
+        &windowEnterFullscreenC,
+        &windowLeaveFullscreenC,
+    );
 }
 
 fn attachWindowLifecycle(ns_window: ?*anyopaque, handle: u64) void {
@@ -1718,9 +1830,23 @@ extern "c" fn suji_window_lifecycle_set_callbacks(
     moved: *const fn (u64, f64, f64) callconv(.c) void,
     focus: *const fn (u64) callconv(.c) void,
     blur: *const fn (u64) callconv(.c) void,
+    minimize: *const fn (u64) callconv(.c) void,
+    restore: *const fn (u64) callconv(.c) void,
+    maximize: *const fn (u64) callconv(.c) void,
+    unmaximize: *const fn (u64) callconv(.c) void,
+    enter_fullscreen: *const fn (u64) callconv(.c) void,
+    leave_fullscreen: *const fn (u64) callconv(.c) void,
 ) void;
 extern "c" fn suji_window_lifecycle_attach(ns_window: ?*anyopaque, handle: u64) i32;
 extern "c" fn suji_window_lifecycle_detach(ns_window: ?*anyopaque) void;
+extern "c" fn suji_window_lifecycle_minimize(ns_window: ?*anyopaque) void;
+extern "c" fn suji_window_lifecycle_deminiaturize(ns_window: ?*anyopaque) void;
+extern "c" fn suji_window_lifecycle_maximize(ns_window: ?*anyopaque) void;
+extern "c" fn suji_window_lifecycle_unmaximize(ns_window: ?*anyopaque) void;
+extern "c" fn suji_window_lifecycle_set_fullscreen(ns_window: ?*anyopaque, flag: i32) void;
+extern "c" fn suji_window_lifecycle_is_minimized(ns_window: ?*anyopaque) i32;
+extern "c" fn suji_window_lifecycle_is_maximized(ns_window: ?*anyopaque) i32;
+extern "c" fn suji_window_lifecycle_is_fullscreen(ns_window: ?*anyopaque) i32;
 
 /// CEF browser native_handle → NSWindow 포인터 lookup. main.zig가 windowId(WM)를
 /// browser handle로 변환 후 호출.

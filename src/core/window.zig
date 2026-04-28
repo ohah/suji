@@ -42,6 +42,14 @@ pub const events = struct {
     /// destroyAll 어느 경로에서든 view가 정리될 때 한 번씩 발화.
     pub const view_created = "window:view-created";
     pub const view_destroyed = "window:view-destroyed";
+    // Phase 5 — OS 라이프사이클. native delegate가 NSWindowDidMiniaturize 등을
+    // 받아서 main.zig가 EventBus로 emit. payload = `{"windowId":N}`.
+    pub const minimize = "window:minimize";
+    pub const restore = "window:restore";
+    pub const maximize = "window:maximize";
+    pub const unmaximize = "window:unmaximize";
+    pub const enter_full_screen = "window:enter-full-screen";
+    pub const leave_full_screen = "window:leave-full-screen";
 };
 
 /// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".
@@ -214,6 +222,16 @@ pub const Native = struct {
         set_view_bounds: *const fn (ctx: ?*anyopaque, view_handle: u64, bounds: Bounds) void,
         set_view_visible: *const fn (ctx: ?*anyopaque, view_handle: u64, visible: bool) void,
         reorder_view: *const fn (ctx: ?*anyopaque, host_handle: u64, view_handle: u64, index_in_host: u32) void,
+        // Phase 5: 라이프사이클 제어 — minimize/maximize/fullscreen.
+        // 모두 멱등 (이미 같은 상태면 no-op). is_* 게터는 platform 호출 결과 그대로 반환.
+        minimize: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        restore_window: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        maximize: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        unmaximize: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        set_fullscreen: *const fn (ctx: ?*anyopaque, handle: u64, flag: bool) void,
+        is_minimized: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        is_maximized: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        is_fullscreen: *const fn (ctx: ?*anyopaque, handle: u64) bool,
     };
 
     pub fn createWindow(self: Native, opts: *const CreateOptions) !u64 {
@@ -308,6 +326,30 @@ pub const Native = struct {
     }
     pub fn reorderView(self: Native, host_handle: u64, view_handle: u64, index_in_host: u32) void {
         self.vtable.reorder_view(self.ctx, host_handle, view_handle, index_in_host);
+    }
+    pub fn minimize(self: Native, handle: u64) void {
+        self.vtable.minimize(self.ctx, handle);
+    }
+    pub fn restoreWindow(self: Native, handle: u64) void {
+        self.vtable.restore_window(self.ctx, handle);
+    }
+    pub fn maximize(self: Native, handle: u64) void {
+        self.vtable.maximize(self.ctx, handle);
+    }
+    pub fn unmaximize(self: Native, handle: u64) void {
+        self.vtable.unmaximize(self.ctx, handle);
+    }
+    pub fn setFullscreen(self: Native, handle: u64, flag: bool) void {
+        self.vtable.set_fullscreen(self.ctx, handle, flag);
+    }
+    pub fn isMinimized(self: Native, handle: u64) bool {
+        return self.vtable.is_minimized(self.ctx, handle);
+    }
+    pub fn isMaximized(self: Native, handle: u64) bool {
+        return self.vtable.is_maximized(self.ctx, handle);
+    }
+    pub fn isFullscreen(self: Native, handle: u64) bool {
+        return self.vtable.is_fullscreen(self.ctx, handle);
     }
 };
 
@@ -1288,5 +1330,66 @@ pub const WindowManager = struct {
         const out = allocator.alloc(u32, items.len) catch return Error.OutOfMemory;
         @memcpy(out, items);
         return out;
+    }
+
+    // ==================== Phase 5: 라이프사이클 제어 ====================
+    // 실제 emit은 native delegate가 상태 전이를 감지해 main.zig 핸들러를 통해 EventBus로
+    // 발화 (이 함수가 직접 emit하지 않음 — OS가 거부할 수도 있고, 사용자가 traffic light로
+    // 직접 조작한 경우도 동일 경로로 처리해야 일관됨).
+
+    pub fn minimize(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.minimize(win.native_handle);
+    }
+
+    pub fn restoreWindow(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.restoreWindow(win.native_handle);
+    }
+
+    pub fn maximize(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.maximize(win.native_handle);
+    }
+
+    pub fn unmaximize(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.unmaximize(win.native_handle);
+    }
+
+    pub fn setFullscreen(self: *WindowManager, id: u32, flag: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setFullscreen(win.native_handle, flag);
+    }
+
+    pub fn isMinimized(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isMinimized(win.native_handle);
+    }
+
+    pub fn isMaximized(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isMaximized(win.native_handle);
+    }
+
+    pub fn isFullscreen(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isFullscreen(win.native_handle);
     }
 };

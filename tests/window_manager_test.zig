@@ -4622,3 +4622,91 @@ test "17-A.8: getChildViews on view (kind=.view) returns NotAWindow" {
     const view = try wm.createView(.{ .host_window_id = host });
     try std.testing.expectError(window.Error.NotAWindow, wm.getChildViews(view, std.testing.allocator));
 }
+
+// ==================== Phase 5: 라이프사이클 제어 ====================
+
+test "minimize/restoreWindow: native 호출 + 게터 상태 갱신" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try std.testing.expectEqual(false, try wm.isMinimized(id));
+    try wm.minimize(id);
+    try std.testing.expectEqual(@as(usize, 1), native.minimize_calls);
+    try std.testing.expectEqual(true, try wm.isMinimized(id));
+
+    try wm.restoreWindow(id);
+    try std.testing.expectEqual(@as(usize, 1), native.restore_calls);
+    try std.testing.expectEqual(false, try wm.isMinimized(id));
+}
+
+test "maximize/unmaximize: native 호출 + 게터 상태 갱신" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try std.testing.expectEqual(false, try wm.isMaximized(id));
+    try wm.maximize(id);
+    try std.testing.expectEqual(@as(usize, 1), native.maximize_calls);
+    try std.testing.expectEqual(true, try wm.isMaximized(id));
+
+    try wm.unmaximize(id);
+    try std.testing.expectEqual(@as(usize, 1), native.unmaximize_calls);
+    try std.testing.expectEqual(false, try wm.isMaximized(id));
+}
+
+test "setFullscreen: flag 전파 + 게터 상태" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try std.testing.expectEqual(false, try wm.isFullscreen(id));
+    try wm.setFullscreen(id, true);
+    try std.testing.expectEqual(@as(usize, 1), native.set_fullscreen_calls);
+    try std.testing.expectEqual(@as(?bool, true), native.last_set_fullscreen_flag);
+    try std.testing.expectEqual(true, try wm.isFullscreen(id));
+
+    try wm.setFullscreen(id, false);
+    try std.testing.expectEqual(@as(usize, 2), native.set_fullscreen_calls);
+    try std.testing.expectEqual(@as(?bool, false), native.last_set_fullscreen_flag);
+    try std.testing.expectEqual(false, try wm.isFullscreen(id));
+}
+
+test "라이프사이클 제어: destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.minimize(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.restoreWindow(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.maximize(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.unmaximize(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setFullscreen(id, true));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.isMinimized(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.isMaximized(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.isFullscreen(id));
+
+    try std.testing.expectError(window.Error.WindowNotFound, wm.minimize(999));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setFullscreen(999, true));
+
+    // destroyed/not-found 분기는 모두 native 호출 X (위 호출 8번 + 2번 모두 가드).
+    try std.testing.expectEqual(@as(usize, 0), native.minimize_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.restore_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.maximize_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.unmaximize_calls);
+    try std.testing.expectEqual(@as(usize, 0), native.set_fullscreen_calls);
+}
+
+test "라이프사이클 이벤트 채널 상수: window: prefix" {
+    try std.testing.expectEqualStrings("window:minimize", window.events.minimize);
+    try std.testing.expectEqualStrings("window:restore", window.events.restore);
+    try std.testing.expectEqualStrings("window:maximize", window.events.maximize);
+    try std.testing.expectEqualStrings("window:unmaximize", window.events.unmaximize);
+    try std.testing.expectEqualStrings("window:enter-full-screen", window.events.enter_full_screen);
+    try std.testing.expectEqualStrings("window:leave-full-screen", window.events.leave_full_screen);
+}

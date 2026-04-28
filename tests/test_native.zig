@@ -67,6 +67,18 @@ pub const TestNative = struct {
     // Phase 4-D: 인쇄
     print_to_pdf_calls: usize = 0,
     last_print_path: ?[]const u8 = null,
+
+    // Phase 5: 라이프사이클 제어
+    minimize_calls: usize = 0,
+    restore_calls: usize = 0,
+    maximize_calls: usize = 0,
+    unmaximize_calls: usize = 0,
+    set_fullscreen_calls: usize = 0,
+    last_set_fullscreen_flag: ?bool = null,
+    /// is_*에 대한 stub 반환값.
+    stub_minimized: bool = false,
+    stub_maximized: bool = false,
+    stub_fullscreen: bool = false,
     /// true이면 다음 create_window 호출이 error.NativeFailure 반환 후 자동 리셋.
     fail_next_create: bool = false,
 
@@ -127,6 +139,14 @@ pub const TestNative = struct {
         .set_view_bounds = setViewBounds,
         .set_view_visible = setViewVisible,
         .reorder_view = reorderView,
+        .minimize = minimize,
+        .restore_window = restoreWindow,
+        .maximize = maximize,
+        .unmaximize = unmaximize,
+        .set_fullscreen = setFullscreen,
+        .is_minimized = isMinimized,
+        .is_maximized = isMaximized,
+        .is_fullscreen = isFullscreen,
     };
 
     /// edit_calls의 named 필드 카운트 증가. 잘못된 필드명은 컴파일 에러.
@@ -304,5 +324,41 @@ pub const TestNative = struct {
         self.last_reorder_host_handle = host_handle;
         self.last_reorder_view_handle = view_handle;
         self.last_reorder_index = idx;
+    }
+
+    fn minimize(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.minimize_calls += 1;
+        self.stub_minimized = true;
+    }
+    fn restoreWindow(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.restore_calls += 1;
+        self.stub_minimized = false;
+    }
+    fn maximize(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.maximize_calls += 1;
+        self.stub_maximized = true;
+    }
+    fn unmaximize(ctx: ?*anyopaque, _: u64) void {
+        const self = fromCtx(ctx);
+        self.unmaximize_calls += 1;
+        self.stub_maximized = false;
+    }
+    fn setFullscreen(ctx: ?*anyopaque, _: u64, flag: bool) void {
+        const self = fromCtx(ctx);
+        self.set_fullscreen_calls += 1;
+        self.last_set_fullscreen_flag = flag;
+        self.stub_fullscreen = flag;
+    }
+    fn isMinimized(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_minimized;
+    }
+    fn isMaximized(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_maximized;
+    }
+    fn isFullscreen(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_fullscreen;
     }
 };
