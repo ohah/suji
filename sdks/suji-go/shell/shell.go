@@ -24,3 +24,9 @@ func ShowItemInFolder(path string) string {
 func Beep() string {
 	return suji.Invoke("__core__", `{"cmd":"shell_beep"}`)
 }
+
+// TrashItem moves the file/folder at path to the system trash.
+// Response: `{"success":bool}`.
+func TrashItem(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"shell_trash_item","path":"%s"}`, jsonesc.Full(path)))
+}

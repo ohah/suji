@@ -154,6 +154,26 @@ describe("powerSaveBlocker", () => {
   });
 });
 
+describe("shell.trashItem", () => {
+  test("임시 파일 생성 → trash → 원본 경로 사라짐", async () => {
+    const tmp = `/tmp/suji-trash-${Date.now()}.txt`;
+    fs.writeFileSync(tmp, "hello");
+    expect(fs.existsSync(tmp)).toBe(true);
+
+    const r = await core<{ success: boolean }>({ cmd: "shell_trash_item", path: tmp });
+    expect(r.success).toBe(true);
+    expect(fs.existsSync(tmp)).toBe(false);
+  });
+
+  test("존재하지 않는 경로는 false", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "shell_trash_item",
+      path: "/tmp/suji-trash-nonexistent-xyz",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
 describe("safeStorage (Keychain)", () => {
   const SVC = "Suji-e2e-test";
 

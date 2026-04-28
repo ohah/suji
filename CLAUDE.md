@@ -64,7 +64,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.copy(id) / paste(id) / findInPage(id, "x", .{})  — 편집/검색 (Phase 4-E)
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
-// suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep()
+// suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
 // suji.dialog.showErrorBox("Title", "content")
@@ -100,7 +100,7 @@ suji::export_handlers!(ping);
 // suji::windows::set_zoom_factor(id, 1.2) / open_dev_tools(id) / copy(id) / find_in_page(id, "x", ..)
 // suji::windows::print_to_pdf(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D)
 // suji::clipboard::read_text() / write_text("hi") / clear()
-// suji::shell::open_external("https://...") / show_item_in_folder("/path") / beep()
+// suji::shell::open_external("https://...") / show_item_in_folder("/path") / beep() / trash_item(path)
 // suji::dialog::show_message_box(MessageBoxOpts { message: "Q", ... })
 // suji::dialog::show_open_dialog(r#""properties":["openFile"]"#)
 // suji::dialog::show_error_box("Title", "content")
@@ -134,7 +134,7 @@ var _ = suji.Bind(&App{})
 // import "github.com/ohah/suji-go/clipboard"
 // clipboard.ReadText() / WriteText("hi") / Clear()
 // import "github.com/ohah/suji-go/shell"
-// shell.OpenExternal(url) / ShowItemInFolder(path) / Beep()
+// shell.OpenExternal(url) / ShowItemInFolder(path) / Beep() / TrashItem(path)
 // import "github.com/ohah/suji-go/dialog"
 // dialog.ShowMessageBox(dialog.MessageBoxOpts{Message:"Q", Buttons:[]string{"OK"}})
 // dialog.ShowOpenDialog(`"properties":["openFile"]`) / ShowErrorBox(t, c)
@@ -187,7 +187,7 @@ suji.platform                                                // "macos" | "linux
 
 // import { clipboard, shell, dialog } from '@suji/api';
 // await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard)
-// await shell.openExternal(url) / showItemInFolder(path) / beep()         (macOS NSWorkspace)
+// await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)   (macOS NSWorkspace + NSFileManager)
 // await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert)
 // await dialog.showMessageBox(windowId, options)  — sheet (부모 창 attach, dialog.m)
 // await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel)
@@ -261,7 +261,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 
 // import { clipboard, shell, dialog } from '@suji/node'
 // await clipboard.readText() / writeText("hi")
-// await shell.openExternal(url) / showItemInFolder(path) / beep()
+// await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
 // await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
 // await dialog.showErrorBox(title, content)

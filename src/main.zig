@@ -1438,6 +1438,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"shell_beep\",\"success\":true}}", .{}) catch return null;
         return result;
     }
+    if (std.mem.eql(u8, cmd, "shell_trash_item")) {
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.shellTrashItem(unesc_buf[0..unesc_len])
+        else
+            false;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"shell_trash_item\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
 
     // Screen API — getAllDisplays 결과를 큰 stack 버퍼로 직접 빌드.
     if (std.mem.eql(u8, cmd, "screen_get_all_displays")) {

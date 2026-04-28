@@ -867,6 +867,16 @@ test "clipboard.clear: 인자 없는 cmd" {
     }.run);
 }
 
+test "shell.trashItem: path 필드 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.shell.trashItem("/tmp/x");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"shell_trash_item\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"path\":\"/tmp/x\"") != null);
+        }
+    }.run);
+}
+
 test "shell.openExternal: url 필드 전송" {
     try withInvokeCore(struct {
         fn run() !void {

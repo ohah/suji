@@ -333,6 +333,8 @@ export declare const shell: {
     showItemInFolder(path: string): Promise<boolean>;
     /** 시스템 비프음. */
     beep(): Promise<boolean>;
+    /** 휴지통으로 이동. macOS NSFileManager `trashItemAtURL:`. 실패하면 false. */
+    trashItem(path: string): Promise<boolean>;
 };
 export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
 export interface FsStat {

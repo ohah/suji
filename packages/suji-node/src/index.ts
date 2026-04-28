@@ -522,6 +522,12 @@ export const shell = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_beep' });
     return r.success === true;
   },
+
+  /** 휴지통으로 이동 (macOS NSFileManager `trashItemAtURL:`). 실패하면 false. */
+  async trashItem(path: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'shell_trash_item', path });
+    return r.success === true;
+  },
 };
 
 // ============================================

@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, type InvokeEvent } from './index';
+import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -187,6 +187,19 @@ describe('globalShortcut', () => {
         click: 'click\nwith\\ctrl',
       }),
     );
+  });
+});
+
+describe('shell.trashItem', () => {
+  it('sends shell_trash_item with path + maps success', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await shell.trashItem('/tmp/x')).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"shell_trash_item","path":"/tmp/x"}');
+  });
+
+  it('returns false when success:false', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":false}');
+    expect(await shell.trashItem('/missing')).toBe(false);
   });
 });
 

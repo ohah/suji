@@ -364,6 +364,11 @@ export const shell = {
         const r = await coreCall({ cmd: "shell_beep" });
         return r.success === true;
     },
+    /** 휴지통으로 이동. macOS NSFileManager `trashItemAtURL:`. 실패하면 false. */
+    async trashItem(path) {
+        const r = await coreCall({ cmd: "shell_trash_item", path });
+        return r.success === true;
+    },
 };
 export const fs = {
     async readFile(path) {

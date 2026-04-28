@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -251,6 +251,24 @@ describe("error handling", () => {
     }
 
     (window as any).__suji__ = original;
+  });
+});
+
+describe("shell.trashItem", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("sends shell_trash_item with path + maps success", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await shell.trashItem("/tmp/x")).toBe(true);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "shell_trash_item",
+      path: "/tmp/x",
+    });
+  });
+
+  it("returns false when success:false", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false });
+    expect(await shell.trashItem("/missing")).toBe(false);
   });
 });
 

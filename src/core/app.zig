@@ -708,6 +708,15 @@ pub const shell = struct {
     pub fn beep() ?[]const u8 {
         return coreCmd("shell_beep", "");
     }
+
+    /// 휴지통으로 이동. 응답: `{"success":bool}`.
+    pub fn trashItem(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("shell_trash_item", fields);
+    }
 };
 
 pub const fs = struct {

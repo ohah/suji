@@ -1235,6 +1235,26 @@ pub fn shellBeep() void {
     objc.NSBeep();
 }
 
+/// 휴지통으로 이동 (Electron `shell.trashItem`). 동기 — NSFileManager
+/// `trashItemAtURL:resultingItemURL:error:` BOOL 반환. 존재하지 않는 경로/권한 부족 등
+/// 은 false. resultingItemURL/error는 nil 전달 (caller가 결과 path 필요 없음).
+pub fn shellTrashItem(path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const ns_path = nsStringFromSlice(path) orelse return false;
+
+    const NSURL = getClass("NSURL") orelse return false;
+    const fileUrlFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_url = fileUrlFn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path) orelse return false;
+
+    const NSFileManager = getClass("NSFileManager") orelse return false;
+    const fm = msgSend(NSFileManager, "defaultManager") orelse return false;
+    const trashFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    const ok = trashFn(fm, @ptrCast(objc.sel_registerName("trashItemAtURL:resultingItemURL:error:")), ns_url, null, null);
+    return ok != 0;
+}
+
 // ============================================
 // Screen API — NSScreen (Electron `screen`)
 // ============================================

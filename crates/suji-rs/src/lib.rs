@@ -545,6 +545,15 @@ pub mod shell {
     pub fn beep() -> Option<String> {
         invoke("__core__", r#"{"cmd":"shell_beep"}"#)
     }
+
+    pub(crate) fn trash_item_request(path: &str) -> String {
+        crate::serde_json::json!({ "cmd": "shell_trash_item", "path": path }).to_string()
+    }
+
+    /// 휴지통으로 이동. 응답: `{"success":bool}`.
+    pub fn trash_item(path: &str) -> Option<String> {
+        invoke("__core__", &trash_item_request(path))
+    }
 }
 
 pub mod fs {
@@ -1484,6 +1493,14 @@ mod tests {
 
         let resp_who = whoami_test(serde_json::json!({}));
         assert_eq!(resp_who, serde_json::json!({ "id": 0, "name": null }));
+    }
+
+    #[test]
+    fn shell_trash_item_request_carries_path() {
+        let v: serde_json::Value =
+            serde_json::from_str(&crate::shell::trash_item_request("/tmp/x")).unwrap();
+        assert_eq!(v["cmd"], "shell_trash_item");
+        assert_eq!(v["path"], "/tmp/x");
     }
 
     #[test]
