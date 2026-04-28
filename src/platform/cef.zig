@@ -1376,9 +1376,10 @@ extern "c" const kSecValueData: ?*anyopaque;
 extern "c" const kSecReturnData: ?*anyopaque;
 extern "c" const kSecMatchLimit: ?*anyopaque;
 extern "c" const kSecMatchLimitOne: ?*anyopaque;
+extern "c" const kCFBooleanTrue: ?*anyopaque;
 
-/// CFDictionary helpers — NSDictionary toll-free bridged.
 extern "c" fn SecItemAdd(attributes: ?*anyopaque, result: ?*?*anyopaque) c_int;
+extern "c" fn SecItemUpdate(query: ?*anyopaque, attributes_to_update: ?*anyopaque) c_int;
 extern "c" fn SecItemCopyMatching(query: ?*anyopaque, result: ?*?*anyopaque) c_int;
 extern "c" fn SecItemDelete(query: ?*anyopaque) c_int;
 
@@ -1391,52 +1392,44 @@ const errSecSuccess: c_int = 0;
 const errSecItemNotFound: c_int = -25300;
 const errSecDuplicateItem: c_int = -25299;
 
-/// 4-필드 NSDictionary 빌드 — `+[NSMutableDictionary dictionaryWithObjectsAndKeys:]` 변종.
-/// 마지막 nil 인자가 list terminator. CFDictionary는 NSDictionary와 toll-free bridged.
+/// service/account/class 3개 필드를 가진 NSMutableDictionary (NSDictionary ↔ CFDictionary toll-free bridged).
 fn buildKeychainQuery(class_val: ?*anyopaque, service: []const u8, account: []const u8) ?*anyopaque {
     const NSMutableDictionary = getClass("NSMutableDictionary") orelse return null;
     const dict = msgSend(NSMutableDictionary, "dictionary") orelse return null;
-
-    const set_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    const set_sel = objc.sel_registerName("setObject:forKey:");
-    set_fn(dict, @ptrCast(set_sel), class_val, kSecClass);
-
-    if (nsStringFromSlice(service)) |s| set_fn(dict, @ptrCast(set_sel), s, kSecAttrService);
-    if (nsStringFromSlice(account)) |a| set_fn(dict, @ptrCast(set_sel), a, kSecAttrAccount);
+    msgSendVoid2(dict, "setObject:forKey:", class_val, kSecClass);
+    if (nsStringFromSlice(service)) |s| msgSendVoid2(dict, "setObject:forKey:", s, kSecAttrService);
+    if (nsStringFromSlice(account)) |a| msgSendVoid2(dict, "setObject:forKey:", a, kSecAttrAccount);
     return dict;
 }
 
 /// 키체인에 utf-8 값을 저장. 같은 key가 있으면 update. 성공 = true.
+/// Add → DuplicateItem이면 Update fallback — race-free + 1 syscall (Apple 권장 패턴).
 pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u8) bool {
     if (!comptime is_macos) return false;
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
-
-    // Delete existing entry (idempotent set 보장).
-    _ = SecItemDelete(query);
-
     const data = CFDataCreate(null, value.ptr, @intCast(value.len)) orelse return false;
     defer CFRelease(data);
 
-    const set_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    const set_sel = objc.sel_registerName("setObject:forKey:");
-    set_fn(query, @ptrCast(set_sel), data, kSecValueData);
+    msgSendVoid2(query, "setObject:forKey:", data, kSecValueData);
+    const r = SecItemAdd(query, null);
+    if (r == errSecSuccess) return true;
+    if (r != errSecDuplicateItem) return false;
 
-    return SecItemAdd(query, null) == errSecSuccess;
+    // 이미 존재 — Update. update_attrs는 새 value만 (query는 kSecValueData 없는 lookup용).
+    const NSMutableDictionary = getClass("NSMutableDictionary") orelse return false;
+    const update_attrs = msgSend(NSMutableDictionary, "dictionary") orelse return false;
+    msgSendVoid2(update_attrs, "setObject:forKey:", data, kSecValueData);
+
+    const lookup = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
+    return SecItemUpdate(lookup, update_attrs) == errSecSuccess;
 }
 
 /// 키체인에서 utf-8 값 read. out_buf에 복사 후 length 반환. 못 찾으면 빈 slice.
 pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) []const u8 {
     if (!comptime is_macos) return out_buf[0..0];
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return out_buf[0..0];
-
-    const set_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    const set_sel = objc.sel_registerName("setObject:forKey:");
-    // kCFBooleanTrue 대신 NSNumber(YES) — toll-free bridged.
-    const NSNumber = getClass("NSNumber") orelse return out_buf[0..0];
-    const yes_fn: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
-    const yes_obj = yes_fn(NSNumber, @ptrCast(objc.sel_registerName("numberWithBool:")), 1) orelse return out_buf[0..0];
-    set_fn(query, @ptrCast(set_sel), yes_obj, kSecReturnData);
-    set_fn(query, @ptrCast(set_sel), kSecMatchLimitOne, kSecMatchLimit);
+    msgSendVoid2(query, "setObject:forKey:", kCFBooleanTrue, kSecReturnData);
+    msgSendVoid2(query, "setObject:forKey:", kSecMatchLimitOne, kSecMatchLimit);
 
     var result: ?*anyopaque = null;
     if (SecItemCopyMatching(query, &result) != errSecSuccess) return out_buf[0..0];
@@ -4640,6 +4633,13 @@ fn msgSendVoid1(target: ?*anyopaque, sel_name: [:0]const u8, arg: ?*anyopaque) v
     const sel = objc.sel_registerName(sel_name.ptr);
     const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     func(target, @ptrCast(sel), arg);
+}
+
+/// 2-arg pointer 버전 — `setObject:forKey:` (NSDictionary) 등 (object, key) 시그니처 setter용.
+fn msgSendVoid2(target: ?*anyopaque, sel_name: [:0]const u8, a1: ?*anyopaque, a2: ?*anyopaque) void {
+    const sel = objc.sel_registerName(sel_name.ptr);
+    const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    func(target, @ptrCast(sel), a1, a2);
 }
 
 /// `[ns_win performSelector:@selector(makeKeyAndOrderFront:) withObject:nil afterDelay:0]`.
