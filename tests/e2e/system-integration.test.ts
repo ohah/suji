@@ -324,6 +324,26 @@ describe("nativeTheme.shouldUseDarkColors", () => {
   });
 });
 
+describe("nativeTheme.setThemeSource", () => {
+  test("light → dark → system round-trip + invalid은 false", async () => {
+    const light = await core<{ success: boolean }>({ cmd: "native_theme_set_source", source: "light" });
+    expect(light.success).toBe(true);
+    const lightDark = await core<{ dark: boolean }>({ cmd: "native_theme_should_use_dark_colors" });
+    expect(lightDark.dark).toBe(false);
+
+    const dark = await core<{ success: boolean }>({ cmd: "native_theme_set_source", source: "dark" });
+    expect(dark.success).toBe(true);
+    const darkDark = await core<{ dark: boolean }>({ cmd: "native_theme_should_use_dark_colors" });
+    expect(darkDark.dark).toBe(true);
+
+    const system = await core<{ success: boolean }>({ cmd: "native_theme_set_source", source: "system" });
+    expect(system.success).toBe(true);
+
+    const invalid = await core<{ success: boolean }>({ cmd: "native_theme_set_source", source: "neon" });
+    expect(invalid.success).toBe(false);
+  });
+});
+
 describe("screen.getCursorScreenPoint", () => {
   test("x/y 숫자 필드 반환 (NSEvent.mouseLocation)", async () => {
     const r = await core<{ x: number; y: number }>({ cmd: "screen_get_cursor_point" });

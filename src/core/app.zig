@@ -858,6 +858,15 @@ pub const nativeTheme = struct {
     pub fn shouldUseDarkColors() ?[]const u8 {
         return coreCmd("native_theme_should_use_dark_colors", "");
     }
+
+    /// "light"|"dark"|"system" 강제. 응답: `{"success":bool}` (잘못된 값 false).
+    pub fn setThemeSource(source: []const u8) ?[]const u8 {
+        var s_buf: [32]u8 = undefined;
+        const s_n = util.escapeJsonStrFull(source, &s_buf) orelse return null;
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"source\":\"{s}\"", .{s_buf[0..s_n]}) catch return null;
+        return coreCmd("native_theme_set_source", fields);
+    }
 };
 
 pub const fs = struct {

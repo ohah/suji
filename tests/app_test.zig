@@ -944,6 +944,16 @@ test "nativeTheme.shouldUseDarkColors: 인자 없는 cmd" {
     }.run);
 }
 
+test "nativeTheme.setThemeSource: source 필드 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.nativeTheme.setThemeSource("dark");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"native_theme_set_source\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"source\":\"dark\"") != null);
+        }
+    }.run);
+}
+
 test "screen.getCursorScreenPoint: 인자 없는 cmd" {
     try withInvokeCore(struct {
         fn run() !void {

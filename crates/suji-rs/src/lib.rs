@@ -622,11 +622,22 @@ pub mod shell {
 }
 
 pub mod native_theme {
-    use crate::invoke;
+    use crate::{escape_json_full, invoke};
 
     /// 시스템 다크 모드 여부 raw JSON. `{"dark":bool}`.
     pub fn should_use_dark_colors() -> Option<String> {
         invoke("__core__", r#"{"cmd":"native_theme_should_use_dark_colors"}"#)
+    }
+
+    /// "light"|"dark"|"system" 강제. raw JSON: `{"success":bool}`.
+    pub fn set_theme_source(source: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"native_theme_set_source","source":"{}"}}"#,
+                escape_json_full(source)
+            ),
+        )
     }
 }
 

@@ -744,12 +744,22 @@ export const shell = {
   },
 };
 
+export type ThemeSource = "system" | "light" | "dark";
+
 export const nativeTheme = {
   /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).
    *  macOS NSApp.effectiveAppearance.name이 Dark 계열이면 true. */
   async shouldUseDarkColors(): Promise<boolean> {
     const r = await coreCall<{ dark: boolean }>({ cmd: "native_theme_should_use_dark_colors" });
     return r.dark === true;
+  },
+
+  /** `themeSource = "light" | "dark" | "system"` setter (Electron 동등).
+   *  system은 OS 따름 (NSApp.appearance = nil), light/dark는 NSAppearance 강제.
+   *  잘못된 값은 false. */
+  async setThemeSource(source: ThemeSource): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "native_theme_set_source", source });
+    return r.success === true;
   },
 };
 
@@ -1129,6 +1139,12 @@ export const screen = {
   async getDisplayNearestPoint(point: { x: number; y: number }): Promise<number> {
     const r = await coreCall<{ index: number }>({ cmd: "screen_get_display_nearest_point", x: point.x, y: point.y });
     return r.index;
+  },
+
+  /** Primary display 객체 반환 (없으면 null) — getAllDisplays.find(isPrimary) wrapper. */
+  async getPrimaryDisplay(): Promise<Display | null> {
+    const all = await this.getAllDisplays();
+    return all.find((d) => d.isPrimary) ?? all[0] ?? null;
   },
 };
 

@@ -1532,6 +1532,35 @@ pub fn nativeThemeIsDark() bool {
     return std.mem.indexOf(u8, name, "Dark") != null;
 }
 
+/// nativeTheme.themeSource 강제 (Electron `nativeTheme.themeSource = "light"|"dark"|"system"`).
+/// system은 OS 설정 따름 (NSApp.appearance = nil), 그 외는 NSAppearance 명시.
+/// 잘못된 source는 false. macOS 10.14+.
+pub fn nativeThemeSetSource(source: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const setApFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void =
+        @ptrCast(&objc.objc_msgSend);
+
+    if (std.mem.eql(u8, source, "system")) {
+        setApFn(app, @ptrCast(objc.sel_registerName("setAppearance:")), null);
+        return true;
+    }
+    const name_cstr: [*:0]const u8 = if (std.mem.eql(u8, source, "dark"))
+        "NSAppearanceNameDarkAqua"
+    else if (std.mem.eql(u8, source, "light"))
+        "NSAppearanceNameAqua"
+    else
+        return false;
+    const NSAppearance = getClass("NSAppearance") orelse return false;
+    const ns_name = nsStringFromCstr(name_cstr) orelse return false;
+    const namedFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const appearance = namedFn(NSAppearance, @ptrCast(objc.sel_registerName("appearanceNamed:")), ns_name) orelse return false;
+    setApFn(app, @ptrCast(objc.sel_registerName("setAppearance:")), appearance);
+    return true;
+}
+
 /// 마우스 포인터 화면 좌표 (Electron `screen.getCursorScreenPoint`).
 /// macOS는 bottom-up 좌표계 (NSEvent.mouseLocation) — y는 main display height에서 반전 필요할 수
 /// 있음. caller가 필요 시 변환.

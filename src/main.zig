@@ -1512,6 +1512,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{cef.nativeThemeIsDark()},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "native_theme_set_source")) {
+        const source = util.extractJsonString(req_clean, "source") orelse "system";
+        const ok = cef.nativeThemeSetSource(source);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"native_theme_set_source\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "screen_get_cursor_point")) {
         const p = cef.screenGetCursorPoint();
         return std.fmt.bufPrint(

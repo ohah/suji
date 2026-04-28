@@ -385,10 +385,15 @@ export declare const shell: {
      *  존재하지 않는 경로는 false. macOS NSWorkspace `openURL:` (file://). */
     openPath(path: string): Promise<boolean>;
 };
+export type ThemeSource = "system" | "light" | "dark";
 export declare const nativeTheme: {
     /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).
      *  macOS NSApp.effectiveAppearance.name이 Dark 계열이면 true. */
     shouldUseDarkColors(): Promise<boolean>;
+    /** `themeSource = "light" | "dark" | "system"` setter (Electron 동등).
+     *  system은 OS 따름 (NSApp.appearance = nil), light/dark는 NSAppearance 강제.
+     *  잘못된 값은 false. */
+    setThemeSource(source: ThemeSource): Promise<boolean>;
 };
 export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
 export interface FsStat {
@@ -548,6 +553,8 @@ export declare const screen: {
         x: number;
         y: number;
     }): Promise<number>;
+    /** Primary display 객체 반환 (없으면 null) — getAllDisplays.find(isPrimary) wrapper. */
+    getPrimaryDisplay(): Promise<Display | null>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {

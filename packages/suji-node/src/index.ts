@@ -626,11 +626,19 @@ export const shell = {
   },
 };
 
+export type ThemeSource = 'system' | 'light' | 'dark';
+
 export const nativeTheme = {
   /** 시스템 다크 모드 활성 여부 (macOS NSApp.effectiveAppearance). */
   async shouldUseDarkColors(): Promise<boolean> {
     const r = await invoke<{ dark: boolean }>('__core__', { cmd: 'native_theme_should_use_dark_colors' });
     return r.dark === true;
+  },
+
+  /** "light"|"dark"|"system" 강제. */
+  async setThemeSource(source: ThemeSource): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'native_theme_set_source', source });
+    return r.success === true;
   },
 };
 
@@ -965,6 +973,12 @@ export const screen = {
   async getDisplayNearestPoint(point: { x: number; y: number }): Promise<number> {
     const r = await invoke<{ index: number }>('__core__', { cmd: 'screen_get_display_nearest_point', x: point.x, y: point.y });
     return r.index;
+  },
+
+  /** Primary display (없으면 null). */
+  async getPrimaryDisplay(): Promise<Display | null> {
+    const all = await this.getAllDisplays();
+    return all.find((d) => d.isPrimary) ?? all[0] ?? null;
   },
 };
 

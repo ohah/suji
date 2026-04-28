@@ -1027,6 +1027,28 @@ test "app.getPath IPC — main.zig dispatch + cef.zig 함수 + 7 키" {
     }
 }
 
+test "nativeTheme.setThemeSource IPC + cef.zig 함수" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"native_theme_set_source\"",
+        "cef.nativeThemeSetSource",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn nativeThemeSetSource",
+        "NSAppearanceNameDarkAqua",
+        "NSAppearanceNameAqua",
+        "setAppearance:",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
