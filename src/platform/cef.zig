@@ -321,7 +321,8 @@ pub const CefNative = struct {
     client: c.cef_client_t = undefined,
     /// WindowManager의 native_handle (= CEF browser identifier를 u64로 캐스팅) → (browser, NSWindow).
     browsers: std.AutoHashMap(u64, BrowserEntry),
-    /// opts.url이 null일 때 사용. "" 이면 CEF는 about:blank 수준의 빈 페이지를 로드.
+    /// opts.url이 null일 때 사용. 빈 문자열이면 createWindow의 setUrlOrBlank가 about:blank로
+    /// fallback 처리 (CEF는 빈 URL이면 페이지 로드 skip — 라이프사이클 이벤트 미발화).
     default_url: [:0]const u8 = "",
 
     pub fn init(allocator: std.mem.Allocator) CefNative {
@@ -462,14 +463,8 @@ pub const CefNative = struct {
             .height = @intCast(opts.bounds.height),
         };
 
-        // CEF는 빈 URL이면 페이지 로드 자체를 skip → OnLoadEnd 미발화. about:blank로
-        // fallback해서 ready-to-show / page-title-updated 등 라이프사이클 이벤트 보장.
         var cef_url: c.cef_string_t = .{};
-        if (url_z.len > 0) {
-            setCefString(&cef_url, url_z);
-        } else {
-            setCefString(&cef_url, "about:blank");
-        }
+        setUrlOrBlank(&cef_url, url_z);
 
         var browser_settings: c.cef_browser_settings_t = undefined;
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
@@ -610,14 +605,8 @@ pub const CefNative = struct {
         });
         setCefString(&window_info.window_name, title_z);
 
-        // CEF는 빈 URL이면 페이지 로드 자체를 skip → OnLoadEnd 미발화. about:blank로
-        // fallback해서 ready-to-show / page-title-updated 등 라이프사이클 이벤트 보장.
         var cef_url: c.cef_string_t = .{};
-        if (url_z.len > 0) {
-            setCefString(&cef_url, url_z);
-        } else {
-            setCefString(&cef_url, "about:blank");
-        }
+        setUrlOrBlank(&cef_url, url_z);
 
         var browser_settings: c.cef_browser_settings_t = undefined;
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
@@ -2379,6 +2368,14 @@ fn setCefString(dest: *c.cef_string_t, src: []const u8) void {
     _ = c.cef_string_utf8_to_utf16(src.ptr, src.len, dest);
 }
 
+/// CEF URL fallback — 빈 url은 페이지 로드 skip → OnLoadEnd/OnTitleChange 미발화로 이어져
+/// `window:ready-to-show` / `page-title-updated` 라이프사이클 이벤트가 안 옴. about:blank
+/// 로 강제해 일관 동작 보장. (`page-title-updated`가 "about:blank" 페이로드로 1회 발화 —
+/// 사용자 코드가 필요하면 listener에서 필터.)
+fn setUrlOrBlank(dest: *c.cef_string_t, url_z: []const u8) void {
+    setCefString(dest, if (url_z.len > 0) url_z else "about:blank");
+}
+
 /// JSON에서 "cmd":"value" 추출
 fn extractCmd(json: []const u8) ?[]const u8 {
     const pattern = "\"cmd\":\"";
@@ -2625,8 +2622,8 @@ fn onAddressChange(
 }
 
 /// 문서 `<title>` 최대 길이 (UTF-8 바이트). 초과 시 cefStringToUtf8가 truncate.
-/// 256은 일반 페이지 title에 충분 — 여기서 escape 후 worst-case ~1.5KB까지 부풀고
-/// main.zig의 emitToBus 4KB 버퍼와 함께 페이로드(`{windowId,title}`) 안전하게 수용.
+/// main.zig의 windowTitleChangeHandler가 이 상수에서 자체 escape 버퍼(`MAX_TITLE_BYTES * 6 + 64`)
+/// 를 도출해 emitBusRaw로 직행 — 256이면 worst-case escape 후 ~1.5KB.
 pub const MAX_TITLE_BYTES: usize = 256;
 
 /// 문서 `<title>`이 변경될 때 호출. payload UTF-8 변환 후 main.zig handler로 forward.

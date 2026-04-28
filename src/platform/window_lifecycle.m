@@ -11,9 +11,9 @@
 //   - delegate methods: NSNotification main run loop dispatch
 // 별도 lock 없이 안전.
 //
-// maximize/unmaximize는 NSWindow에 직접적인 delegate 메서드가 없어 windowDidResize에서
-// isZoomed 상태 변화로 감지 (Electron도 동일 방식). zoom: 호출 또는 traffic light green
-// 클릭(legacy zoom 모드) 시 발화. macOS 11+ green은 fullscreen이라 거의 fullscreen 이벤트로 옴.
+// maximize/unmaximize는 NSWindow에 zoom 완료 delegate가 없어(`windowShouldZoom:toFrame:`만 존재)
+// `suji_window_lifecycle_maximize/unmaximize` API 호출 시점에 직접 emit. macOS 11+에서
+// traffic light green = fullscreen으로 매핑되어 legacy zoom 경로는 사실상 미사용.
 
 #import <Foundation/Foundation.h>
 #import <AppKit/AppKit.h>
@@ -29,11 +29,6 @@ typedef struct {
     double last_width;
     double last_height;
     BOOL has_last;
-    // attach 시점 baseline 캡처 → 첫 windowDidResize에서도 transition 정확히 감지.
-    BOOL last_zoomed;
-    // 사용자 드래그 중에는 zoom 상태가 바뀔 수 없음. live resize 동안 isZoomed
-    // 호출(frame/visibleFrame 비교)을 스킵해 60Hz 핫패스에서 ObjC 콜 제거.
-    BOOL in_live_resize;
 } WindowEntry;
 
 static WindowEntry g_windows[SUJI_WINDOW_LIFECYCLE_MAX];
@@ -69,13 +64,7 @@ static WindowEntry *entry_for_window(NSWindow *win) {
 - (void)windowDidResize:(NSNotification *)note {
     NSWindow *win = note.object;
     WindowEntry *e = entry_for_window(win);
-    if (e == NULL) return;
-
-    // maximize/unmaximize는 우리 API 호출(suji_window_lifecycle_maximize)에서 직접
-    // emit — NSWindow zoom delegate가 없어 windowDidResize 기반 검출은 신뢰 불가.
-    // last_zoomed는 baseline만 유지 (traffic light/programmatic zoom 추적용 historical).
-
-    if (g_resized_cb == NULL) return;
+    if (e == NULL || g_resized_cb == NULL) return;
     NSRect f = win.frame;
     if (e->has_last && e->last_x == f.origin.x && e->last_y == f.origin.y &&
         e->last_width == f.size.width && e->last_height == f.size.height) return;
@@ -83,22 +72,6 @@ static WindowEntry *entry_for_window(NSWindow *win) {
     e->last_width = f.size.width; e->last_height = f.size.height;
     e->has_last = YES;
     g_resized_cb(e->handle, f.origin.x, f.origin.y, f.size.width, f.size.height);
-}
-
-- (void)windowWillStartLiveResize:(NSNotification *)note {
-    WindowEntry *e = entry_for_window(note.object);
-    if (e == NULL) return;
-    e->in_live_resize = YES;
-}
-
-- (void)windowDidEndLiveResize:(NSNotification *)note {
-    NSWindow *win = note.object;
-    WindowEntry *e = entry_for_window(win);
-    if (e == NULL) return;
-    e->in_live_resize = NO;
-    // 드래그 종료 시 한 번만 zoom 상태 재평가 (사용자 드래그로 zoom 변경되진 않지만
-    // baseline은 최신화). drag-zoomed-window를 표준 크기로 되돌리는 케이스 등 안전장치.
-    e->last_zoomed = [win isZoomed];
 }
 
 - (void)windowDidMove:(NSNotification *)note {
@@ -213,10 +186,7 @@ int suji_window_lifecycle_attach(void *ns_window, uint64_t handle) {
     e->ns_window = ns_window;
     e->handle = handle;
     e->has_last = NO;
-    e->in_live_resize = NO;
     NSWindow *win = (__bridge NSWindow *)ns_window;
-    // attach 시점에 zoom baseline 캡처 — 첫 windowDidResize에서도 transition 정확.
-    e->last_zoomed = [win isZoomed];
     // toggleFullScreen이 동작하려면 collectionBehavior에 FullScreenPrimary 비트 필수.
     // CEF 기본 NSWindow는 0x0 — set 안 하면 toggleFullScreen은 no-op.
     [win setCollectionBehavior:[win collectionBehavior] | NSWindowCollectionBehaviorFullScreenPrimary];
@@ -252,12 +222,10 @@ void suji_window_lifecycle_deminiaturize(void *ns_window) {
     [win deminiaturize:nil];
 }
 
-/// 이미 zoomed면 no-op. NSWindow.zoom:은 toggle이라 사전 검사 필수.
-/// `[win zoom:]`은 windowWillStartLiveResize → 여러 windowDidResize → windowDidEndLiveResize
-/// 시퀀스를 발화. 우리는 windowDidResize의 isZoomed 전이로 검출하지만 in_live_resize 가드에
-/// 막힘 + zoom 애니메이션 끝까지 isZoomed=true 안 됨. NSWindow에 zoom 완료 delegate가 없어
-/// (windowShouldZoom:toFrame:만 있음) 우리 API 호출 시 직접 cb 발화 + last_zoomed 갱신.
-/// traffic light green은 macOS 11+ fullscreen으로 매핑되어 사실상 deprecated path.
+/// `[win zoom:]`은 NSWindowDelegate에 zoom 완료 메서드가 없어 (`windowShouldZoom:toFrame:`만
+/// 존재) windowDidResize 기반 검출은 in_live_resize/애니메이션 race로 신뢰 불가. API 호출
+/// 시점에 직접 cb 발화. traffic light green = macOS 11+에서 fullscreen으로 매핑되어 legacy
+/// zoom 경로는 사실상 미사용 (Option-click legacy zoom은 미커버 — Phase 5 scope 외).
 void suji_window_lifecycle_maximize(void *ns_window) {
     if (ns_window == NULL) return;
     NSWindow *win = (__bridge NSWindow *)ns_window;
@@ -265,7 +233,6 @@ void suji_window_lifecycle_maximize(void *ns_window) {
     [win zoom:nil];
     WindowEntry *e = entry_for_window(win);
     if (e == NULL) return;
-    e->last_zoomed = YES;
     if (g_maximize_cb) g_maximize_cb(e->handle);
 }
 
@@ -276,7 +243,6 @@ void suji_window_lifecycle_unmaximize(void *ns_window) {
     [win zoom:nil];
     WindowEntry *e = entry_for_window(win);
     if (e == NULL) return;
-    e->last_zoomed = NO;
     if (g_unmaximize_cb) g_unmaximize_cb(e->handle);
 }
 

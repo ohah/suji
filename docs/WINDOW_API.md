@@ -1850,3 +1850,24 @@ CEF IPC를 통한 프론트엔드 ↔ WindowManager 통합 테스트.
 - suji:window.close IPC → 윈도우 닫힘
 - suji:window.fromName IPC → 올바른 windowId 반환
 ```
+
+## Phase 5 라이프사이클 — E2E 미커버 케이스 (단위 테스트로 cover)
+
+`tests/e2e/window-lifecycle-events.test.ts`에서 **13 pass / 4 skip / 0 fail**.
+4개 skip은 e2e harness 환경 한계로 검증 불가 — 모두 단위 테스트가 동작 검증을 cover.
+
+| Skip 케이스 | 사유 | 단위 cover |
+|---|---|---|
+| `window:focus` / `window:blur` (collect) | macOS app activation 의존 — headless puppeteer + 비활성 NSApp에서 key window 변경 비결정적 | `tests/window_manager_test.zig` 4 typed callback 분리 (focus/blur 채널 emit 정적 검증) |
+| `window:will-resize` (setBounds 트리거) | `[NSWindow setFrame:display:]`은 docs와 달리 `windowWillResize:` 호출이 inconsistent. user drag만 안정 발화 — puppeteer로 native 타이틀바 드래그 simulate 불가. | `tests/event_sink_test.zig` Phase 5 applyWillResize 통합 5케이스(prevent/no-prevent/multi/general/cancelable+general) + `tests/window_manager_test.zig` payload shape/0크기/큰값/handle resolve/sink-없음 |
+| `window:enter-full-screen` / `leave-full-screen` (toggleFullScreen) | `NSWindowCollectionBehaviorFullScreenPrimary` + `makeKeyAndOrderFront` 적용했지만 e2e 환경(headless + 비활성 NSApp)에서 styleMask에 `NSWindowStyleMaskFullScreen` 비트 set되지 않음. 실 user driven은 manual / actual desktop 환경에서 검증. | `tests/window_manager_test.zig` setFullscreen flag 전파 + 게터 상태 + destroyed/unknown 가드, 채널 상수 |
+| `window:page-title-updated` escape (이모지/backslash) | IPC `execute_javascript` wire-level escape (puppeteer → JSON → main.zig → CEF JS exec)에서 backslash/`\u{}` surrogate-pair가 `OnTitleChange`를 trigger 안 함. CEF 경계 케이스. | 단순 ASCII title의 `page-title-updated` 발화는 e2e pass. payload escape 안전성은 `tests/util_test.zig`의 `escapeJsonStrFull` 단위 테스트 cover. |
+
+**알려진 부수 효과** (검증 안 된 케이스 아님, 동작 차이로 분류):
+- **빈 URL `create_window`은 `about:blank` 자동 로드** — CEF가 빈 URL이면 페이지 로드를
+  skip해 `OnLoadEnd`가 발화 안 됨. about:blank fallback으로 라이프사이클 이벤트 일관성
+  보장. `page-title-updated`가 `"about:blank"` 페이로드로 1회 발화 — 사용자 코드가
+  필요하면 listener에서 필터.
+- **legacy zoom (Option+green) 미커버** — macOS 11+ traffic light green = fullscreen으로
+  매핑되어 `[win zoom:]` 경로는 사실상 우리 API 호출만. Option+green으로 발생하는 zoom은
+  `window:maximize` emit 대상 아님 (Phase 5 scope 외 — 단위 테스트도 cover X).
