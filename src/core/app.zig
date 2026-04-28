@@ -775,6 +775,27 @@ pub const clipboard = struct {
     pub fn clear() ?[]const u8 {
         return coreCmd("clipboard_clear", "");
     }
+
+    /// HTML 읽기. 응답: `{"html":"..."}`.
+    pub fn readHtml() ?[]const u8 {
+        return coreCmd("clipboard_read_html", "");
+    }
+
+    /// HTML 쓰기. 응답: `{"success":bool}`.
+    pub fn writeHtml(html: []const u8) ?[]const u8 {
+        var t_buf: [16384]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(html, &t_buf) orelse return null;
+        var fields_buf: [16400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"html\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
+        return coreCmd("clipboard_write_html", fields);
+    }
+};
+
+pub const powerMonitor = struct {
+    /// 시스템 유휴 시간 (초). 응답: `{"seconds":f64}`.
+    pub fn getSystemIdleTime() ?[]const u8 {
+        return coreCmd("power_monitor_get_idle_time", "");
+    }
 };
 
 pub const shell = struct {

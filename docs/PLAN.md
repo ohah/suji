@@ -1320,7 +1320,7 @@ suji build → 결과물:
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ❌ (분량 중 — sqlite plugin) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
-| 클립보드 — 이미지/HTML | `clipboard.readImage` / `writeImage` / `readHTML` | -- | ❌ (현재 plain text만 — NSPasteboard `public.png` / `public.html` UTI 후속) |
+| 클립보드 — 이미지/HTML | `clipboard.readImage` / `writeImage` / `readHTML` | -- | 🟡 HTML ✅ (`clipboard.readHTML`/`writeHTML` — NSPasteboard `public.html` UTI). 이미지 (`public.png` / `public.tiff`)는 후속 |
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
 | Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ❌ (현재 menu는 menubar/tray만 — 임의 위치 popup은 NSMenu `popUpMenuPositioningItem:atLocation:inView:`) |
 | 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |
@@ -1344,7 +1344,7 @@ suji build → 결과물:
 | 다크/라이트 테마 감지 | `nativeTheme.shouldUseDarkColors` + `updated` 이벤트 | `theme` 플러그인 | 🟡 macOS — `nativeTheme.shouldUseDarkColors()` (NSApp.effectiveAppearance.name 검사) ✅, `updated` 이벤트 (KVO)는 후속 |
 | dock 진행률 표시 | `BrowserWindow.setProgressBar(0..1)` | -- | ❌ (macOS NSDockTile setBadgeLabel "" + custom view, Win/Linux 별도) |
 | 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | 🟡 `screen.getCursorScreenPoint()` ✅ (NSEvent.mouseLocation, bottom-up). `getDisplayNearestPoint`는 후속 |
-| 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | ❌ (macOS IOHIDIdleTime) |
+| 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ (`CGEventSourceSecondsSinceLastEventType`, 초). `getSystemIdleState(threshold)` (active/idle/locked enum)는 후속 |
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
 | 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
 | nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | ❌ (CGImage / NSImage wrapping) |

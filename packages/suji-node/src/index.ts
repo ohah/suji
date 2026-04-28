@@ -562,6 +562,26 @@ export const clipboard = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_clear' });
     return r.success === true;
   },
+
+  /** HTML read (NSPasteboard `public.html`). */
+  async readHTML(): Promise<string> {
+    const r = await invoke<{ html: string }>('__core__', { cmd: 'clipboard_read_html' });
+    return r.html ?? '';
+  },
+
+  /** HTML write — 다른 type도 함께 지움. */
+  async writeHTML(html: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_html', html });
+    return r.success === true;
+  },
+};
+
+export const powerMonitor = {
+  /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋. */
+  async getSystemIdleTime(): Promise<number> {
+    const r = await invoke<{ seconds: number }>('__core__', { cmd: 'power_monitor_get_idle_time' });
+    return r.seconds;
+  },
 };
 
 export const shell = {

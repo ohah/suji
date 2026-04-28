@@ -66,6 +66,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.copy(id) / paste(id) / findInPage(id, "x", .{})  — 편집/검색 (Phase 4-E)
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
+//   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip
+// suji.powerMonitor.getSystemIdleTime()  — 유휴 초 (CGEventSource)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors()  — macOS NSApp.effectiveAppearance

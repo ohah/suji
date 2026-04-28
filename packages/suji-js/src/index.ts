@@ -480,6 +480,15 @@ export const windows = {
 // ============================================
 // 현재 macOS만 지원 (NSPasteboard). Linux/Windows는 graceful no-op (read는 빈 문자열).
 
+export const powerMonitor = {
+  /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋 (CGEventSource).
+   *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
+  async getSystemIdleTime(): Promise<number> {
+    const r = await coreCall<{ seconds: number }>({ cmd: "power_monitor_get_idle_time" });
+    return r.seconds;
+  },
+};
+
 export const clipboard = {
   /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
   async readText(): Promise<string> {
@@ -496,6 +505,18 @@ export const clipboard = {
   /** 클립보드 비우기. */
   async clear(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_clear" });
+    return r.success === true;
+  },
+
+  /** HTML read (NSPasteboard `public.html`). 비어 있거나 non-html이면 빈 문자열. */
+  async readHTML(): Promise<string> {
+    const r = await coreCall<{ html: string }>({ cmd: "clipboard_read_html" });
+    return r.html ?? "";
+  },
+
+  /** HTML write — write 시 다른 type (text 등)도 함께 지움. */
+  async writeHTML(html: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_html", html });
     return r.success === true;
   },
 };

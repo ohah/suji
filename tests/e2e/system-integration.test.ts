@@ -196,6 +196,35 @@ describe("app.getPath", () => {
   });
 });
 
+describe("clipboard HTML", () => {
+  test("HTML write → read round-trip", async () => {
+    const html = "<b>hello <i>suji</i></b>";
+    const w = await core<{ success: boolean }>({ cmd: "clipboard_write_html", html });
+    expect(w.success).toBe(true);
+
+    const r = await core<{ html: string }>({ cmd: "clipboard_read_html" });
+    expect(r.html).toBe(html);
+
+    await core({ cmd: "clipboard_clear" });
+  });
+
+  test("escape — 따옴표/줄바꿈 포함 round-trip", async () => {
+    const html = `<a href="x">"quoted"</a>\n<br/>`;
+    await core({ cmd: "clipboard_write_html", html });
+    const r = await core<{ html: string }>({ cmd: "clipboard_read_html" });
+    expect(r.html).toBe(html);
+    await core({ cmd: "clipboard_clear" });
+  });
+});
+
+describe("powerMonitor.getSystemIdleTime", () => {
+  test("seconds 숫자 필드 (>= 0)", async () => {
+    const r = await core<{ seconds: number }>({ cmd: "power_monitor_get_idle_time" });
+    expect(typeof r.seconds).toBe("number");
+    expect(r.seconds).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe("shell.openPath", () => {
   test("존재하는 경로 → success:true (실제 앱 열림은 환경 의존)", async () => {
     const r = await core<{ success: boolean }>({ cmd: "shell_open_path", path: "/tmp" });

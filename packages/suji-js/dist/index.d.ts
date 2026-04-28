@@ -270,6 +270,11 @@ export declare const windows: {
     /** host의 child view id들을 z-order 순서로 조회 (0=bottom, 마지막=top) */
     getChildViews(hostId: number): Promise<GetChildViewsResponse>;
 };
+export declare const powerMonitor: {
+    /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋 (CGEventSource).
+     *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
+    getSystemIdleTime(): Promise<number>;
+};
 export declare const clipboard: {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
     readText(): Promise<string>;
@@ -277,6 +282,10 @@ export declare const clipboard: {
     writeText(text: string): Promise<boolean>;
     /** 클립보드 비우기. */
     clear(): Promise<boolean>;
+    /** HTML read (NSPasteboard `public.html`). 비어 있거나 non-html이면 빈 문자열. */
+    readHTML(): Promise<string>;
+    /** HTML write — write 시 다른 type (text 등)도 함께 지움. */
+    writeHTML(html: string): Promise<boolean>;
 };
 export interface NotificationOptions {
     title: string;

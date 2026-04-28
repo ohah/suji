@@ -877,6 +877,28 @@ test "shell.trashItem: path 필드 전송" {
     }.run);
 }
 
+test "clipboard.readHtml / writeHtml IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.readHtml();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_read_html\"") != null);
+
+            _ = app_mod.clipboard.writeHtml("<b>hi</b>");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_write_html\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "<b>hi</b>") != null);
+        }
+    }.run);
+}
+
+test "powerMonitor.getSystemIdleTime IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.powerMonitor.getSystemIdleTime();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"power_monitor_get_idle_time\"") != null);
+        }
+    }.run);
+}
+
 test "shell.openPath: path 필드 + cmd 전송" {
     try withInvokeCore(struct {
         fn run() !void {

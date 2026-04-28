@@ -26,3 +26,14 @@ func WriteText(text string) string {
 func Clear() string {
 	return suji.Invoke("__core__", `{"cmd":"clipboard_clear"}`)
 }
+
+// ReadHTML reads HTML from clipboard. Response: `{"html":"..."}`.
+func ReadHTML() string {
+	return suji.Invoke("__core__", `{"cmd":"clipboard_read_html"}`)
+}
+
+// WriteHTML writes HTML to clipboard. Other types are cleared.
+// Response: `{"success":bool}`.
+func WriteHTML(html string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_html","html":"%s"}`, jsonesc.Full(html)))
+}

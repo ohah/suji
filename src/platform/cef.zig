@@ -1184,6 +1184,61 @@ pub fn clipboardClear() void {
     _ = msgSend(pb, "clearContents");
 }
 
+const PASTEBOARD_TYPE_HTML: [*:0]const u8 = "public.html";
+
+/// 클립보드 HTML 읽기 (Electron `clipboard.readHTML`). 동일 cap (CLIPBOARD_MAX_TEXT).
+pub fn clipboardReadHtml(buf: []u8) []const u8 {
+    if (!comptime is_macos) return buf[0..0];
+    const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return buf[0..0];
+    const NSString = getClass("NSString") orelse return buf[0..0];
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_HTML) orelse return buf[0..0];
+    const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_str = stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) orelse return buf[0..0];
+    return nsStringToUtf8Buf(ns_str, buf);
+}
+
+/// 클립보드 HTML 쓰기 (Electron `clipboard.writeHTML`). 다른 type (text)도 함께 지움.
+pub fn clipboardWriteHtml(html: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    _ = msgSend(pb, "clearContents");
+
+    var stack_buf: [CLIPBOARD_MAX_TEXT]u8 = undefined;
+    if (html.len + 1 > stack_buf.len) return false;
+    @memcpy(stack_buf[0..html.len], html);
+    stack_buf[html.len] = 0;
+    const cstr: [*:0]const u8 = @ptrCast(&stack_buf);
+
+    const NSString = getClass("NSString") orelse return false;
+    const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_html = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr) orelse return false;
+    const ns_type = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), PASTEBOARD_TYPE_HTML) orelse return false;
+    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_html, ns_type) != 0;
+}
+
+// ============================================
+// powerMonitor — 유휴 시간 (Electron `powerMonitor.getSystemIdleTime`)
+// ============================================
+// `CGEventSourceSecondsSinceLastEventType` (ApplicationServices) — 마지막 input 이후 초.
+// HID system state + 모든 event type (~0). Cocoa가 ApplicationServices transitively 포함.
+
+extern "c" fn CGEventSourceSecondsSinceLastEventType(state: c_int, event_type: u32) f64;
+
+/// 시스템 유휴 시간 (초). 활성 입력이 발생할 때마다 0으로 리셋.
+pub fn powerMonitorIdleSeconds() f64 {
+    if (!comptime is_macos) return 0;
+    // kCGEventSourceStateHIDSystemState = 1, kCGAnyInputEventType = ~0 (uint32_max).
+    return CGEventSourceSecondsSinceLastEventType(1, 0xFFFFFFFF);
+}
+
 // ============================================
 // Shell API — NSWorkspace + NSBeep (Electron `shell.*`)
 // ============================================

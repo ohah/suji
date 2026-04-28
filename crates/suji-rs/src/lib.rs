@@ -532,6 +532,31 @@ pub mod clipboard {
     pub fn clear() -> Option<String> {
         invoke("__core__", r#"{"cmd":"clipboard_clear"}"#)
     }
+
+    /// HTML 읽기 raw JSON. `{"html":"..."}`.
+    pub fn read_html() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_read_html"}"#)
+    }
+
+    /// HTML 쓰기. 응답: `{"success":bool}`.
+    pub fn write_html(html: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_write_html","html":"{}"}}"#,
+                escape_json_full(html)
+            ),
+        )
+    }
+}
+
+pub mod power_monitor {
+    use crate::invoke;
+
+    /// 시스템 유휴 시간 raw JSON. `{"seconds":f64}`.
+    pub fn get_system_idle_time() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"power_monitor_get_idle_time"}"#)
+    }
 }
 
 pub mod shell {

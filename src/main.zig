@@ -1412,6 +1412,38 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_clear\",\"success\":true}}", .{}) catch return null;
         return result;
     }
+    if (std.mem.eql(u8, cmd, "clipboard_read_html")) {
+        var raw_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const html = cef.clipboardReadHtml(&raw_buf);
+        var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const esc_len = util.escapeJsonStrFull(html, &esc_buf) orelse return null;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_html\",\"html\":\"{s}\"}}",
+            .{esc_buf[0..esc_len]},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_write_html")) {
+        const raw = util.extractJsonString(req_clean, "html") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
+            cef.clipboardWriteHtml(unesc_buf[0..unesc_len])
+        else
+            false;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_html\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "power_monitor_get_idle_time")) {
+        const seconds = cef.powerMonitorIdleSeconds();
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_get_idle_time\",\"seconds\":{d}}}",
+            .{seconds},
+        ) catch null;
+    }
 
     // Shell API — NSWorkspace 기본 핸들러 / NSBeep.
     if (std.mem.eql(u8, cmd, "shell_open_external")) {
