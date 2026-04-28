@@ -109,6 +109,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.webRequest.setBlockedUrls(&.{ "https://*.ad/*" })   — URL glob blocklist
 //   → 매칭 요청 cancel + `webRequest:before-request` / `webRequest:completed` 이벤트
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
+// suji.exit()                  — 앱 강제 종료 (Electron app.exit(), code 무시)
+// suji.session.clearCookies() / flushStore() — CEF cookie_manager fire-and-forget
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
 
@@ -142,6 +144,8 @@ suji::export_handlers!(ping);
 // suji::web_request::set_blocked_urls(&["https://*.ad/*"])  — URL glob blocklist
 // suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
+// suji::exit()                 — 앱 강제 종료 (Electron app.exit, code 무시)
+// suji::session::{clear_cookies(), flush_store()}  — CEF cookie_manager fire-and-forget
 // suji::platform()             — "macos" | "linux" | "windows"
 // #[derive(suji::Type)] struct GreetReq { name: String }   — specta re-export로
 //   타입을 ts emit 가능 (specta::ts::export::<T>()로 시그니처 추출)
@@ -184,7 +188,9 @@ var _ = suji.Bind(&App{})
 // import "github.com/ohah/suji-go/dock"
 // dock.SetBadge("99") / GetBadge()
 // import "github.com/ohah/suji-go/app"
-// app.GetPath("userData")
+// app.GetPath("userData") / app.Exit()
+// import "github.com/ohah/suji-go/session"
+// session.ClearCookies() / session.FlushStore()
 // import "github.com/ohah/suji-go/attention"
 // attention.RequestUser(true) / attention.CancelUserRequest(id)
 // import "github.com/ohah/suji-go/webrequest"
@@ -202,6 +208,9 @@ suji.on("event", (data) => console.log(data))
 suji.emit("event", { msg: "hello" })
 suji.quit()                                                  // 앱 종료 요청
 suji.platform                                                // "macos" | "linux" | "windows" (상수)
+// import { app, session } from '@suji/api';
+// await app.exit()                                           // Electron app.exit() (code 무시)
+// await session.clearCookies() / session.flushStore()        // CEF cookie_manager fire-and-forget
 
 // TypeScript type-safe invoke — `SujiHandlers` interface를 augment하면 cmd/req/res 추론.
 // declare module '@suji/api' {
@@ -322,14 +331,16 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
 // await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
-// import { screen, powerSaveBlocker, safeStorage, app, webRequest } from '@suji/node'
+// import { screen, powerSaveBlocker, safeStorage, app, webRequest, session } from '@suji/node'
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
 // const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 // await app.dock.setBadge("99") / app.dock.getBadge()
 // await app.getPath("userData") — Electron app.getPath
+// await app.exit()                                                       — 앱 강제 종료 (code 무시)
 // const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])
+// await session.clearCookies() / session.flushStore()                    — CEF cookie_manager
 
 // TypeScript type-safe — `@suji/node`도 SujiHandlers augment 지원.
 //   await call('zig', 'greet', { name: 'x' })   // res: string 추론

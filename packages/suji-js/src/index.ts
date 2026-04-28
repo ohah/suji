@@ -946,6 +946,21 @@ function splitDialogArgs<T extends object>(
   return { options: arg1 };
 }
 
+export const session = {
+  /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
+   *  fire-and-forget — 실제 cleanup은 비동기. */
+  async clearCookies(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "session_clear_cookies" });
+    return r.success === true;
+  },
+
+  /** disk store flush (Electron `session.cookies.flushStore`). */
+  async flushStore(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "session_flush_store" });
+    return r.success === true;
+  },
+};
+
 export const dialog = {
   /** 메시지 박스. 첫 인자에 windowId(number) 주면 sheet — 그 창에 부착. 없으면 free-floating.
    *  반환: 사용자가 클릭한 버튼 index + checkbox 상태. */
@@ -1271,6 +1286,12 @@ export const app = {
    *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
   async setProgressBar(progress: number): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_set_progress_bar", progress });
+    return r.success === true;
+  },
+
+  /** 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시 (cef.quit 경유). */
+  async exit(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_exit" });
     return r.success === true;
   },
 

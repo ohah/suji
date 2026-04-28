@@ -20,6 +20,7 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_scheme_capi.h");
     @cInclude("include/capi/cef_resource_handler_capi.h");
     @cInclude("include/capi/cef_task_capi.h");
+    @cInclude("include/capi/cef_cookie_capi.h");
 });
 
 const builtin = @import("builtin");
@@ -1867,6 +1868,37 @@ pub fn appSetProgressBar(progress: f64) bool {
 
     msgSendVoid1(tile, "setContentView:", indicator);
     _ = msgSend(tile, "display");
+    return true;
+}
+
+// ============================================
+// Session — CEF cookie_manager (Electron `session.cookies` / `clearStorageData`)
+// ============================================
+// 1차 — fire-and-forget API. delete 모든 cookie + flush. visit/set 등 round-trip은
+// callback 비동기라 후속 (RV_CONTINUE_ASYNC 패턴 응용).
+
+extern "c" fn cef_cookie_manager_get_global_manager(
+    callback: ?*c._cef_completion_callback_t,
+) ?*c._cef_cookie_manager_t;
+
+/// 모든 cookie 삭제 (`session.clearStorageData` 동등 부분). url=null/name=null이면 전체.
+/// callback fire-and-forget — 비동기 완료라 즉시 success:true 반환 (실 cleanup은 async).
+pub fn sessionClearCookies() bool {
+    if (!comptime is_macos) return false;
+    const mgr = cef_cookie_manager_get_global_manager(null) orelse return false;
+    const delete_fn = mgr.delete_cookies orelse return false;
+    var empty_url: c.cef_string_t = .{};
+    var empty_name: c.cef_string_t = .{};
+    _ = delete_fn(mgr, &empty_url, &empty_name, null);
+    return true;
+}
+
+/// disk store flush (`session.cookies.flushStore` 동등). callback fire-and-forget.
+pub fn sessionFlushStore() bool {
+    if (!comptime is_macos) return false;
+    const mgr = cef_cookie_manager_get_global_manager(null) orelse return false;
+    const flush_fn = mgr.flush_store orelse return false;
+    _ = flush_fn(mgr, null);
     return true;
 }
 

@@ -46,6 +46,12 @@ func SetProgressBar(progress float64) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_progress_bar","progress":%g}`, progress))
 }
 
+// Exit force-quits the app (Electron `app.exit(code)`). exit code는 무시.
+// Response: `{"success":bool}` (process는 응답 직후 종료).
+func Exit() string {
+	return suji.Invoke("__core__", `{"cmd":"app_exit"}`)
+}
+
 // Focus brings the app frontmost. raw JSON: `{"success":bool}`.
 func Focus() string {
 	return suji.Invoke("__core__", `{"cmd":"app_focus"}`)

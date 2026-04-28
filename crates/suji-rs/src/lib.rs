@@ -1366,9 +1366,28 @@ pub fn set_progress_bar(progress: f64) -> Option<String> {
     )
 }
 
+/// 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시.
+pub fn exit() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_exit"}"#)
+}
+
 /// 앱 frontmost로. raw JSON: `{"success":bool}`.
 pub fn focus() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_focus"}"#)
+}
+
+pub mod session {
+    use crate::invoke;
+
+    /// 모든 cookie 삭제 (fire-and-forget). 응답: `{"success":bool}`.
+    pub fn clear_cookies() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"session_clear_cookies"}"#)
+    }
+
+    /// disk store flush. 응답: `{"success":bool}`.
+    pub fn flush_store() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
+    }
 }
 
 /// 앱 모든 윈도우 hide (macOS Cmd+H). raw JSON: `{"success":bool}`.

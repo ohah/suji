@@ -1324,7 +1324,7 @@ suji build → 결과물:
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
 | Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ❌ (현재 menu는 menubar/tray만 — 임의 위치 popup은 NSMenu `popUpMenuPositioningItem:atLocation:inView:`) |
 | 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |
-| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ❌ (CEF `cef_cookie_manager_t.set_cookie` / `delete_cookies` / `cef_request_context_t.clear_certificate_exceptions` 등 — 가장 자주 쓰는 API 중 하나) |
+| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | 🟡 `session.clearCookies` / `flushStore` 2개 (CEF cookie_manager fire-and-forget) — 5 SDK 노출 + e2e 2 케이스. `set/get/visit/remove` (visitor 패턴 + async callback 마샬링) 후속 |
 
 ### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
 
@@ -1348,6 +1348,7 @@ suji build → 결과물:
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
 | 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
 | nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | 🟡 `nativeImage.getSize(path)` ✅ (NSImage initWithContentsOfFile + .size). `toPNG`/`toJPEG` encode는 후속 |
+| 앱 강제 종료 | `app.exit(code)` | `process::exit` | ✅ `app.exit()` (Electron app.exit code 무시 — cef.quit 경유 process 종료). 5 SDK + e2e (IPC handler grep만 — 실제 호출은 process 종료라 e2e 불가) |
 
 ### 개발자 경험 (DX)
 

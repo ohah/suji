@@ -1651,6 +1651,18 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ sz.width, sz.height },
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "app_exit")) {
+        cef.quit();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_exit\",\"success\":true}}", .{}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "session_clear_cookies")) {
+        const ok = cef.sessionClearCookies();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_clear_cookies\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "session_flush_store")) {
+        const ok = cef.sessionFlushStore();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_flush_store\",\"success\":{}}}", .{ok}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "app_set_progress_bar")) {
         const progress = util.extractJsonFloat(req_clean, "progress") orelse -1;
         const ok = cef.appSetProgressBar(progress);

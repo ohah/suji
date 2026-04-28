@@ -945,6 +945,26 @@ test "app.isReady / focus / hide IPC" {
     }.run);
 }
 
+test "app.exit IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.exit();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_exit\"") != null);
+        }
+    }.run);
+}
+
+test "session.clearCookies / flushStore IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.session.clearCookies();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"session_clear_cookies\"") != null);
+            _ = app_mod.session.flushStore();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"session_flush_store\"") != null);
+        }
+    }.run);
+}
+
 test "clipboard.readHtml / writeHtml IPC" {
     try withInvokeCore(struct {
         fn run() !void {

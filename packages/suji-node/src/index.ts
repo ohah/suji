@@ -1040,6 +1040,20 @@ export const powerSaveBlocker = {
   },
 };
 
+export const session = {
+  /** 모든 cookie 삭제 (fire-and-forget). 실제 cleanup은 비동기. */
+  async clearCookies(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'session_clear_cookies' });
+    return r.success === true;
+  },
+
+  /** disk store flush (Electron `session.cookies.flushStore`). */
+  async flushStore(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'session_flush_store' });
+    return r.success === true;
+  },
+};
+
 export const safeStorage = {
   /** macOS Keychain에 utf-8 value 저장. 같은 키면 update (idempotent). */
   async setItem(service: string, account: string, value: string): Promise<boolean> {
@@ -1103,6 +1117,12 @@ export const app = {
   /** dock 진행률. progress<0=hide, 0~1=ratio, >1=clamp to 1. */
   async setProgressBar(progress: number): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_set_progress_bar', progress });
+    return r.success === true;
+  },
+
+  /** 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시. */
+  async exit(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_exit' });
     return r.success === true;
   },
 
