@@ -102,6 +102,14 @@ describe("app.dock.setBadge", () => {
     expect(r.text).toBe('a"b');
     await core({ cmd: "dock_set_badge", text: "" });
   });
+
+  test("멀티바이트 round-trip — 이모지 + 한글", async () => {
+    const text = "🎉한";
+    await core({ cmd: "dock_set_badge", text });
+    const r = await core<{ text: string }>({ cmd: "dock_get_badge" });
+    expect(r.text).toBe(text);
+    await core({ cmd: "dock_set_badge", text: "" });
+  });
 });
 
 describe("powerSaveBlocker", () => {
@@ -171,6 +179,20 @@ describe("app.getPath", () => {
   test("unknown 키는 빈 문자열", async () => {
     const r = await core<{ path: string }>({ cmd: "app_get_path", name: "unknown_key_xyz" });
     expect(r.path).toBe("");
+  });
+
+  test("나머지 4 키: temp/appData/desktop/downloads — 모두 절대 경로", async () => {
+    for (const key of ["temp", "appData", "desktop", "downloads"]) {
+      const r = await core<{ path: string }>({ cmd: "app_get_path", name: key });
+      expect(r.path.length).toBeGreaterThan(0);
+      expect(r.path.startsWith("/")).toBe(true);
+    }
+  });
+
+  test("appData는 userData의 prefix (userData = appData/<app>)", async () => {
+    const ad = await core<{ path: string }>({ cmd: "app_get_path", name: "appData" });
+    const ud = await core<{ path: string }>({ cmd: "app_get_path", name: "userData" });
+    expect(ud.path.startsWith(ad.path + "/")).toBe(true);
   });
 });
 
@@ -284,6 +306,28 @@ describe("safeStorage (Keychain)", () => {
     expect(getR.value).toBe(value);
 
     await core({ cmd: "safe_storage_delete", service: SVC, account });
+  });
+
+  test("multi-service 격리 — 같은 account 다른 service는 별도 entry", async () => {
+    const SVC1 = "Suji-e2e-iso-A";
+    const SVC2 = "Suji-e2e-iso-B";
+    const account = `iso-${Date.now()}`;
+    await core({ cmd: "safe_storage_set", service: SVC1, account, value: "value-A" });
+    await core({ cmd: "safe_storage_set", service: SVC2, account, value: "value-B" });
+
+    const a = await core<{ value: string }>({ cmd: "safe_storage_get", service: SVC1, account });
+    const b = await core<{ value: string }>({ cmd: "safe_storage_get", service: SVC2, account });
+    expect(a.value).toBe("value-A");
+    expect(b.value).toBe("value-B");
+
+    // SVC1 삭제해도 SVC2는 유지.
+    await core({ cmd: "safe_storage_delete", service: SVC1, account });
+    const aAfter = await core<{ value: string }>({ cmd: "safe_storage_get", service: SVC1, account });
+    const bAfter = await core<{ value: string }>({ cmd: "safe_storage_get", service: SVC2, account });
+    expect(aAfter.value).toBe("");
+    expect(bAfter.value).toBe("value-B");
+
+    await core({ cmd: "safe_storage_delete", service: SVC2, account });
   });
 });
 

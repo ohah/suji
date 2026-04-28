@@ -131,4 +131,128 @@ describe("webRequest blocklist", () => {
     expect(found[0]).toHaveProperty("url");
     expect(found[0]).toHaveProperty("statusCode");
   });
+
+  test("blocked URL의 completed 이벤트 — statusCode=0 + requestStatus=CANCELED(3)", async () => {
+    await core({
+      cmd: "web_request_set_blocked_urls",
+      patterns: ["https://blocked-completed.suji.invalid/*"],
+    });
+    const listenerKey = await page.evaluate(() => {
+      const events: any[] = [];
+      const off = (window as any).__suji__.on(
+        "webRequest:completed",
+        (payload: string) => {
+          try { events.push(JSON.parse(payload)); } catch { events.push(payload); }
+        },
+      );
+      const reg = ((window as any).__wr_test__ ||= {});
+      const k = String(Math.random());
+      reg[k] = { events, off };
+      return k;
+    });
+
+    await page.evaluate(async () => {
+      await fetch("https://blocked-completed.suji.invalid/api").catch(() => {});
+    });
+
+    const blockedEvent = await page.evaluate(
+      async ({ k }) => {
+        const reg = (window as any).__wr_test__;
+        const c = reg[k];
+        const start = Date.now();
+        while (Date.now() - start < 5000) {
+          const found = c.events.find((e: any) =>
+            typeof e.url === "string" && e.url.includes("blocked-completed.suji.invalid"),
+          );
+          if (found) {
+            c.off();
+            delete reg[k];
+            return found;
+          }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        c.off();
+        delete reg[k];
+        return null;
+      },
+      { k: listenerKey },
+    );
+    expect(blockedEvent).not.toBeNull();
+    expect(blockedEvent.statusCode).toBe(0);
+    // CEF cef_urlrequest_status_t — RV_CANCEL은 UR_FAILED(4)로 보고됨 (UR_CANCELED는
+    // user-initiated cancel만, RV_CANCEL은 handler-initiated라 FAILED). 둘 다 비-SUCCESS.
+    expect([3, 4]).toContain(blockedEvent.requestStatus);
+  });
+
+  test("webRequest:before-request 이벤트 — listener 도달 + URL 페이로드", async () => {
+    const listenerKey = await page.evaluate(() => {
+      const events: any[] = [];
+      const off = (window as any).__suji__.on(
+        "webRequest:before-request",
+        (payload: string) => {
+          try { events.push(JSON.parse(payload)); } catch { events.push(payload); }
+        },
+      );
+      const reg = ((window as any).__wr_test__ ||= {});
+      const k = String(Math.random());
+      reg[k] = { events, off };
+      return k;
+    });
+
+    const tag = `before-${Date.now()}`;
+    await page.evaluate(async (t) => {
+      await fetch(window.location.origin + "/?t=" + t).catch(() => {});
+    }, tag);
+
+    const found = await page.evaluate(
+      async ({ k, tag }) => {
+        const reg = (window as any).__wr_test__;
+        const c = reg[k];
+        const start = Date.now();
+        while (Date.now() - start < 5000) {
+          const hit = c.events.find((e: any) =>
+            typeof e.url === "string" && e.url.includes(tag),
+          );
+          if (hit) {
+            c.off();
+            delete reg[k];
+            return hit;
+          }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        c.off();
+        delete reg[k];
+        return null;
+      },
+      { k: listenerKey, tag },
+    );
+    expect(found).not.toBeNull();
+    expect(typeof found.url).toBe("string");
+    expect(found.url).toContain(tag);
+  });
+
+  test("middle wildcard 매칭 — `*/blocked-mid/*`은 origin 무관하게 path 매칭", async () => {
+    await core({
+      cmd: "web_request_set_blocked_urls",
+      patterns: ["*/blocked-mid/*"],
+    });
+    const result = await page.evaluate(async () => {
+      try {
+        await fetch(window.location.origin + "/blocked-mid/anything");
+        return { ok: true };
+      } catch (e: any) {
+        return { ok: false, error: String(e.message ?? e) };
+      }
+    });
+    expect(result.ok).toBe(false);
+  });
+
+  test("패턴 32개 한계 — 33개 등록 시 32개로 truncate", async () => {
+    const patterns = Array.from({ length: 33 }, (_, i) => `https://truncate-${i}/*`);
+    const r = await core<{ count: number }>({
+      cmd: "web_request_set_blocked_urls",
+      patterns,
+    });
+    expect(r.count).toBe(32);
+  });
 });

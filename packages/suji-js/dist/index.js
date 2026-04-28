@@ -490,9 +490,14 @@ export const dialog = {
 // declarative 패턴만 지원 — JS callback decision은 후속 (sync IPC deadlock 방지).
 // 매칭 시 fetch/XHR/이미지 등 모든 요청 cancel. `*` wildcard만 지원.
 //
-// 이벤트:
-//   `webRequest:before-request` — { url } (모든 요청)
+// 이벤트 (suji.on(...)으로 listen):
+//   `webRequest:before-request` — { url } (모든 요청, 자체 페이지 asset/HMR 포함 — 노이즈
+//                                   많음. consumer가 prefix/regex로 필터 권장)
 //   `webRequest:completed` — { url, statusCode, requestStatus, receivedBytes }
+//                             requestStatus: 0=UNKNOWN 1=SUCCESS 2=IO_PENDING 3=CANCELED 4=FAILED.
+//                             blocklist 매칭 차단 시 statusCode=0 + requestStatus=FAILED(4)
+//                             — CEF가 handler-initiated cancel을 FAILED로 보고 (CANCELED는
+//                             user-initiated만).
 export const webRequest = {
     /** blocklist 패턴 list 갱신 (전체 교체). 빈 list = 모든 요청 통과. 최대 32개, 256자/패턴. */
     async setBlockedUrls(patterns) {

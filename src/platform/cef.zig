@@ -3159,6 +3159,8 @@ fn webRequestUnlock() void {
 }
 
 /// 등록된 패턴을 모두 교체 — 매 호출이 atomic. 빈 list = 모든 요청 통과.
+/// count는 atomic store — `urlMatchesAnyBlockedPattern`의 fast path가 spinlock 없이
+/// 검사할 수 있도록.
 pub fn webRequestSetBlockedUrls(patterns: []const []const u8) usize {
     webRequestLock();
     defer webRequestUnlock();
@@ -3169,11 +3171,14 @@ pub fn webRequestSetBlockedUrls(patterns: []const []const u8) usize {
         @memcpy(g_blocked_url_patterns[i][0..len], p[0..len]);
         g_blocked_url_lens[i] = len;
     }
-    g_blocked_url_count = n;
+    @atomicStore(usize, &g_blocked_url_count, n, .release);
     return n;
 }
 
 fn urlMatchesAnyBlockedPattern(url: []const u8) bool {
+    // Fast path — 패턴 없는 보통의 앱은 spinlock 회피. count는 set 시 atomic하게 갱신,
+    // tear는 unsigned write라 race 시 stale read만 가능 (false negative ≤ 1 요청, 무시).
+    if (@atomicLoad(usize, &g_blocked_url_count, .acquire) == 0) return false;
     webRequestLock();
     defer webRequestUnlock();
     for (0..g_blocked_url_count) |i| {
