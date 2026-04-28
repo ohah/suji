@@ -26,6 +26,11 @@ pub const App = struct {
     handler_count: usize = 0,
     listeners: [MAX_LISTENERS]EventListener = undefined,
     listener_count: usize = 0,
+    /// `.schema(channel, Req, Res)`로 등록된 TypeScript 시그니처. SujiHandlers
+    /// declaration emit에 사용. 등록은 optional — 미등록 핸들러는 frontend에서
+    /// untyped (`unknown` 반환).
+    handler_schemas: [MAX_HANDLERS]HandlerSchema = undefined,
+    schema_count: usize = 0,
     /// ready/bye 로그 prefix. 동일 프로세스에서 Zig SDK로 빌드된 dylib이 여러 개일 때
     /// 구분 가능. 미지정 시 "Zig". (.name("state-plugin") → "[state-plugin] ready")
     name: []const u8 = "Zig",
@@ -41,6 +46,13 @@ pub const App = struct {
     const EventListener = struct {
         channel: []const u8,
         func: *const fn (Event) void,
+    };
+
+    /// `.schema(channel, Req, Res)`로 누적되는 TypeScript handler 시그니처.
+    /// schema_ts는 comptime에 빌드된 `"channel: { req: <Req-ts>; res: <Res-ts> };"` 라인.
+    pub const HandlerSchema = struct {
+        channel: []const u8,
+        schema_ts: []const u8,
     };
 
     /// 요청/응답 핸들러 등록 (Electron: ipcMain.handle).
@@ -65,6 +77,30 @@ pub const App = struct {
         var new = self;
         new.handlers[new.handler_count] = .{ .channel = channel, .func = adapted };
         new.handler_count += 1;
+        return new;
+    }
+
+    /// TypeScript 시그니처 등록 — frontend `@suji/api` SujiHandlers의 `channel`
+    /// 항목으로 emit. `Req`/`Res`는 comptime type. void/bool/숫자/string([]const u8)/
+    /// struct/optional/슬라이스/enum 매핑 지원.
+    ///
+    /// ```zig
+    /// suji.app()
+    ///     .handle("greet", greet)
+    ///     .schema("greet", GreetReq, GreetRes)
+    /// ```
+    pub fn schema(
+        comptime self: App,
+        comptime channel: []const u8,
+        comptime ReqType: type,
+        comptime ResType: type,
+    ) App {
+        var new = self;
+        new.handler_schemas[new.schema_count] = .{
+            .channel = channel,
+            .schema_ts = comptime buildSchemaTs(channel, ReqType, ResType),
+        };
+        new.schema_count += 1;
         return new;
     }
 
@@ -114,6 +150,74 @@ pub const App = struct {
         handler(.{ .channel = name, .data = d });
     }
 };
+
+/// comptime — Zig 타입을 TypeScript 표현으로 변환. void/bool/숫자/string/struct/
+/// optional/slice/enum 매핑 (1차). union/error/pointer-non-slice는 후속.
+pub fn typeToTs(comptime T: type) []const u8 {
+    if (T == void) return "void";
+    const info = @typeInfo(T);
+    return switch (info) {
+        .void => "void",
+        .bool => "boolean",
+        .int, .comptime_int => "number",
+        .float, .comptime_float => "number",
+        .pointer => |p| blk: {
+            if (p.size == .slice and p.child == u8) break :blk "string";
+            if (p.size == .slice) break :blk (comptime typeToTs(p.child)) ++ "[]";
+            @compileError("typeToTs: unsupported pointer kind " ++ @typeName(T));
+        },
+        .optional => |o| (comptime typeToTs(o.child)) ++ " | null",
+        .@"struct" => |s| blk: {
+            if (s.fields.len == 0) break :blk "Record<string, never>";
+            comptime var out: []const u8 = "{ ";
+            inline for (s.fields, 0..) |f, i| {
+                const sep = if (i > 0) "; " else "";
+                out = out ++ sep ++ f.name ++ ": " ++ comptime typeToTs(f.type);
+            }
+            break :blk out ++ " }";
+        },
+        .@"enum" => |e| blk: {
+            if (e.fields.len == 0) break :blk "never";
+            comptime var out: []const u8 = "";
+            inline for (e.fields, 0..) |f, i| {
+                const sep = if (i > 0) " | " else "";
+                out = out ++ sep ++ "\"" ++ f.name ++ "\"";
+            }
+            break :blk out;
+        },
+        else => @compileError("typeToTs: unsupported type " ++ @typeName(T)),
+    };
+}
+
+/// `App.schema(channel, Req, Res)` 빌더가 사용하는 1-line ts 시그니처 빌더.
+pub fn buildSchemaTs(comptime channel: []const u8, comptime Req: type, comptime Res: type) []const u8 {
+    return channel ++ ": { req: " ++ typeToTs(Req) ++ "; res: " ++ typeToTs(Res) ++ " };";
+}
+
+/// runtime — 등록된 모든 schema를 SujiHandlers declaration으로 emit.
+/// caller가 dst slice에 결과 길이만큼 쓰고 byte 길이 반환. 부족하면 0.
+pub fn emitSchemaTs(app_ptr: *const App, dst: []u8) usize {
+    const header = "// auto-generated — do not edit\ndeclare module '@suji/api' {\n  interface SujiHandlers {\n";
+    const footer = "  }\n}\n";
+    var offset: usize = 0;
+    if (header.len + footer.len > dst.len) return 0;
+    @memcpy(dst[offset .. offset + header.len], header);
+    offset += header.len;
+    for (app_ptr.handler_schemas[0..app_ptr.schema_count]) |s| {
+        const indent = "    ";
+        const need = indent.len + s.schema_ts.len + 1; // \n
+        if (offset + need + footer.len > dst.len) return 0;
+        @memcpy(dst[offset .. offset + indent.len], indent);
+        offset += indent.len;
+        @memcpy(dst[offset .. offset + s.schema_ts.len], s.schema_ts);
+        offset += s.schema_ts.len;
+        dst[offset] = '\n';
+        offset += 1;
+    }
+    @memcpy(dst[offset .. offset + footer.len], footer);
+    offset += footer.len;
+    return offset;
+}
 
 /// IPC 요청
 pub const Request = struct {

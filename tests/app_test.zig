@@ -1198,6 +1198,48 @@ test "app.getPath: name 필드 escape + cmd 전송" {
     }.run);
 }
 
+test "typeToTs: primitives + struct + optional + slice + enum" {
+    try std.testing.expectEqualStrings("string", app_mod.typeToTs([]const u8));
+    try std.testing.expectEqualStrings("boolean", app_mod.typeToTs(bool));
+    try std.testing.expectEqualStrings("number", app_mod.typeToTs(i32));
+    try std.testing.expectEqualStrings("number", app_mod.typeToTs(u32));
+    try std.testing.expectEqualStrings("number", app_mod.typeToTs(f64));
+    try std.testing.expectEqualStrings("void", app_mod.typeToTs(void));
+
+    const Greet = struct { name: []const u8 };
+    try std.testing.expectEqualStrings("{ name: string }", app_mod.typeToTs(Greet));
+
+    const Pair = struct { a: i32, b: bool };
+    try std.testing.expectEqualStrings("{ a: number; b: boolean }", app_mod.typeToTs(Pair));
+
+    try std.testing.expectEqualStrings("string | null", app_mod.typeToTs(?[]const u8));
+
+    try std.testing.expectEqualStrings("number[]", app_mod.typeToTs([]const i32));
+
+    const Color = enum { red, green, blue };
+    try std.testing.expectEqualStrings("\"red\" | \"green\" | \"blue\"", app_mod.typeToTs(Color));
+}
+
+test "App.schema + emitSchemaTs: declaration 빌드" {
+    const Req = struct { name: []const u8 };
+    const Res = struct { greeting: []const u8 };
+    const dummy = struct {
+        fn greet(_: app_mod.Request) app_mod.Response {
+            return .{ .data = "{}" };
+        }
+    };
+    const built = comptime app_mod.app()
+        .handle("greet", dummy.greet)
+        .schema("greet", Req, Res);
+
+    var buf: [4096]u8 = undefined;
+    const n = app_mod.emitSchemaTs(&built, &buf);
+    try std.testing.expect(n > 0);
+    const out = buf[0..n];
+    try std.testing.expect(std.mem.indexOf(u8, out, "interface SujiHandlers") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "greet: { req: { name: string }; res: { greeting: string } };") != null);
+}
+
 test "webRequest.setBlockedUrls: patterns 배열 + escape" {
     try withInvokeCore(struct {
         fn run() !void {
