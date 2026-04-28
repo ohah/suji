@@ -1143,3 +1143,86 @@ test "notification.close: notificationId 전송" {
         }
     }.run);
 }
+
+// ============================================
+// screen / powerSaveBlocker / safeStorage / dock / requestUserAttention SDK
+// ============================================
+
+test "screen.getAllDisplays: 인자 없는 cmd" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.screen.getAllDisplays();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"screen_get_all_displays\"") != null);
+        }
+    }.run);
+}
+
+test "powerSaveBlocker.start/stop: type 문자열 + id" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.powerSaveBlocker.start("prevent_display_sleep");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"power_save_blocker_start\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"type\":\"prevent_display_sleep\"") != null);
+
+            _ = app_mod.powerSaveBlocker.stop(7);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"power_save_blocker_stop\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"id\":7") != null);
+        }
+    }.run);
+}
+
+test "safeStorage.set/get/delete: service+account 필드 + escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.safeStorage.setItem("svc", "acc", "v1");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"safe_storage_set\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"service\":\"svc\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"value\":\"v1\"") != null);
+
+            _ = app_mod.safeStorage.getItem("svc", "acc");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"safe_storage_get\"") != null);
+
+            _ = app_mod.safeStorage.deleteItem("svc", "acc");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"safe_storage_delete\"") != null);
+        }
+    }.run);
+}
+
+test "safeStorage.set: 따옴표 escape" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.safeStorage.setItem("svc", "acc", "a\"b");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"value\":\"a\\\"b\"") != null);
+        }
+    }.run);
+}
+
+test "dock.setBadge / getBadge cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.dock.setBadge("99");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"dock_set_badge\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"text\":\"99\"") != null);
+
+            _ = app_mod.dock.getBadge();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"dock_get_badge\"") != null);
+        }
+    }.run);
+}
+
+test "requestUserAttention / cancelUserAttentionRequest: critical bool + id 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.requestUserAttention(true);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_attention_request\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"critical\":true") != null);
+
+            _ = app_mod.requestUserAttention(false);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"critical\":false") != null);
+
+            _ = app_mod.cancelUserAttentionRequest(42);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_attention_cancel\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"id\":42") != null);
+        }
+    }.run);
+}

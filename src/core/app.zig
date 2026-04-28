@@ -1001,6 +1001,115 @@ pub const dialog = struct {
     }
 };
 
+// ============================================
+// screen / powerSaveBlocker / safeStorage / app — frontend `@suji/api`와 동일 cmd.
+// ============================================
+
+pub const screen = struct {
+    /// 모든 모니터 정보. 응답: `{"from","cmd","displays":[{...}]}`.
+    pub fn getAllDisplays() ?[]const u8 {
+        return coreCmd("screen_get_all_displays", "");
+    }
+};
+
+pub const powerSaveBlocker = struct {
+    /// `"prevent_app_suspension"` 또는 `"prevent_display_sleep"`. 응답: `{"id":N}` (0이면 실패).
+    pub fn start(t: []const u8) ?[]const u8 {
+        var t_buf: [64]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(t, &t_buf) orelse return null;
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"type\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
+        return coreCmd("power_save_blocker_start", fields);
+    }
+
+    /// 응답: `{"success":bool}`.
+    pub fn stop(id: u32) ?[]const u8 {
+        var fields_buf: [32]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"id\":{d}", .{id}) catch return null;
+        return coreCmd("power_save_blocker_stop", fields);
+    }
+};
+
+pub const safeStorage = struct {
+    /// service+account에 utf-8 value 저장. 응답: `{"success":bool}`.
+    pub fn setItem(service: []const u8, account: []const u8, value: []const u8) ?[]const u8 {
+        var s_buf: [256]u8 = undefined;
+        var a_buf: [256]u8 = undefined;
+        var v_buf: [4096]u8 = undefined;
+        const s_n = util.escapeJsonStrFull(service, &s_buf) orelse return null;
+        const a_n = util.escapeJsonStrFull(account, &a_buf) orelse return null;
+        const v_n = util.escapeJsonStrFull(value, &v_buf) orelse return null;
+        var fields_buf: [4800]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"service\":\"{s}\",\"account\":\"{s}\",\"value\":\"{s}\"",
+            .{ s_buf[0..s_n], a_buf[0..a_n], v_buf[0..v_n] },
+        ) catch return null;
+        return coreCmd("safe_storage_set", fields);
+    }
+
+    /// 응답: `{"value":"..."}` (없으면 빈 문자열).
+    pub fn getItem(service: []const u8, account: []const u8) ?[]const u8 {
+        var s_buf: [256]u8 = undefined;
+        var a_buf: [256]u8 = undefined;
+        const s_n = util.escapeJsonStrFull(service, &s_buf) orelse return null;
+        const a_n = util.escapeJsonStrFull(account, &a_buf) orelse return null;
+        var fields_buf: [600]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"service\":\"{s}\",\"account\":\"{s}\"",
+            .{ s_buf[0..s_n], a_buf[0..a_n] },
+        ) catch return null;
+        return coreCmd("safe_storage_get", fields);
+    }
+
+    /// 응답: `{"success":bool}` (없는 키도 idempotent true).
+    pub fn deleteItem(service: []const u8, account: []const u8) ?[]const u8 {
+        var s_buf: [256]u8 = undefined;
+        var a_buf: [256]u8 = undefined;
+        const s_n = util.escapeJsonStrFull(service, &s_buf) orelse return null;
+        const a_n = util.escapeJsonStrFull(account, &a_buf) orelse return null;
+        var fields_buf: [600]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"service\":\"{s}\",\"account\":\"{s}\"",
+            .{ s_buf[0..s_n], a_buf[0..a_n] },
+        ) catch return null;
+        return coreCmd("safe_storage_delete", fields);
+    }
+};
+
+// app() 함수와 이름 충돌 방지를 위해 dock/attention을 top-level namespace로 분리.
+pub const dock = struct {
+    /// dock 배지 텍스트 (빈 문자열 = 제거). 응답: `{"success":bool}`.
+    pub fn setBadge(text: []const u8) ?[]const u8 {
+        var t_buf: [256]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(text, &t_buf) orelse return null;
+        var fields_buf: [320]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"text\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
+        return coreCmd("dock_set_badge", fields);
+    }
+
+    /// 응답: `{"text":"..."}`.
+    pub fn getBadge() ?[]const u8 {
+        return coreCmd("dock_get_badge", "");
+    }
+};
+
+/// dock 바운스 시작. 응답: `{"id":N}` (0이면 앱이 active라 no-op).
+pub fn requestUserAttention(critical: bool) ?[]const u8 {
+    var fields_buf: [32]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"critical\":{}", .{critical}) catch return null;
+    return coreCmd("app_attention_request", fields);
+}
+
+/// 응답: `{"success":bool}`.
+pub fn cancelUserAttentionRequest(id: u32) ?[]const u8 {
+    var fields_buf: [32]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"id\":{d}", .{id}) catch return null;
+    return coreCmd("app_attention_cancel", fields);
+}
+
 /// 다른 백엔드 호출 (invoke)
 pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
     const core = _global_core orelse return null;

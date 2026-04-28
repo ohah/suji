@@ -76,6 +76,13 @@ fn onAllClosed(_: suji.Event) void {
 //                                       (macOS NSMenu, menu:click 이벤트)
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key, globalShortcut:trigger 이벤트)
+// suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen)
+// suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)   (macOS IOPMAssertion)
+// suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
+//                                       (macOS Keychain Services)
+// suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
+// suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
+//                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
