@@ -1362,10 +1362,11 @@ suji build → 결과물:
     한 창 contentView 안에 wrapper NSView + child NSView+CefBrowser 합성. id 풀 공유 +
     모든 webContents API view 호환. 8 SDK 메서드 + view-created/view-destroyed 이벤트 +
     호스트 close 시 자동 정리. **알려진 한계**: dynamic destroyView 호출 시 view CefBrowser
-    render subprocess가 cleanup 도중 강종 (CEF + macOS NSView 다중 WebContentsView 합성의
-    known instability — Electron #46203 유사). wrapper 격리/graceful close/NSView ops defer
-    모두 root 못 잡음. 권장 패턴: setViewVisible(false)로 숨김 + host close 시 자동 정리만.
-    17-B에서 Linux/Windows + 동적 destroy 안정화.
+    render subprocess + 메인 webContents까지 함께 강종 (CEF + macOS NSView 다중
+    WebContentsView 합성의 known instability — Electron #46203 유사). wrapper 격리 / graceful
+    close / NSView ops defer / setHidden only 모두 root 못 잡음. 권장 패턴: setViewVisible
+    토글 + host close 시 자동 정리. 17-B에서 CEF Views API(`CefWindow` + `CefBrowserView`)로
+    architecture migration 검토 — 자세한 plan: [docs/plans/17-B-cef-views-architecture.md](./plans/17-B-cef-views-architecture.md).
 18. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
 19. **TypeScript 타입 자동 생성** — Tauri specta 동등 (개발자 경험)
 
