@@ -73,6 +73,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")
+// suji.nativeImage.getSize("/path/to/img.png")  — {width, height} (NSImage)
 // suji.screen.getCursorScreenPoint()      — NSEvent.mouseLocation (bottom-up)
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields

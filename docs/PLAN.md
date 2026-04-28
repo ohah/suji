@@ -1347,7 +1347,7 @@ suji build → 결과물:
 | 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ (`CGEventSourceSecondsSinceLastEventType`, 초). `getSystemIdleState(threshold)` (active/idle/locked enum)는 후속 |
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
 | 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
-| nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | ❌ (CGImage / NSImage wrapping) |
+| nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | 🟡 `nativeImage.getSize(path)` ✅ (NSImage initWithContentsOfFile + .size). `toPNG`/`toJPEG` encode는 후속 |
 
 ### 개발자 경험 (DX)
 

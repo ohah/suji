@@ -638,6 +638,14 @@ export const shell = {
   },
 };
 
+export const nativeImage = {
+  /** 이미지 파일 dimensions. file 없거나 디코딩 실패 시 0/0. macOS NSImage. */
+  async getSize(path: string): Promise<{ width: number; height: number }> {
+    const r = await invoke<{ width: number; height: number }>('__core__', { cmd: 'native_image_get_size', path });
+    return { width: r.width, height: r.height };
+  },
+};
+
 export type ThemeSource = 'system' | 'light' | 'dark';
 
 export const nativeTheme = {

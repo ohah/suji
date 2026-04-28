@@ -868,6 +868,17 @@ pub const shell = struct {
     }
 };
 
+pub const nativeImage = struct {
+    /// 이미지 파일 dimensions. 응답: `{"width":N,"height":N}` (실패 시 0/0).
+    pub fn getSize(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("native_image_get_size", fields);
+    }
+};
+
 pub const nativeTheme = struct {
     /// 시스템 다크 모드 여부. 응답: `{"dark":bool}`.
     pub fn shouldUseDarkColors() ?[]const u8 {

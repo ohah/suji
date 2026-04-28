@@ -1638,6 +1638,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         // V8 binding이 호출 가능한 시점은 이미 init 후. 항상 true.
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_ready\",\"ready\":true}}", .{}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "native_image_get_size")) {
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const sz = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_n|
+            cef.nativeImageGetSize(unesc_buf[0..unesc_n])
+        else
+            cef.NSSize{ .width = 0, .height = 0 };
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"native_image_get_size\",\"width\":{d},\"height\":{d}}}",
+            .{ sz.width, sz.height },
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "app_set_progress_bar")) {
         const progress = util.extractJsonFloat(req_clean, "progress") orelse -1;
         const ok = cef.appSetProgressBar(progress);

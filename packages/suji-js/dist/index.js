@@ -417,6 +417,14 @@ export const shell = {
         return r.success === true;
     },
 };
+export const nativeImage = {
+    /** 이미지 파일 → 크기 {width, height} (point 단위, NSImage). 파일 없거나 디코딩 실패는 0/0.
+     *  Electron `nativeImage.createFromPath(path).getSize()` 동등. */
+    async getSize(path) {
+        const r = await coreCall({ cmd: "native_image_get_size", path });
+        return { width: r.width, height: r.height };
+    },
+};
 export const nativeTheme = {
     /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).
      *  macOS NSApp.effectiveAppearance.name이 Dark 계열이면 true. */

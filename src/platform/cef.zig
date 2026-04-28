@@ -1821,6 +1821,23 @@ pub fn appCancelUserAttentionRequest(id: u32) bool {
     return true;
 }
 
+/// 이미지 파일 → dimensions (Electron `nativeImage.createFromPath(path).getSize()`).
+/// macOS NSImage initWithContentsOfFile: + size (point 단위). pixel은 representation
+/// 사용 (1차 후속). file 없거나 디코딩 실패 시 width/height = 0.
+pub fn nativeImageGetSize(path: []const u8) NSSize {
+    if (!comptime is_macos) return .{ .width = 0, .height = 0 };
+    const ns_path = nsStringFromSlice(path) orelse return .{ .width = 0, .height = 0 };
+    const NSImage = getClass("NSImage") orelse return .{ .width = 0, .height = 0 };
+    const alloc = msgSend(NSImage, "alloc") orelse return .{ .width = 0, .height = 0 };
+    const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const img = init_fn(alloc, @ptrCast(objc.sel_registerName("initWithContentsOfFile:")), ns_path) orelse
+        return .{ .width = 0, .height = 0 };
+    const size_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSSize =
+        @ptrCast(&objc.objc_msgSend);
+    return size_fn(img, @ptrCast(objc.sel_registerName("size")));
+}
+
 /// dock 진행률 표시 (Electron `BrowserWindow.setProgressBar(progress)`).
 /// progress < 0이면 hide, 0~1은 진행률 표시, 1 초과는 100%로 clamp.
 /// macOS는 BrowserWindow별이 아닌 NSApp.dockTile 단일 — Electron의 멀티 윈도우 시도는

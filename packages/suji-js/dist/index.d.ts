@@ -389,6 +389,14 @@ export declare const shell: {
      *  존재하지 않는 경로는 false. macOS NSWorkspace `openURL:` (file://). */
     openPath(path: string): Promise<boolean>;
 };
+export declare const nativeImage: {
+    /** 이미지 파일 → 크기 {width, height} (point 단위, NSImage). 파일 없거나 디코딩 실패는 0/0.
+     *  Electron `nativeImage.createFromPath(path).getSize()` 동등. */
+    getSize(path: string): Promise<{
+        width: number;
+        height: number;
+    }>;
+};
 export type ThemeSource = "system" | "light" | "dark";
 export declare const nativeTheme: {
     /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).

@@ -903,6 +903,16 @@ test "clipboard.has / availableFormats IPC" {
     }.run);
 }
 
+test "nativeImage.getSize: path 필드 + cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.nativeImage.getSize("/tmp/test.png");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"native_image_get_size\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"path\":\"/tmp/test.png\"") != null);
+        }
+    }.run);
+}
+
 test "app.setProgressBar: progress 필드" {
     try withInvokeCore(struct {
         fn run() !void {

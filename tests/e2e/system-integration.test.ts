@@ -232,6 +232,35 @@ describe("screen.getDisplayNearestPoint", () => {
   });
 });
 
+describe("nativeImage.getSize", () => {
+  // 1x1 transparent PNG (valid IHDR width=1, height=1).
+  const PNG_1X1 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  test("1x1 PNG 파일 → width=1, height=1", async () => {
+    const tmp = `/tmp/suji-nimg-${Date.now()}.png`;
+    fs.writeFileSync(tmp, PNG_1X1);
+    try {
+      const r = await core<{ width: number; height: number }>({ cmd: "native_image_get_size", path: tmp });
+      expect(r.width).toBe(1);
+      expect(r.height).toBe(1);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  test("존재하지 않는 파일은 0/0", async () => {
+    const r = await core<{ width: number; height: number }>({
+      cmd: "native_image_get_size",
+      path: "/tmp/suji-nimg-no-such-xyz.png",
+    });
+    expect(r.width).toBe(0);
+    expect(r.height).toBe(0);
+  });
+});
+
 describe("clipboard.writeImage / readImage", () => {
   // 1x1 transparent PNG (67 bytes). canonical valid PNG signature + IHDR + IDAT + IEND.
   const PNG_1X1_TRANSPARENT_BASE64 =

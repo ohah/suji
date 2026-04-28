@@ -635,6 +635,18 @@ pub mod shell {
     }
 }
 
+pub mod native_image {
+    use crate::{invoke, serde_json};
+
+    /// 이미지 파일 dimensions. raw JSON: `{"width":N,"height":N}`.
+    pub fn get_size(path: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &serde_json::json!({ "cmd": "native_image_get_size", "path": path }).to_string(),
+        )
+    }
+}
+
 pub mod native_theme {
     use crate::{escape_json_full, invoke};
 
