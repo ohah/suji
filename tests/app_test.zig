@@ -1238,6 +1238,29 @@ test "process.run: 존재하지 않는 명령은 error 반환" {
     try std.testing.expectError(error.FileNotFound, r);
 }
 
+test "app.getName / getVersion: 인자 없는 cmd" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.getName();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_get_name\"") != null);
+            _ = app_mod.getVersion();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_get_version\"") != null);
+        }
+    }.run);
+}
+
+test "screen.getDisplayNearestPoint: x/y 필드" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.screen.getDisplayNearestPoint(100, 200);
+            const r = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"screen_get_display_nearest_point\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"x\":100") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r, "\"y\":200") != null);
+        }
+    }.run);
+}
+
 test "app.getPath: name 필드 escape + cmd 전송" {
     try withInvokeCore(struct {
         fn run() !void {

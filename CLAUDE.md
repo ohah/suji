@@ -88,7 +88,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain Services)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
+// suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
 // suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
+// suji.screen.getCursorScreenPoint() / suji.screen.getDisplayNearestPoint(x, y)
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
 //                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
 // powerMonitor 이벤트 — 자동 install (NSWorkspace 옵저버), 4 채널 발신:

@@ -1520,6 +1520,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ p.x, p.y },
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "screen_get_display_nearest_point")) {
+        const x = util.extractJsonFloat(req_clean, "x") orelse 0;
+        const y = util.extractJsonFloat(req_clean, "y") orelse 0;
+        const idx = cef.screenGetDisplayNearestPoint(x, y);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"screen_get_display_nearest_point\",\"index\":{d}}}",
+            .{idx},
+        ) catch null;
+    }
 
     // app.getPath — Electron 표준 키 7개. config.app.name이 userData 경로에 들어감.
     if (std.mem.eql(u8, cmd, "app_get_path")) {
@@ -1602,6 +1612,28 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ok},
         ) catch return null;
         return result;
+    }
+
+    // app.getName / app.getVersion — config.app exposure (Electron `app.getName/getVersion`).
+    if (std.mem.eql(u8, cmd, "app_get_name")) {
+        const name: []const u8 = if (g_config) |c| c.app.name else "Suji";
+        var esc_buf: [256]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(name, &esc_buf) orelse return null;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_get_name\",\"name\":\"{s}\"}}",
+            .{esc_buf[0..esc_n]},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_get_version")) {
+        const version: []const u8 = if (g_config) |c| c.app.version else "0.0.0";
+        var esc_buf: [128]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(version, &esc_buf) orelse return null;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_get_version\",\"version\":\"{s}\"}}",
+            .{esc_buf[0..esc_n]},
+        ) catch null;
     }
 
     // app.requestUserAttention — dock bounce. critical=true는 활성화까지 반복, false는 1회.

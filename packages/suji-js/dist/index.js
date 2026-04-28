@@ -577,6 +577,11 @@ export const screen = {
         const r = await coreCall({ cmd: "screen_get_cursor_point" });
         return { x: r.x, y: r.y };
     },
+    /** (x,y)를 포함하는 display index. 어느 display에도 포함 안 되면 -1. */
+    async getDisplayNearestPoint(point) {
+        const r = await coreCall({ cmd: "screen_get_display_nearest_point", x: point.x, y: point.y });
+        return r.index;
+    },
 };
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
@@ -626,6 +631,16 @@ export const safeStorage = {
     },
 };
 export const app = {
+    /** suji.json `app.name` 반환 (Electron `app.getName`). */
+    async getName() {
+        const r = await coreCall({ cmd: "app_get_name" });
+        return r.name;
+    },
+    /** suji.json `app.version` 반환 (Electron `app.getVersion`). */
+    async getVersion() {
+        const r = await coreCall({ cmd: "app_get_version" });
+        return r.version;
+    },
     /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
     async getPath(name) {
         const r = await coreCall({ cmd: "app_get_path", name });

@@ -538,6 +538,11 @@ export declare const screen: {
         x: number;
         y: number;
     }>;
+    /** (x,y)를 포함하는 display index. 어느 display에도 포함 안 되면 -1. */
+    getDisplayNearestPoint(point: {
+        x: number;
+        y: number;
+    }): Promise<number>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {
@@ -556,6 +561,10 @@ export declare const safeStorage: {
 };
 export type AppPathName = "home" | "appData" | "userData" | "temp" | "desktop" | "documents" | "downloads";
 export declare const app: {
+    /** suji.json `app.name` 반환 (Electron `app.getName`). */
+    getName(): Promise<string>;
+    /** suji.json `app.version` 반환 (Electron `app.getVersion`). */
+    getVersion(): Promise<string>;
     /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
     getPath(name: AppPathName): Promise<string>;
     /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */

@@ -1111,6 +1111,12 @@ export const screen = {
     const r = await coreCall<{ x: number; y: number }>({ cmd: "screen_get_cursor_point" });
     return { x: r.x, y: r.y };
   },
+
+  /** (x,y)를 포함하는 display index. 어느 display에도 포함 안 되면 -1. */
+  async getDisplayNearestPoint(point: { x: number; y: number }): Promise<number> {
+    const r = await coreCall<{ index: number }>({ cmd: "screen_get_display_nearest_point", x: point.x, y: point.y });
+    return r.index;
+  },
 };
 
 // ============================================
@@ -1187,6 +1193,18 @@ export type AppPathName =
   | "downloads";
 
 export const app = {
+  /** suji.json `app.name` 반환 (Electron `app.getName`). */
+  async getName(): Promise<string> {
+    const r = await coreCall<{ name: string }>({ cmd: "app_get_name" });
+    return r.name;
+  },
+
+  /** suji.json `app.version` 반환 (Electron `app.getVersion`). */
+  async getVersion(): Promise<string> {
+    const r = await coreCall<{ version: string }>({ cmd: "app_get_version" });
+    return r.version;
+  },
+
   /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
   async getPath(name: AppPathName): Promise<string> {
     const r = await coreCall<{ path: string }>({ cmd: "app_get_path", name });

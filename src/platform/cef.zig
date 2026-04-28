@@ -1518,6 +1518,31 @@ pub fn screenGetCursorPoint() ScreenPoint {
     return .{ .x = p.x, .y = p.y };
 }
 
+/// 주어진 (x, y) 좌표에 가장 가까운 display index 반환 (Electron `screen.getDisplayNearestPoint`).
+/// 1차 단순 접근: point가 frame에 contained된 첫 display, 없으면 -1 반환.
+/// caller가 -1이면 mainScreen으로 fallback. y는 macOS bottom-up 좌표.
+pub fn screenGetDisplayNearestPoint(x: f64, y: f64) i32 {
+    if (!comptime is_macos) return -1;
+    const NSScreen = getClass("NSScreen") orelse return -1;
+    const screens = msgSend(NSScreen, "screens") orelse return -1;
+    const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
+    const count = count_fn(screens, @ptrCast(objc.sel_registerName("count")));
+
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const obj_fn: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+        const screen = obj_fn(screens, @ptrCast(objc.sel_registerName("objectAtIndex:")), i) orelse continue;
+        const rect_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+        const frame = rect_fn(screen, @ptrCast(objc.sel_registerName("frame")));
+        if (x >= frame.x and x < frame.x + frame.width and
+            y >= frame.y and y < frame.y + frame.height)
+        {
+            return @intCast(i);
+        }
+    }
+    return -1;
+}
+
 /// Dock 아이콘 badge 텍스트 설정. 빈 문자열이면 badge 제거.
 pub fn dockSetBadge(text: []const u8) void {
     if (!comptime is_macos) return;

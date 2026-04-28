@@ -1133,6 +1133,15 @@ pub mod screen {
     pub fn get_cursor_screen_point() -> Option<String> {
         invoke("__core__", r#"{"cmd":"screen_get_cursor_point"}"#)
     }
+
+    /// (x,y)에 가장 가까운 display index raw JSON. `{"index":N}` (-1 if none).
+    pub fn get_display_nearest_point(x: f64, y: f64) -> Option<String> {
+        invoke("__core__", &crate::serde_json::json!({
+            "cmd": "screen_get_display_nearest_point",
+            "x": x,
+            "y": y,
+        }).to_string())
+    }
 }
 
 pub mod web_request {
@@ -1274,6 +1283,16 @@ pub(crate) fn get_path_request(name: &str) -> String {
 /// Electron `app.getPath` 동등. name = "home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads".
 pub fn get_path(name: &str) -> Option<String> {
     invoke("__core__", &get_path_request(name))
+}
+
+/// suji.json `app.name` 반환. raw JSON: `{"name":"..."}`.
+pub fn get_name() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_name"}"#)
+}
+
+/// suji.json `app.version` 반환. raw JSON: `{"version":"..."}`.
+pub fn get_version() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_version"}"#)
 }
 
 pub(crate) fn attention_request_json(critical: bool) -> String {

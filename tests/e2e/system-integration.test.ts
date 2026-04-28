@@ -196,6 +196,42 @@ describe("app.getPath", () => {
   });
 });
 
+describe("app.getName / getVersion", () => {
+  test("config.app.name → multi-backend example name 반환", async () => {
+    const r = await core<{ name: string }>({ cmd: "app_get_name" });
+    expect(r.name).toBe("Multi Backend Example");
+  });
+
+  test("config.app.version은 비어있지 않은 string", async () => {
+    const r = await core<{ version: string }>({ cmd: "app_get_version" });
+    expect(typeof r.version).toBe("string");
+    expect(r.version.length).toBeGreaterThan(0);
+  });
+});
+
+describe("screen.getDisplayNearestPoint", () => {
+  test("primary display 내부 점은 valid index (>=0)", async () => {
+    // 첫 display 기준 (0, 0) 내부 좌표.
+    const displays = (await core<{ displays: any[] }>({ cmd: "screen_get_all_displays" })).displays;
+    const primary = displays.find((d) => d.isPrimary) ?? displays[0];
+    const r = await core<{ index: number }>({
+      cmd: "screen_get_display_nearest_point",
+      x: primary.x + primary.width / 2,
+      y: primary.y + primary.height / 2,
+    });
+    expect(r.index).toBeGreaterThanOrEqual(0);
+  });
+
+  test("아주 먼 음수 좌표는 -1 (어느 display에도 contained 안 됨)", async () => {
+    const r = await core<{ index: number }>({
+      cmd: "screen_get_display_nearest_point",
+      x: -999999,
+      y: -999999,
+    });
+    expect(r.index).toBe(-1);
+  });
+});
+
 describe("clipboard HTML", () => {
   test("HTML write → read round-trip", async () => {
     const html = "<b>hello <i>suji</i></b>";

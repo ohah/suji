@@ -1343,7 +1343,7 @@ suji build → 결과물:
 | 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | 🟡 `globalShortcut`로 가능, 전용 API 없음 |
 | 다크/라이트 테마 감지 | `nativeTheme.shouldUseDarkColors` + `updated` 이벤트 | `theme` 플러그인 | 🟡 macOS — `nativeTheme.shouldUseDarkColors()` (NSApp.effectiveAppearance.name 검사) ✅, `updated` 이벤트 (KVO)는 후속 |
 | dock 진행률 표시 | `BrowserWindow.setProgressBar(0..1)` | -- | ❌ (macOS NSDockTile setBadgeLabel "" + custom view, Win/Linux 별도) |
-| 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | 🟡 `screen.getCursorScreenPoint()` ✅ (NSEvent.mouseLocation, bottom-up). `getDisplayNearestPoint`는 후속 |
+| 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | ✅ `screen.getCursorScreenPoint()` (NSEvent.mouseLocation, bottom-up) + `getDisplayNearestPoint({x,y})` (frame contains check, none이면 -1) |
 | 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ (`CGEventSourceSecondsSinceLastEventType`, 초). `getSystemIdleState(threshold)` (active/idle/locked enum)는 후속 |
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
 | 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |

@@ -1151,6 +1151,13 @@ pub const screen = struct {
     pub fn getCursorScreenPoint() ?[]const u8 {
         return coreCmd("screen_get_cursor_point", "");
     }
+
+    /// (x,y)에 가장 가까운 display index. 어느 display에도 contained 안 되면 -1.
+    pub fn getDisplayNearestPoint(x: f64, y: f64) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"x\":{d},\"y\":{d}", .{ x, y }) catch return null;
+        return coreCmd("screen_get_display_nearest_point", fields);
+    }
 };
 
 pub const powerSaveBlocker = struct {
@@ -1339,6 +1346,16 @@ pub const process = struct {
         return .{ .code = code, .stdout = result.stdout, .stderr = result.stderr };
     }
 };
+
+/// suji.json `app.name` 반환. 응답: `{"name":"..."}`.
+pub fn getName() ?[]const u8 {
+    return coreCmd("app_get_name", "");
+}
+
+/// suji.json `app.version` 반환. 응답: `{"version":"..."}`.
+pub fn getVersion() ?[]const u8 {
+    return coreCmd("app_get_version", "");
+}
 
 /// Electron `app.getPath` 동등. name = "home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads".
 /// 응답: `{"path":"..."}` (unknown name은 빈 문자열).

@@ -948,6 +948,12 @@ export const screen = {
     const r = await invoke<{ x: number; y: number }>('__core__', { cmd: 'screen_get_cursor_point' });
     return { x: r.x, y: r.y };
   },
+
+  /** (x,y)에 가장 가까운 display index. -1이면 어느 display에도 contained 안 됨. */
+  async getDisplayNearestPoint(point: { x: number; y: number }): Promise<number> {
+    const r = await invoke<{ index: number }>('__core__', { cmd: 'screen_get_display_nearest_point', x: point.x, y: point.y });
+    return r.index;
+  },
 };
 
 export const webRequest = {
@@ -1024,6 +1030,18 @@ export type AppPathName =
   | 'downloads';
 
 export const app = {
+  /** suji.json `app.name` 반환. */
+  async getName(): Promise<string> {
+    const r = await invoke<{ name: string }>('__core__', { cmd: 'app_get_name' });
+    return r.name;
+  },
+
+  /** suji.json `app.version` 반환. */
+  async getVersion(): Promise<string> {
+    const r = await invoke<{ version: string }>('__core__', { cmd: 'app_get_version' });
+    return r.version;
+  },
+
   /** Electron `app.getPath` 동등. unknown 키는 빈 문자열. */
   async getPath(name: AppPathName): Promise<string> {
     const r = await invoke<{ path: string }>('__core__', { cmd: 'app_get_path', name });
