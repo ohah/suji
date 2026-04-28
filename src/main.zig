@@ -2283,12 +2283,19 @@ fn nextNotificationId() u32 {
 
 /// cef.zig native click target이 NSApp UI thread에서 호출 → BackendRegistry.global 안전 access.
 /// data는 호출자가 std.fmt 포맷으로 미리 빌드한 JSON 페이로드.
-/// 4KB 버퍼 — 일반 emit은 ~50B지만 page-title-updated는 escape worst-case로 ~3KB까지.
+/// 1KB 버퍼 — 일반 emit은 ~50B, 가장 큰 정규 caller(globalShortcut: accel256+click256 escape)도
+/// ~570B로 충분. page-title-updated는 worst-case ~1.5KB라 자체 버퍼로 emitBusRaw 직행.
 fn emitToBus(channel: []const u8, comptime fmt: []const u8, args: anytype) void {
+    var data_buf: [1024]u8 = undefined;
+    const data = std.fmt.bufPrint(&data_buf, fmt, args) catch return;
+    emitBusRaw(channel, data);
+}
+
+/// 이미 빌드된 JSON 페이로드를 EventBus로 직접 전달 — 큰 페이로드(page-title-updated 등)가
+/// emitToBus의 1KB 버퍼를 우회해 자체 스택 버퍼를 쓸 수 있게 한다.
+fn emitBusRaw(channel: []const u8, data: []const u8) void {
     const registry = suji.BackendRegistry.global orelse return;
     const bus = registry.event_bus orelse return;
-    var data_buf: [4096]u8 = undefined;
-    const data = std.fmt.bufPrint(&data_buf, fmt, args) catch return;
     bus.emit(channel, data);
 }
 
@@ -2383,20 +2390,24 @@ fn windowReadyToShowHandler(handle: u64) void {
 
 fn windowTitleChangeHandler(handle: u64, title: []const u8) void {
     const win_id = windowIdFromHandle(handle) orelse return;
-    // JSON escape 최악 6×(`\uXXXX`) + 닫는 따옴표/null 마진 — cef.MAX_TITLE_BYTES와 페어.
-    var title_esc: [cef.MAX_TITLE_BYTES * 6 + 2]u8 = undefined;
-    const title_n = util.escapeJsonStrFull(title, &title_esc) orelse {
+    // JSON escape 최악 6×(`\uXXXX`) — cef.MAX_TITLE_BYTES와 페어. emitToBus의 1KB 버퍼는
+    // 이 케이스(~1.5KB)를 못 담아서 자체 페이로드 버퍼로 emitBusRaw 직행. escape 결과를
+    // payload_buf 안에 직접 써 중간 버퍼 한 단계 제거.
+    var payload_buf: [cef.MAX_TITLE_BYTES * 6 + 64]u8 = undefined;
+    const prefix = std.fmt.bufPrint(&payload_buf, "{{\"windowId\":{d},\"title\":\"", .{win_id}) catch return;
+    const after_prefix = prefix.len;
+    const escape_room = payload_buf.len - after_prefix - 2; // "\"}" 마진
+    const title_n = util.escapeJsonStrFull(title, payload_buf[after_prefix..][0..escape_room]) orelse {
         std.debug.print(
             "[suji] page-title-updated: escape overflow (title bytes={d}) — event dropped\n",
             .{title.len},
         );
         return;
     };
-    emitToBus(
-        window_mod.events.page_title_updated,
-        "{{\"windowId\":{d},\"title\":\"{s}\"}}",
-        .{ win_id, title_esc[0..title_n] },
-    );
+    const tail = after_prefix + title_n;
+    payload_buf[tail] = '"';
+    payload_buf[tail + 1] = '}';
+    emitBusRaw(window_mod.events.page_title_updated, payload_buf[0 .. tail + 2]);
 }
 
 const window_lifecycle_handlers: cef.WindowLifecycleHandlers = .{

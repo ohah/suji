@@ -232,18 +232,20 @@ describe("window lifecycle events", () => {
       x: 200, y: 200, width: 400, height: 300,
     });
     const id = created.windowId;
-    await new Promise((r) => setTimeout(r, 200));
+    // CEF child browser의 NSWindow가 makeKey + content paint까지 기다림 — toggleFullScreen이
+    // 안정 상태에서 동작하도록.
+    await new Promise((r) => setTimeout(r, 1500));
 
-    const enterCol = collect<{ windowId: number }>("window:enter-full-screen", 3000);
+    // toggleFullScreen 애니메이션 ~1s — 5000ms로 여유 두기.
+    const enterCol = collect<{ windowId: number }>("window:enter-full-screen", 5000);
     await core({ cmd: "set_fullscreen", windowId: id, flag: true });
-    // toggleFullScreen 애니메이션 ~1s
     const enterEvs = (await enterCol).filter((e) => e.windowId === id);
     expect(enterEvs.length).toBeGreaterThan(0);
 
     const isFs = await core<{ fullscreen: boolean }>({ cmd: "is_fullscreen", windowId: id });
     expect(isFs.fullscreen).toBe(true);
 
-    const leaveCol = collect<{ windowId: number }>("window:leave-full-screen", 3000);
+    const leaveCol = collect<{ windowId: number }>("window:leave-full-screen", 5000);
     await core({ cmd: "set_fullscreen", windowId: id, flag: false });
     const leaveEvs = (await leaveCol).filter((e) => e.windowId === id);
     expect(leaveEvs.length).toBeGreaterThan(0);
@@ -279,7 +281,9 @@ describe("window lifecycle events", () => {
   // ==================== Phase 5: ready-to-show + page-title-updated ====================
 
   test("새 창 생성 → window:ready-to-show 1회 발화", async () => {
-    const readyCol = collect<{ windowId: number }>("window:ready-to-show", 3000);
+    // 새 창은 다른 V8 context — main 페이지의 listener가 EventBus broadcast를 받음.
+    // CEF가 새 main frame load + first paint 완료까지 충분히 대기 (5000ms).
+    const readyCol = collect<{ windowId: number }>("window:ready-to-show", 5000);
     const created = await core<{ windowId: number }>({
       cmd: "create_window",
       title: "lifecycle-ready",
@@ -389,10 +393,10 @@ describe("window lifecycle events", () => {
 
   // ==================== Phase 5: will-resize ====================
 
-  test("frontend listener는 window:will-resize 채널 구독 가능 (즉시 이벤트 X)", async () => {
-    // programmatic setBounds는 NSWindowDelegate를 거치지 않으므로 will-resize 발화 X.
-    // user-driven drag만 발화 — puppeteer로 native 타이틀바 드래그를 시뮬레이션하는
-    // 표준 방법이 없어 부정 검증으로 대체. 회귀 시 항상 발화하면 negative test가 깨짐.
+  test("setBounds도 windowWillResize: 거쳐서 will-resize 이벤트 발화", async () => {
+    // 실측 결과: macOS NSWindow.setFrame:display:는 (Apple docs와 달리) 일부 케이스에서
+    // delegate의 windowWillResize:toSize:를 호출. programmatic resize도 cancellable
+    // 경로를 통과 — listener가 size를 prevent 가능. payload {windowId, width, height}.
     const created = await core<{ windowId: number }>({
       cmd: "create_window",
       title: "lifecycle-will-resize",
@@ -405,13 +409,16 @@ describe("window lifecycle events", () => {
       "window:will-resize",
       1500,
     );
-    // programmatic setBounds 여러 번 — windowDidResize는 발화하지만 windowWillResize는 X.
     await core({ cmd: "set_bounds", windowId: id, x: 200, y: 200, width: 500, height: 350 });
     await new Promise((r) => setTimeout(r, 200));
     await core({ cmd: "set_bounds", windowId: id, x: 200, y: 200, width: 600, height: 400 });
 
     const willEvs = (await willCol).filter((e) => e.windowId === id);
-    expect(willEvs.length).toBe(0);
+    expect(willEvs.length).toBeGreaterThan(0);
+    // payload shape 검증.
+    const last = willEvs[willEvs.length - 1];
+    expect(last.width).toBeGreaterThan(0);
+    expect(last.height).toBeGreaterThan(0);
 
     await core({ cmd: "destroy_window", windowId: id });
     await new Promise((r) => setTimeout(r, 200));
