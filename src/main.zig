@@ -1117,6 +1117,22 @@ fn backendSpecialDispatch(channel: []const u8, data: []const u8, response_buf: [
 /// 클립보드 쓰기에서 잘려 응답 비었음). 두 곳에서 같은 값 사용 (response check + req_buf).
 const MAX_CORE_PAYLOAD: usize = 32 * 1024;
 
+/// raw bytes를 base64로 인코딩해 `{"from":"zig-core","cmd":<cmd>,"data":"<b64>"}` 응답을 빌드.
+/// b64 한도(12KB) 초과 시 빈 data 반환 — clipboard_read_image / native_image_to_png/jpeg 공유.
+fn respondBase64Data(response_buf: []u8, cmd: []const u8, raw_bytes: []const u8) ?[]const u8 {
+    const enc_size = std.base64.standard.Encoder.calcSize(raw_bytes.len);
+    var b64_buf: [12 * 1024]u8 = undefined;
+    if (enc_size > b64_buf.len) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"\"}}", .{cmd}) catch null;
+    }
+    const encoded = std.base64.standard.Encoder.encode(b64_buf[0..enc_size], raw_bytes);
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"{s}\"}}",
+        .{ cmd, encoded },
+    ) catch null;
+}
+
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     if (data.len > MAX_CORE_PAYLOAD) return coreError(response_buf, "__core__", "payload_too_large");
     var req_buf: [MAX_CORE_PAYLOAD]u8 = undefined;
@@ -1664,28 +1680,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     }
     // nativeImage 인코딩 — clipboard image와 같은 16KB response 한도. raw ~8KB까지.
     if (std.mem.eql(u8, cmd, "native_image_to_png") or std.mem.eql(u8, cmd, "native_image_to_jpeg")) {
-        const is_jpeg = std.mem.eql(u8, cmd, "native_image_to_jpeg");
-        const cmd_label: []const u8 = if (is_jpeg) "native_image_to_jpeg" else "native_image_to_png";
+        const file_type: cef.NSBitmapImageFileType =
+            if (std.mem.eql(u8, cmd, "native_image_to_jpeg")) .jpeg else .png;
         const raw_path = util.extractJsonString(req_clean, "path") orelse "";
         var path_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const path_n = util.unescapeJsonStr(raw_path, &path_buf) orelse {
-            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"\"}}", .{cmd_label}) catch null;
-        };
+        const path_n = util.unescapeJsonStr(raw_path, &path_buf) orelse return respondBase64Data(response_buf, cmd, &.{});
         const quality = util.extractJsonFloat(req_clean, "quality") orelse 90;
-        const file_type: cef.NSBitmapImageFileType = if (is_jpeg) .jpeg else .png;
         var raw_buf: [8 * 1024]u8 = undefined;
         const bytes = cef.nativeImageEncodeFromPath(path_buf[0..path_n], file_type, quality, &raw_buf);
-        const enc_size = std.base64.standard.Encoder.calcSize(bytes.len);
-        var b64_buf: [12 * 1024]u8 = undefined;
-        if (enc_size > b64_buf.len) {
-            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"\"}}", .{cmd_label}) catch null;
-        }
-        const encoded = std.base64.standard.Encoder.encode(b64_buf[0..enc_size], bytes);
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"{s}\"}}",
-            .{ cmd_label, encoded },
-        ) catch null;
+        return respondBase64Data(response_buf, cmd, bytes);
     }
     if (std.mem.eql(u8, cmd, "app_exit")) {
         cef.quit();
@@ -1750,17 +1753,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "clipboard_read_image")) {
         var raw_buf: [8 * 1024]u8 = undefined;
         const png_bytes = cef.clipboardReadImagePng(&raw_buf);
-        const enc_size = std.base64.standard.Encoder.calcSize(png_bytes.len);
-        var b64_buf: [12 * 1024]u8 = undefined;
-        if (enc_size > b64_buf.len) {
-            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_image\",\"data\":\"\"}}", .{}) catch null;
-        }
-        const encoded = std.base64.standard.Encoder.encode(b64_buf[0..enc_size], png_bytes);
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_image\",\"data\":\"{s}\"}}",
-            .{encoded},
-        ) catch null;
+        return respondBase64Data(response_buf, cmd, png_bytes);
     }
     if (std.mem.eql(u8, cmd, "clipboard_has")) {
         const fmt_str = util.extractJsonString(req_clean, "format") orelse "";
