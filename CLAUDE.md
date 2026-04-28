@@ -109,6 +109,11 @@ suji::export_handlers!(ping);
 // suji::menu::set_application_menu(&[MenuItem::Submenu{...}]) / reset_application_menu()
 // suji::global_shortcut::{register("Cmd+Shift+K","openSettings"), unregister(a),
 //   unregister_all(), is_registered(a)}    (macOS Carbon Hot Key)
+// suji::screen::get_all_displays()    — Display 배열 raw JSON
+// suji::power_save_blocker::{start("prevent_display_sleep"), stop(id)}
+// suji::safe_storage::{set_item(s,a,"v"), get_item(s,a), delete_item(s,a)}
+// suji::dock::{set_badge("99"), get_badge()}
+// suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
 ```
@@ -141,6 +146,16 @@ var _ = suji.Bind(&App{})
 // menu.SetApplicationMenu([]menu.MenuItem{menu.Submenu("Tools", []menu.MenuItem{menu.Item("Run", "run")})})
 // import "github.com/ohah/suji-go/globalshortcut"
 // globalshortcut.Register("Cmd+Shift+K", "openSettings") / Unregister(a) / UnregisterAll() / IsRegistered(a)
+// import "github.com/ohah/suji-go/screen"
+// screen.GetAllDisplays()
+// import "github.com/ohah/suji-go/powersaveblocker"
+// powersaveblocker.Start("prevent_display_sleep") / Stop(id)
+// import "github.com/ohah/suji-go/safestorage"
+// safestorage.SetItem(svc, acc, "v") / GetItem(svc, acc) / DeleteItem(svc, acc)
+// import "github.com/ohah/suji-go/dock"
+// dock.SetBadge("99") / GetBadge()
+// import "github.com/ohah/suji-go/attention"
+// attention.Request(true) / attention.Cancel(id)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```
@@ -185,6 +200,16 @@ suji.platform                                                // "macos" | "linux
 // await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key)
 // await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
+
+// import { screen, powerSaveBlocker, safeStorage, app } from '@suji/api';
+// const displays = await screen.getAllDisplays()                         (macOS NSScreen)
+// const id = await powerSaveBlocker.start("prevent_display_sleep")
+// await powerSaveBlocker.stop(id)                                         (macOS IOPMAssertion)
+// await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
+//                                                                         (macOS Keychain Services)
+// await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)
+// const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
+// await app.cancelUserAttentionRequest(reqId)
 ```
 
 ## suji.json 설정
@@ -248,6 +273,12 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
 // await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
+// import { screen, powerSaveBlocker, safeStorage, app } from '@suji/node'
+// const displays = await screen.getAllDisplays()                         (macOS NSScreen)
+// const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)
+// await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
+// await app.dock.setBadge("99") / app.dock.getBadge()
+// const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
 ```
 
 libnode 임베딩 방식 (별도 프로세스 없음). `~/.suji/node/24.14.1/libnode.dylib` 필요.

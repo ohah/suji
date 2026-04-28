@@ -819,3 +819,98 @@ export const dialog = {
     });
   },
 };
+
+// ============================================
+// screen / powerSaveBlocker / safeStorage / app — Frontend `@suji/api`와 동일 cmd.
+// ============================================
+
+export interface Display {
+  index: number;
+  isPrimary: boolean;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  visibleX: number;
+  visibleY: number;
+  visibleWidth: number;
+  visibleHeight: number;
+  scaleFactor: number;
+}
+
+export const screen = {
+  /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
+  async getAllDisplays(): Promise<Display[]> {
+    const r = await invoke<{ displays: Display[] }>('__core__', { cmd: 'screen_get_all_displays' });
+    return r.displays;
+  },
+};
+
+export type PowerSaveBlockerType = 'prevent_app_suspension' | 'prevent_display_sleep';
+
+export const powerSaveBlocker = {
+  /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
+  async start(type: PowerSaveBlockerType): Promise<number> {
+    const r = await invoke<{ id: number }>('__core__', { cmd: 'power_save_blocker_start', type });
+    return r.id;
+  },
+
+  /** start로 받은 id 해제. unknown id는 false. */
+  async stop(id: number): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'power_save_blocker_stop', id });
+    return r.success === true;
+  },
+};
+
+export const safeStorage = {
+  /** macOS Keychain에 utf-8 value 저장. 같은 키면 update (idempotent). */
+  async setItem(service: string, account: string, value: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', {
+      cmd: 'safe_storage_set', service, account, value,
+    });
+    return r.success === true;
+  },
+
+  /** 응답: 없으면 빈 문자열. */
+  async getItem(service: string, account: string): Promise<string> {
+    const r = await invoke<{ value: string }>('__core__', {
+      cmd: 'safe_storage_get', service, account,
+    });
+    return r.value;
+  },
+
+  /** 없는 키도 idempotent true. */
+  async deleteItem(service: string, account: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', {
+      cmd: 'safe_storage_delete', service, account,
+    });
+    return r.success === true;
+  },
+};
+
+export const app = {
+  /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
+  async requestUserAttention(critical = true): Promise<number> {
+    const r = await invoke<{ id: number }>('__core__', { cmd: 'app_attention_request', critical });
+    return r.id;
+  },
+
+  /** id == 0은 false (guard). */
+  async cancelUserAttentionRequest(id: number): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_attention_cancel', id });
+    return r.success === true;
+  },
+
+  dock: {
+    /** dock 배지 텍스트 — 빈 문자열로 제거. macOS만. */
+    async setBadge(text: string): Promise<void> {
+      await invoke('__core__', { cmd: 'dock_set_badge', text });
+    },
+
+    /** 현재 배지 텍스트. 미설정이면 빈 문자열. */
+    async getBadge(): Promise<string> {
+      const r = await invoke<{ text: string }>('__core__', { cmd: 'dock_get_badge' });
+      return r.text;
+    },
+  },
+};

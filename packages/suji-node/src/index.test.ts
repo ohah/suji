@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, type InvokeEvent } from './index';
+import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -187,5 +187,85 @@ describe('globalShortcut', () => {
         click: 'click\nwith\\ctrl',
       }),
     );
+  });
+});
+
+describe('screen', () => {
+  it('getAllDisplays invokes + unwraps displays', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"displays":[{"index":0,"isPrimary":true,"x":0,"y":0,"width":1920,"height":1080,"visibleX":0,"visibleY":0,"visibleWidth":1920,"visibleHeight":1055,"scaleFactor":2}]}');
+    const r = await screen.getAllDisplays();
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"screen_get_all_displays"}');
+    expect(r.length).toBe(1);
+    expect(r[0].isPrimary).toBe(true);
+  });
+});
+
+describe('powerSaveBlocker', () => {
+  it('start sends type and returns id', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"id":7}');
+    expect(await powerSaveBlocker.start('prevent_display_sleep')).toBe(7);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"power_save_blocker_start","type":"prevent_display_sleep"}');
+  });
+
+  it('stop sends id and maps success', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await powerSaveBlocker.stop(7)).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"power_save_blocker_stop","id":7}');
+  });
+});
+
+describe('safeStorage', () => {
+  it('setItem sends service/account/value', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await safeStorage.setItem('svc', 'acc', 'v')).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"safe_storage_set","service":"svc","account":"acc","value":"v"}');
+  });
+
+  it('getItem returns value', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"value":"secret"}');
+    expect(await safeStorage.getItem('svc', 'acc')).toBe('secret');
+  });
+
+  it('deleteItem maps success', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await safeStorage.deleteItem('svc', 'acc')).toBe(true);
+  });
+
+  it('setItem escapes quote/backslash via JSON.stringify', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    await safeStorage.setItem('svc', 'acc', 'a"b\\c');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', JSON.stringify({
+      cmd: 'safe_storage_set', service: 'svc', account: 'acc', value: 'a"b\\c',
+    }));
+  });
+});
+
+describe('app', () => {
+  it('requestUserAttention default critical=true', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"id":42}');
+    expect(await app.requestUserAttention()).toBe(42);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_attention_request","critical":true}');
+  });
+
+  it('requestUserAttention informational', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"id":1}');
+    await app.requestUserAttention(false);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_attention_request","critical":false}');
+  });
+
+  it('cancelUserAttentionRequest maps success', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await app.cancelUserAttentionRequest(42)).toBe(true);
+  });
+
+  it('dock.setBadge sends text', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    await app.dock.setBadge('99');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"dock_set_badge","text":"99"}');
+  });
+
+  it('dock.getBadge returns text', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"text":"9"}');
+    expect(await app.dock.getBadge()).toBe('9');
   });
 });
