@@ -86,6 +86,16 @@ func GetZoomFactor(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_zoom_factor","windowId":%d}`, windowID))
 }
 
+// SetAudioMuted toggles window audio mute (Electron `webContents.setAudioMuted`).
+func SetAudioMuted(windowID uint32, muted bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"set_audio_muted","windowId":%d,"muted":%t}`, windowID, muted))
+}
+
+// IsAudioMuted returns mute state. Response: `{"muted":bool,"ok":bool}`.
+func IsAudioMuted(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"is_audio_muted","windowId":%d}`, windowID))
+}
+
 func Undo(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"undo","windowId":%d}`, windowID))
 }

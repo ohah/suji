@@ -226,6 +226,11 @@ export interface ZoomFactorResponse extends WindowOpResponse {
   factor: number;
 }
 
+export interface IsAudioMutedResponse extends WindowOpResponse {
+  cmd: "is_audio_muted";
+  muted: boolean;
+}
+
 // ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
 // viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
 // `windows.executeJavaScript(viewId, ...)` 등 모든 webContents API가 view에도 동작.
@@ -353,6 +358,16 @@ export const windows = {
 
   getZoomFactor(windowId: number): Promise<ZoomFactorResponse> {
     return coreCall<ZoomFactorResponse>({ cmd: "get_zoom_factor", windowId });
+  },
+
+  /** 창 오디오 mute (Electron `webContents.setAudioMuted`). */
+  setAudioMuted(windowId: number, muted: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_audio_muted", windowId, muted });
+  },
+
+  /** 창 오디오 mute 상태 (Electron `webContents.isAudioMuted`). */
+  isAudioMuted(windowId: number): Promise<IsAudioMutedResponse> {
+    return coreCall<IsAudioMutedResponse>({ cmd: "is_audio_muted", windowId });
   },
 
   // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.

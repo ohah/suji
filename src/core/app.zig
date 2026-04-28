@@ -661,6 +661,18 @@ pub const windows = struct {
         return windowIdCmd("get_zoom_factor", id);
     }
 
+    /// 창 오디오 mute (Electron `webContents.setAudioMuted`). 응답: windowOp.
+    pub fn setAudioMuted(id: u32, muted: bool) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"muted\":{}", .{ id, muted }) catch return null;
+        return coreCmd("set_audio_muted", fields);
+    }
+
+    /// 창 오디오 mute 상태. 응답: `{"muted":bool, "ok":bool}`.
+    pub fn isAudioMuted(id: u32) ?[]const u8 {
+        return windowIdCmd("is_audio_muted", id);
+    }
+
     // Phase 4-E: 편집 (windowId만) + 검색
     pub fn undo(id: u32) ?[]const u8 {
         return windowIdCmd("undo", id);

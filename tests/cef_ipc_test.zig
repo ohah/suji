@@ -1375,3 +1375,27 @@ test "app.requestUserAttention IPC — NSApp request/cancel" {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
 }
+
+test "windows.setAudioMuted/isAudioMuted IPC + cef vtable + browser_host" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"set_audio_muted\"",
+        "\"is_audio_muted\"",
+        "window_ipc.handleSetAudioMuted",
+        "window_ipc.handleIsAudioMuted",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "fn setAudioMutedImpl",
+        "fn isAudioMutedImpl",
+        "host.set_audio_muted",
+        "host.is_audio_muted",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}

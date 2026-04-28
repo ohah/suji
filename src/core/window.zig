@@ -238,6 +238,9 @@ pub const Native = struct {
         // (Electron 호환 — `setZoomFactor(1.5)` ≈ `setZoomLevel(2.22)`).
         set_zoom_level: *const fn (ctx: ?*anyopaque, handle: u64, level: f64) void,
         get_zoom_level: *const fn (ctx: ?*anyopaque, handle: u64) f64,
+        // Audio mute (Electron `webContents.setAudioMuted` / `isAudioMuted`).
+        set_audio_muted: *const fn (ctx: ?*anyopaque, handle: u64, muted: bool) void,
+        is_audio_muted: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
         undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
         redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -320,6 +323,12 @@ pub const Native = struct {
     }
     pub fn getZoomLevel(self: Native, handle: u64) f64 {
         return self.vtable.get_zoom_level(self.ctx, handle);
+    }
+    pub fn setAudioMuted(self: Native, handle: u64, muted: bool) void {
+        self.vtable.set_audio_muted(self.ctx, handle, muted);
+    }
+    pub fn isAudioMuted(self: Native, handle: u64) bool {
+        return self.vtable.is_audio_muted(self.ctx, handle);
     }
     pub fn undo(self: Native, handle: u64) void {
         self.vtable.undo(self.ctx, handle);
@@ -1153,6 +1162,20 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.getZoomLevel(win.native_handle);
+    }
+
+    pub fn setAudioMuted(self: *WindowManager, id: u32, muted: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setAudioMuted(win.native_handle, muted);
+    }
+
+    pub fn isAudioMuted(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.isAudioMuted(win.native_handle);
     }
 
     /// Electron 호환 zoom factor↔level 변환 base. `pow(ZOOM_BASE, level) == factor`,

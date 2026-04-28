@@ -3763,6 +3763,39 @@ test "줌 메서드: destroyed/unknown 가드" {
 }
 
 // ============================================
+// Audio mute (Electron `webContents.setAudioMuted` / `isAudioMuted`)
+// ============================================
+
+test "setAudioMuted: native까지 전달 + isAudioMuted로 읽기" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+
+    try std.testing.expectEqual(false, try wm.isAudioMuted(id));
+
+    try wm.setAudioMuted(id, true);
+    try std.testing.expectEqual(@as(usize, 1), native.set_audio_muted_calls);
+    try std.testing.expectEqual(true, try wm.isAudioMuted(id));
+
+    try wm.setAudioMuted(id, false);
+    try std.testing.expectEqual(@as(usize, 2), native.set_audio_muted_calls);
+    try std.testing.expectEqual(false, try wm.isAudioMuted(id));
+}
+
+test "audio mute: destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setAudioMuted(id, true));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.isAudioMuted(id));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setAudioMuted(999, true));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.isAudioMuted(999));
+}
+
+// ============================================
 // Phase 4-E: 편집 (6 trivial) + 검색
 // ============================================
 

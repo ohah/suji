@@ -732,6 +732,21 @@ test "windows.setZoomLevel / setZoomFactor / getZoomLevel / getZoomFactor" {
     }.run);
 }
 
+test "windows.setAudioMuted / isAudioMuted: cmd JSON 형식" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.setAudioMuted(7, true);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"set_audio_muted\",\"windowId\":7,\"muted\":true") != null);
+
+            _ = app_mod.windows.setAudioMuted(7, false);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"muted\":false") != null);
+
+            _ = app_mod.windows.isAudioMuted(7);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"is_audio_muted\",\"windowId\":7") != null);
+        }
+    }.run);
+}
+
 // Phase 4-E: 편집 6 + find/stop_find.
 test "windows.undo/redo/cut/copy/paste/selectAll: cmd JSON 형식" {
     try withInvokeCore(struct {

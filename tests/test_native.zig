@@ -45,6 +45,9 @@ pub const TestNative = struct {
     // Phase 4-B: 줌 — set 호출이 stub_zoom_level 갱신 (get은 그 값 반환).
     set_zoom_level_calls: usize = 0,
     stub_zoom_level: f64 = 0,
+    // Audio mute — set이 stub_audio_muted 갱신, is가 그 값 반환.
+    set_audio_muted_calls: usize = 0,
+    stub_audio_muted: bool = false,
 
     // Phase 4-E: 편집/검색 캡처. named struct — 인덱스 매핑 mismatch 회귀 차단
     // (이전엔 [6]usize + 인덱스로 호출자/검증자가 분리. 위치 바뀌면 silent 잘못 카운트).
@@ -125,6 +128,8 @@ pub const TestNative = struct {
         .toggle_dev_tools = toggleDevTools,
         .set_zoom_level = setZoomLevel,
         .get_zoom_level = getZoomLevel,
+        .set_audio_muted = setAudioMuted,
+        .is_audio_muted = isAudioMuted,
         .undo = makeEditFn("undo"),
         .redo = makeEditFn("redo"),
         .cut = makeEditFn("cut"),
@@ -264,6 +269,16 @@ pub const TestNative = struct {
 
     fn getZoomLevel(ctx: ?*anyopaque, _: u64) f64 {
         return fromCtx(ctx).stub_zoom_level;
+    }
+
+    fn setAudioMuted(ctx: ?*anyopaque, _: u64, muted: bool) void {
+        const self = fromCtx(ctx);
+        self.set_audio_muted_calls += 1;
+        self.stub_audio_muted = muted;
+    }
+
+    fn isAudioMuted(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_audio_muted;
     }
 
     fn findInPage(ctx: ?*anyopaque, _: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {

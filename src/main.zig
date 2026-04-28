@@ -1260,6 +1260,17 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleGetZoomFactor(win_id, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "set_audio_muted")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const muted = util.extractJsonBool(req_clean, "muted") orelse false;
+        return window_ipc.handleSetAudioMuted(win_id, muted, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "is_audio_muted")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleIsAudioMuted(win_id, response_buf, wm);
+    }
     // Phase 4-E: 편집 (6 trivial) + 검색
     inline for (.{
         .{ "undo", &window_ipc.handleUndo },

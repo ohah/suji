@@ -453,6 +453,8 @@ pub const CefNative = struct {
         .toggle_dev_tools = toggleDevToolsImpl,
         .set_zoom_level = setZoomLevelImpl,
         .get_zoom_level = getZoomLevelImpl,
+        .set_audio_muted = setAudioMutedImpl,
+        .is_audio_muted = isAudioMutedImpl,
         .undo = makeFrameEditFn("undo"),
         .redo = makeFrameEditFn("redo"),
         .cut = makeFrameEditFn("cut"),
@@ -900,6 +902,21 @@ pub const CefNative = struct {
         const entry = self.browsers.get(handle) orelse return 0;
         const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return 0;
         return host.get_zoom_level.?(host);
+    }
+
+    fn setAudioMutedImpl(ctx: ?*anyopaque, handle: u64, muted: bool) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+        host.set_audio_muted.?(host, if (muted) 1 else 0);
+    }
+
+    fn isAudioMutedImpl(ctx: ?*anyopaque, handle: u64) bool {
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return false;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return false;
+        return host.is_audio_muted.?(host) != 0;
     }
 
     // ==================== Phase 4-E: 편집 (frame 위임) + 검색 ====================

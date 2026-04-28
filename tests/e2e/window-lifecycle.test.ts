@@ -505,6 +505,41 @@ describe("Zoom API (Phase 4-B)", () => {
 });
 
 // ============================================
+// webContents.setAudioMuted / isAudioMuted (CEF cef_browser_host_t.set/is_audio_muted)
+// ============================================
+
+describe("Audio mute API", () => {
+  test("set true → is true → set false → is false (round-trip)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "audio-mute", url: "about:blank" });
+    const id = created.windowId;
+    const evalCmd = (req: object): Promise<any> =>
+      page.evaluate((r) => (window as any).__suji__.core(JSON.stringify(r)), req as any);
+
+    const set1 = await evalCmd({ cmd: "set_audio_muted", windowId: id, muted: true });
+    expect(set1.cmd).toBe("set_audio_muted");
+    expect(set1.ok).toBe(true);
+
+    const is1 = await evalCmd({ cmd: "is_audio_muted", windowId: id });
+    expect(is1.ok).toBe(true);
+    expect(is1.muted).toBe(true);
+
+    const set2 = await evalCmd({ cmd: "set_audio_muted", windowId: id, muted: false });
+    expect(set2.ok).toBe(true);
+
+    const is2 = await evalCmd({ cmd: "is_audio_muted", windowId: id });
+    expect(is2.muted).toBe(false);
+  });
+
+  test("알 수 없는 windowId — ok:false, muted:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "is_audio_muted", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+    expect(r.muted).toBe(false);
+  });
+});
+
+// ============================================
 // Phase 4-C: DevTools API (open / close / is / toggle)
 // ============================================
 

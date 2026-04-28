@@ -444,6 +444,30 @@ pub fn handleGetZoomFactor(window_id: u32, response_buf: []u8, wm: *window.Windo
     return handleZoomGet("get_zoom_factor", "factor", 1, &window.WindowManager.getZoomFactor, window_id, response_buf, wm);
 }
 
+// ==================== Audio mute (Electron `webContents.setAudioMuted` / `isAudioMuted`) ====================
+
+pub fn handleSetAudioMuted(window_id: u32, muted: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setAudioMuted(window_id, muted)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_audio_muted", window_id, ok);
+}
+
+pub fn handleIsAudioMuted(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const muted = wm.isAudioMuted(window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"is_audio_muted\",\"windowId\":{d},\"ok\":false,\"muted\":false}}",
+            .{window_id},
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"is_audio_muted\",\"windowId\":{d},\"ok\":true,\"muted\":{}}}",
+        .{ window_id, muted },
+    ) catch null;
+}
+
 // ============================================
 // Phase 4-E: 편집 (6 trivial) + 검색
 // 6 편집은 windowId만 받는 동일 패턴 — 4-C handleDevToolsOp와 같은 헬퍼 사용.

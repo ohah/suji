@@ -345,6 +345,25 @@ pub mod windows {
         )
     }
 
+    /// 창 오디오 mute (Electron `webContents.setAudioMuted`). raw JSON: windowOp.
+    pub fn set_audio_muted(window_id: u32, muted: bool) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_audio_muted","windowId":{},"muted":{}}}"#,
+                window_id, muted
+            ),
+        )
+    }
+
+    /// 창 오디오 mute 상태. raw JSON: `{"muted":bool,"ok":bool}`.
+    pub fn is_audio_muted(window_id: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"is_audio_muted","windowId":{}}}"#, window_id),
+        )
+    }
+
     pub fn undo(window_id: u32) -> Option<String> {
         invoke(
             "__core__",

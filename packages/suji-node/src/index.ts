@@ -423,6 +423,11 @@ export interface ZoomFactorResponse extends WindowOpResponse {
   factor: number;
 }
 
+export interface IsAudioMutedResponse extends WindowOpResponse {
+  cmd: 'is_audio_muted';
+  muted: boolean;
+}
+
 export interface SetBoundsArgs {
   x?: number;
   y?: number;
@@ -482,6 +487,16 @@ export const windows = {
   },
   getZoomFactor(windowId: number): Promise<ZoomFactorResponse> {
     return invoke<ZoomFactorResponse>('__core__', { cmd: 'get_zoom_factor', windowId });
+  },
+
+  /** 창 오디오 mute (Electron `webContents.setAudioMuted`). */
+  setAudioMuted(windowId: number, muted: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_audio_muted', windowId, muted });
+  },
+
+  /** 창 오디오 mute 상태 (Electron `webContents.isAudioMuted`). */
+  isAudioMuted(windowId: number): Promise<IsAudioMutedResponse> {
+    return invoke<IsAudioMutedResponse>('__core__', { cmd: 'is_audio_muted', windowId });
   },
 
   undo(windowId: number): Promise<WindowOpResponse> {
