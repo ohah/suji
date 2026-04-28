@@ -26,6 +26,7 @@ bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-A WebContentsView (createView/z-order/lifecycle)
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
+bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows.create + isLoading polling)
 ```
 
 E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어
