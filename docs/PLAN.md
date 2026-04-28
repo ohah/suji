@@ -1289,7 +1289,7 @@ suji build → 결과물:
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |
 | webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ❌ (CEF resource handler 확장) |
-| safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | ❌ (macOS Keychain / Win DPAPI / Linux libsecret) |
+| safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | 🟡 macOS만 (`safe_storage_set/get/delete` — Keychain Services). Win DPAPI / Linux libsecret 미구현 |
 
 ### 앱 배포 & 패키징
 
@@ -1370,7 +1370,7 @@ suji build → 결과물:
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. **자동 업데이트** — 배포 후 유지보수에 필수
 14. **`child_process` / HTTP / SQLite SDK** — 흔한 use case (Zig std.process.Child / std.http 노출만 — 분량 소)
-15. **`safeStorage` (Keychain 암호화)** — 사용자 인증 토큰/secret 저장 (macOS Keychain / Win DPAPI / Linux libsecret)
+15. 🟡 **`safeStorage` (Keychain 암호화) — macOS 부분 완료**. `safe_storage_set/get/delete` IPC 3개 + Keychain Services (SecItemAdd/CopyMatching/Delete). idempotent set + escape-safe value (e2e 4 케이스). Win DPAPI / Linux libsecret 후속.
 16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge) — 분량 소 each
 17. 🟡 **`windows.createView` (Electron WebContentsView 동등) — Phase 17-A (macOS) 부분 완료**.
     한 창 contentView 안에 wrapper NSView + child NSView+CefBrowser 합성. id 풀 공유 +

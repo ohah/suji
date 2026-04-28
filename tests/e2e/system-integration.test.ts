@@ -1,5 +1,5 @@
 /**
- * 시스템 통합 e2e — screen.getAllDisplays / dock badge / powerSaveBlocker.
+ * 시스템 통합 e2e — screen.getAllDisplays / dock badge / powerSaveBlocker / safeStorage.
  *
  * 실행: ./tests/e2e/run-system-integration.sh
  */
@@ -131,5 +131,98 @@ describe("powerSaveBlocker", () => {
       id: start.id,
     });
     expect(stop2.success).toBe(false);
+  });
+});
+
+describe("safeStorage (Keychain)", () => {
+  const SVC = "Suji-e2e-test";
+
+  test("set → get round-trip", async () => {
+    const account = `acc-${Date.now()}-1`;
+    const setR = await core<{ success: boolean }>({
+      cmd: "safe_storage_set",
+      service: SVC,
+      account,
+      value: "secret-value",
+    });
+    expect(setR.success).toBe(true);
+
+    const getR = await core<{ value: string }>({
+      cmd: "safe_storage_get",
+      service: SVC,
+      account,
+    });
+    expect(getR.value).toBe("secret-value");
+
+    await core({ cmd: "safe_storage_delete", service: SVC, account });
+  });
+
+  test("delete 후 get은 빈 문자열", async () => {
+    const account = `acc-${Date.now()}-2`;
+    await core({
+      cmd: "safe_storage_set",
+      service: SVC,
+      account,
+      value: "to-delete",
+    });
+    const del = await core<{ success: boolean }>({
+      cmd: "safe_storage_delete",
+      service: SVC,
+      account,
+    });
+    expect(del.success).toBe(true);
+
+    const getR = await core<{ value: string }>({
+      cmd: "safe_storage_get",
+      service: SVC,
+      account,
+    });
+    expect(getR.value).toBe("");
+  });
+
+  test("같은 key set 두 번 — 두번째 값으로 update (idempotent)", async () => {
+    const account = `acc-${Date.now()}-3`;
+    await core({
+      cmd: "safe_storage_set",
+      service: SVC,
+      account,
+      value: "first",
+    });
+    await core({
+      cmd: "safe_storage_set",
+      service: SVC,
+      account,
+      value: "second",
+    });
+
+    const getR = await core<{ value: string }>({
+      cmd: "safe_storage_get",
+      service: SVC,
+      account,
+    });
+    expect(getR.value).toBe("second");
+
+    await core({ cmd: "safe_storage_delete", service: SVC, account });
+  });
+
+  test("escape — 따옴표/백슬래시 포함 value round-trip", async () => {
+    const account = `acc-${Date.now()}-4`;
+    const value = 'a"b\\c';
+    const setR = await core<{ success: boolean }>({
+      cmd: "safe_storage_set",
+      service: SVC,
+      account,
+      value,
+    });
+    expect(setR.success).toBe(true);
+
+    const getR = await core<{ value: string }>({
+      cmd: "safe_storage_get",
+      service: SVC,
+      account,
+    });
+    expect(getR.value).toBe(value);
+
+    await core({ cmd: "safe_storage_delete", service: SVC, account });
   });
 });

@@ -1361,6 +1361,102 @@ extern "c" fn IOPMAssertionRelease(assertion_id: u32) c_int;
 /// IOKit/IOPMLib.h:433 — assertion ON. OFF는 0이지만 OFF로 create하는 의미가 없어 미정의.
 const kIOPMAssertionLevelOn: u32 = 255;
 
+// ============================================
+// safeStorage — macOS Keychain Services (Electron `safeStorage`)
+// ============================================
+// SecItemAdd / SecItemCopyMatching / SecItemDelete — generic password class.
+// service = "Suji" + 사용자 지정 namespace, account = key. value는 plain UTF-8.
+// macOS Keychain이 자동 암호화 — 사용자 login session 잠금 시 OS가 access 차단.
+
+extern "c" const kSecClass: ?*anyopaque;
+extern "c" const kSecClassGenericPassword: ?*anyopaque;
+extern "c" const kSecAttrService: ?*anyopaque;
+extern "c" const kSecAttrAccount: ?*anyopaque;
+extern "c" const kSecValueData: ?*anyopaque;
+extern "c" const kSecReturnData: ?*anyopaque;
+extern "c" const kSecMatchLimit: ?*anyopaque;
+extern "c" const kSecMatchLimitOne: ?*anyopaque;
+
+/// CFDictionary helpers — NSDictionary toll-free bridged.
+extern "c" fn SecItemAdd(attributes: ?*anyopaque, result: ?*?*anyopaque) c_int;
+extern "c" fn SecItemCopyMatching(query: ?*anyopaque, result: ?*?*anyopaque) c_int;
+extern "c" fn SecItemDelete(query: ?*anyopaque) c_int;
+
+extern "c" fn CFDataCreate(allocator: ?*anyopaque, bytes: [*]const u8, length: c_long) ?*anyopaque;
+extern "c" fn CFDataGetBytePtr(data: ?*anyopaque) [*]const u8;
+extern "c" fn CFDataGetLength(data: ?*anyopaque) c_long;
+extern "c" fn CFRelease(cf: ?*anyopaque) void;
+
+const errSecSuccess: c_int = 0;
+const errSecItemNotFound: c_int = -25300;
+const errSecDuplicateItem: c_int = -25299;
+
+/// 4-필드 NSDictionary 빌드 — `+[NSMutableDictionary dictionaryWithObjectsAndKeys:]` 변종.
+/// 마지막 nil 인자가 list terminator. CFDictionary는 NSDictionary와 toll-free bridged.
+fn buildKeychainQuery(class_val: ?*anyopaque, service: []const u8, account: []const u8) ?*anyopaque {
+    const NSMutableDictionary = getClass("NSMutableDictionary") orelse return null;
+    const dict = msgSend(NSMutableDictionary, "dictionary") orelse return null;
+
+    const set_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    const set_sel = objc.sel_registerName("setObject:forKey:");
+    set_fn(dict, @ptrCast(set_sel), class_val, kSecClass);
+
+    if (nsStringFromSlice(service)) |s| set_fn(dict, @ptrCast(set_sel), s, kSecAttrService);
+    if (nsStringFromSlice(account)) |a| set_fn(dict, @ptrCast(set_sel), a, kSecAttrAccount);
+    return dict;
+}
+
+/// 키체인에 utf-8 값을 저장. 같은 key가 있으면 update. 성공 = true.
+pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
+
+    // Delete existing entry (idempotent set 보장).
+    _ = SecItemDelete(query);
+
+    const data = CFDataCreate(null, value.ptr, @intCast(value.len)) orelse return false;
+    defer CFRelease(data);
+
+    const set_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    const set_sel = objc.sel_registerName("setObject:forKey:");
+    set_fn(query, @ptrCast(set_sel), data, kSecValueData);
+
+    return SecItemAdd(query, null) == errSecSuccess;
+}
+
+/// 키체인에서 utf-8 값 read. out_buf에 복사 후 length 반환. 못 찾으면 빈 slice.
+pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return out_buf[0..0];
+
+    const set_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    const set_sel = objc.sel_registerName("setObject:forKey:");
+    // kCFBooleanTrue 대신 NSNumber(YES) — toll-free bridged.
+    const NSNumber = getClass("NSNumber") orelse return out_buf[0..0];
+    const yes_fn: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const yes_obj = yes_fn(NSNumber, @ptrCast(objc.sel_registerName("numberWithBool:")), 1) orelse return out_buf[0..0];
+    set_fn(query, @ptrCast(set_sel), yes_obj, kSecReturnData);
+    set_fn(query, @ptrCast(set_sel), kSecMatchLimitOne, kSecMatchLimit);
+
+    var result: ?*anyopaque = null;
+    if (SecItemCopyMatching(query, &result) != errSecSuccess) return out_buf[0..0];
+    const data = result orelse return out_buf[0..0];
+    defer CFRelease(data);
+
+    const ptr = CFDataGetBytePtr(data);
+    const len: usize = @intCast(CFDataGetLength(data));
+    const n = @min(len, out_buf.len);
+    @memcpy(out_buf[0..n], ptr[0..n]);
+    return out_buf[0..n];
+}
+
+pub fn safeStorageDelete(service: []const u8, account: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
+    const r = SecItemDelete(query);
+    return r == errSecSuccess or r == errSecItemNotFound;
+}
+
 /// IOPMAssertion 시작 — 0이면 실패 (id는 1+).
 /// NSString은 toll-free bridged with CFStringRef — IOPM이 받는 CFStringRef 자리에 그대로 전달.
 pub fn powerSaveBlockerStart(t: PowerSaveBlockerType) u32 {

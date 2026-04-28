@@ -1507,6 +1507,48 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
+    // safeStorage — Keychain Services. service/account/value 셋 다 unescape 필요 (wire JSON).
+    if (std.mem.eql(u8, cmd, "safe_storage_set")) {
+        const svc_raw = util.extractJsonString(req_clean, "service") orelse "";
+        const acc_raw = util.extractJsonString(req_clean, "account") orelse "";
+        const val_raw = util.extractJsonString(req_clean, "value") orelse "";
+        var svc_buf: [256]u8 = undefined;
+        var acc_buf: [256]u8 = undefined;
+        var val_buf: [4096]u8 = undefined;
+        const svc_n = util.unescapeJsonStr(svc_raw, &svc_buf) orelse return coreError(response_buf, "safe_storage_set", "service");
+        const acc_n = util.unescapeJsonStr(acc_raw, &acc_buf) orelse return coreError(response_buf, "safe_storage_set", "account");
+        const val_n = util.unescapeJsonStr(val_raw, &val_buf) orelse return coreError(response_buf, "safe_storage_set", "value");
+        const ok = cef.safeStorageSet(svc_buf[0..svc_n], acc_buf[0..acc_n], val_buf[0..val_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"safe_storage_set\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "safe_storage_get")) {
+        const svc_raw = util.extractJsonString(req_clean, "service") orelse "";
+        const acc_raw = util.extractJsonString(req_clean, "account") orelse "";
+        var svc_buf: [256]u8 = undefined;
+        var acc_buf: [256]u8 = undefined;
+        const svc_n = util.unescapeJsonStr(svc_raw, &svc_buf) orelse return coreError(response_buf, "safe_storage_get", "service");
+        const acc_n = util.unescapeJsonStr(acc_raw, &acc_buf) orelse return coreError(response_buf, "safe_storage_get", "account");
+        var val_buf: [4096]u8 = undefined;
+        const val = cef.safeStorageGet(svc_buf[0..svc_n], acc_buf[0..acc_n], &val_buf);
+        var esc_buf: [8192]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(val, &esc_buf) orelse return coreError(response_buf, "safe_storage_get", "encode");
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"safe_storage_get\",\"value\":\"{s}\"}}",
+            .{esc_buf[0..esc_n]},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "safe_storage_delete")) {
+        const svc_raw = util.extractJsonString(req_clean, "service") orelse "";
+        const acc_raw = util.extractJsonString(req_clean, "account") orelse "";
+        var svc_buf: [256]u8 = undefined;
+        var acc_buf: [256]u8 = undefined;
+        const svc_n = util.unescapeJsonStr(svc_raw, &svc_buf) orelse return coreError(response_buf, "safe_storage_delete", "service");
+        const acc_n = util.unescapeJsonStr(acc_raw, &acc_buf) orelse return coreError(response_buf, "safe_storage_delete", "account");
+        const ok = cef.safeStorageDelete(svc_buf[0..svc_n], acc_buf[0..acc_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"safe_storage_delete\",\"success\":{}}}", .{ok}) catch null;
+    }
+
     if (std.mem.eql(u8, cmd, "fs_read_file")) {
         return handleFsReadFile(req_clean, response_buf);
     }

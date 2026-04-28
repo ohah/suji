@@ -861,3 +861,42 @@ test "find_result IPC — find_handler 등록 + main.zig final-only forward + di
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
 }
+
+test "safeStorage IPC — Keychain set/get/delete + Security framework" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"safe_storage_set\"",
+        "\"safe_storage_get\"",
+        "\"safe_storage_delete\"",
+        "cef.safeStorageSet",
+        "cef.safeStorageGet",
+        "cef.safeStorageDelete",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn safeStorageSet",
+        "pub fn safeStorageGet",
+        "pub fn safeStorageDelete",
+        "SecItemAdd",
+        "SecItemCopyMatching",
+        "SecItemDelete",
+        "kSecClassGenericPassword",
+        "errSecItemNotFound",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const build_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(build_src);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "Security") != null);
+}
