@@ -890,6 +890,16 @@ test "clipboard.has / availableFormats IPC" {
     }.run);
 }
 
+test "app.setProgressBar: progress 필드" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.setProgressBar(0.5);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_set_progress_bar\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"progress\":0.5") != null);
+        }
+    }.run);
+}
+
 test "app.getLocale: 인자 없는 cmd" {
     try withInvokeCore(struct {
         fn run() !void {

@@ -1246,6 +1246,13 @@ export const app = {
     return r.locale;
   },
 
+  /** dock 진행률 표시. progress<0=hide, 0~1=ratio, >1=100%로 clamp.
+   *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
+  async setProgressBar(progress: number): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_set_progress_bar", progress });
+    return r.success === true;
+  },
+
   /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
   async focus(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_focus" });

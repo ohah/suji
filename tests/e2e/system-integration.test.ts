@@ -253,6 +253,22 @@ describe("clipboard.has / availableFormats", () => {
   });
 });
 
+describe("app.setProgressBar", () => {
+  test("progress 0.5 → success, hide(-1) → success", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "app_set_progress_bar", progress: 0.5 });
+    expect(r.success).toBe(true);
+
+    const hide = await core<{ success: boolean }>({ cmd: "app_set_progress_bar", progress: -1 });
+    expect(hide.success).toBe(true);
+  });
+
+  test("progress > 1은 clamp되어 success (실패 안 함)", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "app_set_progress_bar", progress: 5 });
+    expect(r.success).toBe(true);
+    await core({ cmd: "app_set_progress_bar", progress: -1 });
+  });
+});
+
 describe("app.getLocale", () => {
   test("BCP 47 형식 locale (xx 또는 xx-XX 패턴)", async () => {
     const r = await core<{ locale: string }>({ cmd: "app_get_locale" });

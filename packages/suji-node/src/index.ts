@@ -1080,6 +1080,12 @@ export const app = {
     return r.locale;
   },
 
+  /** dock 진행률. progress<0=hide, 0~1=ratio, >1=clamp to 1. */
+  async setProgressBar(progress: number): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_set_progress_bar', progress });
+    return r.success === true;
+  },
+
   /** 앱 frontmost로. */
   async focus(): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_focus' });

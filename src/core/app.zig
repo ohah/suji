@@ -1390,6 +1390,14 @@ pub fn getLocale() ?[]const u8 {
     return coreCmd("app_get_locale", "");
 }
 
+/// dock 진행률 (NSDockTile.contentView NSProgressIndicator). progress<0=hide, 0~1=ratio.
+/// 응답: `{"success":bool}`.
+pub fn setProgressBar(progress: f64) ?[]const u8 {
+    var fields_buf: [64]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"progress\":{d}", .{progress}) catch return null;
+    return coreCmd("app_set_progress_bar", fields);
+}
+
 /// 앱 frontmost로. 응답: `{"success":bool}`.
 pub fn focus() ?[]const u8 {
     return coreCmd("app_focus", "");

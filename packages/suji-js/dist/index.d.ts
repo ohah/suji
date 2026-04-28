@@ -581,6 +581,9 @@ export declare const app: {
     isReady(): Promise<boolean>;
     /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
     getLocale(): Promise<string>;
+    /** dock 진행률 표시. progress<0=hide, 0~1=ratio, >1=100%로 clamp.
+     *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
+    setProgressBar(progress: number): Promise<boolean>;
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
     focus(): Promise<boolean>;
     /** 모든 윈도우 hide (macOS Cmd+H 동등). */

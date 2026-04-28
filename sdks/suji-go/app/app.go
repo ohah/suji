@@ -40,6 +40,12 @@ func GetLocale() string {
 	return suji.Invoke("__core__", `{"cmd":"app_get_locale"}`)
 }
 
+// SetProgressBar sets dock icon progress. progress<0=hide, 0~1=ratio.
+// Response: `{"success":bool}`.
+func SetProgressBar(progress float64) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_progress_bar","progress":%g}`, progress))
+}
+
 // Focus brings the app frontmost. raw JSON: `{"success":bool}`.
 func Focus() string {
 	return suji.Invoke("__core__", `{"cmd":"app_focus"}`)

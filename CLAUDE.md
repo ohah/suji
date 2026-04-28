@@ -92,6 +92,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
 // suji.isReady() / suji.focus() / suji.hide()  — 앱 init/frontmost/Cmd+H
 // suji.getLocale()                              — 시스템 locale (BCP 47, "en-US" 등)
+// suji.setProgressBar(0.5)                      — dock 진행률 (NSDockTile)
 // suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
 // suji.screen.getCursorScreenPoint() / suji.screen.getDisplayNearestPoint(x, y)
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)

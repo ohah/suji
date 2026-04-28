@@ -1332,6 +1332,14 @@ pub fn get_locale() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_get_locale"}"#)
 }
 
+/// dock 진행률 (NSDockTile.contentView NSProgressIndicator). progress<0=hide, 0~1=ratio.
+pub fn set_progress_bar(progress: f64) -> Option<String> {
+    invoke(
+        "__core__",
+        &serde_json::json!({ "cmd": "app_set_progress_bar", "progress": progress }).to_string(),
+    )
+}
+
 /// 앱 frontmost로. raw JSON: `{"success":bool}`.
 pub fn focus() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_focus"}"#)

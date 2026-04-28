@@ -1638,6 +1638,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         // V8 binding이 호출 가능한 시점은 이미 init 후. 항상 true.
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_ready\",\"ready\":true}}", .{}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "app_set_progress_bar")) {
+        const progress = util.extractJsonFloat(req_clean, "progress") orelse -1;
+        const ok = cef.appSetProgressBar(progress);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_set_progress_bar\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "app_get_locale")) {
         var raw_buf: [128]u8 = undefined;
         const locale = cef.appGetLocale(&raw_buf);
