@@ -325,3 +325,57 @@ test "Config._arena must be a pointer to ArenaAllocator (not a value)" {
     const payload_info = @typeInfo(optional_info.child);
     try std.testing.expect(payload_info == .pointer);
 }
+
+// ============================================
+// Phase 5-5: quitOnAllWindowsClosed
+// ============================================
+
+test "Config.App.quit_on_all_windows_closed: default false" {
+    const app = config.Config.App{};
+    try std.testing.expectEqual(false, app.quit_on_all_windows_closed);
+}
+
+test "Config.App.quit_on_all_windows_closed: 명시 true 가능" {
+    const app = config.Config.App{ .quit_on_all_windows_closed = true };
+    try std.testing.expectEqual(true, app.quit_on_all_windows_closed);
+}
+
+test "회귀: cef.quit이 idempotent guard (g_quit_called)" {
+    // user code + 코어 자동 quit 두 경로가 동시 발화 가능 — 두 번째 호출은 즉시 no-op
+    // 이어야 race-free. 명시적 flag 가드 존재 검증.
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    inline for (.{
+        "var g_quit_called: bool = false",
+        "if (g_quit_called) return",
+        "g_quit_called = true",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
+    }
+}
+
+test "회귀: main.zig가 config.app.quit_on_all_windows_closed 분기 + listener 등록" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    // 정책 분기 + 자동 quit listener 등록의 핵심 토큰. cef.quit()은 다른 곳에도
+    // 등장하므로 needle에서 제외 — 분기와 listener가 보이면 정책이 살아있음.
+    inline for (.{
+        "if (config.app.quit_on_all_windows_closed)",
+        "event_bus.onC(window_mod.events.all_closed",
+        "fn allClosedAutoQuit",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
+    }
+}

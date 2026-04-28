@@ -22,6 +22,25 @@
           "type": "string",
           "default": "0.1.0",
           "description": "앱 버전 (semver)"
+        },
+        "entitlements": {
+          "type": "string",
+          "description": "사용자 entitlements plist 경로 — 모든 binary에 단독 적용 (Suji default helper별 entitlements 대체)."
+        },
+        "stripCef": {
+          "type": "boolean",
+          "default": true,
+          "description": "CEF framework binary debug symbol strip (~30MB 절약)."
+        },
+        "locales": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "번들에 포함할 CEF locale (`en`, `ko` 등). 미설정 시 default `[\"en\"]`. `[\"*\"]`면 220개 전부."
+        },
+        "quitOnAllWindowsClosed": {
+          "type": "boolean",
+          "default": false,
+          "description": "마지막 창 close 시 코어가 자동 cef.quit(). false면 사용자 코드가 'window:all-closed' 구독 후 직접 quit (Electron canonical 패턴)."
         }
       },
       "additionalProperties": false

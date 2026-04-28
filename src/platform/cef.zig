@@ -2302,7 +2302,15 @@ pub fn shutdown() void {
 /// DevTools 떠 있을 때 cef_quit_message_loop만 호출하면 macOS NSApp 런루프가
 /// DevTools pending 이벤트에 매여 quit이 늦거나 무시됨. close_browser(1)은 force라
 /// cancelable `window:close` 이벤트는 발화 X — 명시적 quit 요청이라 의도적.
+///
+/// **명시적 idempotent**: 두 번째 호출은 즉시 no-op. user code(suji.on("window:all-closed"))
+/// + 코어 자동 quit(`app.quitOnAllWindowsClosed: true`) 두 경로가 동시에 발화해도 안전.
+var g_quit_called: bool = false;
+
 pub fn quit() void {
+    if (g_quit_called) return;
+    g_quit_called = true;
+
     if (devtools_map_initialized) {
         var it = devtools_to_inspectee.iterator();
         while (it.next()) |entry| {

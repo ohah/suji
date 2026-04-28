@@ -829,10 +829,13 @@ fn openWindow(
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
 
-    // window:all-closed 이벤트는 WindowManager가 발화. 사용자가 자기 backend에서
-    // `suji.on("window:all-closed", ...)`로 구독하고 플랫폼에 맞게 `suji.quit()`
-    // 호출하는 Electron 패턴. 코어는 자동 quit하지 않음 → 사용자 코드가 주인.
-    // 예시: examples/zig-backend/app.zig
+    // window:all-closed 이벤트는 WindowManager가 발화. 기본은 사용자 backend가 직접
+    // `suji.on("window:all-closed", ...)`로 구독하고 platform 분기 후 `suji.quit()` 호출
+    // (Electron canonical 패턴). `app.quitOnAllWindowsClosed: true`면 코어가 자동 quit —
+    // user code 호출과 동시 발화해도 cef.quit()이 idempotent라 race 없음.
+    if (config.app.quit_on_all_windows_closed) {
+        _ = event_bus.onC(window_mod.events.all_closed, &allClosedAutoQuit, null);
+    }
 
     // CEF IPC 콜백 연결
     cef.setInvokeHandler(&cefInvokeHandler);
@@ -2366,6 +2369,12 @@ fn windowLeaveFullScreenHandler(handle: u64) void {
 fn windowWillResizeHandler(handle: u64, curr_w: f64, curr_h: f64, proposed_w: *f64, proposed_h: *f64) void {
     const wm = window_mod.WindowManager.global orelse return;
     wm.applyWillResizeForHandle(handle, curr_w, curr_h, proposed_w, proposed_h);
+}
+
+/// `app.quitOnAllWindowsClosed: true` 시 EventBus에 등록되는 listener — window:all-closed 발화 시
+/// 자동으로 cef.quit() 호출. C ABI라 ([*c]u8, [*c]u8, ?*anyopaque) 시그니처.
+fn allClosedAutoQuit(_: [*c]const u8, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {
+    cef.quit();
 }
 
 fn windowReadyToShowHandler(handle: u64) void {

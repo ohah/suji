@@ -36,6 +36,11 @@ pub const Config = struct {
         locales: []const [:0]const u8 = &.{},
         /// CEF framework binary strip — debug symbols 제거 (~30MB 절약). default true.
         strip_cef: bool = true,
+        /// 마지막 창이 닫힐 때 (window:all-closed 발화 시점) 코어가 자동으로 cef.quit().
+        /// default false — Electron canonical 패턴(`suji.on("window:all-closed", ...)`로 user
+        /// 코드가 platform 분기 후 quit 호출). true로 설정 시 모든 플랫폼에서 자동 종료.
+        /// 두 경로(user code + 코어)가 동시에 발화해도 cef.quit()이 idempotent라 안전.
+        quit_on_all_windows_closed: bool = false,
     };
 
     pub const Protocol = enum { suji, file };
@@ -194,6 +199,7 @@ pub const Config = struct {
                 if (getStr(app, "version")) |s| config.app.version = dupeStr(a, s);
                 if (getStr(app, "entitlements")) |s| config.app.entitlements = dupeStr(a, s);
                 if (getBool(app, "stripCef")) |b| config.app.strip_cef = b;
+                if (getBool(app, "quitOnAllWindowsClosed")) |b| config.app.quit_on_all_windows_closed = b;
                 if (app.get("locales")) |loc_val| {
                     if (loc_val == .array) {
                         var list = std.ArrayList([:0]const u8).empty;
