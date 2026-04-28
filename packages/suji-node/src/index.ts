@@ -894,7 +894,22 @@ export const safeStorage = {
   },
 };
 
+export type AppPathName =
+  | 'home'
+  | 'appData'
+  | 'userData'
+  | 'temp'
+  | 'desktop'
+  | 'documents'
+  | 'downloads';
+
 export const app = {
+  /** Electron `app.getPath` 동등. unknown 키는 빈 문자열. */
+  async getPath(name: AppPathName): Promise<string> {
+    const r = await invoke<{ path: string }>('__core__', { cmd: 'app_get_path', name });
+    return r.path;
+  },
+
   /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
   async requestUserAttention(critical = true): Promise<number> {
     const r = await invoke<{ id: number }>('__core__', { cmd: 'app_attention_request', critical });

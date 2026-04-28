@@ -538,11 +538,12 @@ export const safeStorage = {
         return r.success === true;
     },
 };
-// ============================================
-// app — 애플리케이션 레벨 API (dock 바운스 등 NSApp wrap)
-// ============================================
-// Electron `app.requestUserAttention` / `app.dock.setBadge` 동등 (macOS).
 export const app = {
+    /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
+    async getPath(name) {
+        const r = await coreCall({ cmd: "app_get_path", name });
+        return r.path;
+    },
     /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
     async requestUserAttention(critical = true) {
         const r = await coreCall({ cmd: "app_attention_request", critical });

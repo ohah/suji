@@ -1158,6 +1158,16 @@ test "notification.close: notificationId 전송" {
 // screen / powerSaveBlocker / safeStorage / dock / requestUserAttention SDK
 // ============================================
 
+test "app.getPath: name 필드 escape + cmd 전송" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.getPath("userData");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_get_path\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"name\":\"userData\"") != null);
+        }
+    }.run);
+}
+
 test "screen.getAllDisplays: 인자 없는 cmd" {
     try withInvokeCore(struct {
         fn run() !void {

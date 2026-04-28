@@ -1452,6 +1452,21 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         ) catch null;
     }
 
+    // app.getPath — Electron 표준 키 7개. config.app.name이 userData 경로에 들어감.
+    if (std.mem.eql(u8, cmd, "app_get_path")) {
+        const name = util.extractJsonString(req_clean, "name") orelse "";
+        const app_name: []const u8 = if (g_config) |c| c.app.name else "Suji";
+        var path_buf: [1024]u8 = undefined;
+        const path = cef.appGetPath(&path_buf, name, app_name) orelse "";
+        var esc_buf: [2048]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(path, &esc_buf) orelse return coreError(response_buf, "app_get_path", "encode");
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_get_path\",\"path\":\"{s}\"}}",
+            .{esc_buf[0..esc_n]},
+        ) catch null;
+    }
+
     // Screen API — getAllDisplays 결과를 큰 stack 버퍼로 직접 빌드.
     if (std.mem.eql(u8, cmd, "screen_get_all_displays")) {
         var displays_buf: [4096]u8 = undefined;

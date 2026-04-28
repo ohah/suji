@@ -1159,6 +1159,15 @@ pub mod dock {
     }
 }
 
+pub(crate) fn get_path_request(name: &str) -> String {
+    serde_json::json!({ "cmd": "app_get_path", "name": name }).to_string()
+}
+
+/// Electron `app.getPath` 동등. name = "home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads".
+pub fn get_path(name: &str) -> Option<String> {
+    invoke("__core__", &get_path_request(name))
+}
+
 pub(crate) fn attention_request_json(critical: bool) -> String {
     serde_json::json!({ "cmd": "app_attention_request", "critical": critical }).to_string()
 }
@@ -1493,6 +1502,14 @@ mod tests {
 
         let resp_who = whoami_test(serde_json::json!({}));
         assert_eq!(resp_who, serde_json::json!({ "id": 0, "name": null }));
+    }
+
+    #[test]
+    fn app_get_path_request_carries_name() {
+        let v: serde_json::Value =
+            serde_json::from_str(&crate::get_path_request("userData")).unwrap();
+        assert_eq!(v["cmd"], "app_get_path");
+        assert_eq!(v["name"], "userData");
     }
 
     #[test]

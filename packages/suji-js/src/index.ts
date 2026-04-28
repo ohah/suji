@@ -1006,7 +1006,22 @@ export const safeStorage = {
 // ============================================
 // Electron `app.requestUserAttention` / `app.dock.setBadge` 동등 (macOS).
 
+export type AppPathName =
+  | "home"
+  | "appData"
+  | "userData"
+  | "temp"
+  | "desktop"
+  | "documents"
+  | "downloads";
+
 export const app = {
+  /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
+  async getPath(name: AppPathName): Promise<string> {
+    const r = await coreCall<{ path: string }>({ cmd: "app_get_path", name });
+    return r.path;
+  },
+
   /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
   async requestUserAttention(critical = true): Promise<number> {
     const r = await coreCall<{ id: number }>({ cmd: "app_attention_request", critical });

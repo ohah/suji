@@ -81,6 +81,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain Services)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
+// suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
 //                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
@@ -113,6 +114,7 @@ suji::export_handlers!(ping);
 // suji::power_save_blocker::{start("prevent_display_sleep"), stop(id)}
 // suji::safe_storage::{set_item(s,a,"v"), get_item(s,a), delete_item(s,a)}
 // suji::dock::{set_badge("99"), get_badge()}
+// suji::get_path("userData") / get_path("home") ...
 // suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::platform()             — "macos" | "linux" | "windows"
@@ -154,6 +156,8 @@ var _ = suji.Bind(&App{})
 // safestorage.SetItem(svc, acc, "v") / GetItem(svc, acc) / DeleteItem(svc, acc)
 // import "github.com/ohah/suji-go/dock"
 // dock.SetBadge("99") / GetBadge()
+// import "github.com/ohah/suji-go/app"
+// app.GetPath("userData")
 // import "github.com/ohah/suji-go/attention"
 // attention.RequestUser(true) / attention.CancelUserRequest(id)
 // suji.Quit()                   — 앱 종료
@@ -208,6 +212,7 @@ suji.platform                                                // "macos" | "linux
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                                                         (macOS Keychain Services)
 // await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)
+// await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
 ```
@@ -278,6 +283,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 // await app.dock.setBadge("99") / app.dock.getBadge()
+// await app.getPath("userData") — Electron app.getPath
 // const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
 ```
 

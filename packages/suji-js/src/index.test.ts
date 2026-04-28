@@ -329,6 +329,13 @@ describe("safeStorage", () => {
 describe("app", () => {
   beforeEach(() => mockBridge.core.mockClear());
 
+  it("getPath sends name + returns path", async () => {
+    mockBridge.core.mockResolvedValueOnce({ path: "/Users/foo/Library/Application Support/MyApp" });
+    const p = await app.getPath("userData");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "app_get_path", name: "userData" });
+    expect(p).toContain("MyApp");
+  });
+
   it("requestUserAttention default critical=true", async () => {
     mockBridge.core.mockResolvedValueOnce({ id: 42 });
     const id = await app.requestUserAttention();

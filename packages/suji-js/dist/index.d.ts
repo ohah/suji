@@ -473,7 +473,10 @@ export declare const safeStorage: {
     /** service+account 삭제. 존재하지 않아도 true (idempotent). */
     deleteItem(service: string, account: string): Promise<boolean>;
 };
+export type AppPathName = "home" | "appData" | "userData" | "temp" | "desktop" | "documents" | "downloads";
 export declare const app: {
+    /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
+    getPath(name: AppPathName): Promise<string>;
     /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
     requestUserAttention(critical?: boolean): Promise<number>;
     /** requestUserAttention으로 받은 id 취소. id == 0은 false (guard). */

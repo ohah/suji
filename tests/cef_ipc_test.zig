@@ -901,6 +901,34 @@ test "safeStorage IPC — Keychain set/get/delete + Security framework" {
     try std.testing.expect(std.mem.indexOf(u8, build_src, "Security") != null);
 }
 
+test "app.getPath IPC — main.zig dispatch + cef.zig 함수 + 7 키" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"app_get_path\"",
+        "cef.appGetPath",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn appGetPath",
+        "pub fn buildStandardPath",
+        "fn resolveAppDataDir",
+        "\"home\"",
+        "\"userData\"",
+        "\"appData\"",
+        "\"temp\"",
+        "\"desktop\"",
+        "\"documents\"",
+        "\"downloads\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "shell.trashItem IPC — main.zig dispatch + cef.zig 함수" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

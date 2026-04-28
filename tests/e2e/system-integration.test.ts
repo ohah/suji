@@ -154,6 +154,26 @@ describe("powerSaveBlocker", () => {
   });
 });
 
+describe("app.getPath", () => {
+  test("home/userData/documents 모두 절대 경로", async () => {
+    const home = await core<{ path: string }>({ cmd: "app_get_path", name: "home" });
+    expect(home.path.length).toBeGreaterThan(0);
+    expect(home.path.startsWith("/")).toBe(true);
+
+    const userData = await core<{ path: string }>({ cmd: "app_get_path", name: "userData" });
+    // multi-backend example의 app.name = "Multi Backend Example".
+    expect(userData.path).toContain("Multi Backend Example");
+
+    const documents = await core<{ path: string }>({ cmd: "app_get_path", name: "documents" });
+    expect(documents.path.endsWith("/Documents")).toBe(true);
+  });
+
+  test("unknown 키는 빈 문자열", async () => {
+    const r = await core<{ path: string }>({ cmd: "app_get_path", name: "unknown_key_xyz" });
+    expect(r.path).toBe("");
+  });
+});
+
 describe("shell.trashItem", () => {
   test("임시 파일 생성 → trash → 원본 경로 사라짐", async () => {
     const tmp = `/tmp/suji-trash-${Date.now()}.txt`;

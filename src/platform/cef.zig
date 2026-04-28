@@ -176,6 +176,86 @@ test "buildAppCachePath: 너무 긴 path는 null" {
     try std.testing.expect(buildAppCachePath(&small_buf, "/Users/test", "VeryLongAppName") == null);
 }
 
+/// app.getPath (Electron) — 표준 디렉토리 경로 반환. app_name은 userData에만 사용.
+/// home/userData/appData/temp/desktop/documents/downloads 7가지 키 지원.
+/// pure 함수 — env는 caller가 미리 lookup해서 home/appdata/tmp/xdg에 전달.
+pub const StandardPathInputs = struct {
+    home: []const u8,
+    /// macOS: ~/Library/Application Support / Linux: $XDG_CONFIG_HOME or ~/.config /
+    /// Windows: %APPDATA%. caller가 미리 resolve.
+    app_data: []const u8,
+    /// $TMPDIR or fallback (`/tmp`).
+    tmp: []const u8,
+};
+
+pub fn buildStandardPath(buf: []u8, name: []const u8, app_name: []const u8, in: StandardPathInputs) ?[]const u8 {
+    const sep: []const u8 = if (builtin.os.tag == .windows) "\\" else "/";
+    const result = if (std.mem.eql(u8, name, "home"))
+        std.fmt.bufPrint(buf, "{s}", .{in.home})
+    else if (std.mem.eql(u8, name, "appData"))
+        std.fmt.bufPrint(buf, "{s}", .{in.app_data})
+    else if (std.mem.eql(u8, name, "userData"))
+        std.fmt.bufPrint(buf, "{s}{s}{s}", .{ in.app_data, sep, app_name })
+    else if (std.mem.eql(u8, name, "temp"))
+        std.fmt.bufPrint(buf, "{s}", .{in.tmp})
+    else if (std.mem.eql(u8, name, "desktop"))
+        std.fmt.bufPrint(buf, "{s}{s}Desktop", .{ in.home, sep })
+    else if (std.mem.eql(u8, name, "documents"))
+        std.fmt.bufPrint(buf, "{s}{s}Documents", .{ in.home, sep })
+    else if (std.mem.eql(u8, name, "downloads"))
+        std.fmt.bufPrint(buf, "{s}{s}Downloads", .{ in.home, sep })
+    else
+        return null;
+    return result catch null;
+}
+
+/// macOS/Linux/Windows의 app_data prefix만 분리 — buildAppCachePath와 동일 OS 분기.
+/// Cache suffix가 붙기 전 단계라서 Electron `appData`에 매핑.
+fn resolveAppDataDir(buf: []u8, home: []const u8) ?[]const u8 {
+    const result = switch (builtin.os.tag) {
+        .macos => std.fmt.bufPrint(buf, "{s}/Library/Application Support", .{home}),
+        .linux => blk: {
+            const xdg = runtime.env("XDG_CONFIG_HOME");
+            if (xdg) |x| if (x.len > 0) break :blk std.fmt.bufPrint(buf, "{s}", .{x});
+            break :blk std.fmt.bufPrint(buf, "{s}/.config", .{home});
+        },
+        .windows => blk: {
+            const appdata = runtime.env("APPDATA");
+            if (appdata) |a| break :blk std.fmt.bufPrint(buf, "{s}", .{a});
+            break :blk std.fmt.bufPrint(buf, "{s}\\AppData\\Roaming", .{home});
+        },
+        else => std.fmt.bufPrint(buf, "{s}/.suji", .{home}),
+    } catch return null;
+    return result;
+}
+
+/// Electron `app.getPath(name)` — IPC 진입점에서 호출. app_name은 config.app.name.
+pub fn appGetPath(buf: []u8, name: []const u8, app_name: []const u8) ?[]const u8 {
+    const home_env = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
+    const home = runtime.env(home_env) orelse return null;
+    var ad_buf: [512]u8 = undefined;
+    const app_data = resolveAppDataDir(&ad_buf, home) orelse return null;
+    const tmp = runtime.env("TMPDIR") orelse "/tmp";
+    return buildStandardPath(buf, name, app_name, .{ .home = home, .app_data = app_data, .tmp = tmp });
+}
+
+test "buildStandardPath: 7 키 모두 home/app_data/tmp 기반으로 path 빌드" {
+    const in = StandardPathInputs{
+        .home = "/Users/test",
+        .app_data = "/Users/test/Library/Application Support",
+        .tmp = "/var/folders/T",
+    };
+    var buf: [512]u8 = undefined;
+    try std.testing.expectEqualStrings("/Users/test", buildStandardPath(&buf, "home", "MyApp", in).?);
+    try std.testing.expectEqualStrings("/Users/test/Library/Application Support", buildStandardPath(&buf, "appData", "MyApp", in).?);
+    try std.testing.expectEqualStrings("/Users/test/Library/Application Support/MyApp", buildStandardPath(&buf, "userData", "MyApp", in).?);
+    try std.testing.expectEqualStrings("/var/folders/T", buildStandardPath(&buf, "temp", "MyApp", in).?);
+    try std.testing.expectEqualStrings("/Users/test/Desktop", buildStandardPath(&buf, "desktop", "MyApp", in).?);
+    try std.testing.expectEqualStrings("/Users/test/Documents", buildStandardPath(&buf, "documents", "MyApp", in).?);
+    try std.testing.expectEqualStrings("/Users/test/Downloads", buildStandardPath(&buf, "downloads", "MyApp", in).?);
+    try std.testing.expect(buildStandardPath(&buf, "unknown", "MyApp", in) == null);
+}
+
 pub fn initialize(config: CefConfig) !void {
     if (!g_app_initialized) {
         _ = c.cef_api_hash(c.CEF_API_VERSION, 0);

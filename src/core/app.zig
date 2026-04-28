@@ -1105,6 +1105,16 @@ pub const dock = struct {
     }
 };
 
+/// Electron `app.getPath` 동등. name = "home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads".
+/// 응답: `{"path":"..."}` (unknown name은 빈 문자열).
+pub fn getPath(name: []const u8) ?[]const u8 {
+    var n_buf: [64]u8 = undefined;
+    const n_n = util.escapeJsonStrFull(name, &n_buf) orelse return null;
+    var fields_buf: [128]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"name\":\"{s}\"", .{n_buf[0..n_n]}) catch return null;
+    return coreCmd("app_get_path", fields);
+}
+
 /// dock 바운스 시작. 응답: `{"id":N}` (0이면 앱이 active라 no-op).
 pub fn requestUserAttention(critical: bool) ?[]const u8 {
     var fields_buf: [32]u8 = undefined;

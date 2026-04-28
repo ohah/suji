@@ -254,6 +254,12 @@ describe('safeStorage', () => {
 });
 
 describe('app', () => {
+  it('getPath sends name and returns path', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"path":"/Users/foo/Documents"}');
+    expect(await app.getPath('documents')).toBe('/Users/foo/Documents');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_get_path","name":"documents"}');
+  });
+
   it('requestUserAttention default critical=true', async () => {
     bridge.invoke.mockResolvedValueOnce('{"id":42}');
     expect(await app.requestUserAttention()).toBe(42);
