@@ -57,6 +57,12 @@ pub const events = struct {
     /// `setVisible(true/false)` 호출 시 상태 전이가 있을 때만 발화 (멱등).
     pub const show = "window:show";
     pub const hide = "window:hide";
+    /// 사용자/native가 NSWindow 크기 변경 시도 직전에 동기 발화 (취소 가능).
+    /// listener가 `preventDefault()` → 원래 크기로 복원. cancellation은 코어 내부
+    /// (EventBusSink.onCancelable로 등록한) 동기 listener에서만 가능 — IPC 거치는
+    /// frontend/Rust/Go/Node listener는 일반 emit과 동일하게 알림만 받음 (close와 동일).
+    /// macOS에 한정 (Linux/Windows는 후속 플랫폼 작업).
+    pub const will_resize = "window:will-resize";
 };
 
 /// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".
@@ -440,6 +446,33 @@ pub const SujiEvent = struct {
         self.default_prevented = true;
     }
 };
+
+/// will-resize 정책 — sink.emit_cancelable로 cancelable listener 동기 실행 + 일반 listener 알림,
+/// preventDefault 시 proposed_w/h를 curr_w/h로 덮어 NSSize 반환을 원래 크기로 강제.
+/// 단위 테스트가 NSWindow/WM 없이 직접 호출할 수 있도록 sink만 받는 자유 함수로 둠.
+/// 프로덕션 호출자는 `WindowManager.applyWillResizeForHandle`를 사용해 sink/id 조회 캡슐화.
+pub fn applyWillResize(
+    sink: EventSink,
+    window_id: u32,
+    curr_w: f64,
+    curr_h: f64,
+    proposed_w: *f64,
+    proposed_h: *f64,
+) void {
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    w.print("{{\"windowId\":{d},\"width\":{d},\"height\":{d}}}", .{
+        window_id,
+        @as(i64, @intFromFloat(proposed_w.*)),
+        @as(i64, @intFromFloat(proposed_h.*)),
+    }) catch return;
+    var ev: SujiEvent = .{};
+    sink.emitCancelable(events.will_resize, w.buffered(), &ev);
+    if (ev.default_prevented) {
+        proposed_w.* = curr_w;
+        proposed_h.* = curr_h;
+    }
+}
 
 /// WindowManager가 EventBus(또는 테스트 spy)에 이벤트를 흘려보내는 얇은 훅.
 /// 프로덕션에서는 EventBus.emit/emitCancelable로 래핑.
@@ -1410,5 +1443,21 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveWindowLocked(id);
         return self.native.isFullscreen(win.native_handle);
+    }
+
+    /// native handle 기반 will-resize 호출. NSWindowDelegate가 native_handle만 가지고
+    /// 호출하므로 main.zig 트램폴린에서 sink/window_id lookup을 캡슐화.
+    /// sink가 없거나 handle이 알려지지 않으면 no-op (cancellation 안 됨).
+    pub fn applyWillResizeForHandle(
+        self: *WindowManager,
+        handle: u64,
+        curr_w: f64,
+        curr_h: f64,
+        proposed_w: *f64,
+        proposed_h: *f64,
+    ) void {
+        const win_id = self.findByNativeHandle(handle) orelse return;
+        const sink = self.sink orelse return;
+        applyWillResize(sink, win_id, curr_w, curr_h, proposed_w, proposed_h);
     }
 };

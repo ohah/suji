@@ -387,6 +387,36 @@ describe("window lifecycle events", () => {
     await new Promise((r) => setTimeout(r, 200));
   });
 
+  // ==================== Phase 5: will-resize ====================
+
+  test("frontend listener는 window:will-resize 채널 구독 가능 (즉시 이벤트 X)", async () => {
+    // programmatic setBounds는 NSWindowDelegate를 거치지 않으므로 will-resize 발화 X.
+    // user-driven drag만 발화 — puppeteer로 native 타이틀바 드래그를 시뮬레이션하는
+    // 표준 방법이 없어 부정 검증으로 대체. 회귀 시 항상 발화하면 negative test가 깨짐.
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-will-resize",
+      x: 200, y: 200, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 500));
+
+    const willCol = collect<{ windowId: number; width: number; height: number }>(
+      "window:will-resize",
+      1500,
+    );
+    // programmatic setBounds 여러 번 — windowDidResize는 발화하지만 windowWillResize는 X.
+    await core({ cmd: "set_bounds", windowId: id, x: 200, y: 200, width: 500, height: 350 });
+    await new Promise((r) => setTimeout(r, 200));
+    await core({ cmd: "set_bounds", windowId: id, x: 200, y: 200, width: 600, height: 400 });
+
+    const willEvs = (await willCol).filter((e) => e.windowId === id);
+    expect(willEvs.length).toBe(0);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
   test("page-title-updated payload escape — 따옴표/백슬래시 안전", async () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",

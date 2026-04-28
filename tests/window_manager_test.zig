@@ -4824,3 +4824,180 @@ test "setVisible: destroyed/unknown id 가드 — native 호출 X + 이벤트 X"
     try std.testing.expectEqual(@as(usize, 0), native.set_visible_calls);
     try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
 }
+
+// ==================== Phase 5: will-resize ====================
+
+test "will-resize 채널 상수" {
+    try std.testing.expectEqualStrings("window:will-resize", window.events.will_resize);
+}
+
+test "applyWillResizeForHandle: 알려지지 않은 native handle이면 no-op (proposed 유지)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 800;
+    var h: f64 = 600;
+    wm.applyWillResizeForHandle(99999, 400, 300, &w, &h);
+
+    try std.testing.expectEqual(@as(f64, 800), w);
+    try std.testing.expectEqual(@as(f64, 600), h);
+    try std.testing.expectEqual(@as(usize, 0), sink.events.items.len);
+}
+
+test "applyWillResizeForHandle: sink 미설정이면 no-op" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    // 의도적으로 setEventSink 호출 X.
+    const id = try wm.create(.{});
+    const handle = wm.get(id).?.native_handle;
+
+    var w: f64 = 800;
+    var h: f64 = 600;
+    wm.applyWillResizeForHandle(handle, 400, 300, &w, &h);
+
+    try std.testing.expectEqual(@as(f64, 800), w);
+    try std.testing.expectEqual(@as(f64, 600), h);
+}
+
+test "applyWillResizeForHandle: 정상 경로 — handle → win_id 변환 + sink emit" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    const handle = wm.get(id).?.native_handle;
+    sink.reset(); // window:created 비움.
+
+    var w: f64 = 700;
+    var h: f64 = 500;
+    wm.applyWillResizeForHandle(handle, 400, 300, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:will-resize", sink.events.items[0].name);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"windowId\":1"));
+}
+
+test "applyWillResize: listener 없으면 proposed 유지 + emit만" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 600;
+    var h: f64 = 400;
+    window.applyWillResize(sink.asSink(), 1, 800, 500, &w, &h);
+
+    // proposed 유지 (preventDefault 안 됨).
+    try std.testing.expectEqual(@as(f64, 600), w);
+    try std.testing.expectEqual(@as(f64, 400), h);
+    // 일반 emit은 발화 (cancelable path는 항상 EventBus.emit 동반).
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expectEqualStrings("window:will-resize", sink.events.items[0].name);
+    try std.testing.expect(sink.events.items[0].cancelable);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"windowId\":1"));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"width\":600"));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"height\":400"));
+}
+
+test "applyWillResize: TestSink prevent_for로 preventDefault 시 proposed 복원" {
+    var native = TestNative{};
+    var sink = TestSink{ .prevent_for = window.events.will_resize };
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 1200;
+    var h: f64 = 800;
+    window.applyWillResize(sink.asSink(), 7, 600, 400, &w, &h);
+
+    // preventDefault → curr로 덮어씀.
+    try std.testing.expectEqual(@as(f64, 600), w);
+    try std.testing.expectEqual(@as(f64, 400), h);
+}
+
+test "applyWillResize: prevent_for 다른 채널이면 proposed 유지 (channel-scoped)" {
+    var native = TestNative{};
+    var sink = TestSink{ .prevent_for = window.events.close };
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 999;
+    var h: f64 = 555;
+    window.applyWillResize(sink.asSink(), 3, 800, 500, &w, &h);
+
+    try std.testing.expectEqual(@as(f64, 999), w);
+    try std.testing.expectEqual(@as(f64, 555), h);
+}
+
+test "applyWillResize: payload windowId/width/height 값 정확성" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 1234;
+    var h: f64 = 5678;
+    window.applyWillResize(sink.asSink(), 42, 800, 600, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    const data = sink.events.items[0].data;
+    try std.testing.expect(contains(data, "\"windowId\":42"));
+    try std.testing.expect(contains(data, "\"width\":1234"));
+    try std.testing.expect(contains(data, "\"height\":5678"));
+}
+
+test "applyWillResize: 0 크기 — payload 안전 + curr 복원도 0 가능" {
+    var native = TestNative{};
+    var sink = TestSink{ .prevent_for = window.events.will_resize };
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 100;
+    var h: f64 = 100;
+    window.applyWillResize(sink.asSink(), 1, 0, 0, &w, &h);
+
+    // payload는 prevent 전 proposed 값으로 발화 — listener는 100x100을 봄.
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    try std.testing.expect(contains(sink.events.items[0].data, "\"width\":100"));
+    try std.testing.expect(contains(sink.events.items[0].data, "\"height\":100"));
+    // prevent 후 in-out은 curr(0,0)로 덮임.
+    try std.testing.expectEqual(@as(f64, 0), w);
+    try std.testing.expectEqual(@as(f64, 0), h);
+}
+
+test "applyWillResize: 매우 큰 값 — payload truncate 안 됨 (256 byte 안에 포맷)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    var w: f64 = 999_999_999;
+    var h: f64 = 888_888_888;
+    window.applyWillResize(sink.asSink(), 99999, 1, 1, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), sink.events.items.len);
+    const data = sink.events.items[0].data;
+    // 닫는 } 이 살아있는지 — bufPrint 실패 시 partial JSON으로 emit되면 valid JSON 아님.
+    try std.testing.expect(std.mem.endsWith(u8, data, "}"));
+    try std.testing.expect(contains(data, "999999999"));
+    try std.testing.expect(contains(data, "888888888"));
+}

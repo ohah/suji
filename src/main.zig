@@ -2363,6 +2363,11 @@ fn windowLeaveFullScreenHandler(handle: u64) void {
     emitWindowIdEvent(window_mod.events.leave_full_screen, handle);
 }
 
+fn windowWillResizeHandler(handle: u64, curr_w: f64, curr_h: f64, proposed_w: *f64, proposed_h: *f64) void {
+    const wm = window_mod.WindowManager.global orelse return;
+    wm.applyWillResizeForHandle(handle, curr_w, curr_h, proposed_w, proposed_h);
+}
+
 fn windowReadyToShowHandler(handle: u64) void {
     emitWindowIdEvent(window_mod.events.ready_to_show, handle);
 }
@@ -2396,6 +2401,7 @@ const window_lifecycle_handlers: cef.WindowLifecycleHandlers = .{
     .unmaximize = &windowUnmaximizeHandler,
     .enter_fullscreen = &windowEnterFullScreenHandler,
     .leave_fullscreen = &windowLeaveFullScreenHandler,
+    .will_resize = &windowWillResizeHandler,
 };
 
 fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]const u8 {

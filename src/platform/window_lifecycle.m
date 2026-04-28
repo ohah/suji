@@ -49,6 +49,9 @@ static void (*g_maximize_cb)(uint64_t handle) = NULL;
 static void (*g_unmaximize_cb)(uint64_t handle) = NULL;
 static void (*g_enter_fullscreen_cb)(uint64_t handle) = NULL;
 static void (*g_leave_fullscreen_cb)(uint64_t handle) = NULL;
+/// will_resize는 동기 — handler가 proposed in-out 변경하면 그 값이 실제 size.
+/// listener가 preventDefault → handler가 proposed를 curr로 덮어쓰면 NSWindow가 그 크기로 resize.
+static void (*g_will_resize_cb)(uint64_t handle, double curr_w, double curr_h, double *proposed_w, double *proposed_h) = NULL;
 
 static WindowEntry *entry_for_window(NSWindow *win) {
     void *ptr = (__bridge void *)win;
@@ -153,6 +156,18 @@ static WindowEntry *entry_for_window(NSWindow *win) {
     g_leave_fullscreen_cb(e->handle);
 }
 
+/// 사용자/native가 NSWindow 크기 변경을 시도할 때 동기 호출 — 반환값이 실제 크기.
+/// 핸들러가 in-out 포인터를 통해 proposed를 mutate 가능 (preventDefault → curr로 복원).
+- (NSSize)windowWillResize:(NSWindow *)sender toSize:(NSSize)frameSize {
+    WindowEntry *e = entry_for_window(sender);
+    if (e == NULL || g_will_resize_cb == NULL) return frameSize;
+    NSSize curr = [sender frame].size;
+    double proposed_w = frameSize.width;
+    double proposed_h = frameSize.height;
+    g_will_resize_cb(e->handle, curr.width, curr.height, &proposed_w, &proposed_h);
+    return NSMakeSize(proposed_w, proposed_h);
+}
+
 @end
 
 static SujiWindowLifecycleDelegate *g_delegate = nil;
@@ -171,7 +186,8 @@ void suji_window_lifecycle_set_callbacks(
     void (*maximize)(uint64_t),
     void (*unmaximize)(uint64_t),
     void (*enter_fullscreen)(uint64_t),
-    void (*leave_fullscreen)(uint64_t)
+    void (*leave_fullscreen)(uint64_t),
+    void (*will_resize)(uint64_t, double, double, double *, double *)
 ) {
     g_resized_cb = resized;
     g_moved_cb = moved;
@@ -183,6 +199,7 @@ void suji_window_lifecycle_set_callbacks(
     g_unmaximize_cb = unmaximize;
     g_enter_fullscreen_cb = enter_fullscreen;
     g_leave_fullscreen_cb = leave_fullscreen;
+    g_will_resize_cb = will_resize;
     ensure_delegate();
 }
 

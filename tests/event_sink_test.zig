@@ -386,3 +386,111 @@ test "concurrent onCancelable + emitCancelable is mutex-safe" {
     // crash/panic 없으면 성공. 정확한 call count는 non-deterministic
     // (리스너가 register→off 사이에 있을 때만 emit이 잡음)
 }
+
+// ============================================
+// Phase 5: applyWillResize 통합 (EventBusSink + cancelable 정책)
+// ============================================
+
+test "applyWillResize: cancelable listener preventDefault → proposed가 curr로 복원" {
+    var bus = newBus();
+    defer bus.deinit();
+    var sink = newSink(&bus);
+    defer sink.deinit();
+
+    var rec = CancelRecorder{ .prevent = true };
+    _ = try sink.onCancelable(window.events.will_resize, &CancelRecorder.callback, &rec);
+
+    var w: f64 = 1200;
+    var h: f64 = 800;
+    window.applyWillResize(sink.asSink(), 7, 600, 400, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), rec.called);
+    try std.testing.expectEqual(@as(f64, 600), w);
+    try std.testing.expectEqual(@as(f64, 400), h);
+}
+
+test "applyWillResize: cancelable listener preventDefault 안 함 → proposed 유지" {
+    var bus = newBus();
+    defer bus.deinit();
+    var sink = newSink(&bus);
+    defer sink.deinit();
+
+    var rec = CancelRecorder{ .prevent = false };
+    _ = try sink.onCancelable(window.events.will_resize, &CancelRecorder.callback, &rec);
+
+    var w: f64 = 999;
+    var h: f64 = 555;
+    window.applyWillResize(sink.asSink(), 3, 800, 500, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), rec.called);
+    try std.testing.expectEqual(@as(f64, 999), w);
+    try std.testing.expectEqual(@as(f64, 555), h);
+}
+
+test "applyWillResize: 다중 cancelable listener 중 하나만 prevent → 복원" {
+    var bus = newBus();
+    defer bus.deinit();
+    var sink = newSink(&bus);
+    defer sink.deinit();
+
+    var observer = CancelRecorder{ .prevent = false };
+    var preventer = CancelRecorder{ .prevent = true };
+    _ = try sink.onCancelable(window.events.will_resize, &CancelRecorder.callback, &observer);
+    _ = try sink.onCancelable(window.events.will_resize, &CancelRecorder.callback, &preventer);
+
+    var w: f64 = 1200;
+    var h: f64 = 900;
+    window.applyWillResize(sink.asSink(), 9, 700, 500, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), observer.called);
+    try std.testing.expectEqual(@as(usize, 1), preventer.called);
+    try std.testing.expectEqual(@as(f64, 700), w);
+    try std.testing.expectEqual(@as(f64, 500), h);
+}
+
+test "applyWillResize: 일반 EventBus listener는 prevent 권한 없음 — 알림만 받음" {
+    var bus = newBus();
+    defer bus.deinit();
+    var sink = newSink(&bus);
+    defer sink.deinit();
+
+    var bus_rec = BusRecorder{};
+    _ = bus.onC(window.events.will_resize, &BusRecorder.callback, &bus_rec);
+
+    var w: f64 = 500;
+    var h: f64 = 300;
+    window.applyWillResize(sink.asSink(), 1, 400, 200, &w, &h);
+
+    try std.testing.expectEqual(@as(usize, 1), bus_rec.call_count);
+    // 일반 listener는 prevent 못 함 — proposed 유지.
+    try std.testing.expectEqual(@as(f64, 500), w);
+    try std.testing.expectEqual(@as(f64, 300), h);
+    // payload 정확성 (windowId/width/height).
+    try std.testing.expect(std.mem.indexOf(u8, bus_rec.recordedData(), "\"windowId\":1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bus_rec.recordedData(), "\"width\":500") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bus_rec.recordedData(), "\"height\":300") != null);
+}
+
+test "applyWillResize: cancelable + 일반 listener 동시 발화 — 일반은 prevent와 무관하게 호출" {
+    var bus = newBus();
+    defer bus.deinit();
+    var sink = newSink(&bus);
+    defer sink.deinit();
+
+    var bus_rec = BusRecorder{};
+    _ = bus.onC(window.events.will_resize, &BusRecorder.callback, &bus_rec);
+
+    var preventer = CancelRecorder{ .prevent = true };
+    _ = try sink.onCancelable(window.events.will_resize, &CancelRecorder.callback, &preventer);
+
+    var w: f64 = 1100;
+    var h: f64 = 700;
+    window.applyWillResize(sink.asSink(), 5, 600, 400, &w, &h);
+
+    // 일반 listener도 호출됨 (Electron 호환).
+    try std.testing.expectEqual(@as(usize, 1), bus_rec.call_count);
+    try std.testing.expectEqual(@as(usize, 1), preventer.called);
+    // prevent 됨 → curr로 복원.
+    try std.testing.expectEqual(@as(f64, 600), w);
+    try std.testing.expectEqual(@as(f64, 400), h);
+}

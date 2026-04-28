@@ -1703,6 +1703,9 @@ pub const WindowMovedHandler = *const fn (handle: u64, x: f64, y: f64) void;
 pub const WindowFocusHandler = *const fn (handle: u64) void;
 pub const WindowBlurHandler = *const fn (handle: u64) void;
 pub const WindowSimpleHandler = *const fn (handle: u64) void;
+/// will-resize 동기 콜백. handler가 proposed_w/proposed_h 포인터를 mutate 가능 —
+/// listener가 preventDefault 시 curr 값으로 덮어쓰면 cancellation.
+pub const WindowWillResizeHandler = *const fn (handle: u64, curr_w: f64, curr_h: f64, proposed_w: *f64, proposed_h: *f64) void;
 
 pub var g_window_resized_handler: ?WindowResizedHandler = null;
 pub var g_window_moved_handler: ?WindowMovedHandler = null;
@@ -1714,6 +1717,7 @@ pub var g_window_maximize_handler: ?WindowSimpleHandler = null;
 pub var g_window_unmaximize_handler: ?WindowSimpleHandler = null;
 pub var g_window_enter_fullscreen_handler: ?WindowSimpleHandler = null;
 pub var g_window_leave_fullscreen_handler: ?WindowSimpleHandler = null;
+pub var g_window_will_resize_handler: ?WindowWillResizeHandler = null;
 
 fn windowResizedC(handle: u64, x: f64, y: f64, width: f64, height: f64) callconv(.c) void {
     if (g_window_resized_handler) |h| h(handle, x, y, width, height);
@@ -1745,6 +1749,9 @@ fn windowEnterFullscreenC(handle: u64) callconv(.c) void {
 fn windowLeaveFullscreenC(handle: u64) callconv(.c) void {
     if (g_window_leave_fullscreen_handler) |h| h(handle);
 }
+fn windowWillResizeC(handle: u64, curr_w: f64, curr_h: f64, proposed_w: *f64, proposed_h: *f64) callconv(.c) void {
+    if (g_window_will_resize_handler) |h| h(handle, curr_w, curr_h, proposed_w, proposed_h);
+}
 
 pub const WindowLifecycleHandlers = struct {
     resized: WindowResizedHandler,
@@ -1757,6 +1764,7 @@ pub const WindowLifecycleHandlers = struct {
     unmaximize: WindowSimpleHandler,
     enter_fullscreen: WindowSimpleHandler,
     leave_fullscreen: WindowSimpleHandler,
+    will_resize: WindowWillResizeHandler,
 };
 
 pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
@@ -1771,6 +1779,7 @@ pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
     g_window_unmaximize_handler = h.unmaximize;
     g_window_enter_fullscreen_handler = h.enter_fullscreen;
     g_window_leave_fullscreen_handler = h.leave_fullscreen;
+    g_window_will_resize_handler = h.will_resize;
     suji_window_lifecycle_set_callbacks(
         &windowResizedC,
         &windowMovedC,
@@ -1782,6 +1791,7 @@ pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
         &windowUnmaximizeC,
         &windowEnterFullscreenC,
         &windowLeaveFullscreenC,
+        &windowWillResizeC,
     );
 }
 
@@ -1840,6 +1850,7 @@ extern "c" fn suji_window_lifecycle_set_callbacks(
     unmaximize: *const fn (u64) callconv(.c) void,
     enter_fullscreen: *const fn (u64) callconv(.c) void,
     leave_fullscreen: *const fn (u64) callconv(.c) void,
+    will_resize: *const fn (u64, f64, f64, *f64, *f64) callconv(.c) void,
 ) void;
 extern "c" fn suji_window_lifecycle_attach(ns_window: ?*anyopaque, handle: u64) i32;
 extern "c" fn suji_window_lifecycle_detach(ns_window: ?*anyopaque) void;
