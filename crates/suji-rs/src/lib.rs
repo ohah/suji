@@ -1416,6 +1416,16 @@ pub fn get_locale() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_get_locale"}"#)
 }
 
+/// `.app` 번들로 실행 중인지 (Electron `app.isPackaged`). raw JSON: `{"packaged":bool}`.
+pub fn is_packaged() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_is_packaged"}"#)
+}
+
+/// 메인 번들 경로 (Electron `app.getAppPath`). raw JSON: `{"path":"..."}`.
+pub fn get_app_path() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_app_path"}"#)
+}
+
 /// dock 진행률 (NSDockTile.contentView NSProgressIndicator). progress<0=hide, 0~1=ratio.
 pub fn set_progress_bar(progress: f64) -> Option<String> {
     invoke(

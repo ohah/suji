@@ -95,6 +95,8 @@ fn onAllClosed(_: suji.Event) void {
 //                                       (macOS Keychain Services)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
 // suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
+// suji.isPackaged()                              — `.app` 번들 여부 (dev=false, prod=true)
+// suji.getAppPath()                              — NSBundle.mainBundle.bundlePath
 // suji.isReady() / suji.focus() / suji.hide()  — 앱 init/frontmost/Cmd+H
 // suji.getLocale()                              — 시스템 locale (BCP 47, "en-US" 등)
 // suji.setProgressBar(0.5)                      — dock 진행률 (NSDockTile)

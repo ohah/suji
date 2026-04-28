@@ -40,6 +40,18 @@ func GetLocale() string {
 	return suji.Invoke("__core__", `{"cmd":"app_get_locale"}`)
 }
 
+// IsPackaged returns true if running from .app bundle (Electron `app.isPackaged`).
+// Response: `{"packaged":bool}`.
+func IsPackaged() string {
+	return suji.Invoke("__core__", `{"cmd":"app_is_packaged"}`)
+}
+
+// GetAppPath returns main bundle path (Electron `app.getAppPath`).
+// Response: `{"path":"..."}`.
+func GetAppPath() string {
+	return suji.Invoke("__core__", `{"cmd":"app_get_app_path"}`)
+}
+
 // SetProgressBar sets dock icon progress. progress<0=hide, 0~1=ratio.
 // Response: `{"success":bool}`.
 func SetProgressBar(progress float64) string {

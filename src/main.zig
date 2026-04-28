@@ -1678,6 +1678,25 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         // V8 binding이 호출 가능한 시점은 이미 init 후. 항상 true.
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_ready\",\"ready\":true}}", .{}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "app_is_packaged")) {
+        const packaged = cef.appIsPackaged();
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_is_packaged\",\"packaged\":{}}}",
+            .{packaged},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_get_app_path")) {
+        var path_buf: [1024]u8 = undefined;
+        const path = cef.appGetBundlePath(&path_buf);
+        var esc_buf: [2048]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(path, &esc_buf) orelse 0;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_get_app_path\",\"path\":\"{s}\"}}",
+            .{esc_buf[0..esc_n]},
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "native_image_get_size")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
         var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;

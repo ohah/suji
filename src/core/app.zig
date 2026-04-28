@@ -1466,6 +1466,16 @@ pub fn getLocale() ?[]const u8 {
     return coreCmd("app_get_locale", "");
 }
 
+/// `.app` 번들로 실행 중인지 (Electron `app.isPackaged`). 응답: `{"packaged":bool}`.
+pub fn isPackaged() ?[]const u8 {
+    return coreCmd("app_is_packaged", "");
+}
+
+/// 메인 번들 경로 (Electron `app.getAppPath`). 응답: `{"path":"..."}`.
+pub fn getAppPath() ?[]const u8 {
+    return coreCmd("app_get_app_path", "");
+}
+
 /// dock 진행률 (NSDockTile.contentView NSProgressIndicator). progress<0=hide, 0~1=ratio.
 /// 응답: `{"success":bool}`.
 pub fn setProgressBar(progress: f64) ?[]const u8 {

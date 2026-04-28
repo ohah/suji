@@ -1314,6 +1314,18 @@ export const app = {
     return r.ready === true;
   },
 
+  /** `.app` 번들로 실행 중인지 (Electron `app.isPackaged`). dev mode (raw binary)에선 false. */
+  async isPackaged(): Promise<boolean> {
+    const r = await coreCall<{ packaged: boolean }>({ cmd: "app_is_packaged" });
+    return r.packaged === true;
+  },
+
+  /** 메인 번들 경로 (Electron `app.getAppPath`). dev mode에선 binary가 위치한 디렉토리. */
+  async getAppPath(): Promise<string> {
+    const r = await coreCall<{ path: string }>({ cmd: "app_get_app_path" });
+    return r.path ?? "";
+  },
+
   /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
   async getLocale(): Promise<string> {
     const r = await coreCall<{ locale: string }>({ cmd: "app_get_locale" });

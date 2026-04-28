@@ -1298,6 +1298,23 @@ pub fn clipboardWriteHtml(html: []const u8) bool {
     return clipboardWriteType(html, PASTEBOARD_TYPE_HTML);
 }
 
+/// 메인 번들 경로 (Electron `app.getAppPath` 동등). macOS NSBundle.mainBundle.bundlePath.
+/// dev mode (raw binary)에선 binary가 위치한 디렉토리, .app 번들 실행 시 ".../MyApp.app".
+pub fn appGetBundlePath(buf: []u8) []const u8 {
+    if (!comptime is_macos) return buf[0..0];
+    const NSBundle = getClass("NSBundle") orelse return buf[0..0];
+    const main_bundle = msgSend(NSBundle, "mainBundle") orelse return buf[0..0];
+    const path = msgSend(main_bundle, "bundlePath") orelse return buf[0..0];
+    return nsStringToUtf8Buf(path, buf);
+}
+
+/// `.app` 번들로 실행 중인지 (Electron `app.isPackaged`). bundlePath가 ".app"로 끝나면 packaged.
+pub fn appIsPackaged() bool {
+    var buf: [1024]u8 = undefined;
+    const path = appGetBundlePath(&buf);
+    return std.mem.endsWith(u8, path, ".app");
+}
+
 // ============================================
 // powerMonitor — 유휴 시간 (Electron `powerMonitor.getSystemIdleTime`)
 // ============================================

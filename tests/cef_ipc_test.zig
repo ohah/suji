@@ -1376,6 +1376,31 @@ test "app.requestUserAttention IPC — NSApp request/cancel" {
     }
 }
 
+test "app.isPackaged + getAppPath IPC + cef NSBundle" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"app_is_packaged\"",
+        "\"app_get_app_path\"",
+        "cef.appIsPackaged",
+        "cef.appGetBundlePath",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn appIsPackaged",
+        "pub fn appGetBundlePath",
+        "NSBundle",
+        "mainBundle",
+        "bundlePath",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "windows.setAudioMuted/isAudioMuted IPC + cef vtable + browser_host" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

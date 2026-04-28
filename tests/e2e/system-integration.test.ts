@@ -383,6 +383,23 @@ describe("app.getLocale", () => {
   });
 });
 
+describe("app.isPackaged / getAppPath", () => {
+  test("isPackaged: boolean (dev mode raw binary → false 예상)", async () => {
+    const r = await core<{ packaged: boolean }>({ cmd: "app_is_packaged" });
+    expect(typeof r.packaged).toBe("boolean");
+    // dev mode의 raw binary path는 ".app"으로 끝나지 않음.
+    expect(r.packaged).toBe(false);
+  });
+
+  test("getAppPath: 비어있지 않은 절대경로 string", async () => {
+    const r = await core<{ path: string }>({ cmd: "app_get_app_path" });
+    expect(typeof r.path).toBe("string");
+    expect(r.path.length).toBeGreaterThan(0);
+    // macOS 절대경로는 /로 시작.
+    expect(r.path.startsWith("/")).toBe(true);
+  });
+});
+
 describe("app.isReady / focus / hide", () => {
   test("isReady는 항상 true (V8 호출 시점)", async () => {
     const r = await core<{ ready: boolean }>({ cmd: "app_is_ready" });

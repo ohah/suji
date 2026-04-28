@@ -961,6 +961,17 @@ test "app.getLocale: 인자 없는 cmd" {
     }.run);
 }
 
+test "app.isPackaged / getAppPath IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.isPackaged();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_is_packaged\"") != null);
+            _ = app_mod.getAppPath();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"app_get_app_path\"") != null);
+        }
+    }.run);
+}
+
 test "app.isReady / focus / hide IPC" {
     try withInvokeCore(struct {
         fn run() !void {
