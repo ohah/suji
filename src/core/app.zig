@@ -1106,6 +1106,40 @@ pub const dock = struct {
 };
 
 // ============================================
+// http — Zig std.http.Client.fetch wrap (백엔드 only, frontend 미노출 — 보안).
+// ============================================
+
+pub const http = struct {
+    pub const FetchResult = struct {
+        /// HTTP status code (e.g. 200).
+        status: u16,
+        /// Response body. allocator 소유 → caller가 free.
+        body: []u8,
+    };
+
+    /// 단순 GET/POST 요청 (Electron `net.fetch` / Node `fetch` 동등). payload null이면 GET,
+    /// non-null이면 POST. Redirect 자동 처리. allocator/io는 caller가 주입.
+    pub fn fetch(allocator: std.mem.Allocator, fetch_io: std.Io, url: []const u8, payload: ?[]const u8) !FetchResult {
+        var client: std.http.Client = .{ .allocator = allocator, .io = fetch_io };
+        defer client.deinit();
+
+        var aw = std.Io.Writer.Allocating.init(allocator);
+        errdefer aw.deinit();
+
+        const r = try client.fetch(.{
+            .location = .{ .url = url },
+            .payload = payload,
+            .response_writer = &aw.writer,
+        });
+
+        return .{
+            .status = @intFromEnum(r.status),
+            .body = try aw.toOwnedSlice(),
+        };
+    }
+};
+
+// ============================================
 // process — Zig std.process.run wrap (백엔드 only, frontend 미노출 — 보안).
 // ============================================
 

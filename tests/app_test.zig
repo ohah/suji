@@ -1158,6 +1158,19 @@ test "notification.close: notificationId 전송" {
 // screen / powerSaveBlocker / safeStorage / dock / requestUserAttention SDK
 // ============================================
 
+test "http.fetch: 잘못된 URL은 error 반환" {
+    const r = app_mod.http.fetch(std.testing.allocator, std.testing.io, "not-a-valid-url", null);
+    try std.testing.expectError(error.InvalidFormat, r);
+}
+
+test "http.fetch: 함수 시그니처 검증 (빌드만)" {
+    // 실제 HTTP는 환경 의존이라 fetch 자체 호출은 e2e/integration 단계.
+    // 단위로는 함수 export + 컴파일 가능 여부만.
+    const T = @TypeOf(app_mod.http.fetch);
+    _ = T;
+    try std.testing.expect(@hasDecl(app_mod.http, "FetchResult"));
+}
+
 test "process.run: echo 명령 실행 + stdout capture + exit code 0" {
     const result = app_mod.process.run(std.testing.allocator, std.testing.io, &.{ "/bin/echo", "hello" }) catch |err| {
         std.debug.print("process.run skipped: {}\n", .{err});

@@ -87,6 +87,8 @@ fn onAllClosed(_: suji.Event) void {
 //                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
 // suji.process.run(allocator, suji.io(), &.{ "echo", "hi" })  — std.process.run wrap (백엔드 only)
 //   → RunResult { code, stdout, stderr }, caller가 stdout/stderr free
+// suji.http.fetch(allocator, suji.io(), "https://...", null)   — std.http.Client.fetch wrap
+//   → FetchResult { status, body }, payload null이면 GET / non-null이면 POST
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
