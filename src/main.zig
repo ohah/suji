@@ -1447,7 +1447,8 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "power_monitor_get_idle_state")) {
         const threshold = util.extractJsonInt(req_clean, "threshold") orelse 0;
         const seconds = cef.powerMonitorIdleSeconds();
-        const state: []const u8 = if (@as(i64, @intFromFloat(seconds)) >= threshold) "idle" else "active";
+        // f64 직접 비교 — seconds가 NaN/Inf여도 panic 없이 false → "active" (safe default).
+        const state: []const u8 = if (seconds >= @as(f64, @floatFromInt(threshold))) "idle" else "active";
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_get_idle_state\",\"state\":\"{s}\"}}",
