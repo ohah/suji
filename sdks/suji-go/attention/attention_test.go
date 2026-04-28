@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestBuildRequestRequest(t *testing.T) {
+func TestBuildRequestJSON(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildRequestRequest(true)), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildRequestJSON(true)), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "app_attention_request" {
@@ -18,7 +18,7 @@ func TestBuildRequestRequest(t *testing.T) {
 	}
 
 	var info map[string]any
-	if err := json.Unmarshal([]byte(buildRequestRequest(false)), &info); err != nil {
+	if err := json.Unmarshal([]byte(buildRequestJSON(false)), &info); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if info["critical"] != false {
@@ -26,9 +26,9 @@ func TestBuildRequestRequest(t *testing.T) {
 	}
 }
 
-func TestBuildCancelRequest(t *testing.T) {
+func TestBuildCancelJSON(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildCancelRequest(42)), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildCancelJSON(42)), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "app_attention_cancel" {

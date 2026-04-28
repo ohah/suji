@@ -155,7 +155,7 @@ var _ = suji.Bind(&App{})
 // import "github.com/ohah/suji-go/dock"
 // dock.SetBadge("99") / GetBadge()
 // import "github.com/ohah/suji-go/attention"
-// attention.Request(true) / attention.Cancel(id)
+// attention.RequestUser(true) / attention.CancelUserRequest(id)
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 ```

@@ -1064,17 +1064,14 @@ pub mod screen {
 }
 
 pub mod power_save_blocker {
-    use crate::{escape_json_full, invoke};
+    use crate::{invoke, serde_json};
 
     pub(crate) fn start_request(type_str: &str) -> String {
-        format!(
-            r#"{{"cmd":"power_save_blocker_start","type":"{}"}}"#,
-            escape_json_full(type_str)
-        )
+        serde_json::json!({ "cmd": "power_save_blocker_start", "type": type_str }).to_string()
     }
 
     pub(crate) fn stop_request(id: u32) -> String {
-        format!(r#"{{"cmd":"power_save_blocker_stop","id":{}}}"#, id)
+        serde_json::json!({ "cmd": "power_save_blocker_stop", "id": id }).to_string()
     }
 
     /// `"prevent_app_suspension"` | `"prevent_display_sleep"`. 응답: `{"id":N}`.
@@ -1089,31 +1086,34 @@ pub mod power_save_blocker {
 }
 
 pub mod safe_storage {
-    use crate::{escape_json_full, invoke};
+    use crate::{invoke, serde_json};
 
     pub(crate) fn set_request(service: &str, account: &str, value: &str) -> String {
-        format!(
-            r#"{{"cmd":"safe_storage_set","service":"{}","account":"{}","value":"{}"}}"#,
-            escape_json_full(service),
-            escape_json_full(account),
-            escape_json_full(value),
-        )
+        serde_json::json!({
+            "cmd": "safe_storage_set",
+            "service": service,
+            "account": account,
+            "value": value,
+        })
+        .to_string()
     }
 
     pub(crate) fn get_request(service: &str, account: &str) -> String {
-        format!(
-            r#"{{"cmd":"safe_storage_get","service":"{}","account":"{}"}}"#,
-            escape_json_full(service),
-            escape_json_full(account),
-        )
+        serde_json::json!({
+            "cmd": "safe_storage_get",
+            "service": service,
+            "account": account,
+        })
+        .to_string()
     }
 
     pub(crate) fn delete_request(service: &str, account: &str) -> String {
-        format!(
-            r#"{{"cmd":"safe_storage_delete","service":"{}","account":"{}"}}"#,
-            escape_json_full(service),
-            escape_json_full(account),
-        )
+        serde_json::json!({
+            "cmd": "safe_storage_delete",
+            "service": service,
+            "account": account,
+        })
+        .to_string()
     }
 
     /// macOS Keychain에 utf-8 value 저장. 응답: `{"success":bool}`.
@@ -1133,13 +1133,10 @@ pub mod safe_storage {
 }
 
 pub mod dock {
-    use crate::{escape_json_full, invoke};
+    use crate::{invoke, serde_json};
 
     pub(crate) fn set_badge_request(text: &str) -> String {
-        format!(
-            r#"{{"cmd":"dock_set_badge","text":"{}"}}"#,
-            escape_json_full(text)
-        )
+        serde_json::json!({ "cmd": "dock_set_badge", "text": text }).to_string()
     }
 
     /// dock 배지 텍스트 (빈 문자열 = 제거). 응답: `{"success":bool}`.
@@ -1153,25 +1150,22 @@ pub mod dock {
     }
 }
 
-pub(crate) fn request_user_attention_request(critical: bool) -> String {
-    format!(
-        r#"{{"cmd":"app_attention_request","critical":{}}}"#,
-        critical
-    )
+pub(crate) fn attention_request_json(critical: bool) -> String {
+    serde_json::json!({ "cmd": "app_attention_request", "critical": critical }).to_string()
 }
 
-pub(crate) fn cancel_user_attention_request_request(id: u32) -> String {
-    format!(r#"{{"cmd":"app_attention_cancel","id":{}}}"#, id)
+pub(crate) fn attention_cancel_json(id: u32) -> String {
+    serde_json::json!({ "cmd": "app_attention_cancel", "id": id }).to_string()
 }
 
 /// dock 바운스 시작. 응답: `{"id":N}` (0이면 앱이 active라 no-op).
 pub fn request_user_attention(critical: bool) -> Option<String> {
-    invoke("__core__", &request_user_attention_request(critical))
+    invoke("__core__", &attention_request_json(critical))
 }
 
 /// 응답: `{"success":bool}`.
 pub fn cancel_user_attention_request(id: u32) -> Option<String> {
-    invoke("__core__", &cancel_user_attention_request_request(id))
+    invoke("__core__", &attention_cancel_json(id))
 }
 
 /// 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
@@ -1535,12 +1529,12 @@ mod tests {
     #[test]
     fn user_attention_requests_carry_critical_and_id() {
         let req: serde_json::Value =
-            serde_json::from_str(&crate::request_user_attention_request(true)).unwrap();
+            serde_json::from_str(&crate::attention_request_json(true)).unwrap();
         assert_eq!(req["cmd"], "app_attention_request");
         assert_eq!(req["critical"], true);
 
         let cancel: serde_json::Value =
-            serde_json::from_str(&crate::cancel_user_attention_request_request(42)).unwrap();
+            serde_json::from_str(&crate::attention_cancel_json(42)).unwrap();
         assert_eq!(cancel["cmd"], "app_attention_cancel");
         assert_eq!(cancel["id"], 42);
     }
