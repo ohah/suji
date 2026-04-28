@@ -673,6 +673,39 @@ pub const windows = struct {
         return windowIdCmd("is_audio_muted", id);
     }
 
+    /// 창 알파값 (0~1). Electron `BrowserWindow.setOpacity`. 응답: windowOp.
+    pub fn setOpacity(id: u32, opacity: f64) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"opacity\":{d}", .{ id, opacity }) catch return null;
+        return coreCmd("set_opacity", fields);
+    }
+
+    /// 응답: `{"opacity":f64,"ok":bool}`.
+    pub fn getOpacity(id: u32) ?[]const u8 {
+        return windowIdCmd("get_opacity", id);
+    }
+
+    /// 배경색 (`#RRGGBB` 또는 `#RRGGBBAA`). Electron `BrowserWindow.setBackgroundColor`. 응답: windowOp.
+    pub fn setBackgroundColor(id: u32, color: []const u8) ?[]const u8 {
+        var c_buf: [64]u8 = undefined;
+        const c_n = util.escapeJsonStrFull(color, &c_buf) orelse return null;
+        var fields_buf: [192]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"color\":\"{s}\"", .{ id, c_buf[0..c_n] }) catch return null;
+        return coreCmd("set_background_color", fields);
+    }
+
+    /// 그림자 표시 여부. Electron `BrowserWindow.setHasShadow`. 응답: windowOp.
+    pub fn setHasShadow(id: u32, has: bool) ?[]const u8 {
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"hasShadow\":{}", .{ id, has }) catch return null;
+        return coreCmd("set_has_shadow", fields);
+    }
+
+    /// 응답: `{"hasShadow":bool,"ok":bool}`.
+    pub fn hasShadow(id: u32) ?[]const u8 {
+        return windowIdCmd("has_shadow", id);
+    }
+
     // Phase 4-E: 편집 (windowId만) + 검색
     pub fn undo(id: u32) ?[]const u8 {
         return windowIdCmd("undo", id);

@@ -1433,6 +1433,39 @@ test "app.isPackaged + getAppPath IPC + cef NSBundle" {
     }
 }
 
+test "windows.setOpacity/getOpacity/setBackgroundColor/setHasShadow/hasShadow IPC + cef NSWindow" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"set_opacity\"",
+        "\"get_opacity\"",
+        "\"set_background_color\"",
+        "\"set_has_shadow\"",
+        "\"has_shadow\"",
+        "window_ipc.handleSetOpacity",
+        "window_ipc.handleGetOpacity",
+        "window_ipc.handleSetBackgroundColor",
+        "window_ipc.handleSetHasShadow",
+        "window_ipc.handleHasShadow",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "fn setOpacityImpl",
+        "fn getOpacityImpl",
+        "fn setBackgroundColorImpl",
+        "fn setHasShadowImpl",
+        "fn hasShadowImpl",
+        "setAlphaValue:",
+        "alphaValue",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "windows.setAudioMuted/isAudioMuted IPC + cef vtable + browser_host" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

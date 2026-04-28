@@ -3796,6 +3796,55 @@ test "audio mute: destroyed/unknown 가드" {
 }
 
 // ============================================
+// Opacity / background / shadow (BrowserWindow)
+// ============================================
+
+test "setOpacity → getOpacity round-trip" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.setOpacity(id, 0.5);
+    try std.testing.expectApproxEqAbs(@as(f64, 0.5), try wm.getOpacity(id), 1e-9);
+}
+
+test "setBackgroundColor: native까지 hex 전달" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.setBackgroundColor(id, "#abcdef");
+    try std.testing.expectEqualStrings("#abcdef", native.last_background_color);
+    try std.testing.expectEqual(@as(usize, 1), native.set_background_color_calls);
+}
+
+test "setHasShadow → hasShadow round-trip" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.setHasShadow(id, false);
+    try std.testing.expectEqual(false, try wm.hasShadow(id));
+    try wm.setHasShadow(id, true);
+    try std.testing.expectEqual(true, try wm.hasShadow(id));
+}
+
+test "opacity/shadow/background: destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.destroy(id);
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setOpacity(id, 0.5));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.getOpacity(id));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setBackgroundColor(id, "#fff"));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.setHasShadow(id, false));
+    try std.testing.expectError(window.Error.WindowDestroyed, wm.hasShadow(id));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setOpacity(999, 1));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.hasShadow(999));
+}
+
+// ============================================
 // Phase 4-E: 편집 (6 trivial) + 검색
 // ============================================
 

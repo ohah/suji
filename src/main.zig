@@ -1271,6 +1271,36 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleIsAudioMuted(win_id, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "set_opacity")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const opacity = util.extractJsonFloat(req_clean, "opacity") orelse 1;
+        return window_ipc.handleSetOpacity(.{ .window_id = win_id, .value = opacity }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "get_opacity")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleGetOpacity(win_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_background_color")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const raw_hex = util.extractJsonString(req_clean, "color") orelse "";
+        var hex_buf: [32]u8 = undefined;
+        const hex_n = util.unescapeJsonStr(raw_hex, &hex_buf) orelse 0;
+        return window_ipc.handleSetBackgroundColor(win_id, hex_buf[0..hex_n], response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_has_shadow")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const has = util.extractJsonBool(req_clean, "hasShadow") orelse true;
+        return window_ipc.handleSetHasShadow(win_id, has, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "has_shadow")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleHasShadow(win_id, response_buf, wm);
+    }
     // Phase 4-E: 편집 (6 trivial) + 검색
     inline for (.{
         .{ "undo", &window_ipc.handleUndo },

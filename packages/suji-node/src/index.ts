@@ -428,6 +428,16 @@ export interface IsAudioMutedResponse extends WindowOpResponse {
   muted: boolean;
 }
 
+export interface OpacityResponse extends WindowOpResponse {
+  cmd: 'get_opacity';
+  opacity: number;
+}
+
+export interface HasShadowResponse extends WindowOpResponse {
+  cmd: 'has_shadow';
+  hasShadow: boolean;
+}
+
 export interface SetBoundsArgs {
   x?: number;
   y?: number;
@@ -497,6 +507,28 @@ export const windows = {
   /** 창 오디오 mute 상태 (Electron `webContents.isAudioMuted`). */
   isAudioMuted(windowId: number): Promise<IsAudioMutedResponse> {
     return invoke<IsAudioMutedResponse>('__core__', { cmd: 'is_audio_muted', windowId });
+  },
+
+  /** 창 투명도 (0~1). Electron `BrowserWindow.setOpacity`. */
+  setOpacity(windowId: number, opacity: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_opacity', windowId, opacity });
+  },
+
+  getOpacity(windowId: number): Promise<OpacityResponse> {
+    return invoke<OpacityResponse>('__core__', { cmd: 'get_opacity', windowId });
+  },
+
+  /** 배경색 (`#RRGGBB` 또는 `#RRGGBBAA`). */
+  setBackgroundColor(windowId: number, color: string): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_background_color', windowId, color });
+  },
+
+  setHasShadow(windowId: number, hasShadow: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_has_shadow', windowId, hasShadow });
+  },
+
+  hasShadow(windowId: number): Promise<HasShadowResponse> {
+    return invoke<HasShadowResponse>('__core__', { cmd: 'has_shadow', windowId });
   },
 
   undo(windowId: number): Promise<WindowOpResponse> {

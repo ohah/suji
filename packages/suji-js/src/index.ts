@@ -231,6 +231,16 @@ export interface IsAudioMutedResponse extends WindowOpResponse {
   muted: boolean;
 }
 
+export interface OpacityResponse extends WindowOpResponse {
+  cmd: "get_opacity";
+  opacity: number;
+}
+
+export interface HasShadowResponse extends WindowOpResponse {
+  cmd: "has_shadow";
+  hasShadow: boolean;
+}
+
 // ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
 // viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
 // `windows.executeJavaScript(viewId, ...)` 등 모든 webContents API가 view에도 동작.
@@ -368,6 +378,31 @@ export const windows = {
   /** 창 오디오 mute 상태 (Electron `webContents.isAudioMuted`). */
   isAudioMuted(windowId: number): Promise<IsAudioMutedResponse> {
     return coreCall<IsAudioMutedResponse>({ cmd: "is_audio_muted", windowId });
+  },
+
+  /** 창 투명도 (0~1). Electron `BrowserWindow.setOpacity`. */
+  setOpacity(windowId: number, opacity: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_opacity", windowId, opacity });
+  },
+
+  /** 창 투명도 읽기. */
+  getOpacity(windowId: number): Promise<OpacityResponse> {
+    return coreCall<OpacityResponse>({ cmd: "get_opacity", windowId });
+  },
+
+  /** 배경색 (`#RRGGBB` 또는 `#RRGGBBAA`). Electron `BrowserWindow.setBackgroundColor`. */
+  setBackgroundColor(windowId: number, color: string): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_background_color", windowId, color });
+  },
+
+  /** 그림자 표시 여부. Electron `BrowserWindow.setHasShadow`. */
+  setHasShadow(windowId: number, hasShadow: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_has_shadow", windowId, hasShadow });
+  },
+
+  /** 그림자 상태 읽기. Electron `BrowserWindow.hasShadow`. */
+  hasShadow(windowId: number): Promise<HasShadowResponse> {
+    return coreCall<HasShadowResponse>({ cmd: "has_shadow", windowId });
   },
 
   // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.

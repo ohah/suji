@@ -96,6 +96,31 @@ func IsAudioMuted(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"is_audio_muted","windowId":%d}`, windowID))
 }
 
+// SetOpacity sets window alpha (0~1). Electron `BrowserWindow.setOpacity`.
+func SetOpacity(windowID uint32, opacity float64) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"set_opacity","windowId":%d,"opacity":%g}`, windowID, opacity))
+}
+
+// GetOpacity returns alpha. Response: `{"opacity":f64,"ok":bool}`.
+func GetOpacity(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_opacity","windowId":%d}`, windowID))
+}
+
+// SetBackgroundColor accepts `#RRGGBB` or `#RRGGBBAA`.
+func SetBackgroundColor(windowID uint32, color string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"set_background_color","windowId":%d,"color":"%s"}`, windowID, jsonesc.Full(color)))
+}
+
+// SetHasShadow toggles window shadow. Response: windowOp.
+func SetHasShadow(windowID uint32, has bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"set_has_shadow","windowId":%d,"hasShadow":%t}`, windowID, has))
+}
+
+// HasShadow returns shadow state. Response: `{"hasShadow":bool,"ok":bool}`.
+func HasShadow(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"has_shadow","windowId":%d}`, windowID))
+}
+
 func Undo(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"undo","windowId":%d}`, windowID))
 }

@@ -222,7 +222,7 @@ pub fn quit() {
 // ============================================
 
 pub mod windows {
-    use super::invoke;
+    use super::{escape_json_full, invoke};
 
     /// 새 창 생성. `opts_json`은 cmd 객체 안에 들어갈 필드 (예: `r#""title":"x","frame":false"#`).
     /// caller가 JSON-safe 보장. 단순 경우는 `create_simple()` 사용.
@@ -361,6 +361,56 @@ pub mod windows {
         invoke(
             "__core__",
             &format!(r#"{{"cmd":"is_audio_muted","windowId":{}}}"#, window_id),
+        )
+    }
+
+    /// 창 알파값 (0~1). Electron `BrowserWindow.setOpacity`. raw JSON: windowOp.
+    pub fn set_opacity(window_id: u32, opacity: f64) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_opacity","windowId":{},"opacity":{}}}"#,
+                window_id, opacity
+            ),
+        )
+    }
+
+    /// raw JSON: `{"opacity":f64,"ok":bool}`.
+    pub fn get_opacity(window_id: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"get_opacity","windowId":{}}}"#, window_id),
+        )
+    }
+
+    /// 배경색 (`#RRGGBB` 또는 `#RRGGBBAA`). raw JSON: windowOp.
+    pub fn set_background_color(window_id: u32, color: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_background_color","windowId":{},"color":"{}"}}"#,
+                window_id,
+                escape_json_full(color)
+            ),
+        )
+    }
+
+    /// 그림자 표시 여부. raw JSON: windowOp.
+    pub fn set_has_shadow(window_id: u32, has: bool) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_has_shadow","windowId":{},"hasShadow":{}}}"#,
+                window_id, has
+            ),
+        )
+    }
+
+    /// raw JSON: `{"hasShadow":bool,"ok":bool}`.
+    pub fn has_shadow(window_id: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"has_shadow","windowId":{}}}"#, window_id),
         )
     }
 

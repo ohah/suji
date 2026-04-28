@@ -508,6 +508,58 @@ describe("Zoom API (Phase 4-B)", () => {
 // webContents.setAudioMuted / isAudioMuted (CEF cef_browser_host_t.set/is_audio_muted)
 // ============================================
 
+describe("Opacity / Background / Shadow API", () => {
+  test("setOpacity 0.5 → getOpacity 0.5 (NSWindow alphaValue round-trip)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "opacity", url: "about:blank" });
+    const id = created.windowId;
+    const evalCmd = (req: object): Promise<any> =>
+      page.evaluate((r) => (window as any).__suji__.core(JSON.stringify(r)), req as any);
+
+    const set = await evalCmd({ cmd: "set_opacity", windowId: id, opacity: 0.5 });
+    expect(set.cmd).toBe("set_opacity");
+    expect(set.ok).toBe(true);
+
+    const get = await evalCmd({ cmd: "get_opacity", windowId: id });
+    expect(get.ok).toBe(true);
+    expect(get.opacity).toBeCloseTo(0.5, 4);
+  });
+
+  test("setBackgroundColor 응답 ok (#RRGGBB hex)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "bgcolor", url: "about:blank" });
+    const id = created.windowId;
+    const r: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_background_color", windowId: id, color: "#ff8800" },
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  test("setHasShadow false → hasShadow false (NSWindow shadow round-trip)", async () => {
+    const created = await coreCall({ cmd: "create_window", title: "shadow", url: "about:blank" });
+    const id = created.windowId;
+    const evalCmd = (req: object): Promise<any> =>
+      page.evaluate((r) => (window as any).__suji__.core(JSON.stringify(r)), req as any);
+
+    const set = await evalCmd({ cmd: "set_has_shadow", windowId: id, hasShadow: false });
+    expect(set.ok).toBe(true);
+
+    const has = await evalCmd({ cmd: "has_shadow", windowId: id });
+    expect(has.ok).toBe(true);
+    expect(has.hasShadow).toBe(false);
+
+    await evalCmd({ cmd: "set_has_shadow", windowId: id, hasShadow: true });
+    const has2 = await evalCmd({ cmd: "has_shadow", windowId: id });
+    expect(has2.hasShadow).toBe(true);
+  });
+
+  test("opacity: 알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "set_opacity", windowId: 99999, opacity: 1 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+});
+
 describe("Audio mute API", () => {
   test("set true → is true → set false → is false (round-trip)", async () => {
     const created = await coreCall({ cmd: "create_window", title: "audio-mute", url: "about:blank" });

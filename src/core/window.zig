@@ -241,6 +241,12 @@ pub const Native = struct {
         // Audio mute (Electron `webContents.setAudioMuted` / `isAudioMuted`).
         set_audio_muted: *const fn (ctx: ?*anyopaque, handle: u64, muted: bool) void,
         is_audio_muted: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        // Window opacity / background / shadow (Electron `BrowserWindow` 동등).
+        set_opacity: *const fn (ctx: ?*anyopaque, handle: u64, opacity: f64) void,
+        get_opacity: *const fn (ctx: ?*anyopaque, handle: u64) f64,
+        set_background_color: *const fn (ctx: ?*anyopaque, handle: u64, hex: []const u8) void,
+        set_has_shadow: *const fn (ctx: ?*anyopaque, handle: u64, has: bool) void,
+        has_shadow: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
         undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
         redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -329,6 +335,21 @@ pub const Native = struct {
     }
     pub fn isAudioMuted(self: Native, handle: u64) bool {
         return self.vtable.is_audio_muted(self.ctx, handle);
+    }
+    pub fn setOpacity(self: Native, handle: u64, opacity: f64) void {
+        self.vtable.set_opacity(self.ctx, handle, opacity);
+    }
+    pub fn getOpacity(self: Native, handle: u64) f64 {
+        return self.vtable.get_opacity(self.ctx, handle);
+    }
+    pub fn setBackgroundColor(self: Native, handle: u64, hex: []const u8) void {
+        self.vtable.set_background_color(self.ctx, handle, hex);
+    }
+    pub fn setHasShadow(self: Native, handle: u64, has: bool) void {
+        self.vtable.set_has_shadow(self.ctx, handle, has);
+    }
+    pub fn hasShadow(self: Native, handle: u64) bool {
+        return self.vtable.has_shadow(self.ctx, handle);
     }
     pub fn undo(self: Native, handle: u64) void {
         self.vtable.undo(self.ctx, handle);
@@ -1176,6 +1197,41 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.isAudioMuted(win.native_handle);
+    }
+
+    pub fn setOpacity(self: *WindowManager, id: u32, opacity: f64) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setOpacity(win.native_handle, opacity);
+    }
+
+    pub fn getOpacity(self: *WindowManager, id: u32) Error!f64 {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.getOpacity(win.native_handle);
+    }
+
+    pub fn setBackgroundColor(self: *WindowManager, id: u32, hex: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setBackgroundColor(win.native_handle, hex);
+    }
+
+    pub fn setHasShadow(self: *WindowManager, id: u32, has: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setHasShadow(win.native_handle, has);
+    }
+
+    pub fn hasShadow(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.hasShadow(win.native_handle);
     }
 
     /// Electron 호환 zoom factor↔level 변환 base. `pow(ZOOM_BASE, level) == factor`,

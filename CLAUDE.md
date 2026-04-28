@@ -64,6 +64,10 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.setZoomLevel(id, 1.5) / setZoomFactor(id, 1.2)  — 줌 (Phase 4-B)
 // suji.windows.openDevTools(id) / toggleDevTools(id)  — DevTools (Phase 4-C)
 // suji.windows.copy(id) / paste(id) / findInPage(id, "x", .{})  — 편집/검색 (Phase 4-E)
+// suji.windows.setAudioMuted(id, true) / isAudioMuted(id)  — webContents audio mute
+// suji.windows.setOpacity(id, 0.5) / getOpacity(id)            — NSWindow alphaValue
+// suji.windows.setBackgroundColor(id, "#ff8800")               — NSWindow.setBackgroundColor (#RRGGBB[AA])
+// suji.windows.setHasShadow(id, false) / hasShadow(id)          — NSWindow.hasShadow round-trip
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
 //   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip

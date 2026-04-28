@@ -455,6 +455,11 @@ pub const CefNative = struct {
         .get_zoom_level = getZoomLevelImpl,
         .set_audio_muted = setAudioMutedImpl,
         .is_audio_muted = isAudioMutedImpl,
+        .set_opacity = setOpacityImpl,
+        .get_opacity = getOpacityImpl,
+        .set_background_color = setBackgroundColorImpl,
+        .set_has_shadow = setHasShadowImpl,
+        .has_shadow = hasShadowImpl,
         .undo = makeFrameEditFn("undo"),
         .redo = makeFrameEditFn("redo"),
         .cut = makeFrameEditFn("cut"),
@@ -917,6 +922,55 @@ pub const CefNative = struct {
         const entry = self.browsers.get(handle) orelse return false;
         const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return false;
         return host.is_audio_muted.?(host) != 0;
+    }
+
+    fn setOpacityImpl(ctx: ?*anyopaque, handle: u64, opacity: f64) void {
+        assertUiThread();
+        if (!is_macos) return;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const ns_window = entry.ns_window orelse return;
+        const sel = objc.sel_registerName("setAlphaValue:");
+        const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, f64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+        fn_ptr(ns_window, @ptrCast(sel), opacity);
+    }
+
+    fn getOpacityImpl(ctx: ?*anyopaque, handle: u64) f64 {
+        if (!is_macos) return 1;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return 1;
+        const ns_window = entry.ns_window orelse return 1;
+        const sel = objc.sel_registerName("alphaValue");
+        const fn_ptr: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) f64 = @ptrCast(&objc.objc_msgSend);
+        return fn_ptr(ns_window, @ptrCast(sel));
+    }
+
+    fn setBackgroundColorImpl(ctx: ?*anyopaque, handle: u64, hex: []const u8) void {
+        assertUiThread();
+        if (!is_macos) return;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const ns_window = entry.ns_window orelse return;
+        applyBackgroundColor(ns_window, hex);
+    }
+
+    fn setHasShadowImpl(ctx: ?*anyopaque, handle: u64, has: bool) void {
+        assertUiThread();
+        if (!is_macos) return;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return;
+        const ns_window = entry.ns_window orelse return;
+        msgSendVoidBool(ns_window, "setHasShadow:", has);
+    }
+
+    fn hasShadowImpl(ctx: ?*anyopaque, handle: u64) bool {
+        if (!is_macos) return false;
+        const self = fromCtx(ctx);
+        const entry = self.browsers.get(handle) orelse return false;
+        const ns_window = entry.ns_window orelse return false;
+        const sel = objc.sel_registerName("hasShadow");
+        const fn_ptr: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
+        return fn_ptr(ns_window, @ptrCast(sel)) != 0;
     }
 
     // ==================== Phase 4-E: 편집 (frame 위임) + 검색 ====================

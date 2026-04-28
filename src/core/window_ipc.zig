@@ -468,6 +468,44 @@ pub fn handleIsAudioMuted(window_id: u32, response_buf: []u8, wm: *window.Window
     ) catch null;
 }
 
+// ==================== Window opacity / background / shadow ====================
+
+pub fn handleSetOpacity(req: SetZoomReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleZoomSet("set_opacity", &window.WindowManager.setOpacity, req, response_buf, wm);
+}
+
+pub fn handleGetOpacity(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleZoomGet("get_opacity", "opacity", 1, &window.WindowManager.getOpacity, window_id, response_buf, wm);
+}
+
+pub fn handleSetBackgroundColor(window_id: u32, hex: []const u8, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setBackgroundColor(window_id, hex)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_background_color", window_id, ok);
+}
+
+pub fn handleSetHasShadow(window_id: u32, has: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setHasShadow(window_id, has)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_has_shadow", window_id, ok);
+}
+
+pub fn handleHasShadow(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const has = wm.hasShadow(window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"has_shadow\",\"windowId\":{d},\"ok\":false,\"hasShadow\":false}}",
+            .{window_id},
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"has_shadow\",\"windowId\":{d},\"ok\":true,\"hasShadow\":{}}}",
+        .{ window_id, has },
+    ) catch null;
+}
+
 // ============================================
 // Phase 4-E: 편집 (6 trivial) + 검색
 // 6 편집은 windowId만 받는 동일 패턴 — 4-C handleDevToolsOp와 같은 헬퍼 사용.

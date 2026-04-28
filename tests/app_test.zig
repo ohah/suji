@@ -747,6 +747,27 @@ test "windows.setAudioMuted / isAudioMuted: cmd JSON 형식" {
     }.run);
 }
 
+test "windows.setOpacity / getOpacity / setBackgroundColor / setHasShadow / hasShadow IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.windows.setOpacity(3, 0.5);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"set_opacity\",\"windowId\":3,\"opacity\":0.5") != null);
+
+            _ = app_mod.windows.getOpacity(3);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"get_opacity\",\"windowId\":3") != null);
+
+            _ = app_mod.windows.setBackgroundColor(3, "#ff8800");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"set_background_color\",\"windowId\":3,\"color\":\"#ff8800\"") != null);
+
+            _ = app_mod.windows.setHasShadow(3, false);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"set_has_shadow\",\"windowId\":3,\"hasShadow\":false") != null);
+
+            _ = app_mod.windows.hasShadow(3);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"has_shadow\",\"windowId\":3") != null);
+        }
+    }.run);
+}
+
 // Phase 4-E: 편집 6 + find/stop_find.
 test "windows.undo/redo/cut/copy/paste/selectAll: cmd JSON 형식" {
     try withInvokeCore(struct {
