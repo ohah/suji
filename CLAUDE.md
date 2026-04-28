@@ -187,6 +187,17 @@ suji.on("event", (data) => console.log(data))
 suji.emit("event", { msg: "hello" })
 suji.quit()                                                  // 앱 종료 요청
 suji.platform                                                // "macos" | "linux" | "windows" (상수)
+
+// TypeScript type-safe invoke — `SujiHandlers` interface를 augment하면 cmd/req/res 추론.
+// declare module '@suji/api' {
+//   interface SujiHandlers {
+//     ping: { req: void; res: { msg: string } };
+//     greet: { req: { name: string }; res: string };
+//   }
+// }
+// await invoke('greet', { name: 'Suji' })   // res: string (자동 추론)
+// await invoke('greet')                     // ❌ TS 에러 — req 누락
+// await invoke('unknown-cmd')               // unknown 반환 (untyped fallback)
 // import { windows } from '@suji/api';
 // await windows.create({ title:"Settings", url:"...", frame:false }) — 새 창
 // await windows.loadURL(id, url) / reload(id, true) / executeJavaScript(id, code)  (Phase 4-A)

@@ -22,14 +22,16 @@ function getBridge() {
     return bridge;
 }
 /**
- * 백엔드 핸들러 호출 (Electron: ipcRenderer.invoke)
+ * 백엔드 핸들러 호출 (Electron: ipcRenderer.invoke). SujiHandlers에 등록된 cmd면
+ * type-safe (cmd/req/res 추론), 아니면 untyped fallback.
  *
  * @param channel - 핸들러 채널 이름
  * @param data - 요청 데이터 (옵셔널)
  * @param options - { target: "backend" } 명시적 백엔드 지정 (옵셔널)
  */
-export async function invoke(channel, data, options) {
-    return getBridge().invoke(channel, data, options);
+export async function invoke(cmd, ...rest) {
+    const [data, options] = rest;
+    return getBridge().invoke(cmd, data, options);
 }
 /**
  * 이벤트 구독 (Electron: ipcRenderer.on)

@@ -21,6 +21,46 @@ export interface InvokeOptions {
   target?: string;
 }
 
+/**
+ * 사용자 핸들러 타입 declaration. 사용자가 module augmentation으로 채우면 `invoke`가
+ * type-safe해진다 (cmd/req/res 모두 추론).
+ *
+ * ```ts
+ * // 사용자 프로젝트의 src/suji.d.ts
+ * declare module '@suji/api' {
+ *   interface SujiHandlers {
+ *     ping: { req: void; res: { msg: string } };
+ *     greet: { req: { name: string }; res: string };
+ *   }
+ * }
+ *
+ * await invoke('greet', { name: 'Suji' });  // res: string
+ * await invoke('ping');                     // req 생략 가능, res: { msg: string }
+ * ```
+ *
+ * 비어있을 때 (default)는 fallback overload가 작동 — 기존 untyped invoke 호환.
+ */
+export interface SujiHandlers {}
+
+/** Helper: req가 void/undefined이면 args 생략 가능, 아니면 필수. */
+type InvokeArgsForHandler<K extends keyof SujiHandlers & string> =
+  SujiHandlers[K] extends { req: infer R }
+    ? [R] extends [void | undefined]
+      ? [data?: undefined, options?: InvokeOptions]
+      : [data: R, options?: InvokeOptions]
+    : [data?: unknown, options?: InvokeOptions];
+
+type InvokeRes<K extends keyof SujiHandlers & string> =
+  SujiHandlers[K] extends { res: infer R } ? R : unknown;
+
+/** 등록된 cmd면 typed args/res, 아니면 untyped fallback. conditional dispatch. */
+type InvokeArgs<K extends string> = K extends keyof SujiHandlers & string
+  ? InvokeArgsForHandler<K>
+  : [data?: Record<string, unknown>, options?: InvokeOptions];
+
+type InvokeReturn<K extends string> =
+  K extends keyof SujiHandlers & string ? InvokeRes<K> : unknown;
+
 export interface SendOptions {
   /** 특정 창(window id)에만 전달. 생략 시 모든 창으로 브로드캐스트 (Electron `webContents.send` 대응) */
   to?: number;
@@ -44,18 +84,19 @@ function getBridge(): SujiBridge {
 }
 
 /**
- * 백엔드 핸들러 호출 (Electron: ipcRenderer.invoke)
+ * 백엔드 핸들러 호출 (Electron: ipcRenderer.invoke). SujiHandlers에 등록된 cmd면
+ * type-safe (cmd/req/res 추론), 아니면 untyped fallback.
  *
  * @param channel - 핸들러 채널 이름
  * @param data - 요청 데이터 (옵셔널)
  * @param options - { target: "backend" } 명시적 백엔드 지정 (옵셔널)
  */
-export async function invoke<T = unknown>(
-  channel: string,
-  data?: Record<string, unknown>,
-  options?: InvokeOptions,
-): Promise<T> {
-  return getBridge().invoke(channel, data as any, options as any) as Promise<T>;
+export async function invoke<K extends string>(
+  cmd: K,
+  ...rest: InvokeArgs<K>
+): Promise<InvokeReturn<K>> {
+  const [data, options] = rest;
+  return getBridge().invoke(cmd, data as any, options as any) as any;
 }
 
 /**
