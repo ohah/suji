@@ -1472,6 +1472,37 @@ pub fn powerSaveBlockerStop(id: u32) bool {
 }
 
 // ============================================
+// app.requestUserAttention — dock bounce (Electron `app.requestUserAttention`)
+// ============================================
+// NSApp `requestUserAttention:` / `cancelUserAttentionRequest:` raw wrap.
+// 반환된 request_id로 cancel 가능 (NSApp 내부에 큐잉). Linux/Windows는 후속.
+
+/// NSRequestUserAttentionType — `<AppKit/NSApplication.h>`.
+const kNSCriticalRequest: c_long = 0; // 활성화될 때까지 반복 바운스
+const kNSInformationalRequest: c_long = 10; // 1회 바운스
+
+pub fn appRequestUserAttention(critical: bool) u32 {
+    if (!comptime is_macos) return 0;
+    const NSApplication = getClass("NSApplication") orelse return 0;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return 0;
+    const sel = objc.sel_registerName("requestUserAttention:");
+    const f: *const fn (?*anyopaque, ?*anyopaque, c_long) callconv(.c) c_long = @ptrCast(&objc.objc_msgSend);
+    const id = f(app, @ptrCast(sel), if (critical) kNSCriticalRequest else kNSInformationalRequest);
+    return if (id > 0) @intCast(id) else 0;
+}
+
+pub fn appCancelUserAttentionRequest(id: u32) bool {
+    if (!comptime is_macos) return false;
+    if (id == 0) return false;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const sel = objc.sel_registerName("cancelUserAttentionRequest:");
+    const f: *const fn (?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(app, @ptrCast(sel), @intCast(id));
+    return true;
+}
+
+// ============================================
 // Application Menu API — NSMenu customization
 // ============================================
 // macOS 메뉴바 커스터마이즈. App 메뉴(Quit/Hide 등)는 macOS 관례와 종료 라우팅을 위해

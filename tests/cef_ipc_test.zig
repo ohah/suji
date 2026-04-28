@@ -900,3 +900,29 @@ test "safeStorage IPC — Keychain set/get/delete + Security framework" {
     defer std.testing.allocator.free(build_src);
     try std.testing.expect(std.mem.indexOf(u8, build_src, "Security") != null);
 }
+
+test "app.requestUserAttention IPC — NSApp request/cancel" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"app_request_user_attention\"",
+        "\"app_cancel_user_attention_request\"",
+        "cef.appRequestUserAttention",
+        "cef.appCancelUserAttentionRequest",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn appRequestUserAttention",
+        "pub fn appCancelUserAttentionRequest",
+        "requestUserAttention:",
+        "cancelUserAttentionRequest:",
+        "kNSCriticalRequest",
+        "kNSInformationalRequest",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}

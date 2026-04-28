@@ -1371,7 +1371,7 @@ suji build → 결과물:
 13. **자동 업데이트** — 배포 후 유지보수에 필수
 14. **`child_process` / HTTP / SQLite SDK** — 흔한 use case (Zig std.process.Child / std.http 노출만 — 분량 소)
 15. 🟡 **`safeStorage` (Keychain 암호화) — macOS 부분 완료**. `safe_storage_set/get/delete` IPC 3개 + Keychain Services (SecItemAdd/CopyMatching/Delete). idempotent set + escape-safe value (e2e 4 케이스). Win DPAPI / Linux libsecret 후속.
-16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge) — 분량 소 each
+16. **시스템 통합** (screen/powerMonitor/powerSaveBlocker/dock badge/requestUserAttention) — 🟡 macOS 부분 완료. screen.getAllDisplays / dock badge / powerSaveBlocker / requestUserAttention(=dock bounce, NSApp `requestUserAttention:`) 모두 구현 + e2e (`tests/e2e/system-integration.test.ts`). powerMonitor (suspend/resume/lock NSWorkspace 알림) + Linux/Windows 후속.
 17. 🟡 **`windows.createView` (Electron WebContentsView 동등) — Phase 17-A (macOS) 부분 완료**.
     한 창 contentView 안에 wrapper NSView + child NSView+CefBrowser 합성. id 풀 공유 +
     모든 webContents API view 호환. 8 SDK 메서드 + view-created/view-destroyed 이벤트 +

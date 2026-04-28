@@ -1,5 +1,6 @@
 /**
- * 시스템 통합 e2e — screen.getAllDisplays / dock badge / powerSaveBlocker / safeStorage.
+ * 시스템 통합 e2e — screen.getAllDisplays / dock badge / powerSaveBlocker / safeStorage /
+ * requestUserAttention.
  *
  * 실행: ./tests/e2e/run-system-integration.sh
  */
@@ -224,5 +225,60 @@ describe("safeStorage (Keychain)", () => {
     expect(getR.value).toBe(value);
 
     await core({ cmd: "safe_storage_delete", service: SVC, account });
+  });
+});
+
+describe("app.requestUserAttention (dock bounce)", () => {
+  // NSApp 문서: 호출 시점에 앱이 active면 0 반환 (no-op). e2e는 puppeteer가
+  // attach된 active app이라 0이 자주 발생 — id 0 응답을 정상 신호로 처리.
+
+  test("critical request → IPC 응답에 id 필드", async () => {
+    const r = await core<{ id: number }>({
+      cmd: "app_request_user_attention",
+      critical: true,
+    });
+    expect(typeof r.id).toBe("number");
+    if (r.id > 0) {
+      const c = await core<{ success: boolean }>({
+        cmd: "app_cancel_user_attention_request",
+        id: r.id,
+      });
+      expect(c.success).toBe(true);
+    }
+  });
+
+  test("informational request도 IPC 응답에 id 필드", async () => {
+    const r = await core<{ id: number }>({
+      cmd: "app_request_user_attention",
+      critical: false,
+    });
+    expect(typeof r.id).toBe("number");
+    if (r.id > 0) {
+      await core({ cmd: "app_cancel_user_attention_request", id: r.id });
+    }
+  });
+
+  test("nonzero request id 발급 시 서로 다름 (NSApp 큐)", async () => {
+    const r1 = await core<{ id: number }>({
+      cmd: "app_request_user_attention",
+      critical: true,
+    });
+    const r2 = await core<{ id: number }>({
+      cmd: "app_request_user_attention",
+      critical: true,
+    });
+    if (r1.id > 0 && r2.id > 0) {
+      expect(r1.id).not.toBe(r2.id);
+    }
+    if (r1.id > 0) await core({ cmd: "app_cancel_user_attention_request", id: r1.id });
+    if (r2.id > 0) await core({ cmd: "app_cancel_user_attention_request", id: r2.id });
+  });
+
+  test("invalid id (0) cancel은 false", async () => {
+    const c = await core<{ success: boolean }>({
+      cmd: "app_cancel_user_attention_request",
+      id: 0,
+    });
+    expect(c.success).toBe(false);
   });
 });
