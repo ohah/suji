@@ -1,0 +1,135 @@
+/**
+ * 시스템 통합 e2e — screen.getAllDisplays / dock badge / powerSaveBlocker.
+ *
+ * 실행: ./tests/e2e/run-system-integration.sh
+ */
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import puppeteer, { type Browser, type Page } from "puppeteer-core";
+
+let browser: Browser;
+let page: Page;
+
+const core = <T = any>(request: Record<string, unknown>): Promise<T> =>
+  page.evaluate(
+    (req) => (window as any).__suji__.core(JSON.stringify(req)),
+    request as any,
+  ) as Promise<T>;
+
+beforeAll(async () => {
+  browser = await puppeteer.connect({
+    browserURL: "http://localhost:9222",
+    protocolTimeout: 30000,
+    defaultViewport: null,
+  });
+  const pages = await browser.pages();
+  expect(pages.length).toBeGreaterThan(0);
+  page = pages[0];
+  page.setDefaultTimeout(30000);
+});
+
+afterAll(async () => {
+  await browser?.disconnect();
+});
+
+describe("screen.getAllDisplays", () => {
+  test("최소 1개 display 반환 + 필수 필드", async () => {
+    const r = await core<{ displays: any[] }>({ cmd: "screen_get_all_displays" });
+    expect(Array.isArray(r.displays)).toBe(true);
+    expect(r.displays.length).toBeGreaterThan(0);
+
+    const d = r.displays[0];
+    for (const k of ["index", "isPrimary", "x", "y", "width", "height",
+                     "visibleX", "visibleY", "visibleWidth", "visibleHeight", "scaleFactor"]) {
+      expect(d).toHaveProperty(k);
+    }
+    expect(d.width).toBeGreaterThan(0);
+    expect(d.height).toBeGreaterThan(0);
+    expect(d.scaleFactor).toBeGreaterThan(0);
+  });
+
+  test("primary display는 정확히 1개", async () => {
+    const r = await core<{ displays: any[] }>({ cmd: "screen_get_all_displays" });
+    const primary = r.displays.filter((d) => d.isPrimary);
+    expect(primary.length).toBe(1);
+  });
+
+  test("visibleHeight ≤ height (메뉴바/dock 제외 영역)", async () => {
+    const r = await core<{ displays: any[] }>({ cmd: "screen_get_all_displays" });
+    for (const d of r.displays) {
+      expect(d.visibleHeight).toBeLessThanOrEqual(d.height);
+      expect(d.visibleWidth).toBeLessThanOrEqual(d.width);
+    }
+  });
+});
+
+describe("app.dock.setBadge", () => {
+  test("set → get round-trip", async () => {
+    await core({ cmd: "dock_set_badge", text: "42" });
+    const r = await core<{ text: string }>({ cmd: "dock_get_badge" });
+    expect(r.text).toBe("42");
+  });
+
+  test("빈 문자열로 badge 제거", async () => {
+    await core({ cmd: "dock_set_badge", text: "X" });
+    await core({ cmd: "dock_set_badge", text: "" });
+    const r = await core<{ text: string }>({ cmd: "dock_get_badge" });
+    expect(r.text).toBe("");
+  });
+
+  test("escape 안전 — 따옴표 포함 텍스트 round-trip", async () => {
+    await core({ cmd: "dock_set_badge", text: 'a"b' });
+    const r = await core<{ text: string }>({ cmd: "dock_get_badge" });
+    expect(r.text).toBe('a"b');
+    await core({ cmd: "dock_set_badge", text: "" });
+  });
+});
+
+describe("powerSaveBlocker", () => {
+  test("start → stop round-trip — display sleep 차단", async () => {
+    const start = await core<{ id: number }>({
+      cmd: "power_save_blocker_start",
+      type: "prevent_display_sleep",
+    });
+    expect(start.id).toBeGreaterThan(0);
+
+    const stop = await core<{ success: boolean }>({
+      cmd: "power_save_blocker_stop",
+      id: start.id,
+    });
+    expect(stop.success).toBe(true);
+  });
+
+  test("app suspension 차단 type", async () => {
+    const start = await core<{ id: number }>({
+      cmd: "power_save_blocker_start",
+      type: "prevent_app_suspension",
+    });
+    expect(start.id).toBeGreaterThan(0);
+    await core({ cmd: "power_save_blocker_stop", id: start.id });
+  });
+
+  test("invalid id (0) stop은 false", async () => {
+    const stop = await core<{ success: boolean }>({
+      cmd: "power_save_blocker_stop",
+      id: 0,
+    });
+    expect(stop.success).toBe(false);
+  });
+
+  test("이미 stop된 id 두 번째 stop은 false (idempotent guard)", async () => {
+    const start = await core<{ id: number }>({
+      cmd: "power_save_blocker_start",
+      type: "prevent_display_sleep",
+    });
+    const stop1 = await core<{ success: boolean }>({
+      cmd: "power_save_blocker_stop",
+      id: start.id,
+    });
+    expect(stop1.success).toBe(true);
+    const stop2 = await core<{ success: boolean }>({
+      cmd: "power_save_blocker_stop",
+      id: start.id,
+    });
+    expect(stop2.success).toBe(false);
+  });
+});

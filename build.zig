@@ -147,6 +147,8 @@ pub fn build(b: *std.Build) void {
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
         root_module.linkFramework("Carbon", .{});
+        // IOKit — IOPMAssertionCreateWithName / Release (powerSaveBlocker).
+        root_module.linkFramework("IOKit", .{});
         // window_lifecycle.m — NSWindowDelegate (resize/focus/blur/move) → C callback.
         root_module.addCSourceFile(.{
             .file = b.path("src/platform/window_lifecycle.m"),

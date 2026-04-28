@@ -82,6 +82,10 @@ pub const events = struct {
     /// frontend/Rust/Go/Node listener는 일반 emit과 동일하게 알림만 받음 (close와 동일).
     /// macOS에 한정 (Linux/Windows는 후속 플랫폼 작업).
     pub const will_resize = "window:will-resize";
+    /// `find_in_page` 검색 결과 보고. payload: `{windowId, identifier, count,
+    /// activeMatchOrdinal, finalUpdate}`. CEF는 검색 진행 중에도 incremental update를
+    /// 발화하지만 main.zig handler는 `finalUpdate=true`만 forward (noise 제거).
+    pub const find_result = "window:find-result";
 };
 
 /// 외형 (시각 속성). frame/transparent/타이틀바 스타일/배경/그림자 등 "보이는 모양".

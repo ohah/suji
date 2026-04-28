@@ -617,6 +617,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
         .title_change = &windowTitleChangeHandler,
+        .find_result = &windowFindResultHandler,
     });
     // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
     if (config.security.csp) |csp_val| {
@@ -796,6 +797,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
         .title_change = &windowTitleChangeHandler,
+        .find_result = &windowFindResultHandler,
     });
     // CSP — 사용자 명시 csp 우선, 미명시 시 default CSP를 iframe_allowed_origins로 빌드.
     if (config.security.csp) |csp_val| {
@@ -1434,6 +1436,73 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "shell_beep")) {
         cef.shellBeep();
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"shell_beep\",\"success\":true}}", .{}) catch return null;
+        return result;
+    }
+
+    // Screen API — getAllDisplays 결과를 큰 stack 버퍼로 직접 빌드.
+    if (std.mem.eql(u8, cmd, "screen_get_all_displays")) {
+        var displays_buf: [4096]u8 = undefined;
+        const displays = cef.screenGetAllDisplays(&displays_buf);
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"screen_get_all_displays\",\"displays\":{s}}}",
+            .{displays},
+        ) catch return null;
+        return result;
+    }
+
+    // Dock badge API. extractJsonString은 wire escape를 안 풀어주므로 unescape 후 NSDockTile에.
+    // unescape 실패(text 한도 초과)면 graceful false — clipboard_write_text 패턴과 일관.
+    if (std.mem.eql(u8, cmd, "dock_set_badge")) {
+        const raw = util.extractJsonString(req_clean, "text") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |n| blk: {
+            cef.dockSetBadge(unesc_buf[0..n]);
+            break :blk true;
+        } else false;
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"dock_set_badge\",\"success\":{}}}",
+            .{ok},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "dock_get_badge")) {
+        var text_buf: [256]u8 = undefined;
+        const text = cef.dockGetBadge(&text_buf);
+        var esc_buf: [512]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(text, &esc_buf) orelse return null;
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"dock_get_badge\",\"text\":\"{s}\"}}",
+            .{esc_buf[0..esc_n]},
+        ) catch return null;
+        return result;
+    }
+
+    // Power save blocker.
+    if (std.mem.eql(u8, cmd, "power_save_blocker_start")) {
+        const type_str = util.extractJsonString(req_clean, "type") orelse "prevent_display_sleep";
+        const t: cef.PowerSaveBlockerType = if (std.mem.eql(u8, type_str, "prevent_app_suspension"))
+            .prevent_app_suspension
+        else
+            .prevent_display_sleep;
+        const id = cef.powerSaveBlockerStart(t);
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_save_blocker_start\",\"id\":{d}}}",
+            .{id},
+        ) catch return null;
+        return result;
+    }
+    if (std.mem.eql(u8, cmd, "power_save_blocker_stop")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        const ok = cef.powerSaveBlockerStop(util.nonNegU32(id_n));
+        const result = std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_save_blocker_stop\",\"success\":{}}}",
+            .{ok},
+        ) catch return null;
         return result;
     }
 
@@ -2376,6 +2445,18 @@ fn windowLeaveFullScreenHandler(handle: u64) void {
 fn windowWillResizeHandler(handle: u64, curr_w: f64, curr_h: f64, proposed_w: *f64, proposed_h: *f64) void {
     const wm = window_mod.WindowManager.global orelse return;
     wm.applyWillResizeForHandle(handle, curr_w, curr_h, proposed_w, proposed_h);
+}
+
+/// CEF find_handler.OnFindResult는 incremental(검색 진행) + final 두 종류로 발화. final만
+/// frontend에 forward해 검색어 입력 중 noise 차단 (Electron의 `found-in-page` 의도와 동일).
+fn windowFindResultHandler(handle: u64, identifier: i32, count: i32, active_match_ordinal: i32, final_update: bool) void {
+    if (!final_update) return;
+    const win_id = windowIdFromHandle(handle) orelse return;
+    emitToBus(
+        window_mod.events.find_result,
+        "{{\"windowId\":{d},\"identifier\":{d},\"count\":{d},\"activeMatchOrdinal\":{d}}}",
+        .{ win_id, identifier, count, active_match_ordinal },
+    );
 }
 
 /// `app.quitOnAllWindowsClosed: true` 시 EventBus에 등록되는 listener — window:all-closed 발화 시

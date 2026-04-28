@@ -342,6 +342,46 @@ describe("Phase 4-E — 편집 / 검색", () => {
     expect(r2.ok).toBe(true);
   });
 
+  test("find_in_page → window:find-result 이벤트 (DOM에 명시 텍스트 주입 후 검색)", async () => {
+    // 검색 대상 텍스트를 명시적으로 DOM에 주입 (페이지 콘텐츠에 의존하지 않음).
+    // listener 등록 race 회피 위해 page.evaluate 안에서 listener attach + promise resolve.
+    const result: any = await page.evaluate(async () => {
+      return new Promise((resolve) => {
+        // 검색 대상 텍스트 주입
+        const marker = document.createElement("div");
+        marker.id = "__find_marker__";
+        marker.textContent = "find-target-token-xyz";
+        document.body.appendChild(marker);
+
+        const off = (window as any).__suji__.on("window:find-result", (payload: any) => {
+          off();
+          marker.remove();
+          // dispatch는 JSON literal로 emit하므로 payload가 string이 아닌 object일 수 있음.
+          const obj = typeof payload === "string" ? JSON.parse(payload) : payload;
+          resolve(obj);
+        });
+        (window as any).__suji__.core(
+          JSON.stringify({ cmd: "find_in_page", windowId: 1, text: "find-target-token-xyz", forward: true, matchCase: false, findNext: false }),
+        );
+        setTimeout(() => {
+          off();
+          marker.remove();
+          resolve({ timeout: true });
+        }, 5000);
+      });
+    });
+    expect(result.timeout).toBeUndefined();
+    expect(result.windowId).toBe(1);
+    expect(typeof result.identifier).toBe("number");
+    expect(result.count).toBeGreaterThan(0);
+    expect(typeof result.activeMatchOrdinal).toBe("number");
+
+    // cleanup
+    await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "stop_find_in_page", windowId: 1, clearSelection: true })),
+    );
+  });
+
   test("알 수 없는 windowId — 모든 4-E cmd ok:false", async () => {
     for (const cmd of ["undo", "copy", "paste", "select_all", "stop_find_in_page"]) {
       const r: any = await page.evaluate(

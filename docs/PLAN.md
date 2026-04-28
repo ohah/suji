@@ -518,8 +518,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           custom selector → cef.quit() (NSApplicationWillTerminate 옵저버에서 CEF SIGTRAP 우회).
     - [x] **Frameless 창 키 이벤트** — `SujiKeyableWindow` ObjC subclass + `canBecomeKeyWindow=YES`
           override (기본 NSWindow는 borderless면 NO 반환).
-    - [ ] **`find_in_page` 결과 보고 이벤트** — `cef_find_handler_t.OnFindResult`로 매치 수,
-          현재 인덱스, 셀렉션 영역 받음 → `window:find-result` 이벤트로 발화. 현재는 ok 응답만.
+    - [x] **`find_in_page` 결과 보고 이벤트** — `cef_find_handler_t.OnFindResult` 등록 →
+          `window:find-result` 이벤트(`{windowId, identifier, count, activeMatchOrdinal}`).
+          incremental 진행 update는 forward X (`finalUpdate=true`만, Electron `found-in-page`
+          의도와 동일). 단위 + e2e 1 (DOM 텍스트 주입 후 검색 → match count > 0).
 
     B 플랫폼/엣지 (가치 중간):
     - [ ] **Linux PDF 인쇄** — `cef_print_handler_t::GetPdfPaperSize` 구현 필요 (CEF 요구).
@@ -1323,13 +1325,13 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| 디스플레이 정보 | `screen.getAllDisplays` / `getPrimaryDisplay` | -- | ❌ (분량 소 — NSScreen / GdkDisplay / EnumDisplayMonitors) |
+| 디스플레이 정보 | `screen.getAllDisplays` / `getPrimaryDisplay` | -- | ✅ macOS NSScreen — `screen_get_all_displays` IPC, frame/visibleFrame/scaleFactor + isPrimary 3 e2e |
 | 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | ❌ (분량 소 — IOPMSchedulePowerEvent / DBus / WM_POWERBROADCAST) |
-| 슬립 차단 | `powerSaveBlocker.start` | -- | ❌ (분량 소 — IOPMAssertion / DBus inhibit / SetThreadExecutionState) |
+| 슬립 차단 | `powerSaveBlocker.start` | -- | ✅ macOS IOPMAssertion — `power_save_blocker_start/stop` IPC, prevent_app_suspension / prevent_display_sleep + idempotent guard 4 e2e |
 | 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | ❌ (분량 중 — CGWindowListCopyWindowInfo + ScreenCaptureKit) |
 | 크래시 리포터 | `crashReporter.start` | -- | ❌ (분량 중 — Apple Crashpad/Breakpad 연동) |
 | 인앱 결제 | `inAppPurchase` (Mac App Store) | -- | ❌ (분량 대 — App Store 의존) |
-| Mac dock badge | `app.dock.setBadge` | -- | ❌ (분량 소 — NSDockTile setBadgeLabel) |
+| Mac dock badge | `app.dock.setBadge` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape round-trip 3 e2e |
 | 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | 🟡 `globalShortcut`로 가능, 전용 API 없음 |
 
 ### 개발자 경험 (DX)

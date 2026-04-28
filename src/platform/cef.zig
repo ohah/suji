@@ -1236,6 +1236,154 @@ pub fn shellBeep() void {
 }
 
 // ============================================
+// Screen API — NSScreen (Electron `screen`)
+// ============================================
+// `screen.getAllDisplays` — 연결된 모든 NSScreen의 frame/visibleFrame/scale.
+// 결과는 JSON 배열로 직접 빌드. macOS만 — 다른 OS는 빈 배열 반환.
+// macOS arm64 ABI: 작은 struct(NSRect 32B)는 일반 objc_msgSend로 반환됨 — _stret 불필요.
+
+/// out_buf에 `[{...},{...}]` JSON 배열을 빌드해 길이 반환.
+pub fn screenGetAllDisplays(out_buf: []u8) []const u8 {
+    if (!comptime is_macos) {
+        const empty = "[]";
+        const n = @min(empty.len, out_buf.len);
+        @memcpy(out_buf[0..n], empty[0..n]);
+        return out_buf[0..n];
+    }
+    var w = std.Io.Writer.fixed(out_buf);
+    w.writeByte('[') catch return out_buf[0..1];
+
+    const NSScreen = getClass("NSScreen") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const screens = msgSend(NSScreen, "screens") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const main_screen = msgSend(NSScreen, "mainScreen");
+
+    const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
+    const count = count_fn(screens, @ptrCast(objc.sel_registerName("count")));
+
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const obj_fn: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+        const screen = obj_fn(screens, @ptrCast(objc.sel_registerName("objectAtIndex:")), i) orelse continue;
+
+        const rect_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+        const f64_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) f64 = @ptrCast(&objc.objc_msgSend);
+        const frame = rect_fn(screen, @ptrCast(objc.sel_registerName("frame")));
+        const visible = rect_fn(screen, @ptrCast(objc.sel_registerName("visibleFrame")));
+        const scale = f64_fn(screen, @ptrCast(objc.sel_registerName("backingScaleFactor")));
+        const is_primary = main_screen != null and screen == main_screen.?;
+
+        if (i > 0) w.writeByte(',') catch return w.buffered();
+        w.print(
+            "{{\"index\":{d},\"isPrimary\":{},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"visibleX\":{d},\"visibleY\":{d},\"visibleWidth\":{d},\"visibleHeight\":{d},\"scaleFactor\":{d}}}",
+            .{
+                i,
+                is_primary,
+                @as(i64, @intFromFloat(frame.x)),
+                @as(i64, @intFromFloat(frame.y)),
+                @as(i64, @intFromFloat(frame.width)),
+                @as(i64, @intFromFloat(frame.height)),
+                @as(i64, @intFromFloat(visible.x)),
+                @as(i64, @intFromFloat(visible.y)),
+                @as(i64, @intFromFloat(visible.width)),
+                @as(i64, @intFromFloat(visible.height)),
+                scale,
+            },
+        ) catch return w.buffered();
+    }
+    w.writeByte(']') catch return w.buffered();
+    return w.buffered();
+}
+
+// ============================================
+// Dock badge API — NSDockTile (Electron `app.dock.setBadge`)
+// ============================================
+
+/// NSString.stringWithUTF8String + objc_msgSend pattern — clipboard/menu에 같은 패턴 반복.
+fn newNSString(cstr: [*:0]const u8) ?*anyopaque {
+    const NSString = getClass("NSString") orelse return null;
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    return fn_ptr(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr);
+}
+
+fn nsStringToUtf8Buf(ns_str: ?*anyopaque, out: []u8) []const u8 {
+    const utf8_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?[*:0]const u8 = @ptrCast(&objc.objc_msgSend);
+    const cstr = utf8_fn(ns_str, @ptrCast(objc.sel_registerName("UTF8String"))) orelse return out[0..0];
+    const len = std.mem.span(cstr).len;
+    const n = @min(len, out.len);
+    @memcpy(out[0..n], cstr[0..n]);
+    return out[0..n];
+}
+
+/// Dock 아이콘 badge 텍스트 설정. 빈 문자열이면 badge 제거.
+pub fn dockSetBadge(text: []const u8) void {
+    if (!comptime is_macos) return;
+    const NSApp = getClass("NSApplication") orelse return;
+    const app = msgSend(NSApp, "sharedApplication") orelse return;
+    const dock_tile = msgSend(app, "dockTile") orelse return;
+
+    var text_buf: [256]u8 = undefined;
+    const text_z = util.nullTerminate(text, &text_buf);
+    const ns_str = newNSString(text_z.ptr) orelse return;
+    msgSendVoid1(dock_tile, "setBadgeLabel:", ns_str);
+}
+
+/// 현재 badge 텍스트 (없으면 빈 문자열).
+pub fn dockGetBadge(out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const NSApp = getClass("NSApplication") orelse return out_buf[0..0];
+    const app = msgSend(NSApp, "sharedApplication") orelse return out_buf[0..0];
+    const dock_tile = msgSend(app, "dockTile") orelse return out_buf[0..0];
+    const ns_str = msgSend(dock_tile, "badgeLabel") orelse return out_buf[0..0];
+    return nsStringToUtf8Buf(ns_str, out_buf);
+}
+
+// ============================================
+// Power-save blocker — IOPMAssertion (Electron `powerSaveBlocker`)
+// ============================================
+// `IOPMAssertionCreateWithName` — `kIOPMAssertionTypePreventUserIdleSystemSleep` 또는
+// `kIOPMAssertionTypePreventUserIdleDisplaySleep`. 반환된 assertion id로 release.
+
+pub const PowerSaveBlockerType = enum { prevent_app_suspension, prevent_display_sleep };
+
+extern "c" fn IOPMAssertionCreateWithName(
+    assertion_type: ?*anyopaque,
+    assertion_level: u32,
+    name: ?*anyopaque,
+    out_id: *u32,
+) c_int;
+extern "c" fn IOPMAssertionRelease(assertion_id: u32) c_int;
+
+/// IOKit/IOPMLib.h:433 — assertion ON. OFF는 0이지만 OFF로 create하는 의미가 없어 미정의.
+const kIOPMAssertionLevelOn: u32 = 255;
+
+/// IOPMAssertion 시작 — 0이면 실패 (id는 1+).
+/// NSString은 toll-free bridged with CFStringRef — IOPM이 받는 CFStringRef 자리에 그대로 전달.
+pub fn powerSaveBlockerStart(t: PowerSaveBlockerType) u32 {
+    if (!comptime is_macos) return 0;
+    const type_str: [*:0]const u8 = switch (t) {
+        .prevent_app_suspension => "PreventUserIdleSystemSleep",
+        .prevent_display_sleep => "PreventUserIdleDisplaySleep",
+    };
+    const ns_type = newNSString(type_str) orelse return 0;
+    const ns_name = newNSString("Suji powerSaveBlocker") orelse return 0;
+    var id: u32 = 0;
+    const r = IOPMAssertionCreateWithName(ns_type, kIOPMAssertionLevelOn, ns_name, &id);
+    return if (r == 0) id else 0;
+}
+
+pub fn powerSaveBlockerStop(id: u32) bool {
+    if (!comptime is_macos) return false;
+    if (id == 0) return false;
+    return IOPMAssertionRelease(id) == 0;
+}
+
+// ============================================
 // Application Menu API — NSMenu customization
 // ============================================
 // macOS 메뉴바 커스터마이즈. App 메뉴(Quit/Hide 등)는 macOS 관례와 종료 라우팅을 위해
@@ -2561,6 +2709,7 @@ fn initClient(client_ptr: *c.cef_client_t) void {
     client_ptr.get_drag_handler = &getDragHandler;
     client_ptr.get_display_handler = &getDisplayHandler;
     client_ptr.get_load_handler = &getLoadHandler;
+    client_ptr.get_find_handler = &getFindHandler;
     client_ptr.on_process_message_received = &onBrowserProcessMessageReceived;
 }
 
@@ -2684,22 +2833,63 @@ fn onLoadEnd(
 
 pub const WindowReadyToShowHandler = *const fn (handle: u64) void;
 pub const WindowTitleChangeHandler = *const fn (handle: u64, title: []const u8) void;
+pub const WindowFindResultHandler = *const fn (handle: u64, identifier: i32, count: i32, active_match_ordinal: i32, final_update: bool) void;
 
 var g_window_ready_to_show_handler: ?WindowReadyToShowHandler = null;
 var g_window_title_change_handler: ?WindowTitleChangeHandler = null;
+var g_window_find_result_handler: ?WindowFindResultHandler = null;
 
 pub const WindowDisplayHandlers = struct {
     ready_to_show: ?WindowReadyToShowHandler = null,
     title_change: ?WindowTitleChangeHandler = null,
+    find_result: ?WindowFindResultHandler = null,
 };
 
-/// main.zig가 ready-to-show / page-title-updated emit 핸들러를 주입.
+/// main.zig가 ready-to-show / page-title-updated / find-result emit 핸들러를 주입.
 /// cef.zig가 EventBus(loader/main)에 직접 의존하지 않도록 한 단계 indirection.
-/// lifecycle handlers와 동일하게 struct 패턴 — Phase 5+ 추가 핸들러(did-finish-load 등)
-/// 도입 시 비파괴적 확장 가능.
+/// lifecycle handlers와 동일하게 struct 패턴 — webContents 라이프사이클 핸들러를 비파괴적
+/// 추가 가능 (did-finish-load 등).
 pub fn setWindowDisplayHandlers(handlers: WindowDisplayHandlers) void {
     g_window_ready_to_show_handler = handlers.ready_to_show;
     g_window_title_change_handler = handlers.title_change;
+    g_window_find_result_handler = handlers.find_result;
+}
+
+// ============================================
+// CEF Find Handler — 검색 결과 보고 → window:find-result 이벤트 (Electron 호환)
+// ============================================
+
+var g_find_handler: c.cef_find_handler_t = undefined;
+var g_find_handler_initialized: bool = false;
+
+fn ensureFindHandler() void {
+    if (g_find_handler_initialized) return;
+    zeroCefStruct(c.cef_find_handler_t, &g_find_handler);
+    initBaseRefCounted(&g_find_handler.base);
+    g_find_handler.on_find_result = &onFindResult;
+    g_find_handler_initialized = true;
+}
+
+fn getFindHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_find_handler_t {
+    ensureFindHandler();
+    return &g_find_handler;
+}
+
+/// CEF가 find_in_page 검색 결과를 보고할 때 호출. payload는 main.zig가 final_update 동안만
+/// `window:find-result` 발화 (incremental 진행은 noise). handler 주입은 setWindowDisplayHandlers.
+fn onFindResult(
+    _: ?*c._cef_find_handler_t,
+    browser: ?*c._cef_browser_t,
+    identifier: c_int,
+    count: c_int,
+    _: [*c]const c.cef_rect_t,
+    active_match_ordinal: c_int,
+    final_update: c_int,
+) callconv(.c) void {
+    const br = browser orelse return;
+    const handler = g_window_find_result_handler orelse return;
+    const handle: u64 = @intCast(br.get_identifier.?(br));
+    handler(handle, identifier, count, active_match_ordinal, final_update != 0);
 }
 
 // ============================================

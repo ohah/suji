@@ -750,3 +750,114 @@ test "navigate URL: null-terminated" {
     const url: [:0]const u8 = "suji://app/index.html";
     try std.testing.expectEqual(@as(u8, 0), url[url.len]);
 }
+
+// ============================================
+// System integration IPC 라우팅 회귀 — main.zig에 cmd 등록 정적 검증
+// ============================================
+
+const std_io = std.testing.io;
+
+fn readMainSource() ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+}
+
+fn readCefSource() ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "src/platform/cef.zig",
+        std.testing.allocator,
+        .limited(4 * 1024 * 1024),
+    );
+}
+
+test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"screen_get_all_displays\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.screenGetAllDisplays") != null);
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn screenGetAllDisplays") != null);
+    // JSON shape 필드 정적 검증 — fmt 내 escape 형태가 zig source에서 다양하므로 단어만 매칭.
+    inline for (.{
+        "isPrimary",
+        "visibleWidth",
+        "visibleHeight",
+        "scaleFactor",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "dock badge IPC — set/get round-trip 등록" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{ "\"dock_set_badge\"", "\"dock_get_badge\"", "cef.dockSetBadge", "cef.dockGetBadge" }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{ "pub fn dockSetBadge", "pub fn dockGetBadge", "setBadgeLabel:", "badgeLabel" }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "powerSaveBlocker IPC — start/stop + 두 type 모두 노출" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"power_save_blocker_start\"",
+        "\"power_save_blocker_stop\"",
+        "\"prevent_app_suspension\"",
+        "\"prevent_display_sleep\"",
+        "cef.powerSaveBlockerStart",
+        "cef.powerSaveBlockerStop",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn powerSaveBlockerStart",
+        "pub fn powerSaveBlockerStop",
+        "IOPMAssertionCreateWithName",
+        "IOPMAssertionRelease",
+        "PreventUserIdleSystemSleep",
+        "PreventUserIdleDisplaySleep",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "find_result IPC — find_handler 등록 + main.zig final-only forward + display struct 통합" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "fn windowFindResultHandler",
+        "if (!final_update) return",
+        ".find_result = &windowFindResultHandler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "client_ptr.get_find_handler = &getFindHandler",
+        "fn ensureFindHandler",
+        "fn onFindResult",
+        "pub const WindowFindResultHandler",
+        "find_result: ?WindowFindResultHandler",
+        "g_find_handler.on_find_result = &onFindResult",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
