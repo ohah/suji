@@ -1324,7 +1324,7 @@ suji build → 결과물:
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
 | Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ❌ (현재 menu는 menubar/tray만 — 임의 위치 popup은 NSMenu `popUpMenuPositioningItem:atLocation:inView:`) |
 | 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |
-| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | 🟡 `session.clearCookies` / `flushStore` 2개 (CEF cookie_manager fire-and-forget) — 5 SDK 노출 + e2e 2 케이스. `set/get/visit/remove` (visitor 패턴 + async callback 마샬링) 후속 |
+| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ✅ `session.clearCookies` / `flushStore` / `setCookie` / `getCookies` / `removeCookies` — CEF cookie_manager + visitor 패턴 (`session:cookies-result` 이벤트 + requestId 매칭, race-safe pending buffer + 1초 timeout). 5 SDK 노출 + e2e 8 케이스 (set/get round-trip, httponly 필터, removeCookies, includeHttpOnly:false, URL 검증, SDK wrapper). cookies 0개 case는 visit fn 호출 안 돼 SDK timeout으로 빈 결과 (Electron 동등 동작). `clearStorageData` (IndexedDB/localStorage) 후속 |
 
 ### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
 
@@ -1418,6 +1418,11 @@ suji build → 결과물:
     `typeToTs` + App.schema chain, Rust specta v2 re-export. `suji types` CLI는 후속.
 21. **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (분량 중)
 22. **SQLite plugin** — 흔한 DB use case. 위 #14의 "SQLite SDK" 잔여 부분.
+23. ✅ **session 쿠키 풀 셋** — `setCookie` / `getCookies` / `removeCookies` 추가
+    (`session:cookies-result` 이벤트 + visitor 패턴 + race-safe pending buffer + 1초
+    timeout). CEF refcount 모델이 표준 RefPtr scope과 안 맞아 visit fn count==total-1
+    시점 emit 채택. cookies 0개 case는 SDK timeout으로 빈 결과 (Electron 동등). 5 SDK
+    노출 + e2e 8 케이스. `clearStorageData` (IndexedDB/localStorage)는 후속.
 
 ---
 

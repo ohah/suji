@@ -1824,6 +1824,59 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = cef.sessionFlushStore();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_flush_store\",\"success\":{}}}", .{ok}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "session_set_cookie")) {
+        var url_buf: [2048]u8 = undefined;
+        var name_buf: [256]u8 = undefined;
+        var value_buf: [4096]u8 = undefined;
+        var domain_buf: [256]u8 = undefined;
+        var path_buf: [256]u8 = undefined;
+        const url = util.extractJsonString(req_clean, "url") orelse "";
+        const name = util.extractJsonString(req_clean, "name") orelse "";
+        const value = util.extractJsonString(req_clean, "value") orelse "";
+        const domain = util.extractJsonString(req_clean, "domain") orelse "";
+        const path = util.extractJsonString(req_clean, "path") orelse "";
+        const url_n = util.unescapeJsonStr(url, &url_buf) orelse 0;
+        const name_n = util.unescapeJsonStr(name, &name_buf) orelse 0;
+        const value_n = util.unescapeJsonStr(value, &value_buf) orelse 0;
+        const domain_n = util.unescapeJsonStr(domain, &domain_buf) orelse 0;
+        const path_n = util.unescapeJsonStr(path, &path_buf) orelse 0;
+        const secure = util.extractJsonBool(req_clean, "secure") orelse false;
+        const httponly = util.extractJsonBool(req_clean, "httponly") orelse false;
+        const expires = util.extractJsonFloat(req_clean, "expires") orelse 0;
+        const ok = cef.sessionSetCookie(
+            url_buf[0..url_n],
+            name_buf[0..name_n],
+            value_buf[0..value_n],
+            domain_buf[0..domain_n],
+            path_buf[0..path_n],
+            secure,
+            httponly,
+            expires,
+        );
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_cookie\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "session_remove_cookies")) {
+        var url_buf: [2048]u8 = undefined;
+        var name_buf: [256]u8 = undefined;
+        const url = util.extractJsonString(req_clean, "url") orelse "";
+        const name = util.extractJsonString(req_clean, "name") orelse "";
+        const url_n = util.unescapeJsonStr(url, &url_buf) orelse 0;
+        const name_n = util.unescapeJsonStr(name, &name_buf) orelse 0;
+        const ok = cef.sessionRemoveCookies(url_buf[0..url_n], name_buf[0..name_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_remove_cookies\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "session_get_cookies")) {
+        var url_buf: [2048]u8 = undefined;
+        const url = util.extractJsonString(req_clean, "url") orelse "";
+        const url_n = util.unescapeJsonStr(url, &url_buf) orelse 0;
+        const include_http_only = util.extractJsonBool(req_clean, "includeHttpOnly") orelse true;
+        const id = cef.sessionGetCookies(url_buf[0..url_n], include_http_only);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"session_get_cookies\",\"success\":{},\"requestId\":{d}}}",
+            .{ id != 0, id },
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "app_set_progress_bar")) {
         const progress = util.extractJsonFloat(req_clean, "progress") orelse -1;
         const ok = cef.appSetProgressBar(progress);

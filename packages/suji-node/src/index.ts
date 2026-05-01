@@ -1132,6 +1132,33 @@ export const powerSaveBlocker = {
   },
 };
 
+export interface CookieDescriptor {
+  url: string;
+  name: string;
+  value?: string;
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  httponly?: boolean;
+  /** unix epoch second. 0이면 세션 쿠키. */
+  expires?: number;
+}
+
+export interface CookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httponly: boolean;
+  expires: number;
+}
+
+export interface CookieFilter {
+  url?: string;
+  includeHttpOnly?: boolean;
+}
+
 export const session = {
   /** 모든 cookie 삭제 (fire-and-forget). 실제 cleanup은 비동기. */
   async clearCookies(): Promise<boolean> {
@@ -1143,6 +1170,82 @@ export const session = {
   async flushStore(): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'session_flush_store' });
     return r.success === true;
+  },
+
+  /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
+  async setCookie(cookie: CookieDescriptor): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', {
+      cmd: 'session_set_cookie',
+      url: cookie.url,
+      name: cookie.name,
+      value: cookie.value ?? '',
+      domain: cookie.domain ?? '',
+      path: cookie.path ?? '',
+      secure: cookie.secure ?? false,
+      httponly: cookie.httponly ?? false,
+      expires: cookie.expires ?? 0,
+    });
+    return r.success === true;
+  },
+
+  /** Electron `session.cookies.remove`. url+name 매칭. */
+  async removeCookies(url: string, name: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', {
+      cmd: 'session_remove_cookies',
+      url,
+      name,
+    });
+    return r.success === true;
+  },
+
+  /** Electron `session.cookies.get`. visitor 패턴 — `session:cookies-result`로 결과 도착.
+   *  Race-safe: listener 먼저 등록 + emit을 buffer (visit이 invoke 응답보다 빨리 fire 가능). */
+  async getCookies(filter: CookieFilter = {}): Promise<CookieRecord[]> {
+    return new Promise<CookieRecord[]>((resolve) => {
+      let id = 0;
+      let pending: { requestId: number; cookies: CookieRecord[] } | null = null;
+      const timer = setTimeout(() => {
+        off();
+        resolve([]);
+      }, 1000);
+      const off = on<{ requestId: number; cookies: CookieRecord[] }>(
+        'session:cookies-result',
+        (data) => {
+          if (id === 0) {
+            pending = data;
+            return;
+          }
+          if (data.requestId !== id) return;
+          clearTimeout(timer);
+          off();
+          resolve(data.cookies ?? []);
+        },
+      );
+      invoke<{ success: boolean; requestId: number }>('__core__', {
+        cmd: 'session_get_cookies',
+        url: filter.url ?? '',
+        includeHttpOnly: filter.includeHttpOnly ?? true,
+      })
+        .then((r) => {
+          if (!r.success || !r.requestId) {
+            clearTimeout(timer);
+            off();
+            resolve([]);
+            return;
+          }
+          id = r.requestId;
+          if (pending && pending.requestId === id) {
+            clearTimeout(timer);
+            off();
+            resolve(pending.cookies ?? []);
+          }
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          off();
+          resolve([]);
+        });
+    });
   },
 };
 

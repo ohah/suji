@@ -432,6 +432,165 @@ describe("session.clearCookies / flushStore", () => {
   });
 });
 
+// `session.cookies.set/get/remove` — visit_url_cookies가 비동기라 결과는
+// `session:cookies-result` 이벤트로 도착. SDK getCookies와 동일한 race-safe pending
+// 패턴 (emit이 invoke 응답보다 먼저 와도 buffer로 매칭).
+const waitCookies = async (
+  request: Record<string, unknown>,
+  timeoutMs = 1000,
+): Promise<any[]> =>
+  page.evaluate(
+    ({ req, timeout }) =>
+      new Promise<any[]>((resolve) => {
+        const w = window as any;
+        let id = 0;
+        let pending: { requestId: number; cookies: any[] } | null = null;
+        const timer = setTimeout(() => {
+          off();
+          resolve([]);
+        }, timeout);
+        const off = w.__suji__.on("session:cookies-result", (raw: string) => {
+          const ev = typeof raw === "string" ? JSON.parse(raw) : raw;
+          if (id === 0) { pending = ev; return; }
+          if (ev.requestId !== id) return;
+          off();
+          clearTimeout(timer);
+          resolve(ev.cookies ?? []);
+        });
+        Promise.resolve(w.__suji__.core(JSON.stringify(req))).then((raw: any) => {
+          const r = typeof raw === "string" ? JSON.parse(raw) : raw;
+          id = r.requestId ?? 0;
+          if (!id) {
+            off();
+            clearTimeout(timer);
+            resolve([]);
+            return;
+          }
+          if (pending && pending.requestId === id) {
+            off();
+            clearTimeout(timer);
+            resolve(pending.cookies ?? []);
+          }
+        });
+      }),
+    { req: request as any, timeout: timeoutMs },
+  ) as Promise<any[]>;
+
+describe("session.cookies set/get/remove", () => {
+  const url = "https://suji-cookies-test.example.com/";
+
+  test("setup — clearCookies로 깔끔하게 시작", async () => {
+    await core({ cmd: "session_clear_cookies" });
+  });
+
+  test("setCookie → getCookies round-trip", async () => {
+    const set = await core<{ success: boolean }>({
+      cmd: "session_set_cookie",
+      url,
+      name: "k1",
+      value: "v1",
+      domain: "",
+      path: "/",
+      secure: true,
+      httponly: false,
+      expires: Math.floor(Date.now() / 1000) + 3600,
+    });
+    expect(set.success).toBe(true);
+
+    const cookies = await waitCookies({
+      cmd: "session_get_cookies",
+      url,
+      includeHttpOnly: true,
+    });
+    const k1 = cookies.find((c: any) => c.name === "k1");
+    expect(k1).toBeDefined();
+    expect(k1.value).toBe("v1");
+    expect(k1.path).toBe("/");
+    expect(k1.secure).toBe(true);
+    expect(k1.httponly).toBe(false);
+    expect(k1.expires).toBeGreaterThan(0);
+  });
+
+  test("httponly + 멀티 cookie", async () => {
+    const set1 = await core<{ success: boolean }>({
+      cmd: "session_set_cookie",
+      url,
+      name: "k2",
+      value: "v2",
+      domain: "",
+      path: "/",
+      secure: true,
+      httponly: true,
+      expires: 0,
+    });
+    expect(set1.success).toBe(true);
+
+    const cookies = await waitCookies({
+      cmd: "session_get_cookies",
+      url,
+      includeHttpOnly: true,
+    });
+    const k2 = cookies.find((c: any) => c.name === "k2");
+    expect(k2).toBeDefined();
+    expect(k2.value).toBe("v2");
+    expect(k2.httponly).toBe(true);
+    // 세션 쿠키는 expires=0
+    expect(k2.expires).toBe(0);
+  });
+
+  test("includeHttpOnly:false면 httponly 쿠키 제외", async () => {
+    const cookies = await waitCookies({
+      cmd: "session_get_cookies",
+      url,
+      includeHttpOnly: false,
+    });
+    expect(cookies.find((c: any) => c.name === "k2")).toBeUndefined();
+    // k1은 httponly:false라 보여야 함
+    expect(cookies.find((c: any) => c.name === "k1")).toBeDefined();
+  });
+
+  test("removeCookies → 해당 쿠키만 삭제", async () => {
+    const rm = await core<{ success: boolean }>({
+      cmd: "session_remove_cookies",
+      url,
+      name: "k1",
+    });
+    expect(rm.success).toBe(true);
+
+    // disk store flush 후 visit으로 확인 (delete_cookies는 비동기라 약간 race —
+    // visit_url_cookies는 같은 UI thread에서 sequential 처리되어 보장됨).
+    const cookies = await waitCookies({
+      cmd: "session_get_cookies",
+      url,
+      includeHttpOnly: true,
+    });
+    expect(cookies.find((c: any) => c.name === "k1")).toBeUndefined();
+    expect(cookies.find((c: any) => c.name === "k2")).toBeDefined();
+  });
+
+  test("clearCookies로 모두 삭제", async () => {
+    const cl = await core<{ success: boolean }>({ cmd: "session_clear_cookies" });
+    expect(cl.success).toBe(true);
+
+    const cookies = await waitCookies({
+      cmd: "session_get_cookies",
+      url,
+      includeHttpOnly: true,
+    });
+    expect(cookies.find((c: any) => c.name === "k2")).toBeUndefined();
+  });
+
+  test("setCookie url 빈 문자열 → success:false (URL 검증)", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "session_set_cookie",
+      url: "",
+      name: "x",
+      value: "y",
+    });
+    expect(r.success).toBe(false);
+  });
+});
+
 // app.exit는 실제 호출 시 dev server 종료 → 후속 테스트 모두 fail.
 // IPC handler 등록은 cef_ipc_test.zig grep + app_test.zig InvokeSpy로 커버.
 
@@ -866,6 +1025,27 @@ describe("@suji/api SDK — round-trip", () => {
 
     const missing = await sdk<boolean>("shell.trashItem", "/tmp/suji-sdk-trash-no-such-xyz");
     expect(missing).toBe(false);
+  });
+
+  test("session.cookies setCookie → getCookies → removeCookies wrapper", async () => {
+    const url = "https://suji-cookies-sdk.example.com/";
+    await sdk("session.clearCookies");
+
+    const set = await sdk<boolean>("session.setCookie", {
+      url, name: "sdk-k", value: "sdk-v", path: "/", secure: true,
+    });
+    expect(set).toBe(true);
+
+    const cookies = await sdk<any[]>("session.getCookies", { url });
+    const sdkK = cookies.find((c: any) => c.name === "sdk-k");
+    expect(sdkK).toBeDefined();
+    expect(sdkK.value).toBe("sdk-v");
+
+    const rm = await sdk<boolean>("session.removeCookies", url, "sdk-k");
+    expect(rm).toBe(true);
+
+    const after = await sdk<any[]>("session.getCookies", { url });
+    expect(after.find((c: any) => c.name === "sdk-k")).toBeUndefined();
   });
 
   test("app.requestUserAttention → cancel (id ≥ 0 lenient)", async () => {

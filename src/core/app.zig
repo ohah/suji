@@ -1512,6 +1512,23 @@ pub const session = struct {
     pub fn flushStore() ?[]const u8 {
         return coreCmd("session_flush_store", "");
     }
+
+    /// cookie set (Electron `session.cookies.set`). url+name 필수, 나머지 옵션.
+    /// expires 0 → 세션 쿠키. raw JSON args 그대로 전달.
+    pub fn setCookieRaw(args_json: []const u8) ?[]const u8 {
+        return coreCmd("session_set_cookie", args_json);
+    }
+
+    /// cookie 삭제 (Electron `session.cookies.remove`). url+name 매처. raw JSON.
+    pub fn removeCookiesRaw(args_json: []const u8) ?[]const u8 {
+        return coreCmd("session_remove_cookies", args_json);
+    }
+
+    /// cookie 조회 (Electron `session.cookies.get`). 즉시 `requestId` 응답,
+    /// 결과는 `session:cookies-result` 이벤트로 비동기 도착.
+    pub fn getCookiesRaw(args_json: []const u8) ?[]const u8 {
+        return coreCmd("session_get_cookies", args_json);
+    }
 };
 
 /// suji.json `app.name` 반환. 응답: `{"name":"..."}`.

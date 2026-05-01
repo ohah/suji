@@ -158,6 +158,18 @@ export interface ZoomFactorResponse extends WindowOpResponse {
     cmd: "get_zoom_factor";
     factor: number;
 }
+export interface IsAudioMutedResponse extends WindowOpResponse {
+    cmd: "is_audio_muted";
+    muted: boolean;
+}
+export interface OpacityResponse extends WindowOpResponse {
+    cmd: "get_opacity";
+    opacity: number;
+}
+export interface HasShadowResponse extends WindowOpResponse {
+    cmd: "has_shadow";
+    hasShadow: boolean;
+}
 export interface ViewOptions {
     /** view를 합성할 host 창 id. live & .window이어야 함 */
     hostId: number;
@@ -224,6 +236,20 @@ export declare const windows: {
     /** 줌 factor 변경. 1.0 = 100%, 1.5 = 150% (linear). 내부적으로 level = log(factor)/log(1.2) 변환 */
     setZoomFactor(windowId: number, factor: number): Promise<WindowOpResponse>;
     getZoomFactor(windowId: number): Promise<ZoomFactorResponse>;
+    /** 창 오디오 mute (Electron `webContents.setAudioMuted`). */
+    setAudioMuted(windowId: number, muted: boolean): Promise<WindowOpResponse>;
+    /** 창 오디오 mute 상태 (Electron `webContents.isAudioMuted`). */
+    isAudioMuted(windowId: number): Promise<IsAudioMutedResponse>;
+    /** 창 투명도 (0~1). Electron `BrowserWindow.setOpacity`. */
+    setOpacity(windowId: number, opacity: number): Promise<WindowOpResponse>;
+    /** 창 투명도 읽기. */
+    getOpacity(windowId: number): Promise<OpacityResponse>;
+    /** 배경색 (`#RRGGBB` 또는 `#RRGGBBAA`). Electron `BrowserWindow.setBackgroundColor`. */
+    setBackgroundColor(windowId: number, color: string): Promise<WindowOpResponse>;
+    /** 그림자 표시 여부. Electron `BrowserWindow.setHasShadow`. */
+    setHasShadow(windowId: number, hasShadow: boolean): Promise<WindowOpResponse>;
+    /** 그림자 상태 읽기. Electron `BrowserWindow.hasShadow`. */
+    hasShadow(windowId: number): Promise<HasShadowResponse>;
     undo(windowId: number): Promise<WindowOpResponse>;
     redo(windowId: number): Promise<WindowOpResponse>;
     cut(windowId: number): Promise<WindowOpResponse>;
@@ -274,6 +300,9 @@ export declare const powerMonitor: {
     /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋 (CGEventSource).
      *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
     getSystemIdleTime(): Promise<number>;
+    /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
+     *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등 (lock 상태는 미트래킹). */
+    getSystemIdleState(threshold: number): Promise<"active" | "idle">;
 };
 export declare const clipboard: {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
@@ -286,6 +315,15 @@ export declare const clipboard: {
     readHTML(): Promise<string>;
     /** HTML write — write 시 다른 type (text 등)도 함께 지움. */
     writeHTML(html: string): Promise<boolean>;
+    /** RTF read (Electron `clipboard.readRTF`). 비어 있거나 non-rtf면 빈 문자열. */
+    readRTF(): Promise<string>;
+    /** RTF write (Electron `clipboard.writeRTF`). 다른 type 지움. */
+    writeRTF(rtf: string): Promise<boolean>;
+    /** 임의 UTI raw bytes 쓰기 (Electron `clipboard.writeBuffer(format, buffer)`).
+     *  data는 base64 인코딩된 문자열 (raw ~8KB 한도). */
+    writeBuffer(format: string, data: string): Promise<boolean>;
+    /** 임의 UTI raw bytes 읽기 (Electron `clipboard.readBuffer(format)`). base64 string 반환. */
+    readBuffer(format: string): Promise<string>;
     /** 클립보드에 주어진 format이 있는지 (Electron `clipboard.has(format)`).
      *  format은 macOS UTI ("public.utf8-plain-text", "public.html" 등). */
     has(format: string): Promise<boolean>;
@@ -396,6 +434,11 @@ export declare const nativeImage: {
         width: number;
         height: number;
     }>;
+    /** 이미지 파일 → PNG base64 (raw ~8KB 한도, 작은 아이콘용 1차).
+     *  Electron `nativeImage.createFromPath(path).toPNG()` → base64.toString('base64'). */
+    toPng(path: string): Promise<string>;
+    /** 이미지 파일 → JPEG base64. quality 0~100 (기본 90). */
+    toJpeg(path: string, quality?: number): Promise<string>;
 };
 export type ThemeSource = "system" | "light" | "dark";
 export declare const nativeTheme: {
@@ -486,6 +529,54 @@ export interface SaveDialogOptions {
     filters?: FileFilter[];
     properties?: SaveDialogProperty[];
 }
+export interface CookieDescriptor {
+    url: string;
+    name: string;
+    value?: string;
+    domain?: string;
+    path?: string;
+    secure?: boolean;
+    httponly?: boolean;
+    /** unix epoch second. 0 또는 미지정이면 세션 쿠키. */
+    expires?: number;
+}
+export interface CookieRecord {
+    name: string;
+    value: string;
+    domain: string;
+    path: string;
+    secure: boolean;
+    httponly: boolean;
+    /** unix epoch second. 0이면 세션 쿠키. */
+    expires: number;
+}
+export interface CookieFilter {
+    /** 빈 문자열 또는 미지정이면 모든 쿠키 (visit_all_cookies). */
+    url?: string;
+    /** httpOnly 쿠키 포함 여부 (visit_url_cookies 시). 기본 true. */
+    includeHttpOnly?: boolean;
+}
+export declare const session: {
+    /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
+     *  fire-and-forget — 실제 cleanup은 비동기. */
+    clearCookies(): Promise<boolean>;
+    /** disk store flush (Electron `session.cookies.flushStore`). */
+    flushStore(): Promise<boolean>;
+    /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
+    setCookie(cookie: CookieDescriptor): Promise<boolean>;
+    /** Electron `session.cookies.remove`. url+name 매칭. */
+    removeCookies(url: string, name: string): Promise<boolean>;
+    /** Electron `session.cookies.get`. visitor 패턴 — `session:cookies-result` 이벤트로
+     *  결과 도착, requestId 매칭으로 promise resolve.
+     *
+     *  Race-safe: listener 먼저 등록하지만 visit이 invoke 응답보다 빨리 emit하면 id=0 상태로
+     *  도달. 그 emit을 buffer해두고 invoke 응답으로 id 받은 뒤 매칭.
+     *
+     *  Timeout 1초 — cookies 0개 case는 native visitor가 호출 안 돼 emit이 없으므로
+     *  timeout으로 빈 array 반환. 1초면 사용자 느끼는 지연 충분히 짧고 visit 비동기성
+     *  여유도 보장. */
+    getCookies(filter?: CookieFilter): Promise<CookieRecord[]>;
+};
 export declare const dialog: {
     /** 메시지 박스. 첫 인자에 windowId(number) 주면 sheet — 그 창에 부착. 없으면 free-floating.
      *  반환: 사용자가 클릭한 버튼 index + checkbox 상태. */
@@ -591,11 +682,17 @@ export declare const app: {
     getVersion(): Promise<string>;
     /** 앱 init 완료 여부 (V8 binding이 호출 가능한 시점은 항상 true). Electron 동등. */
     isReady(): Promise<boolean>;
+    /** `.app` 번들로 실행 중인지 (Electron `app.isPackaged`). dev mode (raw binary)에선 false. */
+    isPackaged(): Promise<boolean>;
+    /** 메인 번들 경로 (Electron `app.getAppPath`). dev mode에선 binary가 위치한 디렉토리. */
+    getAppPath(): Promise<string>;
     /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
     getLocale(): Promise<string>;
     /** dock 진행률 표시. progress<0=hide, 0~1=ratio, >1=100%로 clamp.
      *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
     setProgressBar(progress: number): Promise<boolean>;
+    /** 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시 (cef.quit 경유). */
+    exit(): Promise<boolean>;
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
     focus(): Promise<boolean>;
     /** 모든 윈도우 hide (macOS Cmd+H 동등). */

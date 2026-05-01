@@ -2074,6 +2074,245 @@ pub fn sessionFlushStore() bool {
     return true;
 }
 
+// ============================================
+// Session Cookies — set / get / remove (Electron `session.cookies.*`)
+// ============================================
+// Electron `session.cookies.set/get/remove` 동등.
+//   - set/remove: fire-and-forget, callback null. URL 검증만 sync 반환.
+//   - get: visit_url_cookies 비동기 — visitor가 cookies 누적, release(refcount=0) 시
+//     `session:cookies-result` 이벤트 발화. JS SDK는 requestId로 promise resolve.
+//     동시 visit pool 4개 (in_use 플래그 + atomic acquire).
+//
+// `cef_basetime_t` ↔ unix epoch second 변환은 cef_time_from_doublet/cef_time_to_basetime
+// 페어 사용 (CEF 정식 경로).
+
+fn unixSecToBasetime(sec: f64) c.cef_basetime_t {
+    var t: c.cef_time_t = undefined;
+    _ = c.cef_time_from_doublet(sec, &t);
+    var bt: c.cef_basetime_t = .{ .val = 0 };
+    _ = c.cef_time_to_basetime(&t, &bt);
+    return bt;
+}
+
+fn basetimeToUnixSec(bt: c.cef_basetime_t) f64 {
+    var t: c.cef_time_t = undefined;
+    _ = c.cef_time_from_basetime(bt, &t);
+    var sec: f64 = 0;
+    _ = c.cef_time_to_doublet(&t, &sec);
+    return sec;
+}
+
+/// cookie set — URL 필수, 나머지 옵션. fire-and-forget (callback null).
+/// CEF가 URL을 검증해 invalid면 false. set_cookie는 path/domain 빈 문자열은 host
+/// cookie로 처리 (Electron 동등).
+pub fn sessionSetCookie(
+    url: []const u8,
+    name: []const u8,
+    value: []const u8,
+    domain: []const u8,
+    path: []const u8,
+    secure: bool,
+    httponly: bool,
+    expires_unix_sec: f64, // 0 → 세션 쿠키
+) bool {
+    if (url.len == 0 or name.len == 0) return false;
+    const mgr = asPtr(c.cef_cookie_manager_t, c.cef_cookie_manager_get_global_manager(null)) orelse return false;
+    defer if (mgr.base.release) |rel| {
+        _ = rel(&mgr.base);
+    };
+    const set_fn = mgr.set_cookie orelse return false;
+
+    var cef_url: c.cef_string_t = .{};
+    setCefString(&cef_url, url);
+    var cookie: c.cef_cookie_t = undefined;
+    zeroCefStruct(c.cef_cookie_t, &cookie);
+    setCefString(&cookie.name, name);
+    setCefString(&cookie.value, value);
+    if (domain.len > 0) setCefString(&cookie.domain, domain);
+    if (path.len > 0) setCefString(&cookie.path, path);
+    cookie.secure = if (secure) 1 else 0;
+    cookie.httponly = if (httponly) 1 else 0;
+    if (expires_unix_sec > 0) {
+        cookie.has_expires = 1;
+        cookie.expires = unixSecToBasetime(expires_unix_sec);
+    }
+    cookie.same_site = c.CEF_COOKIE_SAME_SITE_UNSPECIFIED;
+    cookie.priority = c.CEF_COOKIE_PRIORITY_MEDIUM;
+
+    const ret = set_fn(mgr, &cef_url, &cookie, null);
+    return ret != 0;
+}
+
+/// cookie 삭제 — `delete_cookies(url, name, callback)`. url 비면 모든 도메인 cookie,
+/// name 비면 url의 host cookies 모두. clearCookies는 url+name 모두 빈 special case.
+pub fn sessionRemoveCookies(url: []const u8, name: []const u8) bool {
+    const mgr = asPtr(c.cef_cookie_manager_t, c.cef_cookie_manager_get_global_manager(null)) orelse return false;
+    defer if (mgr.base.release) |rel| {
+        _ = rel(&mgr.base);
+    };
+    const delete_fn = mgr.delete_cookies orelse return false;
+    var cef_url: c.cef_string_t = .{};
+    var cef_name: c.cef_string_t = .{};
+    if (url.len > 0) setCefString(&cef_url, url);
+    if (name.len > 0) setCefString(&cef_name, name);
+    const ret = delete_fn(mgr, &cef_url, &cef_name, null);
+    return ret != 0;
+}
+
+const COOKIE_VISITOR_POOL_SIZE: usize = 4;
+const COOKIE_VISITOR_BUF_LEN: usize = 8 * 1024;
+
+/// CEF cookie_visitor wrapper — base가 첫 필드라 visitor 포인터 = instance 포인터.
+/// instance pool로 동시 visit 최대 4개 지원.
+///
+/// **emit 시점**: visit fn count == total - 1 — CEF는 RefPtr scope마다 add_ref/release
+/// pair를 만들어 ref count 0 도달이 여러 번 발생, 종료 신호로 못 씀. cookies 0개 case는
+/// visit fn 자체가 호출 안 되므로 SDK 측 1초 timeout으로 빈 결과 반환.
+const CookieVisitor = extern struct {
+    base: c.cef_cookie_visitor_t,
+    request_id: u64,
+    buf_len: usize,
+    in_use: u8, // atomic: 0=free, 1=in-use
+    truncated: u8, // 1이면 buf overflow로 일부 cookie drop
+    buf: [COOKIE_VISITOR_BUF_LEN]u8,
+};
+
+var g_cookie_visitors: [COOKIE_VISITOR_POOL_SIZE]CookieVisitor = undefined;
+var g_cookie_visitors_initialized: bool = false;
+var g_cookie_request_id_counter: std.atomic.Value(u64) = .init(0);
+
+fn ensureCookieVisitorPool() void {
+    if (g_cookie_visitors_initialized) return;
+    for (&g_cookie_visitors) |*v| {
+        zeroCefStruct(c.cef_cookie_visitor_t, &v.base);
+        initBaseRefCounted(&v.base.base);
+        v.base.visit = &cookieVisitorVisit;
+        v.in_use = 0;
+        v.buf_len = 0;
+        v.request_id = 0;
+        v.truncated = 0;
+    }
+    g_cookie_visitors_initialized = true;
+}
+
+fn cookieVisitorVisit(
+    self_ptr: ?*c._cef_cookie_visitor_t,
+    cookie: ?*const c._cef_cookie_t,
+    count: c_int,
+    total: c_int,
+    _: [*c]c_int,
+) callconv(.c) c_int {
+    const sp = self_ptr orelse return 0;
+    const self: *CookieVisitor = @ptrCast(@alignCast(sp));
+    const ck = cookie orelse return 1;
+    appendCookieJson(self, ck);
+    if (count + 1 >= total) {
+        emitCookiesResult(self.request_id, self.buf[0..self.buf_len], self.truncated != 0);
+        self.buf_len = 0;
+        self.truncated = 0;
+        @atomicStore(u8, &self.in_use, 0, .release);
+    }
+    return 1;
+}
+
+fn appendCookieJson(self: *CookieVisitor, ck: *const c._cef_cookie_t) void {
+    if (self.truncated != 0) return;
+    var name_buf: [256]u8 = undefined;
+    var value_buf: [1024]u8 = undefined;
+    var domain_buf: [256]u8 = undefined;
+    var path_buf: [256]u8 = undefined;
+    var name_esc: [512]u8 = undefined;
+    var value_esc: [2048]u8 = undefined;
+    var domain_esc: [512]u8 = undefined;
+    var path_esc: [512]u8 = undefined;
+    const name = cefStringToUtf8(&ck.name, &name_buf);
+    const value = cefStringToUtf8(&ck.value, &value_buf);
+    const domain = cefStringToUtf8(&ck.domain, &domain_buf);
+    const path = cefStringToUtf8(&ck.path, &path_buf);
+    const name_n = util.escapeJsonStrFull(name, &name_esc) orelse return;
+    const value_n = util.escapeJsonStrFull(value, &value_esc) orelse return;
+    const domain_n = util.escapeJsonStrFull(domain, &domain_esc) orelse return;
+    const path_n = util.escapeJsonStrFull(path, &path_esc) orelse return;
+    const expires = if (ck.has_expires != 0) basetimeToUnixSec(ck.expires) else 0;
+
+    const sep = if (self.buf_len > 0) "," else "";
+    const entry = std.fmt.bufPrint(
+        self.buf[self.buf_len..],
+        "{s}{{\"name\":\"{s}\",\"value\":\"{s}\",\"domain\":\"{s}\",\"path\":\"{s}\",\"secure\":{s},\"httponly\":{s},\"expires\":{d}}}",
+        .{
+            sep,
+            name_esc[0..name_n],
+            value_esc[0..value_n],
+            domain_esc[0..domain_n],
+            path_esc[0..path_n],
+            if (ck.secure != 0) "true" else "false",
+            if (ck.httponly != 0) "true" else "false",
+            @as(i64, @intFromFloat(expires)),
+        },
+    ) catch {
+        // 8KB buf overflow — 이 cookie 부터 drop. SDK가 truncated:true 보고 전체 fetch 등 폴백.
+        self.truncated = 1;
+        return;
+    };
+    self.buf_len += entry.len;
+}
+
+fn emitCookiesResult(request_id: u64, cookies_json: []const u8, truncated: bool) void {
+    const emit = g_webrequest_emit_fn orelse return;
+    var payload_buf: [COOKIE_VISITOR_BUF_LEN + 256]u8 = undefined;
+    const payload = std.fmt.bufPrintZ(
+        &payload_buf,
+        "{{\"requestId\":{d},\"cookies\":[{s}],\"truncated\":{s}}}",
+        .{ request_id, cookies_json, if (truncated) "true" else "false" },
+    ) catch return;
+    emit("session:cookies-result", payload.ptr);
+}
+
+/// cookie get — visit_url_cookies(url) 호출. url 빈 문자열이면 visit_all_cookies.
+/// 즉시 request_id 반환 (visitor pool 슬롯 점유). 결과는 `session:cookies-result` 이벤트.
+/// 0 = visitor pool 가득 또는 manager null.
+pub fn sessionGetCookies(url: []const u8, include_http_only: bool) u64 {
+    ensureCookieVisitorPool();
+    const mgr = asPtr(c.cef_cookie_manager_t, c.cef_cookie_manager_get_global_manager(null)) orelse return 0;
+    defer if (mgr.base.release) |rel| {
+        _ = rel(&mgr.base);
+    };
+
+    // 빈 슬롯 점유 (atomic CAS).
+    var slot: ?*CookieVisitor = null;
+    for (&g_cookie_visitors) |*v| {
+        if (@cmpxchgWeak(u8, &v.in_use, 0, 1, .acquire, .monotonic) == null) {
+            slot = v;
+            break;
+        }
+    }
+    const v = slot orelse return 0;
+    const id = g_cookie_request_id_counter.fetchAdd(1, .monotonic) + 1;
+    v.request_id = id;
+    v.buf_len = 0;
+    v.truncated = 0;
+
+    var ok: bool = false;
+    if (url.len > 0) {
+        if (mgr.visit_url_cookies) |visit_url| {
+            var cef_url: c.cef_string_t = .{};
+            setCefString(&cef_url, url);
+            ok = visit_url(mgr, &cef_url, if (include_http_only) 1 else 0, &v.base) != 0;
+        }
+    } else {
+        if (mgr.visit_all_cookies) |visit_all| {
+            ok = visit_all(mgr, &v.base) != 0;
+        }
+    }
+
+    if (!ok) {
+        // 호출 자체 실패. caller에 id 안 주므로 emit도 dangling — 슬롯만 해제.
+        @atomicStore(u8, &v.in_use, 0, .release);
+        return 0;
+    }
+    return id;
+}
+
 /// 시스템 locale (Electron `app.getLocale()`). 예: "en-US", "ko-KR".
 /// `[NSLocale currentLocale] localeIdentifier` 반환 — POSIX style ("en_US")이라
 /// underscore → hyphen 치환해 BCP 47 형식으로 통일.

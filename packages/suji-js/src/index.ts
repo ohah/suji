@@ -1044,6 +1044,36 @@ function splitDialogArgs<T extends object>(
   return { options: arg1 };
 }
 
+export interface CookieDescriptor {
+  url: string;
+  name: string;
+  value?: string;
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  httponly?: boolean;
+  /** unix epoch second. 0 또는 미지정이면 세션 쿠키. */
+  expires?: number;
+}
+
+export interface CookieRecord {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httponly: boolean;
+  /** unix epoch second. 0이면 세션 쿠키. */
+  expires: number;
+}
+
+export interface CookieFilter {
+  /** 빈 문자열 또는 미지정이면 모든 쿠키 (visit_all_cookies). */
+  url?: string;
+  /** httpOnly 쿠키 포함 여부 (visit_url_cookies 시). 기본 true. */
+  includeHttpOnly?: boolean;
+}
+
 export const session = {
   /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
    *  fire-and-forget — 실제 cleanup은 비동기. */
@@ -1056,6 +1086,88 @@ export const session = {
   async flushStore(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "session_flush_store" });
     return r.success === true;
+  },
+
+  /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
+  async setCookie(cookie: CookieDescriptor): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({
+      cmd: "session_set_cookie",
+      url: cookie.url,
+      name: cookie.name,
+      value: cookie.value ?? "",
+      domain: cookie.domain ?? "",
+      path: cookie.path ?? "",
+      secure: cookie.secure ?? false,
+      httponly: cookie.httponly ?? false,
+      expires: cookie.expires ?? 0,
+    });
+    return r.success === true;
+  },
+
+  /** Electron `session.cookies.remove`. url+name 매칭. */
+  async removeCookies(url: string, name: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({
+      cmd: "session_remove_cookies",
+      url,
+      name,
+    });
+    return r.success === true;
+  },
+
+  /** Electron `session.cookies.get`. visitor 패턴 — `session:cookies-result` 이벤트로
+   *  결과 도착, requestId 매칭으로 promise resolve.
+   *
+   *  Race-safe: listener 먼저 등록하지만 visit이 invoke 응답보다 빨리 emit하면 id=0 상태로
+   *  도달. 그 emit을 buffer해두고 invoke 응답으로 id 받은 뒤 매칭.
+   *
+   *  Timeout 1초 — cookies 0개 case는 native visitor가 호출 안 돼 emit이 없으므로
+   *  timeout으로 빈 array 반환. 1초면 사용자 느끼는 지연 충분히 짧고 visit 비동기성
+   *  여유도 보장. */
+  async getCookies(filter: CookieFilter = {}): Promise<CookieRecord[]> {
+    return new Promise<CookieRecord[]>((resolve) => {
+      let id = 0;
+      let pending: { requestId: number; cookies: CookieRecord[] } | null = null;
+      const timer = setTimeout(() => {
+        off();
+        resolve([]);
+      }, 1000);
+      const off = on("session:cookies-result", (data) => {
+        const raw = typeof data === "string" ? JSON.parse(data) : data;
+        const ev = raw as { requestId: number; cookies: CookieRecord[] };
+        if (id === 0) {
+          pending = ev;
+          return;
+        }
+        if (ev.requestId !== id) return;
+        clearTimeout(timer);
+        off();
+        resolve(ev.cookies ?? []);
+      });
+      coreCall<{ success: boolean; requestId: number }>({
+        cmd: "session_get_cookies",
+        url: filter.url ?? "",
+        includeHttpOnly: filter.includeHttpOnly ?? true,
+      })
+        .then((r) => {
+          if (!r.success || !r.requestId) {
+            clearTimeout(timer);
+            off();
+            resolve([]);
+            return;
+          }
+          id = r.requestId;
+          if (pending && pending.requestId === id) {
+            clearTimeout(timer);
+            off();
+            resolve(pending.cookies ?? []);
+          }
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          off();
+          resolve([]);
+        });
+    });
   },
 };
 

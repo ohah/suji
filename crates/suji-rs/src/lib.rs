@@ -1461,9 +1461,25 @@ pub mod dock {
     }
 }
 
-/// Electron `session.cookies.*`. CEF cookie_manager fire-and-forget.
+/// Electron `session.cookies.*`. CEF cookie_manager fire-and-forget +
+/// 비동기 visitor 패턴 (get).
 pub mod session {
     use crate::invoke;
+    use serde_json::json;
+
+    /// `session.cookies.set` 인자 (Electron `Cookie`). expires는 unix epoch second
+    /// (0 또는 미지정 → 세션 쿠키).
+    #[derive(Debug, Default, Clone)]
+    pub struct CookieDescriptor<'a> {
+        pub url: &'a str,
+        pub name: &'a str,
+        pub value: &'a str,
+        pub domain: &'a str,
+        pub path: &'a str,
+        pub secure: bool,
+        pub httponly: bool,
+        pub expires_unix_sec: f64,
+    }
 
     /// 모든 cookie 삭제. 실 cleanup은 비동기.
     pub fn clear_cookies() -> Option<String> {
@@ -1473,6 +1489,46 @@ pub mod session {
     /// disk store flush.
     pub fn flush_store() -> Option<String> {
         invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
+    }
+
+    /// cookie set (Electron `session.cookies.set`).
+    pub fn set_cookie(c: CookieDescriptor) -> Option<String> {
+        let req = json!({
+            "cmd": "session_set_cookie",
+            "url": c.url,
+            "name": c.name,
+            "value": c.value,
+            "domain": c.domain,
+            "path": c.path,
+            "secure": c.secure,
+            "httponly": c.httponly,
+            "expires": c.expires_unix_sec,
+        })
+        .to_string();
+        invoke("__core__", &req)
+    }
+
+    /// cookie 삭제 (Electron `session.cookies.remove`).
+    pub fn remove_cookies(url: &str, name: &str) -> Option<String> {
+        let req = json!({
+            "cmd": "session_remove_cookies",
+            "url": url,
+            "name": name,
+        })
+        .to_string();
+        invoke("__core__", &req)
+    }
+
+    /// cookie 조회 — 비동기 visitor. 응답: `{success, requestId}`. 결과는
+    /// `session:cookies-result` 이벤트(`{requestId, cookies:[...], truncated}`).
+    pub fn get_cookies(url: &str, include_http_only: bool) -> Option<String> {
+        let req = json!({
+            "cmd": "session_get_cookies",
+            "url": url,
+            "includeHttpOnly": include_http_only,
+        })
+        .to_string();
+        invoke("__core__", &req)
     }
 }
 

@@ -122,6 +122,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
 // suji.exit()                  — 앱 강제 종료 (Electron app.exit(), code 무시)
 // suji.session.clearCookies() / flushStore() — CEF cookie_manager fire-and-forget
+//   / setCookieRaw(args) / getCookiesRaw(args) / removeCookiesRaw(args)
+//                                       — Electron session.cookies.set/get/remove
+//                                       (visitor 패턴, `session:cookies-result` 이벤트 응답)
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
 

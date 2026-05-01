@@ -141,6 +141,34 @@ export const windows = {
     getZoomFactor(windowId) {
         return coreCall({ cmd: "get_zoom_factor", windowId });
     },
+    /** 창 오디오 mute (Electron `webContents.setAudioMuted`). */
+    setAudioMuted(windowId, muted) {
+        return coreCall({ cmd: "set_audio_muted", windowId, muted });
+    },
+    /** 창 오디오 mute 상태 (Electron `webContents.isAudioMuted`). */
+    isAudioMuted(windowId) {
+        return coreCall({ cmd: "is_audio_muted", windowId });
+    },
+    /** 창 투명도 (0~1). Electron `BrowserWindow.setOpacity`. */
+    setOpacity(windowId, opacity) {
+        return coreCall({ cmd: "set_opacity", windowId, opacity });
+    },
+    /** 창 투명도 읽기. */
+    getOpacity(windowId) {
+        return coreCall({ cmd: "get_opacity", windowId });
+    },
+    /** 배경색 (`#RRGGBB` 또는 `#RRGGBBAA`). Electron `BrowserWindow.setBackgroundColor`. */
+    setBackgroundColor(windowId, color) {
+        return coreCall({ cmd: "set_background_color", windowId, color });
+    },
+    /** 그림자 표시 여부. Electron `BrowserWindow.setHasShadow`. */
+    setHasShadow(windowId, hasShadow) {
+        return coreCall({ cmd: "set_has_shadow", windowId, hasShadow });
+    },
+    /** 그림자 상태 읽기. Electron `BrowserWindow.hasShadow`. */
+    hasShadow(windowId) {
+        return coreCall({ cmd: "has_shadow", windowId });
+    },
     // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
     undo(windowId) {
         return coreCall({ cmd: "undo", windowId });
@@ -255,6 +283,15 @@ export const powerMonitor = {
         const r = await coreCall({ cmd: "power_monitor_get_idle_time" });
         return r.seconds;
     },
+    /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
+     *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등 (lock 상태는 미트래킹). */
+    async getSystemIdleState(threshold) {
+        const r = await coreCall({
+            cmd: "power_monitor_get_idle_state",
+            threshold,
+        });
+        return r.state;
+    },
 };
 export const clipboard = {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
@@ -281,6 +318,27 @@ export const clipboard = {
     async writeHTML(html) {
         const r = await coreCall({ cmd: "clipboard_write_html", html });
         return r.success === true;
+    },
+    /** RTF read (Electron `clipboard.readRTF`). 비어 있거나 non-rtf면 빈 문자열. */
+    async readRTF() {
+        const r = await coreCall({ cmd: "clipboard_read_rtf" });
+        return r.rtf ?? "";
+    },
+    /** RTF write (Electron `clipboard.writeRTF`). 다른 type 지움. */
+    async writeRTF(rtf) {
+        const r = await coreCall({ cmd: "clipboard_write_rtf", rtf });
+        return r.success === true;
+    },
+    /** 임의 UTI raw bytes 쓰기 (Electron `clipboard.writeBuffer(format, buffer)`).
+     *  data는 base64 인코딩된 문자열 (raw ~8KB 한도). */
+    async writeBuffer(format, data) {
+        const r = await coreCall({ cmd: "clipboard_write_buffer", format, data });
+        return r.success === true;
+    },
+    /** 임의 UTI raw bytes 읽기 (Electron `clipboard.readBuffer(format)`). base64 string 반환. */
+    async readBuffer(format) {
+        const r = await coreCall({ cmd: "clipboard_read_buffer", format });
+        return r.data ?? "";
     },
     /** 클립보드에 주어진 format이 있는지 (Electron `clipboard.has(format)`).
      *  format은 macOS UTI ("public.utf8-plain-text", "public.html" 등). */
@@ -424,6 +482,17 @@ export const nativeImage = {
         const r = await coreCall({ cmd: "native_image_get_size", path });
         return { width: r.width, height: r.height };
     },
+    /** 이미지 파일 → PNG base64 (raw ~8KB 한도, 작은 아이콘용 1차).
+     *  Electron `nativeImage.createFromPath(path).toPNG()` → base64.toString('base64'). */
+    async toPng(path) {
+        const r = await coreCall({ cmd: "native_image_to_png", path });
+        return r.data ?? "";
+    },
+    /** 이미지 파일 → JPEG base64. quality 0~100 (기본 90). */
+    async toJpeg(path, quality = 90) {
+        const r = await coreCall({ cmd: "native_image_to_jpeg", path, quality });
+        return r.data ?? "";
+    },
 };
 export const nativeTheme = {
     /** 시스템 다크 모드 활성 여부 (Electron `nativeTheme.shouldUseDarkColors`).
@@ -488,6 +557,99 @@ function splitDialogArgs(arg1, arg2) {
     }
     return { options: arg1 };
 }
+export const session = {
+    /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
+     *  fire-and-forget — 실제 cleanup은 비동기. */
+    async clearCookies() {
+        const r = await coreCall({ cmd: "session_clear_cookies" });
+        return r.success === true;
+    },
+    /** disk store flush (Electron `session.cookies.flushStore`). */
+    async flushStore() {
+        const r = await coreCall({ cmd: "session_flush_store" });
+        return r.success === true;
+    },
+    /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
+    async setCookie(cookie) {
+        const r = await coreCall({
+            cmd: "session_set_cookie",
+            url: cookie.url,
+            name: cookie.name,
+            value: cookie.value ?? "",
+            domain: cookie.domain ?? "",
+            path: cookie.path ?? "",
+            secure: cookie.secure ?? false,
+            httponly: cookie.httponly ?? false,
+            expires: cookie.expires ?? 0,
+        });
+        return r.success === true;
+    },
+    /** Electron `session.cookies.remove`. url+name 매칭. */
+    async removeCookies(url, name) {
+        const r = await coreCall({
+            cmd: "session_remove_cookies",
+            url,
+            name,
+        });
+        return r.success === true;
+    },
+    /** Electron `session.cookies.get`. visitor 패턴 — `session:cookies-result` 이벤트로
+     *  결과 도착, requestId 매칭으로 promise resolve.
+     *
+     *  Race-safe: listener 먼저 등록하지만 visit이 invoke 응답보다 빨리 emit하면 id=0 상태로
+     *  도달. 그 emit을 buffer해두고 invoke 응답으로 id 받은 뒤 매칭.
+     *
+     *  Timeout 1초 — cookies 0개 case는 native visitor가 호출 안 돼 emit이 없으므로
+     *  timeout으로 빈 array 반환. 1초면 사용자 느끼는 지연 충분히 짧고 visit 비동기성
+     *  여유도 보장. */
+    async getCookies(filter = {}) {
+        return new Promise((resolve) => {
+            let id = 0;
+            let pending = null;
+            const timer = setTimeout(() => {
+                off();
+                resolve([]);
+            }, 1000);
+            const off = on("session:cookies-result", (data) => {
+                const raw = typeof data === "string" ? JSON.parse(data) : data;
+                const ev = raw;
+                if (id === 0) {
+                    pending = ev;
+                    return;
+                }
+                if (ev.requestId !== id)
+                    return;
+                clearTimeout(timer);
+                off();
+                resolve(ev.cookies ?? []);
+            });
+            coreCall({
+                cmd: "session_get_cookies",
+                url: filter.url ?? "",
+                includeHttpOnly: filter.includeHttpOnly ?? true,
+            })
+                .then((r) => {
+                if (!r.success || !r.requestId) {
+                    clearTimeout(timer);
+                    off();
+                    resolve([]);
+                    return;
+                }
+                id = r.requestId;
+                if (pending && pending.requestId === id) {
+                    clearTimeout(timer);
+                    off();
+                    resolve(pending.cookies ?? []);
+                }
+            })
+                .catch(() => {
+                clearTimeout(timer);
+                off();
+                resolve([]);
+            });
+        });
+    },
+};
 export const dialog = {
     /** 메시지 박스. 첫 인자에 windowId(number) 주면 sheet — 그 창에 부착. 없으면 free-floating.
      *  반환: 사용자가 클릭한 버튼 index + checkbox 상태. */
@@ -687,6 +849,16 @@ export const app = {
         const r = await coreCall({ cmd: "app_is_ready" });
         return r.ready === true;
     },
+    /** `.app` 번들로 실행 중인지 (Electron `app.isPackaged`). dev mode (raw binary)에선 false. */
+    async isPackaged() {
+        const r = await coreCall({ cmd: "app_is_packaged" });
+        return r.packaged === true;
+    },
+    /** 메인 번들 경로 (Electron `app.getAppPath`). dev mode에선 binary가 위치한 디렉토리. */
+    async getAppPath() {
+        const r = await coreCall({ cmd: "app_get_app_path" });
+        return r.path ?? "";
+    },
     /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
     async getLocale() {
         const r = await coreCall({ cmd: "app_get_locale" });
@@ -696,6 +868,11 @@ export const app = {
      *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
     async setProgressBar(progress) {
         const r = await coreCall({ cmd: "app_set_progress_bar", progress });
+        return r.success === true;
+    },
+    /** 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시 (cef.quit 경유). */
+    async exit() {
+        const r = await coreCall({ cmd: "app_exit" });
         return r.success === true;
     },
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
