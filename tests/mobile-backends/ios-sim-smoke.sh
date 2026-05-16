@@ -14,20 +14,23 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
-VARIANTS=("${@:-zig multi}")
+VARIANTS=( "$@" )
+[ "${#VARIANTS[@]}" -eq 0 ] && VARIANTS=(zig multi)
 ALIVE_SECS=4
-OUT="$(mktemp -d)"
-DD="$OUT/dd"
-trap 'rm -rf "$OUT"' EXIT
 
 command -v xcodegen >/dev/null || { echo "xcodegen 미설치 — brew install xcodegen"; exit 1; }
 command -v xcodebuild >/dev/null || { echo "xcodebuild 미발견 — Xcode 필요"; exit 1; }
 UDID="$(xcrun simctl list devices booted | grep -oE '\([0-9A-F-]{36}\)' | head -1 | tr -d '()')"
 [ -n "$UDID" ] || { echo "부팅된 시뮬레이터 없음 — Simulator.app 으로 1대 부팅 필요"; exit 1; }
+
+OUT="$(mktemp -d)"
+DD="$OUT/dd"
+installed=""   # 현재 시뮬에 install 된 bundle id — 루프 중간 실패 시 trap 이 정리
+trap 'rm -rf "$OUT"; [ -z "$installed" ] || xcrun simctl uninstall "$UDID" "$installed" >/dev/null 2>&1 || true' EXIT
 echo "시뮬레이터 UDID=$UDID, 변형=[${VARIANTS[*]}]"
 
 fail=0
-for v in ${VARIANTS[*]}; do
+for v in "${VARIANTS[@]}"; do
   dir="$REPO/examples/ios/$v"
   [ -d "$dir" ] || { echo "[$v] 변형 디렉토리 없음 — skip"; fail=1; continue; }
   echo "=== [$v] build-lib.sh sim ==="
@@ -46,15 +49,19 @@ for v in ${VARIANTS[*]}; do
 
   echo "=== [$v] install + launch ($bid) ==="
   xcrun simctl install "$UDID" "$app" >/dev/null
-  pid="$(xcrun simctl launch "$UDID" "$bid" | grep -oE '[0-9]+$' || true)"
-  [ -n "$pid" ] || { echo "[$v] launch 실패 — FAIL"; xcrun simctl uninstall "$UDID" "$bid" >/dev/null 2>&1 || true; fail=1; continue; }
+  installed="$bid"
+  xcrun simctl launch "$UDID" "$bid" | grep -qE '[0-9]+$' \
+    || { echo "[$v] launch 실패 — FAIL"; xcrun simctl uninstall "$UDID" "$bid" >/dev/null 2>&1 || true; installed=""; fail=1; continue; }
 
-  # 기동 직후 크래시(링크/TLS/dlopen) 검출: N초 후에도 동일 pid 생존이어야 한다.
+  # 기동 직후 크래시(링크/TLS/dlopen) 검출: N초 후 시뮬레이터 launchd 도메인에
+  # 이 앱 잡이 살아있는지(PID 컬럼이 정수 — 종료/크래시면 항목 부재 또는 '-').
+  # 호스트 ps/pid 는 시뮬 게스트 pid 네임스페이스와 무관해 신뢰 불가하므로 안 씀.
   sleep "$ALIVE_SECS"
-  if xcrun simctl spawn "$UDID" launchctl print "system/$bid" >/dev/null 2>&1 \
-     || ps -p "$pid" >/dev/null 2>&1; then
+  alive="$(xcrun simctl spawn "$UDID" launchctl list 2>/dev/null \
+           | awk -v b="$bid" 'index($0, b) && $1 ~ /^[0-9]+$/ { print $1; exit }')"
+  if [ -n "$alive" ]; then
     xcrun simctl io "$UDID" screenshot "$OUT/ios-$v.png" >/dev/null 2>&1 || true
-    echo "[$v] PASS — ${ALIVE_SECS}s 생존(링크/기동 무결). 스크린샷: /tmp/ios-smoke-$v.png"
+    echo "[$v] PASS — ${ALIVE_SECS}s 생존(pid=$alive, 링크/기동 무결). 스크린샷: /tmp/ios-smoke-$v.png"
     cp "$OUT/ios-$v.png" "/tmp/ios-smoke-$v.png" 2>/dev/null || true
   else
     echo "[$v] FAIL — 기동 직후 종료(크래시 의심)"
@@ -62,6 +69,7 @@ for v in ${VARIANTS[*]}; do
   fi
   xcrun simctl terminate "$UDID" "$bid" >/dev/null 2>&1 || true
   xcrun simctl uninstall "$UDID" "$bid" >/dev/null 2>&1 || true
+  installed=""
 done
 
 [ "$fail" -eq 0 ] && echo "ALL PASS — 변형 전부 시뮬레이터 빌드+기동 OK" \
