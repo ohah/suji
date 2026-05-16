@@ -165,3 +165,28 @@ jobs:
 
       - name: Cross-compile embed lib (Windows x86_64)
         run: zig build lib -Dtarget=x86_64-windows
+
+  # 모바일 정적 백엔드 메커니즘 회귀 방지 (CEF/NDK/Xcode 불필요 — 호스트
+  # 타깃으로 코어+Rust+Go 정적 링크 후 register_handler 왕복 실증).
+  mobile-backends:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run mobile-backends host harness
+        run: bash tests/mobile-backends/run.sh
