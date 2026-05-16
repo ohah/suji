@@ -494,19 +494,23 @@ pub const BackendRegistry = struct {
 var quit_handler: ?*const fn () void = null;
 
 /// 플랫폼 문자열 상수 — loader / SDK / tests가 동일 문자열 공유.
-/// Suji는 macOS / Linux / Windows만 지원. 그 외 OS는 컴파일 단계 에러.
+/// 데스크톱 macOS/Linux/Windows + 모바일 iOS/Android. 그 외 OS는 컴파일 단계 에러.
 pub const platform_names = struct {
     pub const macos: [:0]const u8 = "macos";
     pub const linux: [:0]const u8 = "linux";
     pub const windows: [:0]const u8 = "windows";
+    pub const ios: [:0]const u8 = "ios";
+    pub const android: [:0]const u8 = "android";
 };
 
 pub fn platformName() [*:0]const u8 {
     const builtin = @import("builtin");
     return switch (builtin.os.tag) {
         .macos => platform_names.macos,
-        .linux => platform_names.linux,
+        // Android 타깃은 os.tag=.linux + abi=.android — 데스크톱 Linux와 구분.
+        .linux => if (builtin.abi == .android) platform_names.android else platform_names.linux,
         .windows => platform_names.windows,
-        else => @compileError("Suji: unsupported OS (only macos/linux/windows)"),
+        .ios => platform_names.ios,
+        else => @compileError("Suji: unsupported OS (macos/linux/windows/ios/android)"),
     };
 }

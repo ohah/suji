@@ -130,3 +130,38 @@ jobs:
 
       - name: Test state plugin Go wrapper
         run: zig build test-state-go
+
+  # CEF 무관 임베드 코어 라이브러리 회귀 방지.
+  # CEF/Node/Rust/Go 불필요 — 경계가 데스크톱 의존을 다시 끌어오거나
+  # 모바일 크로스 컴파일이 깨지면 여기서 잡힌다. macOS 러너(Xcode SDK)에서
+  # host + iOS/Android/Windows 타깃을 전부 빌드.
+  embed-lib:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build embed lib (host macOS)
+        run: zig build lib
+
+      - name: Cross-compile embed lib (iOS aarch64)
+        run: zig build lib -Dtarget=aarch64-ios
+
+      # iOS 산출물이 아직 zig-out/lib 에 있을 때 검증 (이후 타깃이 덮어씀).
+      - name: Verify C ABI symbols exported
+        run: |
+          for sym in init destroy invoke free emit emit_to on off; do
+            nm zig-out/lib/libsuji_core.a 2>/dev/null | grep -q "T _suji_core_$sym" \
+              || { echo "missing export: suji_core_$sym"; exit 1; }
+          done
+          echo "all suji_core_* symbols present"
+
+      - name: Cross-compile embed lib (Android aarch64)
+        run: zig build lib -Dtarget=aarch64-linux-android
+
+      - name: Cross-compile embed lib (Windows x86_64)
+        run: zig build lib -Dtarget=x86_64-windows
