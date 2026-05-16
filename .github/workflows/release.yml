@@ -183,16 +183,17 @@ jobs:
       - name: Cross-build embed core libs
         run: |
           V="${{ needs.version.outputs.version }}"
-          declare -A T=(
-            [host-macos-arm64]=""
-            [ios-arm64]="-Dtarget=aarch64-ios"
-            [android-arm64]="-Dtarget=aarch64-linux-android"
-            [windows-x64]="-Dtarget=x86_64-windows"
-          )
-          for name in "${!T[@]}"; do
+          # macos-14 러너 bash 3.2 는 `declare -A` 미지원 → name|flags 쌍 리스트.
+          for pair in \
+            "host-macos-arm64|" \
+            "ios-arm64|-Dtarget=aarch64-ios" \
+            "android-arm64|-Dtarget=aarch64-linux-android" \
+            "windows-x64|-Dtarget=x86_64-windows"; do
+            name="${pair%%|*}"
+            flags="${pair#*|}"
             rm -rf zig-out
             # shellcheck disable=SC2086
-            zig build lib ${T[$name]}
+            zig build lib $flags
             LIB=$(ls zig-out/lib/libsuji_core.* | head -1)
             cp "$LIB" "libsuji_core-$name$(echo "$LIB" | grep -oE '\.[a-z]+$')"
           done

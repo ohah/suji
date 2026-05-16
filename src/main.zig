@@ -21,8 +21,11 @@ const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") e
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
     }
-    // 비-macOS 스텁 — 실제 bundle_macos.BundleOptions 와 필드 동형이라야
-    // 호출부 struct literal 이 크로스 컴파일됨(createBundle 은 panic).
+    // 비-macOS 스텁 — 실제 bundle_macos 와 동형 타입이라야 크로스 컴파일됨.
+    // SigningMode 는 comptime os switch 밖(`const signing: bundle_macos.
+    // SigningMode`)에서 전 OS 분석되므로 스텁에도 필수. createBundle 등은
+    // .macos arm 에서만 분석돼 panic 본문으로 충분.
+    pub const SigningMode = enum { none, adhoc, identity };
     pub const BundleOptions = struct {
         user_entitlements: ?[]const u8 = null,
         locales: []const []const u8 = &.{},
