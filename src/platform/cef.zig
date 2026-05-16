@@ -2998,7 +2998,8 @@ const SujiWindowLifecycleCallbacks = extern struct {
 // window_lifecycle.m 은 macOS 전용(build.zig 가 macOS 호스트에서만 컴파일).
 // 비-macOS 는 그 C 심볼이 없어 링크 실패 → @extern(명시 .name)은 macOS,
 // 비-macOS 는 callconv(.c) unreachable 스텁 포인터로. 이 경로는 전부
-// macOS 전용(callOnNs/callOnNsBool/setFullscreen 가 !is_macos early-return)
+// macOS 전용 — 모든 호출자(callOnNs/callOnNsBool/setFullscreenImpl/
+// setWindowLifecycleHandlers/attach/detach)가 !comptime is_macos early-return
 // 이라 비-macOS 런타임 미도달. 호출부 무변경 위해 동명 const(fn 포인터).
 const wl_stub = struct {
     fn voidNs(_: ?*anyopaque) callconv(.c) void {
