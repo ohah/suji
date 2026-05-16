@@ -1423,6 +1423,49 @@ suji build → 결과물:
     timeout). CEF refcount 모델이 표준 RefPtr scope과 안 맞아 visit fn count==total-1
     시점 emit 채택. cookies 0개 case는 SDK timeout으로 빈 결과 (Electron 동등). 5 SDK
     노출 + e2e 8 케이스. `clearStorageData` (IndexedDB/localStorage)는 후속.
+24. ✅ **임베드 코어 분리 + 모바일 (zero-native 벤치마킹)** — 아래 전용 섹션.
+25. ✅ **Windows dlopen 백엔드 복구** — Zig 0.16 std.DynLib Windows 제거(의도된 설계)에
+    대응해 kernel32 `LoadLibraryExW`/`GetProcAddress`/`FreeLibrary` 직접 래핑
+    (`loader.zig` `WinDynLib`). 이슈 #11 해결.
+
+---
+
+## 임베드 코어 분리 + 모바일 (Phase 1·2·3)
+
+`vercel-labs/zero-native` 벤치마킹 후, 코어를 CEF에서 분리해 C ABI 임베드
+라이브러리로 노출. 동기: 헤드리스 테스트, 결합도 ↓, 빌드 속도, 그리고 시스템
+WebView·모바일의 전제. 핵심 발견 — `src/core/*`·`src/backends/loader.zig`는 이미
+CEF import 0이라 분리선이 이미 존재했음.
+
+- [x] **Phase 1: C ABI shim** — `src/embed.zig`가 `BackendRegistry`+`EventBus`를
+      감싸 `suji_core_init/destroy/invoke/free/emit/emit_to/on/off` export. `zig
+      build lib` → `libsuji_core.a`(CEF/Cocoa/Node 링크 0). `include/suji_core.h`
+      수기 헤더. `tests/embed_abi_test.zig` 헤드리스 통합 3종 → `zig build test`.
+- [x] **Phase 2: 호스트 재배선** — `main.zig` runDev/runProd가 `BackendRegistry`/
+      `EventBus`를 직접 생성하지 않고 `embed.init/registry()/eventBus()` 경유.
+      호스트는 embed 경계로만 코어 접근 → 경계가 CEF 의존을 컴파일 단계에서 차단.
+      CEF 호출부(200+) 불변. e2e cef-ipc 멀티백엔드 40/40 pass.
+- [x] **Phase 3: 모바일 활성화**
+  - [x] `loader.zig platformName()`에 iOS/Android 추가 (데스크톱 불변).
+  - [x] `zig build lib` 4타깃(host/iOS/Android/Windows) 크로스 컴파일 검증.
+  - [x] CI `embed-lib` job — CEF 무관, 4타깃 빌드 + `suji_core_*` 심볼 검증.
+  - [x] `examples/ios` — XcodeGen `project.yml` + Swift `WKWebView` + bridging
+        header + JS 브릿지(`window.suji.invoke`↔C ABI) + `demo:tick` 이벤트.
+  - [x] `examples/android` — Gradle + JNI(`suji_jni.c`)가 `libsuji_core.a` 정적
+        링크 → `libsujihost.so`, Kotlin `WebView`, UI 스레드 마샬링(single-thread
+        core), 동형 JS 브릿지.
+  - [x] Windows dlopen 복구(#25 항목) — kernel32 직접 래핑.
+
+### 한계 / 후속
+
+- C ABI 표면은 `invoke/emit/on/off`만. 윈도우/clipboard/dialog 등 데스크톱
+  네이티브 API는 CEF 호스트 전용 — 모바일 미동작.
+- **Rust/Go/Node 백엔드는 모바일에서 아직 안 돈다.** 모바일 호스트는 코어
+  라우팅+이벤트만 검증하고 백엔드를 배선하지 않음. iOS: 임의 dylib `dlopen`
+  금지(정적 링크 필수) + Node V8 JIT 불가. Android: NDK 정적 링크/`.so`로 가능하나
+  미배선. → 정적 링크 백엔드를 `embed_runtimes`로 등록하는 경로가 후속 과제.
+- 렌더러 eval은 in-process Zig 호스트가 `embed.eventBus().webview_eval` 직접
+  주입. 비-Zig 호스트(모바일)용 C ABI eval 셋터는 미도입(후속).
 
 ---
 
