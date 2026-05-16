@@ -73,7 +73,7 @@ test "BackendRegistry register invalid path returns error" {
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     const result = reg.register("test", "/nonexistent/path/libtest.dylib");
-    // POSIX: FileNotFound, Windows: DynlibUnsupportedOnWindows (0.16 std.DynLib 미지원).
+    // POSIX: FileNotFound, Windows: FileNotFound (kernel32 LoadLibraryExW 실패).
     try std.testing.expect(std.meta.isError(result));
 }
 
@@ -114,7 +114,7 @@ test "BackendRegistry multiple setGlobal" {
 
 test "Backend load invalid path" {
     const result = loader.Backend.load("test", "/nonexistent.dylib");
-    // POSIX: FileNotFound, Windows: DynlibUnsupportedOnWindows.
+    // POSIX: FileNotFound, Windows: FileNotFound (kernel32 LoadLibraryExW 실패).
     try std.testing.expect(std.meta.isError(result));
 }
 

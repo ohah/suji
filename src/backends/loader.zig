@@ -36,10 +36,50 @@ pub const EmbedRuntime = struct {
     free_response: ?*const fn (ptr: [*:0]const u8) callconv(.c) void = null,
 };
 
+const builtin = @import("builtin");
+const is_windows = builtin.os.tag == .windows;
+
+/// Zig 0.16은 `std.DynLib`의 Windows 경로를 의도적으로 제거(릴리스 노트) —
+/// regression이 아니라 "kernel32를 직접 쓰라"가 공식 입장. POSIX는 std.DynLib,
+/// Windows는 kernel32 직접 래핑으로 동일 인터페이스(open/lookup/close) 제공.
+const win = if (is_windows) struct {
+    const w = std.os.windows;
+    extern "kernel32" fn LoadLibraryExW(lpLibFileName: [*:0]const u16, hFile: ?*anyopaque, dwFlags: u32) callconv(.winapi) ?w.HMODULE;
+    extern "kernel32" fn GetProcAddress(hModule: w.HMODULE, lpProcName: [*:0]const u8) callconv(.winapi) ?w.FARPROC;
+    extern "kernel32" fn FreeLibrary(hModule: w.HMODULE) callconv(.winapi) w.BOOL;
+    /// 의존 DLL을 백엔드 .dll 옆에서 탐색 (Rust/Go 백엔드의 형제 deps 해석).
+    const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x00000008;
+} else struct {};
+
+const WinDynLib = struct {
+    handle: std.os.windows.HMODULE,
+
+    fn open(path: [:0]const u8) !WinDynLib {
+        var buf: [std.os.windows.PATH_MAX_WIDE + 1]u16 = undefined;
+        const len = std.unicode.utf8ToUtf16Le(buf[0..], path) catch return error.BadPathName;
+        buf[len] = 0;
+        const h = win.LoadLibraryExW(buf[0..len :0].ptr, null, win.LOAD_WITH_ALTERED_SEARCH_PATH) orelse
+            return error.FileNotFound;
+        return .{ .handle = h };
+    }
+
+    fn lookup(self: *WinDynLib, comptime T: type, name: [:0]const u8) ?T {
+        const p = win.GetProcAddress(self.handle, name.ptr) orelse return null;
+        return @ptrCast(@alignCast(p));
+    }
+
+    fn close(self: *WinDynLib) void {
+        _ = win.FreeLibrary(self.handle);
+    }
+};
+
+/// 크로스 플랫폼 동적 라이브러리 핸들. 호출부(load/deinit)는 동일 API 사용.
+const DynLib = if (is_windows) WinDynLib else std.DynLib;
+
 /// C ABI 백엔드 인터페이스
 pub const Backend = struct {
     name: []const u8,
-    lib: ?std.DynLib,
+    lib: ?DynLib,
     vtable: VTable,
 
     pub const VTable = struct {
@@ -55,13 +95,7 @@ pub const Backend = struct {
     const DestroyFn = *const fn () callconv(.c) void;
 
     pub fn load(name: []const u8, path: [:0]const u8) !Backend {
-        // Zig 0.16은 Windows용 std.DynLib이 미구현 (LoadLibraryA 래퍼 없음).
-        // Windows에서는 dlopen 백엔드 로드가 불가능하므로 즉시 에러 반환.
-        // 임베드 런타임(Node 등)은 embed_runtimes 테이블로 계속 동작.
-        // 추후 kernel32 직접 래핑으로 지원 예정.
-        if (@import("builtin").os.tag == .windows) return error.DynlibUnsupportedOnWindows;
-
-        var lib = try std.DynLib.open(path);
+        var lib = try DynLib.open(path);
         errdefer lib.close();
 
         const vtable = VTable{
@@ -96,13 +130,11 @@ pub const Backend = struct {
 
     pub fn deinit(self: *Backend) void {
         self.vtable.destroy();
-        // Windows는 load()가 항상 에러 반환이라 여기 도달할 일이 없음.
-        // 그래도 comptime branch로 DynLib.close 참조를 Windows 경로에서 제거.
-        if (@import("builtin").os.tag != .windows) {
-            if (self.lib) |*lib| {
-                lib.close();
-                self.lib = null;
-            }
+        // 핫 리로드 경로에서만 호출됨 (registry.deinit는 프로세스 종료 시
+        // backend.deinit 생략 — dlclose/FreeLibrary 후 잔존 워커 SIGSEGV 회피).
+        if (self.lib) |*lib| {
+            lib.close();
+            self.lib = null;
         }
     }
 };
@@ -504,7 +536,6 @@ pub const platform_names = struct {
 };
 
 pub fn platformName() [*:0]const u8 {
-    const builtin = @import("builtin");
     return switch (builtin.os.tag) {
         .macos => platform_names.macos,
         // Android 타깃은 os.tag=.linux + abi=.android — 데스크톱 Linux와 구분.
