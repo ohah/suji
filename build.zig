@@ -275,6 +275,30 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run Suji CLI");
     run_step.dependOn(&run_cmd.step);
 
+    // ============================================================
+    // 임베드 코어 라이브러리 (CEF 무관 C ABI)
+    //   src/embed.zig — BackendRegistry + EventBus 만 감싼다.
+    //   CEF/Cocoa/Node 일절 링크하지 않음 → 헤드리스 테스트 / 모바일 호스트
+    //   / 시스템 WebView 호스트가 정적·동적 링크로 코어를 구동.
+    // ============================================================
+    const embed_module = b.createModule(.{
+        .root_source_file = b.path("src/embed.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true, // c_allocator (suji_core_* 경로)
+    });
+    embed_module.addImport("loader", loader_module);
+    embed_module.addImport("events", events_module);
+    embed_module.addImport("util", util_module);
+
+    const embed_lib = b.addLibrary(.{
+        .name = "suji_core",
+        .root_module = embed_module,
+        .linkage = .static,
+    });
+    const embed_lib_step = b.step("lib", "Build CEF-free embeddable core static library");
+    embed_lib_step.dependOn(&b.addInstallArtifact(embed_lib, .{}).step);
+
     // Unit tests
     const test_step = b.step("test", "Run unit tests");
 
@@ -295,6 +319,29 @@ pub fn build(b: *std.Build) void {
     loader_test_mod.addImport("loader", test_loader);
     const loader_test = b.addTest(.{ .root_module = loader_test_mod });
     dependOnTestWithProjectCwd(b, test_step, loader_test);
+
+    // Embed C ABI 헤드리스 통합 테스트 (CEF 무관)
+    const embed_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/embed_abi_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const test_embed = b.createModule(.{
+        .root_source_file = b.path("src/embed.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    // loader_test 블록의 test_loader 모듈 인스턴스 재사용 (별도 test exe = 별도
+    // 프로세스라 loader 전역 상태 공유 문제 없음).
+    test_embed.addImport("loader", test_loader);
+    test_embed.addImport("events", events_module);
+    test_embed.addImport("util", util_module);
+    embed_test_mod.addImport("embed", test_embed);
+    embed_test_mod.addImport("loader", test_loader);
+    const embed_test = b.addTest(.{ .root_module = embed_test_mod });
+    test_step.dependOn(&b.addRunArtifact(embed_test).step);
 
     // Config tests
     const config_test_mod = b.createModule(.{
