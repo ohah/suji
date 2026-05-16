@@ -26,7 +26,7 @@ CLANG="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/${NDK_PREFIX}${API}-clang
 
 # 코어 동적 .so (zig LE-TLS↔JNI -shared 회피) — NDK sysroot 를 --libc 로 공급.
 SYSROOT="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
-LIBC_TXT="$(mktemp)"
+LIBC_TXT="$(mktemp)"; trap 'rm -f "$LIBC_TXT"' EXIT
 cat > "$LIBC_TXT" <<EOF2
 include_dir=$SYSROOT/usr/include
 sys_include_dir=$SYSROOT/usr/include
@@ -37,7 +37,6 @@ gcc_dir=
 EOF2
 ( cd "$REPO" && zig build lib -Dlib-dynamic -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseSmall --libc "$LIBC_TXT" )
 cp "$REPO/zig-out/lib/libsuji_core.so" "$JNILIBS/libsuji_core.so"
-rm -f "$LIBC_TXT"
 
 # Go c-shared 는 SONAME 미설정 → DT_NEEDED 절대경로화 → 디바이스 dlopen 실패.
 # -Wl,-soname 으로 basename SONAME 주입.

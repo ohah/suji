@@ -28,7 +28,7 @@ CLANG="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/${NDK_PREFIX}${API}-clang
 # TLSLE_*). .so 는 TLSDESC. zig 가 Android Bionic 미제공이라 NDK sysroot 를
 # --libc 로 공급. Go .so 와 동일하게 jniLibs 패키징(런타임 DT_NEEDED 해소).
 SYSROOT="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
-LIBC_TXT="$(mktemp)"
+LIBC_TXT="$(mktemp)"; trap 'rm -f "$LIBC_TXT"' EXIT
 cat > "$LIBC_TXT" <<EOF2
 include_dir=$SYSROOT/usr/include
 sys_include_dir=$SYSROOT/usr/include
@@ -39,7 +39,6 @@ gcc_dir=
 EOF2
 ( cd "$REPO" && zig build lib -Dlib-dynamic -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseSmall --libc "$LIBC_TXT" )
 cp "$REPO/zig-out/lib/libsuji_core.so" "$JNILIBS/libsuji_core.so"
-rm -f "$LIBC_TXT"
 
 RUST_ENV_VAR="CARGO_TARGET_$(echo "$RUST_TARGET" | tr 'a-z-' 'A-Z_')_LINKER"
 env "$RUST_ENV_VAR=$CLANG" "CC_${RUST_TARGET}=$CLANG" \

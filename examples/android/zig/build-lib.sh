@@ -27,7 +27,7 @@ NDK_PREFIX=$([ "$ABI" = arm64-v8a ] && echo aarch64-linux-android || echo x86_64
 # 코어 동적 .so (zig std Io.Threaded LE-TLS↔JNI -shared 회피) — NDK libc 공급.
 # (zig 백엔드 .a 는 Io.Threaded 미사용이라 정적 링크 OK.)
 SYSROOT="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
-LIBC_TXT="$(mktemp)"
+LIBC_TXT="$(mktemp)"; trap 'rm -f "$LIBC_TXT"' EXIT
 cat > "$LIBC_TXT" <<EOF2
 include_dir=$SYSROOT/usr/include
 sys_include_dir=$SYSROOT/usr/include
@@ -38,7 +38,6 @@ gcc_dir=
 EOF2
 ( cd "$REPO" && zig build lib -Dlib-dynamic -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseSmall --libc "$LIBC_TXT" )
 cp "$REPO/zig-out/lib/libsuji_core.so" "$JNILIBS/libsuji_core.so"
-rm -f "$LIBC_TXT"
 
 # Zig 백엔드 staticlib (suji_zig_* 고유 심볼). build.zig 없이 직접 build-lib.
 zig build-lib -target "$ZIG_TARGET" -O ReleaseSmall -fPIC -lc \

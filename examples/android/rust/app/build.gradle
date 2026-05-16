@@ -24,7 +24,8 @@ android {
             java.srcDirs = ["../../_shared/java"]
             manifest.srcFile "../../_shared/AndroidManifest.xml"
             assets.srcDirs = ["../web"]
-            // Rust 단독 — Go .so 없음(jniLibs 불필요)
+            // 코어 .so 는 CMake SHARED IMPORTED 의존이라 AGP 가 자동 패키징
+            // → 수동 jniLibs.srcDirs 불필요. Rust 백엔드는 .a 정적 링크.
         }
     }
 

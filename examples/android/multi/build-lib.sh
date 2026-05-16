@@ -18,6 +18,7 @@ DEST="$HERE/cpp/libs/$ABI"
 JNILIBS="$HERE/jniLibs/$ABI"
 API=26
 mkdir -p "$DEST" "$JNILIBS"
+rm -f "$DEST/libsuji_core.a"   # 코어는 이제 .so(jniLibs) — 이전 .a 잔존 제거
 
 NDK="${ANDROID_NDK_HOME:-}"
 [ -z "$NDK" ] && NDK="$(ls -d "$HOME"/Library/Android/sdk/ndk/* 2>/dev/null | tail -1)"
@@ -30,7 +31,7 @@ CLANG="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/${NDK_PREFIX}${API}-clang
 # 이므로 NDK sysroot 를 --libc 로 공급. jniLibs 에 둬 Gradle 패키징+런타임
 # DT_NEEDED 해소(Go .so 와 동일 방식).
 SYSROOT="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
-LIBC_TXT="$(mktemp)"
+LIBC_TXT="$(mktemp)"; trap 'rm -f "$LIBC_TXT"' EXIT
 cat > "$LIBC_TXT" <<EOF
 include_dir=$SYSROOT/usr/include
 sys_include_dir=$SYSROOT/usr/include
@@ -41,7 +42,6 @@ gcc_dir=
 EOF
 ( cd "$REPO" && zig build lib -Dlib-dynamic -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseSmall --libc "$LIBC_TXT" )
 cp "$REPO/zig-out/lib/libsuji_core.so" "$JNILIBS/libsuji_core.so"
-rm -f "$LIBC_TXT"
 
 RUST_ENV_VAR="CARGO_TARGET_$(echo "$RUST_TARGET" | tr 'a-z-' 'A-Z_')_LINKER"
 env "$RUST_ENV_VAR=$CLANG" "CC_${RUST_TARGET}=$CLANG" \

@@ -293,7 +293,7 @@ pub fn build(b: *std.Build) void {
 
     // Android JNI 호스트(.so, -shared)에 정적 .a 링크 시 zig std threadlocal
     // (Io.Threaded) Local-Exec TLS reloc 이 -shared 비호환(R_AARCH64_TLSLE_*).
-    // 동적 .so 면 GD TLS 라 회피. iOS(Mach-O)는 정적 .a 그대로 OK.
+    // 동적 .so 면 TLSDESC 라 회피. iOS(Mach-O)는 정적 .a 그대로 OK.
     const lib_dynamic = b.option(bool, "lib-dynamic", "Build embed core as dynamic .so (Android JNI; --libc 로 Bionic 제공 필요)") orelse false;
     const embed_lib = b.addLibrary(.{
         .name = "suji_core",
