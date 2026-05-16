@@ -32,6 +32,7 @@ EXTRA=()
 case "$(uname -s)" in
   Darwin) EXTRA=(-lresolv -framework CoreFoundation -framework Security) ;;
   Linux)  EXTRA=(-lresolv -lpthread -lm) ;;
+  *) echo "unsupported host OS: $(uname -s)" >&2; exit 1 ;;
 esac
 cc "$HERE/verify.c" \
    "$OUT/libsuji_core.a" "$OUT/libsuji_rs_backend.a" "$OUT/libsuji_go_backend.a" \
