@@ -20,7 +20,7 @@ iOS(`examples/ios`)와 동형. 모바일은 호스트(JNI `.so`)에 백엔드를
 
 ```bash
 cd examples/android/<variant>
-ANDROID_NDK_HOME=... ./build-lib.sh        # 코어/Rust .a + Go .so 스테이징
+ANDROID_NDK_HOME=... ./build-lib.sh        # 코어 + 변형 백엔드(.a/.so) 스테이징
 ./gradlew installDebug                     # 또는 Android Studio 로 open
 ```
 
