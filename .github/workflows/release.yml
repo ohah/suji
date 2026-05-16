@@ -206,9 +206,10 @@ jobs:
             rm -rf zig-out
             # shellcheck disable=SC2086
             zig build lib $flags
-            # zig 0.16: static=libsuji_core.a, windows target=suji_core.lib
-            # 가능 → lib/ 한정 말고 zig-out 전체에서 탐색.
-            LIB="$(find zig-out -type f \( -name 'libsuji_core.*' -o -name 'suji_core.*' \) | head -1)"
+            # zig 0.16: static=libsuji_core.a, dynamic=.so, windows(msvc)=
+            # suji_core.lib. lib/ 경로 미가정(전체 탐색) + 확장자 한정
+            # (.pdb/.o 등 비-lib first-match 회피).
+            LIB="$(find zig-out -type f \( -name 'libsuji_core.a' -o -name 'libsuji_core.so' -o -name 'suji_core.lib' \) | head -1)"
             if [ -z "$LIB" ]; then
               echo "::error::no embed lib produced for $name"; find zig-out -type f; exit 1
             fi

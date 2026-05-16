@@ -25,6 +25,7 @@ const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") e
     // SigningMode 는 comptime os switch 밖(`const signing: bundle_macos.
     // SigningMode`)에서 전 OS 분석되므로 스텁에도 필수. createBundle 등은
     // .macos arm 에서만 분석돼 panic 본문으로 충분.
+    // ⚠ bundle_macos.zig 의 SigningMode 와 동형 유지 필수(variant 추가 시 동기화).
     pub const SigningMode = enum { none, adhoc, identity };
     pub const BundleOptions = struct {
         user_entitlements: ?[]const u8 = null,
