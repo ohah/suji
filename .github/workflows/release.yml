@@ -126,8 +126,18 @@ jobs:
             Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\libnode.tar.gz"
             tar xzf "$env:TEMP\libnode.tar.gz" -C $nodeDir
           } catch { Write-Host "libnode skipped" }
-      - name: Build suji CLI (ReleaseSafe)
-        run: zig build -Doptimize=ReleaseSafe
+      - name: Build suji CLI
+        shell: bash
+        run: |
+          # Windows 는 ReleaseSafe 에서 translate-c 가 cimport 'unused local
+          # constant' 를 내 컴파일 실패(ci.yml 의 Debug `zig build` 는 green).
+          # 검증된 경로 사용: Windows=Debug, mac/linux=ReleaseSafe. Windows
+          # release 최적화는 후속(translate-c quirk) — #14.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            zig build
+          else
+            zig build -Doptimize=ReleaseSafe
+          fi
       - name: Package (Unix)
         if: runner.os != 'Windows'
         env:
@@ -182,6 +192,8 @@ jobs:
           version: 0.16.0
       - name: Cross-build embed core libs
         run: |
+          set -euxo pipefail
+          zig version
           V="${{ needs.version.outputs.version }}"
           # macos-14 러너 bash 3.2 는 `declare -A` 미지원 → name|flags 쌍 리스트.
           for pair in \
@@ -194,8 +206,13 @@ jobs:
             rm -rf zig-out
             # shellcheck disable=SC2086
             zig build lib $flags
-            LIB=$(ls zig-out/lib/libsuji_core.* | head -1)
-            cp "$LIB" "libsuji_core-$name$(echo "$LIB" | grep -oE '\.[a-z]+$')"
+            # zig 0.16: static=libsuji_core.a, windows target=suji_core.lib
+            # 가능 → lib/ 한정 말고 zig-out 전체에서 탐색.
+            LIB="$(find zig-out -type f \( -name 'libsuji_core.*' -o -name 'suji_core.*' \) | head -1)"
+            if [ -z "$LIB" ]; then
+              echo "::error::no embed lib produced for $name"; find zig-out -type f; exit 1
+            fi
+            cp "$LIB" "libsuji_core-$name.${LIB##*.}"
           done
           tar czf "suji-embed-libs-$V.tar.gz" libsuji_core-* include/suji_core.h include/suji_mobile_bridge.h
           shasum -a 256 "suji-embed-libs-$V.tar.gz" > "suji-embed-libs-$V.tar.gz.sha256"
