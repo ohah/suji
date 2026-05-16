@@ -1487,8 +1487,13 @@ CEF import 0이라 분리선이 이미 존재했음.
 - **iOS·Android 둘 다 Rust·Go 백엔드 동작** (위 체크 항목). **Node 만 iOS
   미지원** — V8 JIT 이 iOS 코드서명 샌드박스에서 금지(정적 링크해도 런타임 코드
   생성 불가, `--jitless`는 비실용). **Android Node 는 NDK로 가능하나 예제 미배선**
-  (후속). 모바일 런타임(Xcode/Gradle 디바이스 빌드)은 로컬 검증 불가 — 메커니즘은
-  tests/mobile-backends 호스트 하니스로 실증.
+  (후속). **iOS: 시뮬레이터 빌드+구동 검증됨**(데모 demo:tick 네이티브→JS→UI).
+  **Android: APK 빌드 미해결 블로커** — 정적 libsuji_core.a(Zig std Io.Threaded
+  threadlocal LE-TLS)를 JNI `-shared .so` 에 링크 불가(R_AARCH64_TLSLE_*),
+  Zig 동적 .so 우회는 Android Bionic libc 미제공으로 또 막힘. 후속: NDK libc 로
+  Zig 코어 .so 빌드 또는 TLS 모델 우회. 백엔드 메커니즘 자체는
+  tests/mobile-backends 호스트 하니스로 실증(JNI/CMake/Gradle 배선·NDK 컴파일·
+  심볼 검증, 최종 APK 링크만 블록).
 - 렌더러 eval은 in-process Zig 호스트가 `embed.eventBus().webview_eval` 직접
   주입. 비-Zig 호스트(모바일)용 C ABI eval 셋터는 미도입(후속).
 
