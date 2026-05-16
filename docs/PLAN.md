@@ -1459,16 +1459,22 @@ CEF import 0이라 분리선이 이미 존재했음.
         + strdup)·Android(JNI 트램폴린, JNI_OnLoad 캐싱 + ExceptionCheck) 예제가
         `ping`→pong / `counter:inc` 실제 왕복 시연. 헤드리스 테스트 +memory 계약.
   - [x] Windows dlopen 복구(#25 항목) — kernel32 직접 래핑.
+  - [x] **iOS Rust/Go 정적 백엔드** — 언어 고유 심볼로 단일 바이너리 충돌 회피:
+        Rust SDK `export_handlers_static!`(→`suji_rs_*` `#[no_mangle]`),
+        Go SDK `//export suji_go_*`(기존 `backend_*`에 위임). 호스트는
+        `suji_core_register_handler`로 채널→백엔드 cmd JSON 브리지 등록.
+        `examples/ios/backends/{rust(staticlib),go(c-archive)}` + Swift
+        `Backends.swift`. 4타깃 심볼 네임스페이스 분리 검증(nm),
+        데스크톱 dlopen·SDK 테스트 무회귀. (Node 제외 — V8 JIT iOS 불가.)
 
 ### 한계 / 후속
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).
-- 모바일 invoke는 `suji_core_register_handler`로 **호스트가 직접 응답** 가능
-  (예제 시연). 단 **Rust/Go/Node 백엔드는 모바일에서 아직 안 돈다**: iOS는 임의
-  dylib `dlopen` 금지(정적 링크 필수) + Node V8 JIT 불가, Android는 NDK 정적
-  링크/`.so`로 가능하나 미배선. → 정적 링크 백엔드를 `embed_runtimes`로 등록하는
-  경로가 후속 과제.
+- **iOS: Rust·Go 백엔드 정적 링크 동작** (위 체크 항목). **Node 만 iOS 미지원**
+  — V8 JIT 이 iOS 코드서명 샌드박스에서 금지(`.a` 정적 링크해도 런타임 코드 생성
+  불가, `--jitless`는 비실용). **Android는 Rust/Go/Node 전부 NDK로 가능하나 예제
+  미배선** — iOS와 동형(고유 심볼 + register_handler)으로 후속.
 - 렌더러 eval은 in-process Zig 호스트가 `embed.eventBus().webview_eval` 직접
   주입. 비-Zig 호스트(모바일)용 C ABI eval 셋터는 미도입(후속).
 

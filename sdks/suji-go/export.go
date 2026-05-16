@@ -222,3 +222,19 @@ func backend_destroy() {
 	goListenerMu.Unlock()
 	fmt.Fprintf(os.Stderr, "[Go] bye\n")
 }
+
+// 정적 링크용 고유 심볼 (iOS 등 단일 바이너리에 여러 백엔드 정적 링크 시
+// backend_* 충돌 회피 — Rust=suji_rs_*, Go=suji_go_*). 데스크톱 dlopen 은
+// backend_* 를 dylib 네임스페이스로 격리하므로 그대로 사용. 로직 위임만.
+
+//export suji_go_backend_init
+func suji_go_backend_init(c *C.SujiCore) { backend_init(c) }
+
+//export suji_go_backend_handle_ipc
+func suji_go_backend_handle_ipc(request *C.char) *C.char { return backend_handle_ipc(request) }
+
+//export suji_go_backend_free
+func suji_go_backend_free(ptr *C.char) { backend_free(ptr) }
+
+//export suji_go_backend_destroy
+func suji_go_backend_destroy() { backend_destroy() }

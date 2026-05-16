@@ -24,9 +24,16 @@ targets:
         # 레포 include/ 의 suji_core.h 직접 참조
         HEADER_SEARCH_PATHS:
           - $(SRCROOT)/../../include
-        # build-lib.sh 가 스테이징한 코어 정적 라이브러리
+        # build-lib.sh 가 스테이징한 코어 + Rust/Go 정적 백엔드
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/Vendor
         OTHER_LDFLAGS:
           - -lsuji_core
-    dependencies: []
+          - -lsuji_rs_backend
+          - -lsuji_go_backend
+          # Go c-archive 런타임 의존
+          - -lresolv
+    dependencies:
+      # Go 런타임(darwin)이 요구하는 시스템 프레임워크
+      - sdk: CoreFoundation.framework
+      - sdk: Security.framework

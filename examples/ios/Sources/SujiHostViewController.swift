@@ -51,9 +51,11 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
             fatalError("suji_core_init failed")
         }
 
-        // 백엔드 없는 모바일에서 invoke 를 네이티브로 응답.
+        // 순수 Swift 핸들러 데모.
         _ = suji_core_register_handler("ping", sujiPingHandler, sujiHandlerFree)
         _ = suji_core_register_handler("counter:inc", sujiCounterHandler, sujiHandlerFree)
+        // 정적 링크된 Rust/Go 백엔드 등록 (greet/add/go:ping/go:upper).
+        registerStaticBackends()
 
         let cfg = WKWebViewConfiguration()
         let ucc = WKUserContentController()

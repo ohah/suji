@@ -1,0 +1,17 @@
+[package]
+name = "suji-ios-rust-backend"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "suji_rs_backend"
+# 정적 링크 전용 — iOS 호스트 바이너리에 직접 링크.
+crate-type = ["staticlib"]
+
+[dependencies]
+suji = { path = "../../../../crates/suji-rs" }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true

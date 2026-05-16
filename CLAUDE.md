@@ -434,16 +434,18 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
   - `examples/ios` — XcodeGen `project.yml` + Swift `WKWebView` + bridging header.
   - `examples/android` — Gradle + JNI(`suji_jni.c`)가 `libsuji_core.a` 정적 링크
     → `libsujihost.so`, Kotlin `WebView`.
-  - 둘 다 `build-lib.sh`로 `.a` 스테이징. `suji.invoke("ping"/"counter:inc")`
-    → 호스트가 `suji_core_register_handler`로 등록한 Swift/Kotlin 네이티브
-    핸들러가 응답 (실제 데이터 왕복) + `suji_core_on` 이벤트 데모.
+  - 둘 다 `build-lib.sh`로 `.a` 스테이징. `suji.invoke(...)` → 호스트가
+    `suji_core_register_handler`로 등록한 핸들러가 응답 + `suji_core_on` 이벤트.
+  - **iOS는 Rust/Go 백엔드까지 정적 링크 동작**: `examples/ios/backends/{rust,go}`
+    가 언어 고유 심볼(`export_handlers_static!`→`suji_rs_*` / cgo `suji_go_*`)로
+    빌드돼 단일 바이너리에 충돌 없이 링크. `greet`/`add`(Rust)·`go:ping`/
+    `go:upper`(Go)가 실제 백엔드 왕복.
 
 **한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
-모바일 미동작. 모바일 invoke는 `suji_core_register_handler`로 **호스트가 직접
-응답**(예제가 이를 시연)하거나 백엔드 경유인데, **Rust/Go/Node 백엔드는 모바일에서
-아직 안 돈다**: iOS는 임의 dylib `dlopen` 금지(정적 링크 필수) + Node V8 JIT 불가,
-Android는 NDK 정적 링크/`.so`로 가능하나 미배선. 정적 링크 백엔드를 `embed_runtimes`
-로 등록하는 경로가 후속 과제.
+모바일 미동작. **iOS에서 Rust·Go 백엔드는 정적 링크로 동작**(언어별 고유 심볼 +
+`suji_core_register_handler`). **Node 만 iOS 미지원** — V8 JIT 가 iOS 코드서명
+샌드박스에서 금지(`.a` 정적 링크해도 런타임 코드 생성 불가). Android는 NDK 정적
+링크로 Rust/Go/Node 모두 가능하나 예제 미배선(후속).
 
 ## 앱별 cache / 사용자 데이터 (Electron `app.getPath('userData')` 동등)
 

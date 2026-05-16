@@ -2110,3 +2110,70 @@ macro_rules! export_handlers {
         pub extern "C" fn backend_destroy() { eprintln!("[Rust] bye"); }
     };
 }
+
+/// 정적 링크용 — 고유 `suji_rs_*` 심볼로 backend C ABI 노출.
+///
+/// dlopen 데스크톱은 `export_handlers!`(고정 `backend_*`)를 dylib 네임스페이스로
+/// 격리하지만, iOS 처럼 여러 백엔드를 한 바이너리에 정적 링크하면 `backend_*`가
+/// 충돌한다. 이 매크로는 언어 고유 prefix(`suji_rs_`)로 내보내 Go(`suji_go_`)·
+/// Zig 코어와 공존시킨다. 호스트는 `suji_core_register_handler` 로 등록.
+/// (앱당 Rust 백엔드 1개 가정 — 멀티백엔드의 정상 패턴.)
+///
+/// NOTE: 본문은 `export_handlers!` @impl 의 의도적 복제 — 심볼명(`suji_rs_*`)과
+/// stderr 로그 생략만 다르다. macro_rules 가 fn 식별자를 paste 못 해 공통화
+/// 불가. 한쪽 수정 시 다른 쪽도 함께 갱신할 것.
+#[macro_export]
+macro_rules! export_handlers_static {
+    ($($handler:ident),* $(,)?) => {
+        $crate::export_handlers_static!(@impl [$($handler),*]; []);
+    };
+    ($($handler:ident),* $(,)? ; $($ch:literal => $listener:ident),* $(,)?) => {
+        $crate::export_handlers_static!(@impl [$($handler),*]; [$($ch => $listener),*]);
+    };
+    (@impl [$($handler:ident),*]; [$($ch:literal => $listener:ident),*]) => {
+        #[no_mangle]
+        pub extern "C" fn suji_rs_backend_init(core: *const $crate::SujiCore) {
+            $crate::__SUJI_CORE.store(
+                core as *mut $crate::SujiCore,
+                std::sync::atomic::Ordering::Release,
+            );
+            if !core.is_null() {
+                let core_ref: &'static $crate::SujiCore = unsafe { std::mem::transmute(&*core) };
+                $(
+                    let ch = std::ffi::CString::new(stringify!($handler)).unwrap();
+                    (core_ref.register)(ch.as_ptr());
+                )*
+                $(
+                    let ch = std::ffi::CString::new($ch).unwrap();
+                    (core_ref.on)(ch.as_ptr(), Some($listener), std::ptr::null_mut());
+                )*
+            }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn suji_rs_backend_handle_ipc(request: *const std::os::raw::c_char) -> *mut std::os::raw::c_char {
+            let req_str = unsafe { std::ffi::CStr::from_ptr(request) }.to_str().unwrap_or("");
+            let parsed: $crate::serde_json::Value = $crate::serde_json::from_str(req_str)
+                .unwrap_or($crate::serde_json::json!({}));
+            let cmd = parsed.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+
+            let response = match cmd {
+                $(stringify!($handler) => {
+                    let result = $handler(parsed.clone());
+                    $crate::serde_json::json!({"from":"rust","cmd":cmd,"result":result}).to_string()
+                }),*
+                _ => $crate::serde_json::json!({"from":"rust","error":format!("unknown: {}",cmd)}).to_string(),
+            };
+
+            std::ffi::CString::new(response).unwrap().into_raw()
+        }
+
+        #[no_mangle]
+        pub extern "C" fn suji_rs_backend_free(ptr: *mut std::os::raw::c_char) {
+            if !ptr.is_null() { unsafe { drop(std::ffi::CString::from_raw(ptr)); } }
+        }
+
+        #[no_mangle]
+        pub extern "C" fn suji_rs_backend_destroy() {}
+    };
+}

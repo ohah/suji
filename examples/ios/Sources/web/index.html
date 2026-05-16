@@ -17,10 +17,14 @@
   <p>WKWebView ↔ <code>libsuji_core.a</code> C ABI 왕복 데모.</p>
 
   <div class="row">
-    <button id="ping">invoke("ping")</button>
-    <button id="inc">invoke("counter:inc")</button>
+    <button id="ping">ping (Swift)</button>
+    <button id="inc">counter:inc (Swift)</button>
+    <button id="greet">greet (Rust)</button>
+    <button id="add">add (Rust)</button>
+    <button id="goping">go:ping (Go)</button>
+    <button id="goupper">go:upper (Go)</button>
   </div>
-  <div class="row">응답 (Swift 네이티브 핸들러): <strong id="out">…</strong></div>
+  <div class="row">응답: <strong id="out">…</strong></div>
   <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
     <span id="ticks">대기 중…</span>
   </div>
@@ -38,6 +42,18 @@
         out.textContent = "counter → " + JSON.stringify(r);
       });
     };
+    // Rust/Go 정적 백엔드 (suji_core_register_handler 로 등록).
+    function call(id, ch, payload) {
+      document.getElementById(id).onclick = function () {
+        suji.invoke(ch, payload).then(function (r) {
+          out.textContent = ch + " → " + JSON.stringify(r);
+        });
+      };
+    }
+    call("greet", "greet", { name: "Suji" });
+    call("add", "add", { a: 19, b: 23 });
+    call("goping", "go:ping", {});
+    call("goupper", "go:upper", { s: "hello ios" });
 
     // suji.on: 호스트가 2초마다 suji_core_emit 으로 발행하는 틱 수신.
     var n = 0;
