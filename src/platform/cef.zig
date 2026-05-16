@@ -53,7 +53,35 @@ const objc = if (is_macos) struct {
     pub extern "c" fn objc_registerClassPair(cls: ?*anyopaque) void;
     /// AppKit 시스템 비프 (NSGraphics.h). Cocoa 프레임워크 링크로 자동 가용.
     pub extern "c" fn NSBeep() void;
-} else struct {};
+} else struct {
+    // 비-macOS 스텁 — 이 심볼을 쓰는 헬퍼는 전부 macOS 전용(is_macos
+    // runtime/comptime 가드)이라 비-macOS 에선 호출 안 됨. 크로스 컴파일만
+    // 통과시키면 되므로 unreachable 본문.
+    pub fn sel_registerName(_: [*:0]const u8) ?*anyopaque {
+        unreachable;
+    }
+    pub fn objc_getClass(_: [*:0]const u8) ?*anyopaque {
+        unreachable;
+    }
+    pub fn objc_msgSend() void {
+        unreachable;
+    }
+    pub fn class_addMethod(_: ?*anyopaque, _: ?*anyopaque, _: *const fn () callconv(.c) void, _: [*:0]const u8) u8 {
+        unreachable;
+    }
+    pub fn class_getMethodImplementation(_: ?*anyopaque, _: ?*anyopaque) *const fn () callconv(.c) void {
+        unreachable;
+    }
+    pub fn objc_allocateClassPair(_: ?*anyopaque, _: [*:0]const u8, _: usize) ?*anyopaque {
+        unreachable;
+    }
+    pub fn objc_registerClassPair(_: ?*anyopaque) void {
+        unreachable;
+    }
+    pub fn NSBeep() void {
+        unreachable;
+    }
+};
 
 // ============================================
 // Public API

@@ -8,7 +8,8 @@ on:
 
 env:
   NODE_VERSION: '24.14.1'
-  RUST_TOOLCHAIN: '1.83.0'
+  # ci.yml 과 동일 — edition2024(specta-macros rc.25+) 안정화 = 1.85.0.
+  RUST_TOOLCHAIN: '1.85.0'
   GO_VERSION: '1.26.0'
   CEF_PLATFORM: 'macos-arm64'
   CEF_FILE: 'cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_macosarm64_minimal.tar.bz2'

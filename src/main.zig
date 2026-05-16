@@ -21,9 +21,12 @@ const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") e
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
     }
+    // 비-macOS 스텁 — 실제 bundle_macos.BundleOptions 와 필드 동형이라야
+    // 호출부 struct literal 이 크로스 컴파일됨(createBundle 은 panic).
     pub const BundleOptions = struct {
-        sandbox: bool = false,
         user_entitlements: ?[]const u8 = null,
+        locales: []const []const u8 = &.{},
+        strip_cef: bool = true,
     };
 };
 
