@@ -431,7 +431,9 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
   lib`이 `libsuji_core.a` 생성(CEF/Cocoa/Node 링크 없음).
 - C ABI 표면: `suji_core_init/destroy/invoke/free/emit/emit_to/on/off`
   + `suji_core_register_handler`(호스트가 채널을 네이티브로 응답 — `embed_runtimes`
-  경로 재사용) ([`include/suji_core.h`](./include/suji_core.h), 수기 동기화).
+  경로 재사용) + `suji_core_last_error`(단일 -1 보강, 사람이 읽는 사유 — 정적,
+  free 금지; zero-native `last_error_name` 차용)
+  ([`include/suji_core.h`](./include/suji_core.h), 수기 동기화).
 - `main.zig`(CEF 호스트)도 `embed.init/registry()/eventBus()` 경유 — 호스트는
   embed 경계로만 코어 접근, 경계가 CEF 의존을 컴파일 단계에서 차단.
 - 모바일 호스트 예제:

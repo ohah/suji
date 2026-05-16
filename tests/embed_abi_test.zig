@@ -145,3 +145,45 @@ test "embed: suji_core_register_handler routes invoke to host handler" {
     try std.testing.expectEqual(@as(c_int, -1), c.suji_core_register_handler("x", echoInvoke, echoFree));
     // defer 의 두 번째 destroy 는 idempotent (no-op).
 }
+
+test "embed: suji_core_last_error 가 실패 사유를 노출" {
+    const c = struct {
+        extern fn suji_core_init() c_int;
+        extern fn suji_core_destroy() void;
+        extern fn suji_core_last_error() [*c]const u8;
+        extern fn suji_core_register_handler(
+            channel: [*c]const u8,
+            invoke_cb: ?*const fn ([*:0]const u8, [*:0]const u8) callconv(.c) ?[*:0]const u8,
+            free_cb: ?*const fn ([*:0]const u8) callconv(.c) void,
+        ) c_int;
+    };
+    const lastErr = struct {
+        fn get() []const u8 {
+            return std.mem.span(@as([*:0]const u8, @ptrCast(c.suji_core_last_error())));
+        }
+    }.get;
+    const has = struct {
+        fn f(needle: []const u8) bool {
+            return std.mem.indexOf(u8, lastErr(), needle) != null;
+        }
+    }.f;
+
+    c.suji_core_destroy(); // 미초기화 상태 보장
+
+    // 미초기화에서 register → -1 + 사유
+    try std.testing.expectEqual(@as(c_int, -1), c.suji_core_register_handler("x", echoInvoke, echoFree));
+    try std.testing.expect(has("not initialized"));
+
+    // 성공 init → 사유 클리어
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_init());
+    defer c.suji_core_destroy();
+    try std.testing.expectEqualStrings("", lastErr());
+
+    // null invoke_cb → 사유
+    try std.testing.expectEqual(@as(c_int, -1), c.suji_core_register_handler("y", null, null));
+    try std.testing.expect(has("null invoke_cb"));
+
+    // 중복 init → 사유
+    try std.testing.expectEqual(@as(c_int, -1), c.suji_core_init());
+    try std.testing.expect(has("already initialized"));
+}

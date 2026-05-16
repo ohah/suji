@@ -32,6 +32,15 @@ const State = struct {
 /// `*EventBus`를 참조하므로 포인터가 고정돼야 한다.
 var g_state: ?*State = null;
 
+/// 마지막 실패의 사람이 읽는 사유 (정적 문자열 — 호스트가 free 안 함, 다음
+/// 실패 호출 전까지 유효). 단일 `-1` 반환을 진단 가능하게 보강.
+/// zero-native `last_error_name` 패턴 차용.
+var g_last_error: [*:0]const u8 = "";
+
+fn setErr(msg: [:0]const u8) void {
+    g_last_error = msg.ptr;
+}
+
 // ============================================================
 // Zig 레벨 API (테스트 / 호스트 Zig 코드가 직접 호출)
 //   - 테스트는 std.testing.allocator/io 를 주입해 누수 검출.
@@ -101,10 +110,23 @@ pub fn freeResponse(ptr: [*c]const u8) void {
 // C ABI export — 호스트(CEF/iOS/Android)가 dlopen/정적 링크로 호출
 // ============================================================
 
-/// 코어 초기화. 0=성공, -1=이미 초기화됨/실패.
+/// 코어 초기화. 0=성공, -1=실패(`suji_core_last_error` 로 사유 조회).
 export fn suji_core_init() c_int {
-    init(std.heap.c_allocator, embed_threaded.io()) catch return -1;
+    init(std.heap.c_allocator, embed_threaded.io()) catch |e| {
+        setErr(switch (e) {
+            Error.AlreadyInitialized => "already initialized",
+            Error.OutOfMemory => "out of memory",
+        });
+        return -1;
+    };
+    g_last_error = ""; // 새 lifecycle — 이전 실패 사유 클리어
     return 0;
+}
+
+/// 마지막 `suji_core_*` 실패의 사람이 읽는 사유. 실패 없으면 빈 문자열.
+/// 정적 — free 금지, 다음 실패 호출 전까지 유효.
+export fn suji_core_last_error() [*c]const u8 {
+    return g_last_error;
 }
 
 export fn suji_core_destroy() void {
@@ -134,12 +156,21 @@ export fn suji_core_register_handler(
     invoke_cb: ?*const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
     free_cb: ?*const fn (ptr: [*:0]const u8) callconv(.c) void,
 ) c_int {
-    if (g_state == null) return -1;
-    const cb = invoke_cb orelse return -1;
+    if (g_state == null) {
+        setErr("not initialized");
+        return -1;
+    }
+    const cb = invoke_cb orelse {
+        setErr("null invoke_cb");
+        return -1;
+    };
     loader.BackendRegistry.registerEmbedRuntime(
         util.cSpan(channel),
         .{ .invoke = cb, .free_response = free_cb },
-    ) catch return -1;
+    ) catch {
+        setErr("register failed (registry/oom)");
+        return -1;
+    };
     return 0;
 }
 

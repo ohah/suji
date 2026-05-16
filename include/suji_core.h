@@ -17,8 +17,12 @@
 extern "C" {
 #endif
 
-/* 코어 초기화. 0=성공, -1=이미 초기화됨 또는 실패. */
+/* 코어 초기화. 0=성공, -1=실패(suji_core_last_error 로 사유). */
 int suji_core_init(void);
+
+/* 마지막 suji_core_* 실패의 사람이 읽는 사유. 실패 없으면 "".
+ * 정적 포인터 — free 금지, 다음 실패 호출 전까지 유효. */
+const char *suji_core_last_error(void);
 
 /* 코어 해제. init 전/후 idempotent(미초기화면 no-op). */
 void suji_core_destroy(void);
