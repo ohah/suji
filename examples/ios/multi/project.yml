@@ -11,16 +11,13 @@ targets:
     platform: iOS
     sources:
       - path: ../_shared      # 공유 호스트(AppDelegate/VC/bridging/Info)
+        excludes: [Info.plist]
       - path: Backends.swift  # 변형별 백엔드 등록 (Rust+Go)
       - path: web             # 번들 프론트엔드
-    info:
-      path: ../_shared/Info.plist
-      properties:
-        UILaunchStoryboardName: ""
-        UIApplicationSceneManifest:
-          UIApplicationSupportsMultipleScenes: false
     settings:
       base:
+        # xcodegen 이 공유 Info.plist 를 덮어쓰지 않도록 생성 대신 참조
+        INFOPLIST_FILE: $(SRCROOT)/../_shared/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
         HEADER_SEARCH_PATHS:
           - $(SRCROOT)/../../../include

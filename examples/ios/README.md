@@ -21,9 +21,18 @@ Xcode 스캐폴딩 중복을 피하려고 호스트 소스를 [`_shared/`](./_sh
 ```bash
 brew install xcodegen                       # 최초 1회
 cd examples/ios/<variant>
-./build-lib.sh                              # 코어+백엔드 .a 스테이징(Vendor/)
-xcodegen generate && open *.xcodeproj       # 시뮬레이터 실행
+./build-lib.sh                              # 기본 sim — 코어+백엔드 .a(Vendor/)
+xcodegen generate
+# 시뮬레이터(디바이스/프로비저닝 불필요, Apple Silicon=arm64):
+xcodebuild -project *.xcodeproj -scheme "$(ls -d *.xcodeproj|sed 's/\.xcodeproj//')" \
+  -sdk iphonesimulator -configuration Debug ARCHS=arm64 build
+xcrun simctl install booted "$(find ~/Library/Developer/Xcode/DerivedData -name '*.app' -path '*Debug-iphonesimulator*'|head -1)"
+# 실기기는: ./build-lib.sh device && open *.xcodeproj (Xcode 서명/실행)
 ```
+
+> `build-lib.sh [sim|device]` — **sim 기본**(디바이스/프로비저닝 불필요).
+> 코어는 `ReleaseSmall`(임베드 모바일 적합: 작고, 패닉 스택트레이스의 dyld
+> 의존 제거 — 시뮬레이터 링크에 필수). Apple Silicon 가정(arm64 sim).
 
 ## 구조
 
