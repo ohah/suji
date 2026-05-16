@@ -119,12 +119,15 @@ export fn suji_core_init() c_int {
         });
         return -1;
     };
-    g_last_error = ""; // 새 lifecycle — 이전 실패 사유 클리어
+    // init = lifecycle 경계라 진단 리셋. lifecycle 내에서는 sticky
+    // (실패가 덮고, 성공은 안 지움 — errno 모델).
+    setErr("");
     return 0;
 }
 
-/// 마지막 `suji_core_*` 실패의 사람이 읽는 사유. 실패 없으면 빈 문자열.
-/// 정적 — free 금지, 다음 실패 호출 전까지 유효.
+/// 마지막으로 기록된 `suji_core_*` 실패 사유 (사람이 읽음). 한 lifecycle 내
+/// 에선 sticky — 성공 호출은 안 지우고, `suji_core_init` 성공만 리셋한다.
+/// 실패 기록 없으면 빈 문자열. 정적 — free 금지, 다음 실패 전까지 유효.
 export fn suji_core_last_error() [*c]const u8 {
     return g_last_error;
 }
@@ -136,7 +139,10 @@ export fn suji_core_destroy() void {
 /// 프론트엔드 invoke 디스패치. 반환 문자열은 코어 소유 — 호출자는 사용 후
 /// 반드시 `suji_core_free`로 해제. 미초기화 시 빈 문자열.
 export fn suji_core_invoke(channel: [*c]const u8, json: [*c]const u8) [*c]const u8 {
-    if (g_state == null) return @ptrCast(@constCast(""));
+    if (g_state == null) {
+        setErr("not initialized"); // 빈 응답이 미초기화인지 빈 결과인지 진단 가능하게
+        return @ptrCast(@constCast(""));
+    }
     return invokeOwned(@ptrCast(channel), @ptrCast(json));
 }
 
@@ -167,8 +173,11 @@ export fn suji_core_register_handler(
     loader.BackendRegistry.registerEmbedRuntime(
         util.cSpan(channel),
         .{ .invoke = cb, .free_response = free_cb },
-    ) catch {
-        setErr("register failed (registry/oom)");
+    ) catch |e| {
+        setErr(switch (e) {
+            error.NoRegistry => "no registry",
+            error.OutOfMemory => "out of memory",
+        });
         return -1;
     };
     return 0;

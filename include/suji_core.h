@@ -20,8 +20,9 @@ extern "C" {
 /* 코어 초기화. 0=성공, -1=실패(suji_core_last_error 로 사유). */
 int suji_core_init(void);
 
-/* 마지막 suji_core_* 실패의 사람이 읽는 사유. 실패 없으면 "".
- * 정적 포인터 — free 금지, 다음 실패 호출 전까지 유효. */
+/* 마지막으로 기록된 suji_core_* 실패 사유 (사람이 읽음). lifecycle 내에선
+ * sticky — 성공 호출은 안 지우고 suji_core_init 성공만 리셋. 기록 없으면 "".
+ * 정적 포인터 — free 금지, 다음 실패 전까지 유효. */
 const char *suji_core_last_error(void);
 
 /* 코어 해제. init 전/후 idempotent(미초기화면 no-op). */

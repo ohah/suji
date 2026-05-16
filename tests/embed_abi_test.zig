@@ -151,6 +151,7 @@ test "embed: suji_core_last_error 가 실패 사유를 노출" {
         extern fn suji_core_init() c_int;
         extern fn suji_core_destroy() void;
         extern fn suji_core_last_error() [*c]const u8;
+        extern fn suji_core_invoke(channel: [*c]const u8, json: [*c]const u8) [*c]const u8;
         extern fn suji_core_register_handler(
             channel: [*c]const u8,
             invoke_cb: ?*const fn ([*:0]const u8, [*:0]const u8) callconv(.c) ?[*:0]const u8,
@@ -169,6 +170,10 @@ test "embed: suji_core_last_error 가 실패 사유를 노출" {
     }.f;
 
     c.suji_core_destroy(); // 미초기화 상태 보장
+
+    // 미초기화 invoke → "" 반환 + last_error 로 진단 가능 (불투명 "" 보강)
+    try std.testing.expectEqualStrings("", std.mem.span(@as([*:0]const u8, @ptrCast(c.suji_core_invoke("x", "{}")))));
+    try std.testing.expect(has("not initialized"));
 
     // 미초기화에서 register → -1 + 사유
     try std.testing.expectEqual(@as(c_int, -1), c.suji_core_register_handler("x", echoInvoke, echoFree));
