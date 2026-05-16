@@ -16,9 +16,6 @@ const PLUGIN_PATH = switch (builtin.os.tag) {
 // ============================================
 
 fn loadStatePlugin(reg: *loader.BackendRegistry) !void {
-    // 플러그인 dylib이 이 하니스에서 Windows용으로 빌드되지 않음 → skip
-    // (Windows dlopen 자체는 kernel32 래퍼로 지원됨 — loader.zig).
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try reg.register("state", PLUGIN_PATH);
     // 테스트 격리: 이전 테스트의 상태 초기화
     freeResp(reg, invokePlugin(reg, "{\"cmd\":\"state:clear\"}"));

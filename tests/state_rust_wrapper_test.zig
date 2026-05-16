@@ -31,7 +31,6 @@ const BRIDGE_PATH = switch (builtin.os.tag) {
 };
 
 fn setupRegistry(reg: *loader.BackendRegistry) !void {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
     try reg.register("state", STATE_PATH);
     try reg.register("rust", BRIDGE_PATH);
     freeResp(reg, "rust", invokeRust(reg, "{\"cmd\":\"rust_state_clear\"}"));
@@ -206,8 +205,6 @@ test "rust wrapper: keys_in returns prefix-stripped user keys" {
 // 명시 회귀: 4개 reg를 순차 생성/teardown하면서 매번 invoke 동작해야 함. 이전 OnceLock
 // 구현이면 두 번째부터 crash, 현재는 통과.
 test "회귀: __SUJI_CORE AtomicPtr — 다중 reg use-after-free 차단" {
-    if (builtin.os.tag == .windows) return error.SkipZigTest;
-
     // 4개 reg 순차 생성/teardown. OnceLock 시절엔 두 번째부터 stale 포인터로
     // GP exception (Linux). AtomicPtr는 매 backend_init이 store로 replace.
     for (0..4) |iter| {
