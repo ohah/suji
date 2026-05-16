@@ -20,6 +20,7 @@ permissions:
 
 env:
   NODE_VERSION: '24.14.1'
+  # specta-macros rc.25(edition2024+let-chains) 때문에 1.93.0 (ci.yml 동일).
   RUST_TOOLCHAIN: '1.93.0'
   GO_VERSION: '1.26.0'
 
@@ -87,9 +88,17 @@ jobs:
             echo "::warning::CARGO_REGISTRY_TOKEN 미설정 — crate 발행 skip"
             exit 0
           fi
+          # ⚠ crates.io 는 재발행 불가(yank 만 가능). macros 발행 후 아래
+          # 단계가 실패하면 부분 발행 상태가 되어 수동 복구(버전 bump) 필요.
           cargo publish --manifest-path crates/suji-rs-macros/Cargo.toml
-          # crates.io 인덱스 반영 대기 후 의존 crate 발행.
-          until cargo search suji-macros | grep -q '^suji-macros '; do sleep 10; done
+          # macros 인덱스 반영 대기 — sparse index 직접 조회(cargo search 는
+          # 검색 API 라 rate-limit/지연 불안정). bounded 재시도(30회×10s=5분)
+          # 후 미반영이면 명시적 실패(무한 대기 방지).
+          for i in $(seq 1 30); do
+            curl -fsS "https://index.crates.io/su/ji/suji-macros" >/dev/null 2>&1 && break
+            [ "$i" -eq 30 ] && { echo "::error::suji-macros 인덱스 5분 내 미반영 — suji 발행 중단(부분 발행: macros 수동 확인)"; exit 1; }
+            sleep 10
+          done
           cargo publish --manifest-path crates/suji-rs/Cargo.toml
 
   go:
