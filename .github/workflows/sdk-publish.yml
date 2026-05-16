@@ -78,7 +78,7 @@ jobs:
         run: |
           cargo publish --dry-run --allow-dirty --manifest-path crates/suji-rs-macros/Cargo.toml
           cargo check --manifest-path crates/suji-rs/Cargo.toml
-      - name: Publish to crates.io (순서: macros → suji)
+      - name: "Publish to crates.io (순서: macros → suji)"
         if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
