@@ -33,6 +33,22 @@ const char *suji_core_invoke(const char *channel, const char *json);
 /* suji_core_invoke 반환 포인터 해제. NULL/미초기화는 no-op. */
 void suji_core_free(const char *ptr);
 
+/* 호스트 invoke 핸들러.
+ * channel/json 은 널종단(코어 소유, 콜백 동안만 유효).
+ * 반환: 응답 JSON(널종단, 호스트 소유) 또는 NULL(미처리 → 백엔드로 폴백).
+ */
+typedef const char *(*suji_core_handler_cb)(const char *channel, const char *json);
+/* 위 콜백이 반환한 포인터 해제(코어가 복사 후 호출). NULL 이면 호스트가 미관리. */
+typedef void (*suji_core_handler_free_cb)(const char *ptr);
+
+/* 채널을 네이티브로 응답하도록 등록 (채널명 == 등록명 정확 매치).
+ * dlopen 백엔드 없는 모바일에서 invoke 를 의미있게 만든다.
+ * 같은 채널 재등록은 에러가 아니라 덮어쓰기. 0=성공, -1=실패(미초기화/메모리).
+ */
+int suji_core_register_handler(const char *channel,
+                               suji_core_handler_cb invoke_cb,
+                               suji_core_handler_free_cb free_cb);
+
 /* 이벤트 발행(전 창 브로드캐스트). */
 void suji_core_emit(const char *event_name, const char *json);
 

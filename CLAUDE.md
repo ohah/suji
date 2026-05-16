@@ -426,22 +426,24 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
 - `src/embed.zig` — `BackendRegistry`+`EventBus`를 감싸는 C ABI shim. `zig build
   lib`이 `libsuji_core.a` 생성(CEF/Cocoa/Node 링크 없음).
 - C ABI 표면: `suji_core_init/destroy/invoke/free/emit/emit_to/on/off`
-  ([`include/suji_core.h`](./include/suji_core.h), 수기 동기화).
+  + `suji_core_register_handler`(호스트가 채널을 네이티브로 응답 — `embed_runtimes`
+  경로 재사용) ([`include/suji_core.h`](./include/suji_core.h), 수기 동기화).
 - `main.zig`(CEF 호스트)도 `embed.init/registry()/eventBus()` 경유 — 호스트는
   embed 경계로만 코어 접근, 경계가 CEF 의존을 컴파일 단계에서 차단.
 - 모바일 호스트 예제:
   - `examples/ios` — XcodeGen `project.yml` + Swift `WKWebView` + bridging header.
   - `examples/android` — Gradle + JNI(`suji_jni.c`)가 `libsuji_core.a` 정적 링크
     → `libsujihost.so`, Kotlin `WebView`.
-  - 둘 다 `build-lib.sh`로 `.a` 스테이징, `window.suji.invoke → 네이티브 →
-    suji_core_invoke` 왕복 + `suji_core_on` 이벤트 데모.
+  - 둘 다 `build-lib.sh`로 `.a` 스테이징. `suji.invoke("ping"/"counter:inc")`
+    → 호스트가 `suji_core_register_handler`로 등록한 Swift/Kotlin 네이티브
+    핸들러가 응답 (실제 데이터 왕복) + `suji_core_on` 이벤트 데모.
 
-**한계**: C ABI 표면은 `invoke/emit/on/off`만. 윈도우/clipboard/dialog 등 데스크톱
-네이티브 API는 CEF 호스트 전용 — 모바일 미동작. **Rust/Go/Node 백엔드는 모바일에서
-아직 안 돈다**: 모바일 호스트는 코어 라우팅+이벤트만 검증하며 백엔드를 배선하지
-않는다. iOS는 임의 dylib `dlopen` 금지(정적 링크 필수) + Node V8 JIT 불가, Android는
-NDK 정적 링크/`.so`로 가능하나 미배선. 정적 링크 백엔드를 `embed_runtimes`로 등록하는
-경로가 후속 과제.
+**한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
+모바일 미동작. 모바일 invoke는 `suji_core_register_handler`로 **호스트가 직접
+응답**(예제가 이를 시연)하거나 백엔드 경유인데, **Rust/Go/Node 백엔드는 모바일에서
+아직 안 돈다**: iOS는 임의 dylib `dlopen` 금지(정적 링크 필수) + Node V8 JIT 불가,
+Android는 NDK 정적 링크/`.so`로 가능하나 미배선. 정적 링크 백엔드를 `embed_runtimes`
+로 등록하는 경로가 후속 과제.
 
 ## 앱별 cache / 사용자 데이터 (Electron `app.getPath('userData')` 동등)
 

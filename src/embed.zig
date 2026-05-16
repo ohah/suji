@@ -123,6 +123,26 @@ export fn suji_core_free(ptr: [*c]const u8) void {
     freeResponse(ptr);
 }
 
+/// 호스트(Swift/Kotlin/임의 네이티브)가 채널을 네이티브로 응답하도록 등록.
+/// dlopen 백엔드가 없는 모바일에서 invoke를 의미 있게 만든다 — Node가 쓰는
+/// `embed_runtimes` 경로를 그대로 재사용(코어 측 신규 상태 0).
+///
+/// 채널명 == 등록명 정확 매치. invoke_cb 반환 문자열은 호스트 소유 —
+/// 코어가 즉시 복사하고 free_cb로 원본을 호스트에 돌려준다. 0=성공, -1=실패.
+export fn suji_core_register_handler(
+    channel: [*c]const u8,
+    invoke_cb: ?*const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
+    free_cb: ?*const fn (ptr: [*:0]const u8) callconv(.c) void,
+) c_int {
+    if (g_state == null) return -1;
+    const cb = invoke_cb orelse return -1;
+    loader.BackendRegistry.registerEmbedRuntime(
+        util.cSpan(channel),
+        .{ .invoke = cb, .free_response = free_cb },
+    ) catch return -1;
+    return 0;
+}
+
 export fn suji_core_emit(event_name: [*c]const u8, json: [*c]const u8) void {
     const state = g_state orelse return;
     state.event_bus.emit(util.cSpan(event_name), util.cSpan(json));

@@ -15,6 +15,29 @@ private func sujiEventTrampoline(
     DispatchQueue.main.async { vc.emitToJS(name: n, json: d) }
 }
 
+// 호스트 invoke 핸들러 (suji_core_register_handler). 캡처 없는 톱레벨 +
+// strdup — 코어가 즉시 복사하고 sujiHandlerFree 로 원본을 돌려준다.
+// 락 없는 전역: invoke 는 WKScriptMessageHandler(메인 스레드) + single-threaded
+// 코어 경로로만 진입하므로 데이터 레이스 없음.
+private var sujiCounter = 0
+
+private func sujiPingHandler(
+    _ channel: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?
+) -> UnsafePointer<CChar>? {
+    return UnsafePointer(strdup("{\"pong\":true,\"from\":\"ios-native\"}"))
+}
+
+private func sujiCounterHandler(
+    _ channel: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?
+) -> UnsafePointer<CChar>? {
+    sujiCounter += 1
+    return UnsafePointer(strdup("{\"n\":\(sujiCounter)}"))
+}
+
+private func sujiHandlerFree(_ ptr: UnsafePointer<CChar>?) {
+    free(UnsafeMutableRawPointer(mutating: ptr))
+}
+
 final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
     private var webView: WKWebView!
     private var tickListenerId: UInt64 = 0
@@ -27,6 +50,10 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         guard suji_core_init() == 0 else {
             fatalError("suji_core_init failed")
         }
+
+        // 백엔드 없는 모바일에서 invoke 를 네이티브로 응답.
+        _ = suji_core_register_handler("ping", sujiPingHandler, sujiHandlerFree)
+        _ = suji_core_register_handler("counter:inc", sujiCounterHandler, sujiHandlerFree)
 
         let cfg = WKWebViewConfiguration()
         let ucc = WKUserContentController()

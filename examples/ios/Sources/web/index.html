@@ -16,19 +16,28 @@
   <h1>Suji iOS 호스트</h1>
   <p>WKWebView ↔ <code>libsuji_core.a</code> C ABI 왕복 데모.</p>
 
-  <div class="row">JS → 네이티브 → 코어 invoke:
-    <strong id="invoke">…</strong>
+  <div class="row">
+    <button id="ping">invoke("ping")</button>
+    <button id="inc">invoke("counter:inc")</button>
   </div>
+  <div class="row">응답 (Swift 네이티브 핸들러): <strong id="out">…</strong></div>
   <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
     <span id="ticks">대기 중…</span>
   </div>
 
   <script>
-    // suji.invoke: 백엔드 미등록이라 코어가 "{}" 반환 — 라운드트립 자체가 검증 포인트.
-    suji.invoke("ping", { from: "ios" }).then(function (res) {
-      document.getElementById("invoke").textContent =
-        "응답 = " + JSON.stringify(res);
-    });
+    var out = document.getElementById("out");
+    // suji.invoke → suji_core_register_handler 로 등록된 Swift 핸들러가 응답.
+    document.getElementById("ping").onclick = function () {
+      suji.invoke("ping", { from: "ios" }).then(function (r) {
+        out.textContent = "ping → " + JSON.stringify(r);
+      });
+    };
+    document.getElementById("inc").onclick = function () {
+      suji.invoke("counter:inc").then(function (r) {
+        out.textContent = "counter → " + JSON.stringify(r);
+      });
+    };
 
     // suji.on: 호스트가 2초마다 suji_core_emit 으로 발행하는 틱 수신.
     var n = 0;

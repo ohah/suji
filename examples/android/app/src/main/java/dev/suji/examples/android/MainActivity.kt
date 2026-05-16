@@ -33,6 +33,9 @@ class MainActivity : Activity() {
 
         check(SujiCore.nativeInit() == 0) { "suji_core_init failed" }
         tickListenerId = SujiCore.nativeRegisterEvents("demo:tick")
+        // 백엔드 없는 모바일에서 invoke 를 네이티브로 응답.
+        SujiCore.nativeRegisterHandler("ping")
+        SujiCore.nativeRegisterHandler("counter:inc")
 
         webView = WebView(this)
         webView.settings.javaScriptEnabled = true
@@ -49,6 +52,15 @@ class MainActivity : Activity() {
         SujiCore.nativeDestroy()
         if (active === this) active = null
         super.onDestroy()
+    }
+
+    private var counter = 0
+
+    /// SujiCore.onInvoke 위임 대상 (UI 스레드). 백엔드 자리 네이티브 응답.
+    fun handleInvoke(channel: String, json: String): String = when (channel) {
+        "ping" -> "{\"pong\":true,\"from\":\"android-native\"}"
+        "counter:inc" -> { counter++; "{\"n\":$counter}" }
+        else -> "{}"
     }
 
     /// 네이티브 → JS. JSONObject.quote 로 안전한 JS 문자열 리터럴 생성.

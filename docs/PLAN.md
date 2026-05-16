@@ -1454,16 +1454,21 @@ CEF import 0이라 분리선이 이미 존재했음.
   - [x] `examples/android` — Gradle + JNI(`suji_jni.c`)가 `libsuji_core.a` 정적
         링크 → `libsujihost.so`, Kotlin `WebView`, UI 스레드 마샬링(single-thread
         core), 동형 JS 브릿지.
+  - [x] `suji_core_register_handler` — 호스트가 채널을 네이티브로 응답
+        (`registerEmbedRuntime` 위임, 코어 신규 상태 0). iOS(Swift @convention(c)
+        + strdup)·Android(JNI 트램폴린, JNI_OnLoad 캐싱 + ExceptionCheck) 예제가
+        `ping`→pong / `counter:inc` 실제 왕복 시연. 헤드리스 테스트 +memory 계약.
   - [x] Windows dlopen 복구(#25 항목) — kernel32 직접 래핑.
 
 ### 한계 / 후속
 
-- C ABI 표면은 `invoke/emit/on/off`만. 윈도우/clipboard/dialog 등 데스크톱
-  네이티브 API는 CEF 호스트 전용 — 모바일 미동작.
-- **Rust/Go/Node 백엔드는 모바일에서 아직 안 돈다.** 모바일 호스트는 코어
-  라우팅+이벤트만 검증하고 백엔드를 배선하지 않음. iOS: 임의 dylib `dlopen`
-  금지(정적 링크 필수) + Node V8 JIT 불가. Android: NDK 정적 링크/`.so`로 가능하나
-  미배선. → 정적 링크 백엔드를 `embed_runtimes`로 등록하는 경로가 후속 과제.
+- 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
+  미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).
+- 모바일 invoke는 `suji_core_register_handler`로 **호스트가 직접 응답** 가능
+  (예제 시연). 단 **Rust/Go/Node 백엔드는 모바일에서 아직 안 돈다**: iOS는 임의
+  dylib `dlopen` 금지(정적 링크 필수) + Node V8 JIT 불가, Android는 NDK 정적
+  링크/`.so`로 가능하나 미배선. → 정적 링크 백엔드를 `embed_runtimes`로 등록하는
+  경로가 후속 과제.
 - 렌더러 eval은 in-process Zig 호스트가 `embed.eventBus().webview_eval` 직접
   주입. 비-Zig 호스트(모바일)용 C ABI eval 셋터는 미도입(후속).
 

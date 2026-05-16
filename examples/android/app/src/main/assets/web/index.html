@@ -42,17 +42,28 @@
   <h1>Suji Android 호스트</h1>
   <p>WebView ↔ JNI ↔ <code>libsuji_core.a</code> 왕복 데모.</p>
 
-  <div class="row">JS → JNI → 코어 invoke:
-    <strong id="invoke">…</strong>
+  <div class="row">
+    <button id="ping">invoke("ping")</button>
+    <button id="inc">invoke("counter:inc")</button>
   </div>
+  <div class="row">응답 (Kotlin 네이티브 핸들러): <strong id="out">…</strong></div>
   <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
     <span id="ticks">대기 중…</span>
   </div>
 
   <script>
-    suji.invoke("ping", { from: "android" }).then(function (res) {
-      document.getElementById("invoke").textContent = "응답 = " + JSON.stringify(res);
-    });
+    var out = document.getElementById("out");
+    // suji.invoke → suji_core_register_handler 로 등록된 Kotlin 핸들러가 응답.
+    document.getElementById("ping").onclick = function () {
+      suji.invoke("ping", { from: "android" }).then(function (r) {
+        out.textContent = "ping → " + JSON.stringify(r);
+      });
+    };
+    document.getElementById("inc").onclick = function () {
+      suji.invoke("counter:inc").then(function (r) {
+        out.textContent = "counter → " + JSON.stringify(r);
+      });
+    };
     var n = 0;
     suji.on("demo:tick", function (d) {
       n++;

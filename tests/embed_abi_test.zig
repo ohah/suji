@@ -17,7 +17,9 @@ fn echoInvoke(channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]co
     @memcpy(buf, resp);
     return buf.ptr;
 }
+var echo_free_calls: usize = 0;
 fn echoFree(ptr: [*:0]const u8) callconv(.c) void {
+    echo_free_calls += 1;
     std.heap.c_allocator.free(std.mem.span(ptr));
 }
 
@@ -110,4 +112,36 @@ test "embed: C ABI export surface (suji_core_*) drives core end-to-end" {
     c.suji_core_off(id);
     c.suji_core_emit("evt", "{}");
     try std.testing.expectEqual(@as(u32, 1), Ctx.hits);
+}
+
+test "embed: suji_core_register_handler routes invoke to host handler" {
+    const c = struct {
+        extern fn suji_core_init() c_int;
+        extern fn suji_core_destroy() void;
+        extern fn suji_core_invoke(channel: [*c]const u8, json: [*c]const u8) [*c]const u8;
+        extern fn suji_core_free(ptr: [*c]const u8) void;
+        extern fn suji_core_register_handler(
+            channel: [*c]const u8,
+            invoke_cb: ?*const fn ([*:0]const u8, [*:0]const u8) callconv(.c) ?[*:0]const u8,
+            free_cb: ?*const fn ([*:0]const u8) callconv(.c) void,
+        ) c_int;
+    };
+
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_init());
+    defer c.suji_core_destroy();
+
+    // 호스트(Swift/Kotlin 자리)가 "ping" 을 네이티브로 응답하도록 등록.
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_register_handler("ping", echoInvoke, echoFree));
+
+    echo_free_calls = 0;
+    const resp = c.suji_core_invoke("ping", "{\"from\":\"host\"}");
+    try std.testing.expectEqualStrings("{\"pong\":1}", std.mem.span(@as([*:0]const u8, @ptrCast(resp))));
+    // 메모리 계약: 코어가 호스트 응답을 복사하고 free_cb 로 원본을 반납.
+    try std.testing.expectEqual(@as(usize, 1), echo_free_calls);
+    c.suji_core_free(resp);
+
+    // 미초기화 가드: destroy 후 등록은 -1.
+    c.suji_core_destroy();
+    try std.testing.expectEqual(@as(c_int, -1), c.suji_core_register_handler("x", echoInvoke, echoFree));
+    // defer 의 두 번째 destroy 는 idempotent (no-op).
 }
