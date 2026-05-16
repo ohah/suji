@@ -90,13 +90,17 @@ jobs:
           fi
           # ⚠ crates.io 는 재발행 불가(yank 만 가능). macros 발행 후 아래
           # 단계가 실패하면 부분 발행 상태가 되어 수동 복구(버전 bump) 필요.
+          MV="$(grep -m1 '^version' crates/suji-rs-macros/Cargo.toml | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
           cargo publish --manifest-path crates/suji-rs-macros/Cargo.toml
           # macros 인덱스 반영 대기 — sparse index 직접 조회(cargo search 는
-          # 검색 API 라 rate-limit/지연 불안정). bounded 재시도(30회×10s=5분)
-          # 후 미반영이면 명시적 실패(무한 대기 방지).
+          # 검색 API 라 rate-limit/지연 불안정). 존재가 아니라 *해당 버전*
+          # ("vers":"<MV>")을 확인 — 버전 bump 재발행 시 구 인덱스가 조기
+          # 200 반환해 suji 가 "no matching version"으로 깨지는 것 방지.
+          # bounded 재시도(실패 시 10s sleep × 최대 29회 ≈ 5분) 후 미반영이면
+          # 명시적 실패(무한 대기 방지).
           for i in $(seq 1 30); do
-            curl -fsS "https://index.crates.io/su/ji/suji-macros" >/dev/null 2>&1 && break
-            [ "$i" -eq 30 ] && { echo "::error::suji-macros 인덱스 5분 내 미반영 — suji 발행 중단(부분 발행: macros 수동 확인)"; exit 1; }
+            curl -fsS "https://index.crates.io/su/ji/suji-macros" 2>/dev/null | grep -q "\"vers\":\"$MV\"" && break
+            [ "$i" -eq 30 ] && { echo "::error::suji-macros@$MV 인덱스 ~5분 내 미반영 — suji 발행 중단(부분 발행: macros 수동 확인)"; exit 1; }
             sleep 10
           done
           cargo publish --manifest-path crates/suji-rs/Cargo.toml
