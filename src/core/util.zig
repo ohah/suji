@@ -28,6 +28,12 @@ pub fn cstrOpt(s: ?[:0]const u8) ?[]const u8 {
     return if (s) |v| std.mem.sliceTo(v, 0) else null;
 }
 
+/// C ABI에서 받은 `[*c]const u8`을 sentinel 슬라이스로. C 콜백 래퍼에서
+/// `std.mem.span(@as([*:0]const u8, @ptrCast(p)))` 보일러플레이트 단축.
+pub fn cSpan(p: [*c]const u8) [:0]const u8 {
+    return std.mem.span(@as([*:0]const u8, @ptrCast(p)));
+}
+
 /// i64 → u32 변환 (음수는 0 clamp, u32 max 초과는 maxInt 클램프).
 /// suji.json/wire에 잘못된 값이 들어와도 ReleaseSafe `@intCast` panic 회피.
 pub fn nonNegU32(v: i64) u32 {

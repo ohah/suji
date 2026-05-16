@@ -1,6 +1,9 @@
 const std = @import("std");
 const runtime = @import("runtime");
 const suji = @import("root.zig");
+// 호스트는 코어를 embed 경계로만 접근 (BackendRegistry/EventBus를 직접 생성하지
+// 않음). embed.zig가 loader+events만 감싸 CEF 의존을 컴파일 단계에서 차단한다.
+const embed = @import("embed.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
 const window_mod = @import("window");
@@ -604,9 +607,9 @@ fn runDev(allocator: std.mem.Allocator) !void {
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
-    var registry = suji.BackendRegistry.init(allocator, runtime.io);
-    defer registry.deinit();
-    registry.setGlobal();
+    try embed.init(allocator, runtime.io);
+    defer embed.deinit();
+    const registry = embed.registry(); // *BackendRegistry — setGlobal은 embed.init이 수행
     registry.setQuitHandler(&cef.quit); // 백엔드 suji.quit()가 cef.quit()로 이어지도록
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
     cef.setTrayEmitHandler(&trayEmitHandler);
@@ -632,25 +635,23 @@ fn runDev(allocator: std.mem.Allocator) !void {
         cef.setCspValue(csp);
     }
 
-    // EventBus를 백엔드 로드보다 먼저 생성해 backend_init의 on() 등록이 반영되도록.
-    // (이전엔 openWindow에서 생성해 너무 늦었고 backend listener가 silent 실패)
-    var event_bus = suji.EventBus.init(allocator, runtime.io);
-    defer event_bus.deinit();
-    registry.setEventBus(&event_bus);
+    // setEventBus는 backend 로드보다 먼저여야 backend_init의 on() 등록이 반영됨 —
+    // embed.init이 이 순서를 보장.
+    const event_bus = embed.eventBus();
 
-    try loadPluginsFromConfig(allocator, &config, &registry, false);
-    try loadBackendsFromConfig(allocator, &config, &registry, false);
+    try loadPluginsFromConfig(allocator, &config, registry, false);
+    try loadBackendsFromConfig(allocator, &config, registry, false);
 
     // 백엔드 핫 리로드 감시 스레드
     var watcher = Watcher.init(allocator, runtime.io);
     defer watcher.deinit();
-    startBackendWatcher(allocator, &config, &watcher, &registry);
+    startBackendWatcher(allocator, &config, &watcher, registry);
 
     // 프론트엔드 dev 서버
     std.debug.print("[suji] starting frontend dev server...\n", .{});
     var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
-        try openWindow(allocator, &config, &event_bus, .dev);
+        try openWindow(allocator, &config, event_bus, .dev);
         return;
     };
     defer frontend_proc.kill(runtime.io);
@@ -658,7 +659,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
     runtime.io.sleep(.fromSeconds(2), .awake) catch {};
 
-    try openWindow(allocator, &config, &event_bus, .dev);
+    try openWindow(allocator, &config, event_bus, .dev);
 }
 
 // ============================================
@@ -787,9 +788,9 @@ fn runProd(allocator: std.mem.Allocator) !void {
 
     std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
 
-    var registry = suji.BackendRegistry.init(allocator, runtime.io);
-    defer registry.deinit();
-    registry.setGlobal();
+    try embed.init(allocator, runtime.io);
+    defer embed.deinit();
+    const registry = embed.registry(); // *BackendRegistry — setGlobal은 embed.init이 수행
     registry.setQuitHandler(&cef.quit);
     suji.BackendRegistry.special_dispatch = backendSpecialDispatch;
     cef.setTrayEmitHandler(&trayEmitHandler);
@@ -815,15 +816,14 @@ fn runProd(allocator: std.mem.Allocator) !void {
         cef.setCspValue(csp);
     }
 
-    // EventBus를 백엔드 로드보다 먼저 생성 (backend_init의 on() 등록이 반영되도록).
-    var event_bus = suji.EventBus.init(allocator, runtime.io);
-    defer event_bus.deinit();
-    registry.setEventBus(&event_bus);
+    // setEventBus는 backend 로드보다 먼저여야 backend_init의 on() 등록이 반영됨 —
+    // embed.init이 이 순서를 보장.
+    const event_bus = embed.eventBus();
 
-    try loadPluginsFromConfig(allocator, &config, &registry, true);
-    try loadBackendsFromConfig(allocator, &config, &registry, true);
+    try loadPluginsFromConfig(allocator, &config, registry, true);
+    try loadBackendsFromConfig(allocator, &config, registry, true);
 
-    try openWindow(allocator, &config, &event_bus, .dist);
+    try openWindow(allocator, &config, event_bus, .dist);
 }
 
 const WindowMode = enum { dev, dist };
