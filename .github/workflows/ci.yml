@@ -8,8 +8,9 @@ on:
 
 env:
   NODE_VERSION: '24.14.1'
-  # edition2024 (specta-macros 2.0.0-rc.25+ 가 요구) 안정화 = Rust 1.85.0.
-  RUST_TOOLCHAIN: '1.85.0'
+  # specta-macros 2.0.0-rc.25 는 edition2024 + let-chains(1.88) +
+  # extract_if(1.87) 사용 → 1.85 로 부족. 로컬 실증치 1.93.0 으로 핀.
+  RUST_TOOLCHAIN: '1.93.0'
   GO_VERSION: '1.26.0'
 
 jobs:

@@ -2995,17 +2995,50 @@ const SujiWindowLifecycleCallbacks = extern struct {
     leave_fullscreen: *const fn (u64) callconv(.c) void,
     will_resize: *const fn (u64, f64, f64, *f64, *f64) callconv(.c) void,
 };
-extern "c" fn suji_window_lifecycle_set_callbacks(cbs: *const SujiWindowLifecycleCallbacks) void;
-extern "c" fn suji_window_lifecycle_attach(ns_window: ?*anyopaque, handle: u64) i32;
-extern "c" fn suji_window_lifecycle_detach(ns_window: ?*anyopaque) void;
-extern "c" fn suji_window_lifecycle_minimize(ns_window: ?*anyopaque) void;
-extern "c" fn suji_window_lifecycle_deminiaturize(ns_window: ?*anyopaque) void;
-extern "c" fn suji_window_lifecycle_maximize(ns_window: ?*anyopaque) void;
-extern "c" fn suji_window_lifecycle_unmaximize(ns_window: ?*anyopaque) void;
-extern "c" fn suji_window_lifecycle_set_fullscreen(ns_window: ?*anyopaque, flag: i32) void;
-extern "c" fn suji_window_lifecycle_is_minimized(ns_window: ?*anyopaque) i32;
-extern "c" fn suji_window_lifecycle_is_maximized(ns_window: ?*anyopaque) i32;
-extern "c" fn suji_window_lifecycle_is_fullscreen(ns_window: ?*anyopaque) i32;
+// window_lifecycle.m 은 macOS 전용(build.zig 가 macOS 호스트에서만 컴파일).
+// 비-macOS 는 그 C 심볼이 없어 링크 실패 → @extern(명시 .name)은 macOS,
+// 비-macOS 는 callconv(.c) unreachable 스텁 포인터로. 이 경로는 전부
+// macOS 전용(callOnNs/callOnNsBool/setFullscreen 가 !is_macos early-return)
+// 이라 비-macOS 런타임 미도달. 호출부 무변경 위해 동명 const(fn 포인터).
+const wl_stub = struct {
+    fn voidNs(_: ?*anyopaque) callconv(.c) void {
+        unreachable;
+    }
+    fn i32Ns(_: ?*anyopaque) callconv(.c) i32 {
+        unreachable;
+    }
+    fn attach(_: ?*anyopaque, _: u64) callconv(.c) i32 {
+        unreachable;
+    }
+    fn setFs(_: ?*anyopaque, _: i32) callconv(.c) void {
+        unreachable;
+    }
+    fn setCb(_: *const SujiWindowLifecycleCallbacks) callconv(.c) void {
+        unreachable;
+    }
+};
+const suji_window_lifecycle_set_callbacks: *const fn (*const SujiWindowLifecycleCallbacks) callconv(.c) void =
+    if (is_macos) @extern(*const fn (*const SujiWindowLifecycleCallbacks) callconv(.c) void, .{ .name = "suji_window_lifecycle_set_callbacks" }) else &wl_stub.setCb;
+const suji_window_lifecycle_attach: *const fn (?*anyopaque, u64) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque, u64) callconv(.c) i32, .{ .name = "suji_window_lifecycle_attach" }) else &wl_stub.attach;
+const suji_window_lifecycle_detach: *const fn (?*anyopaque) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "suji_window_lifecycle_detach" }) else &wl_stub.voidNs;
+const suji_window_lifecycle_minimize: *const fn (?*anyopaque) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "suji_window_lifecycle_minimize" }) else &wl_stub.voidNs;
+const suji_window_lifecycle_deminiaturize: *const fn (?*anyopaque) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "suji_window_lifecycle_deminiaturize" }) else &wl_stub.voidNs;
+const suji_window_lifecycle_maximize: *const fn (?*anyopaque) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "suji_window_lifecycle_maximize" }) else &wl_stub.voidNs;
+const suji_window_lifecycle_unmaximize: *const fn (?*anyopaque) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) void, .{ .name = "suji_window_lifecycle_unmaximize" }) else &wl_stub.voidNs;
+const suji_window_lifecycle_set_fullscreen: *const fn (?*anyopaque, i32) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque, i32) callconv(.c) void, .{ .name = "suji_window_lifecycle_set_fullscreen" }) else &wl_stub.setFs;
+const suji_window_lifecycle_is_minimized: *const fn (?*anyopaque) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_minimized" }) else &wl_stub.i32Ns;
+const suji_window_lifecycle_is_maximized: *const fn (?*anyopaque) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_maximized" }) else &wl_stub.i32Ns;
+const suji_window_lifecycle_is_fullscreen: *const fn (?*anyopaque) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_fullscreen" }) else &wl_stub.i32Ns;
 
 /// CEF browser native_handle → NSWindow 포인터 lookup. main.zig가 windowId(WM)를
 /// browser handle로 변환 후 호출.
