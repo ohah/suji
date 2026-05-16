@@ -373,6 +373,21 @@ pub fn build(b: *std.Build) void {
     const events_test = b.addTest(.{ .root_module = events_test_mod });
     test_step.dependOn(&b.addRunArtifact(events_test).step);
 
+    // release_opts tests (서명모드/플래그 파싱 — std-only, 전 OS)
+    const release_opts_module = b.createModule(.{
+        .root_source_file = b.path("src/core/release_opts.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const release_opts_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/release_opts_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    release_opts_test_mod.addImport("release_opts", release_opts_module);
+    const release_opts_test = b.addTest(.{ .root_module = release_opts_test_mod });
+    test_step.dependOn(&b.addRunArtifact(release_opts_test).step);
+
     // App tests
     const app_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/app_test.zig"),

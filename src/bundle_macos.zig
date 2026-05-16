@@ -20,12 +20,10 @@ const Dir = std.Io.Dir;
 /// │   │   └── {name} Helper (Plugin).app/
 /// │   └── Resources/
 /// │       └── frontend/           ← 프론트엔드 빌드 결과
-/// 코드 서명 모드 (zero-native `--signing` 패리티).
-/// - none: 서명 생략 (로컬 빌드/검증용).
-/// - adhoc: ad-hoc 서명 (`codesign --sign -`) — 기본, 배포 불가하나 로컬 실행 OK.
-/// - identity: Developer ID 서명 + hardened runtime(`--options runtime`) +
-///   secure timestamp(`--timestamp`) — 공증/배포 전제.
-pub const SigningMode = enum { none, adhoc, identity };
+/// 코드 서명 모드 (zero-native `--signing` 패리티) — 단일 출처는
+/// core/release_opts.zig. none=생략 / adhoc=`codesign --sign -`(기본,
+/// 로컬용) / identity=Developer ID + hardened runtime + timestamp(공증 전제).
+pub const SigningMode = @import("core/release_opts.zig").SigningMode;
 
 /// 공증 자격증명 (xcrun notarytool). app-specific password 또는 keychain
 /// profile 둘 중 하나. CI 는 secret env 로 주입.

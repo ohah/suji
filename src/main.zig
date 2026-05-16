@@ -21,12 +21,9 @@ const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") e
     pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
         @panic("macOS bundle not supported on this platform");
     }
-    // 비-macOS 스텁 — 실제 bundle_macos 와 동형 타입이라야 크로스 컴파일됨.
-    // SigningMode 는 comptime os switch 밖(`const signing: bundle_macos.
-    // SigningMode`)에서 전 OS 분석되므로 스텁에도 필수. createBundle 등은
-    // .macos arm 에서만 분석돼 panic 본문으로 충분.
-    // ⚠ bundle_macos.zig 의 SigningMode 와 동형 유지 필수(variant 추가 시 동기화).
-    pub const SigningMode = enum { none, adhoc, identity };
+    // 비-macOS 스텁 — createBundle 등은 .macos arm 에서만 분석돼 panic 본문
+    // 으로 충분. SigningMode 는 release_opts(std-only)로 단일화되어 스텁
+    // 불필요(main 이 release_opts.SigningMode 직접 사용).
     pub const BundleOptions = struct {
         user_entitlements: ?[]const u8 = null,
         locales: []const []const u8 = &.{},
@@ -177,6 +174,7 @@ fn printUsage() void {
 
 const init_mod = @import("core/init.zig");
 const proc = @import("core/proc.zig");
+const release_opts = @import("core/release_opts.zig");
 
 fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
     if (init_args.len == 0) {
@@ -213,24 +211,10 @@ fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void 
 // ============================================
 // suji dev
 // ============================================
-/// `--flag=value` 또는 `--flag value` 형태에서 값 추출. 없으면 null.
-fn flagValue(args: []const [:0]const u8, flag: []const u8) ?[]const u8 {
-    for (args, 0..) |a, i| {
-        if (std.mem.startsWith(u8, a, flag) and a.len > flag.len and a[flag.len] == '=')
-            return a[flag.len + 1 ..];
-        if (std.mem.eql(u8, a, flag) and i + 1 < args.len) return args[i + 1];
-    }
-    return null;
-}
-
-fn hasFlag(args: []const [:0]const u8, flag: []const u8) bool {
-    for (args) |a| if (std.mem.eql(u8, a, flag)) return true;
-    return false;
-}
-
 /// 플래그 우선, 없으면 env 폴백 (CI 는 secret 을 env 로 주입).
+/// flagValue/hasFlag 순수 로직은 core/release_opts.zig(테스트 커버).
 fn flagOrEnv(args: []const [:0]const u8, flag: []const u8, env_name: []const u8) ?[]const u8 {
-    return flagValue(args, flag) orelse runtime.env(env_name);
+    return release_opts.flagValue(args, flag) orelse runtime.env(env_name);
 }
 
 fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
@@ -244,12 +228,10 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
 
     // 서명/공증/패키징 옵션 (zero-native `--signing/--identity` 패리티).
     // 플래그 > env(CI secret) 우선. 기본 adhoc(기존 동작 유지).
-    const sign_str = flagOrEnv(args, "--sign", "SUJI_SIGN") orelse "adhoc";
-    const signing: bundle_macos.SigningMode =
-        if (std.mem.eql(u8, sign_str, "none")) .none else if (std.mem.eql(u8, sign_str, "identity")) .identity else .adhoc;
+    const signing = release_opts.parseSigningMode(flagOrEnv(args, "--sign", "SUJI_SIGN"));
     const identity = flagOrEnv(args, "--identity", "SUJI_SIGN_IDENTITY");
-    const want_notarize = hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
-    const want_dmg = hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
+    const want_notarize = release_opts.hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
+    const want_dmg = release_opts.hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
 
     // 백엔드 릴리스 빌드
     try buildBackendsFromConfig(allocator, &config, true);
