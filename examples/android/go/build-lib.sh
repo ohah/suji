@@ -17,18 +17,35 @@ DEST="$HERE/cpp/libs/$ABI"
 JNILIBS="$HERE/jniLibs/$ABI"
 API=26
 mkdir -p "$DEST" "$JNILIBS"
+rm -f "$DEST/libsuji_core.a"   # 코어는 이제 .so(jniLibs)
 
 NDK="${ANDROID_NDK_HOME:-}"
 [ -z "$NDK" ] && NDK="$(ls -d "$HOME"/Library/Android/sdk/ndk/* 2>/dev/null | tail -1)"
 [ -n "$NDK" ] || { echo "NDK 미발견 — ANDROID_NDK_HOME 설정 필요"; exit 1; }
 CLANG="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin/${NDK_PREFIX}${API}-clang"
 
-( cd "$REPO" && zig build lib -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseSafe )
-cp "$REPO/zig-out/lib/libsuji_core.a" "$DEST/libsuji_core.a"
+# 코어 동적 .so (zig LE-TLS↔JNI -shared 회피) — NDK sysroot 를 --libc 로 공급.
+SYSROOT="$NDK/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
+LIBC_TXT="$(mktemp)"
+cat > "$LIBC_TXT" <<EOF2
+include_dir=$SYSROOT/usr/include
+sys_include_dir=$SYSROOT/usr/include
+crt_dir=$SYSROOT/usr/lib/$NDK_PREFIX/$API
+msvc_lib_dir=
+kernel32_lib_dir=
+gcc_dir=
+EOF2
+( cd "$REPO" && zig build lib -Dlib-dynamic -Dtarget="$ZIG_TARGET" -Doptimize=ReleaseSmall --libc "$LIBC_TXT" )
+cp "$REPO/zig-out/lib/libsuji_core.so" "$JNILIBS/libsuji_core.so"
+rm -f "$LIBC_TXT"
 
+# Go c-shared 는 SONAME 미설정 → DT_NEEDED 절대경로화 → 디바이스 dlopen 실패.
+# -Wl,-soname 으로 basename SONAME 주입.
 ( cd "$BK/go" && \
   CGO_ENABLED=1 GOOS=android GOARCH="$( [ "$ABI" = arm64-v8a ] && echo arm64 || echo amd64 )" \
-  CC="$CLANG" go build -buildmode=c-shared -o "$JNILIBS/libsuji_go_backend.so" . )
+  CC="$CLANG" go build -buildmode=c-shared \
+  -ldflags="-extldflags=-Wl,-soname,libsuji_go_backend.so" \
+  -o "$JNILIBS/libsuji_go_backend.so" . )
 
 echo "staged ($ABI):"; ls -1 "$DEST" "$JNILIBS"
 echo "next: (cd examples/android/go && ./gradlew installDebug  # 또는 Android Studio)"

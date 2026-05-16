@@ -20,7 +20,7 @@ rm -rf "$VENDOR"; mkdir -p "$VENDOR"
 cp "$REPO/zig-out/lib/libsuji_core.a" "$VENDOR/libsuji_core.a"
 
 # Zig 백엔드 staticlib (suji_zig_* 고유 심볼). build.zig 없이 직접 build-lib.
-zig build-lib -target "$ZIG_T" -O ReleaseSmall -lc \
+zig build-lib -target "$ZIG_T" -O ReleaseSmall -fPIC -lc \
   -femit-bin="$VENDOR/libsuji_zig_backend.a" \
   --name suji_zig_backend "$BK/zig/src/backend.zig"
 rm -f "$VENDOR/libsuji_zig_backend.a.o"

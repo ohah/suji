@@ -451,9 +451,11 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
     `suji_zig_*`)로 단일 바이너리 무충돌. 각 `build-lib.sh`로 `.a`/`.so`
     스테이징, `suji_core_register_handler` 등록 + `(channel,json)→{"cmd":..}`
     는 `include/suji_mobile_bridge.h` 공용(verify.c·JNI 공유).
-  - Gradle/Xcode 빌드는 사용자 환경 필요 — 레포는 NDK/cargo/go 크로스
-    컴파일·심볼만 검증. 메커니즘은 `tests/mobile-backends`(호스트 하니스,
-    CI `mobile-backends` job)가 실증.
+  - iOS 시뮬레이터·Android 에뮬레이터에서 빌드+구동 검증됨(multi·zig 변형
+    실디바이스 스크린샷: Rust greet / Go go:ping / Zig zig:rev / demo:tick
+    네이티브→JS→DOM). Android 코어는 동적 `.so`(`-Dlib-dynamic`+NDK `--libc`,
+    zig LE-TLS↔JNI `-shared` 회피), Go `.so` `-Wl,-soname`, Zig 백엔드 `-fPIC`.
+    메커니즘 회귀는 `tests/mobile-backends`(호스트 하니스, CI job) 가드.
 
 **한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
 모바일 미동작. **iOS·Android 둘 다 Rust·Go 백엔드 동작**(언어별 고유 심볼

@@ -1488,12 +1488,13 @@ CEF import 0이라 분리선이 이미 존재했음.
   미지원** — V8 JIT 이 iOS 코드서명 샌드박스에서 금지(정적 링크해도 런타임 코드
   생성 불가, `--jitless`는 비실용). **Android Node 는 NDK로 가능하나 예제 미배선**
   (후속). **iOS: 시뮬레이터 빌드+구동 검증됨**(데모 demo:tick 네이티브→JS→UI).
-  **Android: APK 빌드 미해결 블로커** — 정적 libsuji_core.a(Zig std Io.Threaded
-  threadlocal LE-TLS)를 JNI `-shared .so` 에 링크 불가(R_AARCH64_TLSLE_*),
-  Zig 동적 .so 우회는 Android Bionic libc 미제공으로 또 막힘. 후속: NDK libc 로
-  Zig 코어 .so 빌드 또는 TLS 모델 우회. 백엔드 메커니즘 자체는
-  tests/mobile-backends 호스트 하니스로 실증(JNI/CMake/Gradle 배선·NDK 컴파일·
-  심볼 검증, 최종 APK 링크만 블록).
+  **Android: APK/AAB 빌드+에뮬레이터 구동 검증됨**(multi·zig 변형 실디바이스
+  스크린샷 — greet=Rust, go:ping=Go, zig:rev=Zig, demo:tick=네이티브→JS→UI).
+  과거 블로커 3건 해결: 코어 정적 .a 의 zig Io.Threaded LE-TLS↔JNI -shared
+  비호환 → 코어 동적 .so(`-Dlib-dynamic`, build.zig) + zig 가 Android Bionic
+  미제공이라 NDK sysroot 를 `--libc` 공급(TLSDESC); Go c-shared SONAME 부재
+  → `-Wl,-soname`; Zig 백엔드 .a 비-PIC → `-fPIC`. .so 는 jniLibs 패키징
+  (Gradle 자동 + 런타임 DT_NEEDED). 메커니즘 회귀는 tests/mobile-backends(CI).
 - 렌더러 eval은 in-process Zig 호스트가 `embed.eventBus().webview_eval` 직접
   주입. 비-Zig 호스트(모바일)용 C ABI eval 셋터는 미도입(후속).
 
