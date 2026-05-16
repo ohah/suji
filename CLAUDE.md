@@ -34,6 +34,10 @@ bash tests/e2e/run-view-lifecycle.sh    # Phase 17-A WebContentsView (createView
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
 bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows.create + isLoading polling)
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
+
+# 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
+bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive) 정적
+                                        # 링크 → register_handler 왕복 11 케이스
 ```
 
 E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어
