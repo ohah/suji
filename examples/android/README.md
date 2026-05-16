@@ -1,55 +1,43 @@
-# Suji Android 호스트 예제
+# Suji Android 예제 (언어별)
 
-CEF 무관 Suji 코어(`libsuji_core.a`)를 Android 앱에 임베드하는 최소 호스트.
-Kotlin이 `WebView`를 띄우고, JNI `.so`가 정적 `libsuji_core.a`를 링크해
-`suji_core_*` C ABI를 호출한다.
+iOS(`examples/ios`)와 동형. 모바일은 호스트(JNI `.so`)에 백엔드를 정적/공유
+링크 — "언어별"은 별도 앱이 아니라 *어떤 백엔드를 링크/등록하느냐*. Gradle
+스캐폴딩 중복을 피하려 호스트(Kotlin/manifest/코어 JNI)를 [`_shared/`](./_shared)
+에 두고 변형은 thin(gradle + `cpp/backends.c` + `cpp/CMakeLists.txt` + `web/`).
 
-> iOS는 Swift가 C ABI를 직접 부르지만, Android는 런타임에 `.a`를 dlopen 못 한다.
-> JNI 브리지(`libsujihost.so`)가 `libsuji_core.a`를 **정적 링크**하고,
-> Kotlin이 `System.loadLibrary("sujihost")` 로 그 `.so` 를 로드한다.
+| 변형 | 백엔드 | 빌드 |
+|---|---|---|
+| [`multi/`](./multi) | Rust(`.a`) + Go(`.so`) + Kotlin 네이티브 | `multi/build-lib.sh` |
+| [`rust/`](./rust) | Rust(`.a`) + Kotlin 네이티브 | `rust/build-lib.sh` |
+| `go/` | (후속) Go(`.so` c-shared) | iOS go 와 동형 |
+| `zig/` | (후속) Zig staticlib | iOS zig 와 동형 |
 
-## 1. 코어 정적 라이브러리 빌드
+> **Go 는 Android 에서 c-archive 미지원 → `c-shared`(`.so`)**. Gradle 이
+> `jniLibs/<abi>/` 의 `.so` 를 자동 패키징, CMake 는 SHARED IMPORTED 로 링크.
+> Rust/Zig 는 `.a` 정적 링크. **Node**: Android NDK 로 가능하나 미배선(후속).
 
-```bash
-cd examples/android
-./build-lib.sh        # zig build lib -Dtarget=<abi>-linux-android → app/src/main/cpp/libs/<abi>/
-```
-
-기본 `arm64-v8a`. `./build-lib.sh x86_64` 로 에뮬레이터용도 추가 가능.
-C 헤더는 레포 [`include/suji_core.h`](../../include/suji_core.h) 를 CMake가 참조.
-
-## 2. 빌드 & 실행
+## 실행
 
 ```bash
-cd examples/android
-./build-lib.sh
-./gradlew installDebug      # 또는 Android Studio 로 open
+cd examples/android/<variant>
+ANDROID_NDK_HOME=... ./build-lib.sh        # 코어/Rust .a + Go .so 스테이징
+./gradlew installDebug                     # 또는 Android Studio 로 open
 ```
 
-## 동작
+> Gradle/Android 빌드는 사용자 Android 환경 필요(이 레포 CI/로컬에선 NDK
+> 컴파일·심볼만 검증). 백엔드 메커니즘은 `tests/mobile-backends`(호스트
+> 하니스, CI `mobile-backends` job)가 실증.
 
-- `app/src/main/cpp/suji_jni.c` — JNI: `nativeInit/nativeInvoke/nativeEmit/nativeDestroy`
-  + `nativeRegisterEvents` (suji_core_on 트램폴린 → JVM 콜백).
-- `app/src/main/cpp/CMakeLists.txt` — `libsuji_core.a` 를 IMPORTED STATIC 으로
-  링크해 `libsujihost.so` 생성.
-- `MainActivity.kt` — `WebView` + `@JavascriptInterface` 로 JS→네이티브,
-  네이티브→JS 는 `evaluateJavascript`.
-- `app/src/main/assets/web/index.html` — invoke 왕복 + `demo:tick` 이벤트 데모.
+## 구조
 
-## 한계 (현재)
+- `_shared/` — `cpp/suji_jni_core.c`(코어 JNI: init/invoke/emit/on/off +
+  Kotlin 핸들러 트램폴린 + 이벤트 + JNI_OnLoad 캐시), `java/`(SujiCore.kt /
+  MainActivity.kt: ping/counter Kotlin 데모 + `nativeRegisterStaticBackends`
+  호출), `AndroidManifest.xml`. 변형 gradle `sourceSets` 가 공유.
+- `<variant>/cpp/backends.c` — `nativeRegisterStaticBackends` 가 그 변형
+  백엔드만 `suji_core_register_handler` 로 등록. `(channel,json)→{"cmd":..}`
+  는 `include/suji_mobile_bridge.h` 공용(iOS·verify.c 와 동일).
+- 백엔드 소스: `examples/ios/backends/{rust,go,zig}` iOS·Android 공유.
 
-C ABI 표면은 `invoke/emit/on/off`만. 윈도우/clipboard/dialog 등 데스크톱
-네이티브 API는 CEF 호스트 전용이라 Android 에서는 동작하지 않는다.
-
-## 파일
-
-| 파일 | 역할 |
-|---|---|
-| `build-lib.sh` | `zig build lib -Dtarget=<abi>-linux-android` + `.a` 스테이징 |
-| `settings.gradle` / `build.gradle` | Gradle 프로젝트 |
-| `app/build.gradle` | NDK + CMake externalNativeBuild |
-| `app/src/main/cpp/CMakeLists.txt` | JNI `.so` ← `libsuji_core.a` 정적 링크 |
-| `app/src/main/cpp/suji_jni.c` | JNI ↔ C ABI 브리지 |
-| `app/src/main/java/.../MainActivity.kt` | WebView + JS 브리지 |
-| `app/src/main/assets/web/index.html` | 데모 프론트엔드 |
-| `app/src/main/AndroidManifest.xml` | 앱 메타 |
+API 차이: 모바일은 invoke/emit/on + 호스트 핸들러만. `windows.*`/`clipboard`/
+`dialog`/플러그인 등 데스크톱 네이티브 API·플러그인은 CEF 호스트 전용.

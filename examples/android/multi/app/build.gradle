@@ -1,0 +1,39 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace "dev.suji.examples.android"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "dev.suji.examples.android.multi"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+        ndk { abiFilters "arm64-v8a" }   // build-lib.sh ABI 와 일치
+        externalNativeBuild { cmake { arguments "-DANDROID_STL=c++_shared" } }
+    }
+
+    externalNativeBuild { cmake { path "../cpp/CMakeLists.txt" } }
+
+    // 호스트(Kotlin/manifest)는 _shared 공유, 변형은 backends/web 만 다름.
+    sourceSets {
+        main {
+            java.srcDirs = ["../../_shared/java"]
+            manifest.srcFile "../../_shared/AndroidManifest.xml"
+            assets.srcDirs = ["../web"]
+            jniLibs.srcDirs = ["../jniLibs"]   // build-lib.sh 가 Go .so 스테이징
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+}
+
+dependencies { implementation "androidx.appcompat:appcompat:1.7.0" }
