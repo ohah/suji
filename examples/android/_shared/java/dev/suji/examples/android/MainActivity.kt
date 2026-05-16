@@ -43,7 +43,9 @@ class MainActivity : Activity() {
         webView.settings.javaScriptEnabled = true
         webView.addJavascriptInterface(Bridge(), "SujiNative")
         setContentView(webView)
-        webView.loadUrl("file:///android_asset/web/index.html")
+        // Gradle assets.srcDirs=["../web"] 가 web/ 내용을 assets 루트로 병합 →
+        // 번들 경로는 assets/index.html (web/ 접두어 아님).
+        webView.loadUrl("file:///android_asset/index.html")
 
         ui.postDelayed(tick, 2000)
     }

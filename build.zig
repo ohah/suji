@@ -291,12 +291,16 @@ pub fn build(b: *std.Build) void {
     embed_module.addImport("events", events_module);
     embed_module.addImport("util", util_module);
 
+    // Android JNI 호스트(.so, -shared)에 정적 .a 링크 시 zig std threadlocal
+    // (Io.Threaded) Local-Exec TLS reloc 이 -shared 비호환(R_AARCH64_TLSLE_*).
+    // 동적 .so 면 GD TLS 라 회피. iOS(Mach-O)는 정적 .a 그대로 OK.
+    const lib_dynamic = b.option(bool, "lib-dynamic", "Build embed core as dynamic .so (Android JNI; --libc 로 Bionic 제공 필요)") orelse false;
     const embed_lib = b.addLibrary(.{
         .name = "suji_core",
         .root_module = embed_module,
-        .linkage = .static,
+        .linkage = if (lib_dynamic) .dynamic else .static,
     });
-    const embed_lib_step = b.step("lib", "Build CEF-free embeddable core static library");
+    const embed_lib_step = b.step("lib", "Build CEF-free embeddable core library (static; -Dlib-dynamic=.so)");
     embed_lib_step.dependOn(&b.addInstallArtifact(embed_lib, .{}).step);
 
     // Unit tests
