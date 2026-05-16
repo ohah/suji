@@ -20,6 +20,10 @@ bun.lock
 examples/*/Cargo.lock
 examples/*/backends/*/Cargo.lock
 
+# Mobile host 생성 아티팩트 (build-lib.sh / xcodegen 산출물)
+examples/ios/Vendor/
+examples/*/*.xcodeproj/
+
 # OS
 .DS_Store
 

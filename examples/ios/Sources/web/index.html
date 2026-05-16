@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Suji iOS</title>
+  <style>
+    body { font: 16px -apple-system, system-ui; padding: 2rem; color: #111; }
+    h1 { font-size: 1.4rem; letter-spacing: .02em; }
+    .row { margin: .8rem 0; }
+    code { background: #f2f2f7; padding: .15rem .4rem; border-radius: 4px; }
+    #ticks { font-variant-numeric: tabular-nums; color: #0a7; }
+  </style>
+</head>
+<body>
+  <h1>Suji iOS 호스트</h1>
+  <p>WKWebView ↔ <code>libsuji_core.a</code> C ABI 왕복 데모.</p>
+
+  <div class="row">JS → 네이티브 → 코어 invoke:
+    <strong id="invoke">…</strong>
+  </div>
+  <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
+    <span id="ticks">대기 중…</span>
+  </div>
+
+  <script>
+    // suji.invoke: 백엔드 미등록이라 코어가 "{}" 반환 — 라운드트립 자체가 검증 포인트.
+    suji.invoke("ping", { from: "ios" }).then(function (res) {
+      document.getElementById("invoke").textContent =
+        "응답 = " + JSON.stringify(res);
+    });
+
+    // suji.on: 호스트가 2초마다 suji_core_emit 으로 발행하는 틱 수신.
+    var n = 0;
+    suji.on("demo:tick", function (d) {
+      n++;
+      document.getElementById("ticks").textContent =
+        "tick #" + n + "  payload=" + JSON.stringify(d);
+    });
+  </script>
+</body>
+</html>

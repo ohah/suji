@@ -1,0 +1,32 @@
+name: SujiIOSExample
+
+options:
+  bundleIdPrefix: dev.suji.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  SujiIOSExample:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    info:
+      path: Sources/Info.plist
+      properties:
+        UILaunchStoryboardName: ""
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        # Swift ← C 헤더
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Suji-Bridging-Header.h
+        # 레포 include/ 의 suji_core.h 직접 참조
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/../../include
+        # build-lib.sh 가 스테이징한 코어 정적 라이브러리
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/Vendor
+        OTHER_LDFLAGS:
+          - -lsuji_core
+    dependencies: []
