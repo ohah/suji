@@ -12,6 +12,9 @@ object SujiCore {
     external fun nativeOff(id: Long)
     external fun nativeRegisterHandler(channel: String): Int
 
+    /// 정적 링크된 Rust(.a)/Go(.so) 백엔드를 채널에 등록 (iOS 와 동형).
+    external fun nativeRegisterStaticBackends()
+
     /// 네이티브 이벤트 수신 지점 (suji_jni.c event_trampoline 가 호출).
     /// 활성 호스트로 위임 — UI 스레드 전환은 호스트가 책임.
     @JvmStatic

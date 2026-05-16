@@ -448,10 +448,14 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
     `go:upper`(Go)가 실제 백엔드 왕복.
 
 **한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
-모바일 미동작. **iOS에서 Rust·Go 백엔드는 정적 링크로 동작**(언어별 고유 심볼 +
-`suji_core_register_handler`). **Node 만 iOS 미지원** — V8 JIT 가 iOS 코드서명
-샌드박스에서 금지(`.a` 정적 링크해도 런타임 코드 생성 불가). Android는 NDK 정적
-링크로 Rust/Go/Node 모두 가능하나 예제 미배선(후속).
+모바일 미동작. **iOS·Android 둘 다 Rust·Go 백엔드 동작**(언어별 고유 심볼
+`suji_rs_*`/`suji_go_*` + `suji_core_register_handler`). iOS=Rust staticlib
++ Go c-archive(둘 다 `.a` 정적 링크), Android=Rust `.a` 정적 + Go `.so`
+c-shared(Android는 Go c-archive 미지원 → JNI `.so`가 정적/공유 혼합 링크).
+`(channel,json)→{"cmd":..}` 브리지는 `include/suji_mobile_bridge.h` 공용
+(verify.c·JNI 공유, iOS는 Swift 동형). **Node 만 iOS 미지원** — V8 JIT 가
+iOS 코드서명 샌드박스에서 금지(정적 링크해도 런타임 코드 생성 불가).
+Android Node 는 NDK로 가능하나 예제 미배선(후속).
 
 ## 앱별 cache / 사용자 데이터 (Electron `app.getPath('userData')` 동등)
 

@@ -1466,15 +1466,23 @@ CEF import 0이라 분리선이 이미 존재했음.
         `examples/ios/backends/{rust(staticlib),go(c-archive)}` + Swift
         `Backends.swift`. 4타깃 심볼 네임스페이스 분리 검증(nm),
         데스크톱 dlopen·SDK 테스트 무회귀. (Node 제외 — V8 JIT iOS 불가.)
+  - [x] **Android Rust/Go 정적 백엔드** — iOS와 동형, 백엔드 소스 재사용
+        (`examples/ios/backends` 공유). Rust=`.a` 정적, Go=`.so` c-shared
+        (Android는 Go c-archive 미지원 → JNI `.so`가 정적/공유 혼합 링크,
+        Gradle jniLibs 자동 패키징). `suji_jni.c`가 `suji_core_register_handler`
+        로 등록, `(channel,json)→{"cmd":..}` 브리지는 `include/suji_mobile_bridge.h`
+        공용(verify.c·JNI 공유, 동일 C 중복 제거). NDK 컴파일·심볼 검증,
+        tests/mobile-backends 하니스 ALL PASS.
 
 ### 한계 / 후속
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).
-- **iOS: Rust·Go 백엔드 정적 링크 동작** (위 체크 항목). **Node 만 iOS 미지원**
-  — V8 JIT 이 iOS 코드서명 샌드박스에서 금지(`.a` 정적 링크해도 런타임 코드 생성
-  불가, `--jitless`는 비실용). **Android는 Rust/Go/Node 전부 NDK로 가능하나 예제
-  미배선** — iOS와 동형(고유 심볼 + register_handler)으로 후속.
+- **iOS·Android 둘 다 Rust·Go 백엔드 동작** (위 체크 항목). **Node 만 iOS
+  미지원** — V8 JIT 이 iOS 코드서명 샌드박스에서 금지(정적 링크해도 런타임 코드
+  생성 불가, `--jitless`는 비실용). **Android Node 는 NDK로 가능하나 예제 미배선**
+  (후속). 모바일 런타임(Xcode/Gradle 디바이스 빌드)은 로컬 검증 불가 — 메커니즘은
+  tests/mobile-backends 호스트 하니스로 실증.
 - 렌더러 eval은 in-process Zig 호스트가 `embed.eventBus().webview_eval` 직접
   주입. 비-Zig 호스트(모바일)용 C ABI eval 셋터는 미도입(후속).
 

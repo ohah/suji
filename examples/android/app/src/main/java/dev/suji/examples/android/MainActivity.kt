@@ -36,6 +36,8 @@ class MainActivity : Activity() {
         // 백엔드 없는 모바일에서 invoke 를 네이티브로 응답.
         SujiCore.nativeRegisterHandler("ping")
         SujiCore.nativeRegisterHandler("counter:inc")
+        // 정적 링크 Rust/Go 백엔드 (greet/add=Rust, go:ping/go:upper=Go)
+        SujiCore.nativeRegisterStaticBackends()
 
         webView = WebView(this)
         webView.settings.javaScriptEnabled = true

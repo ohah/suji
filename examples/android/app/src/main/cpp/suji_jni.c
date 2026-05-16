@@ -1,10 +1,12 @@
 // JNI ↔ Suji 코어 C ABI 브리지.
 // Kotlin SujiCore 의 external 함수 ↔ libsuji_core.a (정적 링크).
 
+#include <android/log.h>
 #include <jni.h>
 #include <stdlib.h>
 #include <string.h>
 #include "suji_core.h"
+#include "suji_mobile_bridge.h" // (channel,json)→{"cmd":...} 공용 (verify.c와 공유)
 
 static JavaVM *g_vm = NULL;
 // 트램폴린 hot path 비용 제거 — JNI_OnLoad 1회 캐싱 (FindClass/GetStaticMethodID
@@ -158,4 +160,53 @@ Java_dev_suji_examples_android_SujiCore_nativeRegisterHandler(
     int rc = suji_core_register_handler(ch, host_invoke_trampoline, host_free_trampoline);
     (*env)->ReleaseStringUTFChars(env, channel, ch);
     return rc;
+}
+
+// ── 정적 링크된 Rust/Go 백엔드 (iOS Backends.swift 와 동형) ──────────────
+// 고유 심볼: Rust=suji_rs_*(정적 .a), Go=suji_go_*(c-shared .so).
+extern char *suji_rs_backend_handle_ipc(const char *req);
+extern void suji_rs_backend_free(char *p);
+extern void suji_rs_backend_init(const void *core);
+extern char *suji_go_backend_handle_ipc(const char *req);
+extern void suji_go_backend_free(char *p);
+extern void suji_go_backend_init(const void *core);
+
+static const char *rust_backend_h(const char *ch, const char *j) {
+    char *q = suji_mobile_bridge(ch, j);
+    if (!q) return NULL; // OOM → 코어가 "{}" 폴백
+    char *r = suji_rs_backend_handle_ipc(q);
+    free(q);
+    return r;
+}
+static void rust_backend_f(const char *p) { suji_rs_backend_free((char *)p); }
+
+static const char *go_backend_h(const char *ch, const char *j) {
+    char *q = suji_mobile_bridge(ch, j);
+    if (!q) return NULL;
+    char *r = suji_go_backend_handle_ipc(q);
+    free(q);
+    return r;
+}
+static void go_backend_f(const char *p) { suji_go_backend_free((char *)p); }
+
+static void reg_backend(const char *ch,
+                        const char *(*h)(const char *, const char *),
+                        void (*f)(const char *)) {
+    if (suji_core_register_handler(ch, h, f) != 0) {
+        __android_log_print(ANDROID_LOG_WARN, "suji",
+                            "register_handler failed: %s", ch);
+    }
+}
+
+JNIEXPORT void JNICALL
+Java_dev_suji_examples_android_SujiCore_nativeRegisterStaticBackends(
+    JNIEnv *env, jclass clazz) {
+    (void)env;
+    (void)clazz;
+    suji_rs_backend_init(NULL); // cross-call 미사용 → null core
+    suji_go_backend_init(NULL);
+    reg_backend("greet", rust_backend_h, rust_backend_f);
+    reg_backend("add", rust_backend_h, rust_backend_f);
+    reg_backend("go:ping", go_backend_h, go_backend_f);
+    reg_backend("go:upper", go_backend_h, go_backend_f);
 }

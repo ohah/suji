@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "suji_core.h"
+#include "suji_mobile_bridge.h" // (channel,json)→{"cmd":...} 공용 (JNI와 공유)
 
 // 정적 링크된 백엔드의 언어 고유 진입점.
 extern char *suji_rs_backend_handle_ipc(const char *req);
@@ -23,28 +24,9 @@ extern char *suji_go_backend_handle_ipc(const char *req);
 extern void suji_go_backend_free(char *p);
 extern void suji_go_backend_init(const void *core);
 
-// (channel,json) → {"cmd":"<channel>", <json 본문>} 브리지.
-// Backends.swift bridgeRequest 의 경량 문자열 조립 버전.
-static char *bridge(const char *ch, const char *json) {
-    // non-empty 분기는 json 이 well-formed 단일객체(`{...}`)라 가정 — json 자체의
-    // 닫는 `}` 가 결과를 닫는다. 비-객체/공백시작은 empty 분기로 흘림.
-    // +32: 포맷 고정부(`{"cmd":"",`+NUL) 여유 (실사용은 strlen(json)-1).
-    int empty = json == NULL || strcmp(json, "{}") == 0 || json[0] != '{';
-    size_t n = strlen(ch) + (json ? strlen(json) : 0) + 32;
-    char *buf = malloc(n);
-    if (!buf) {
-        perror("malloc");
-        abort();
-    }
-    if (empty)
-        snprintf(buf, n, "{\"cmd\":\"%s\"}", ch);
-    else
-        snprintf(buf, n, "{\"cmd\":\"%s\",%s", ch, json + 1); // json+1: skip '{'
-    return buf;
-}
-
 static const char *rust_h(const char *ch, const char *j) {
-    char *q = bridge(ch, j);
+    char *q = suji_mobile_bridge(ch, j);
+    if (!q) return NULL;
     char *r = suji_rs_backend_handle_ipc(q);
     free(q);
     return r;
@@ -52,7 +34,8 @@ static const char *rust_h(const char *ch, const char *j) {
 static void rust_f(const char *p) { suji_rs_backend_free((char *)p); }
 
 static const char *go_h(const char *ch, const char *j) {
-    char *q = bridge(ch, j);
+    char *q = suji_mobile_bridge(ch, j);
+    if (!q) return NULL;
     char *r = suji_go_backend_handle_ipc(q);
     free(q);
     return r;

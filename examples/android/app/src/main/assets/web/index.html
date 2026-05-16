@@ -43,10 +43,14 @@
   <p>WebView ↔ JNI ↔ <code>libsuji_core.a</code> 왕복 데모.</p>
 
   <div class="row">
-    <button id="ping">invoke("ping")</button>
-    <button id="inc">invoke("counter:inc")</button>
+    <button id="ping">ping (Kotlin)</button>
+    <button id="inc">counter:inc (Kotlin)</button>
+    <button id="greet">greet (Rust)</button>
+    <button id="add">add (Rust)</button>
+    <button id="goping">go:ping (Go)</button>
+    <button id="goupper">go:upper (Go)</button>
   </div>
-  <div class="row">응답 (Kotlin 네이티브 핸들러): <strong id="out">…</strong></div>
+  <div class="row">응답: <strong id="out">…</strong></div>
   <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
     <span id="ticks">대기 중…</span>
   </div>
@@ -64,6 +68,18 @@
         out.textContent = "counter → " + JSON.stringify(r);
       });
     };
+    // 정적 링크 Rust/Go 백엔드 (nativeRegisterStaticBackends).
+    function call(id, ch, payload) {
+      document.getElementById(id).onclick = function () {
+        suji.invoke(ch, payload).then(function (r) {
+          out.textContent = ch + " → " + JSON.stringify(r);
+        });
+      };
+    }
+    call("greet", "greet", { name: "Suji" });
+    call("add", "add", { a: 19, b: 23 });
+    call("goping", "go:ping", {});
+    call("goupper", "go:upper", { s: "hello android" });
     var n = 0;
     suji.on("demo:tick", function (d) {
       n++;
