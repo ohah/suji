@@ -96,7 +96,7 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, command, "dev")) {
         try runDev(allocator);
     } else if (std.mem.eql(u8, command, "build")) {
-        try runBuild(allocator);
+        try runBuild(allocator, args[2..]);
     } else if (std.mem.eql(u8, command, "run")) {
         try runProd(allocator);
     } else {
@@ -207,7 +207,27 @@ fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void 
 // ============================================
 // suji dev
 // ============================================
-fn runBuild(allocator: std.mem.Allocator) !void {
+/// `--flag=value` 또는 `--flag value` 형태에서 값 추출. 없으면 null.
+fn flagValue(args: []const [:0]const u8, flag: []const u8) ?[]const u8 {
+    for (args, 0..) |a, i| {
+        if (std.mem.startsWith(u8, a, flag) and a.len > flag.len and a[flag.len] == '=')
+            return a[flag.len + 1 ..];
+        if (std.mem.eql(u8, a, flag) and i + 1 < args.len) return args[i + 1];
+    }
+    return null;
+}
+
+fn hasFlag(args: []const [:0]const u8, flag: []const u8) bool {
+    for (args) |a| if (std.mem.eql(u8, a, flag)) return true;
+    return false;
+}
+
+/// 플래그 우선, 없으면 env 폴백 (CI 는 secret 을 env 로 주입).
+fn flagOrEnv(args: []const [:0]const u8, flag: []const u8, env_name: []const u8) ?[]const u8 {
+    return flagValue(args, flag) orelse runtime.env(env_name);
+}
+
+fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     var config = suji.Config.load(allocator) catch {
         std.debug.print("Error: suji.toml or suji.json not found.\n", .{});
         return;
@@ -215,6 +235,15 @@ fn runBuild(allocator: std.mem.Allocator) !void {
     defer config.deinit();
 
     std.debug.print("[suji] production build - {s}\n", .{config.app.name});
+
+    // 서명/공증/패키징 옵션 (zero-native `--signing/--identity` 패리티).
+    // 플래그 > env(CI secret) 우선. 기본 adhoc(기존 동작 유지).
+    const sign_str = flagOrEnv(args, "--sign", "SUJI_SIGN") orelse "adhoc";
+    const signing: bundle_macos.SigningMode =
+        if (std.mem.eql(u8, sign_str, "none")) .none else if (std.mem.eql(u8, sign_str, "identity")) .identity else .adhoc;
+    const identity = flagOrEnv(args, "--identity", "SUJI_SIGN_IDENTITY");
+    const want_notarize = hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
+    const want_dmg = hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
 
     // 백엔드 릴리스 빌드
     try buildBackendsFromConfig(allocator, &config, true);
@@ -255,8 +284,32 @@ fn runBuild(allocator: std.mem.Allocator) !void {
             .user_entitlements = config.app.entitlements,
             .locales = locales_slice,
             .strip_cef = config.app.strip_cef,
+            .signing = signing,
+            .identity = identity,
         },
     );
+
+    // 공증 (identity 서명 + hardened runtime 전제). 자격증명은 env secret.
+    if (want_notarize) {
+        bundle_macos.notarizeBundle(allocator, config.app.name, .{
+            .apple_id = runtime.env("SUJI_NOTARIZE_APPLE_ID"),
+            .team_id = runtime.env("SUJI_NOTARIZE_TEAM_ID"),
+            .password = runtime.env("SUJI_NOTARIZE_PASSWORD"),
+            .keychain_profile = runtime.env("SUJI_NOTARIZE_KEYCHAIN_PROFILE"),
+        }) catch |err| {
+            std.debug.print("[suji] notarize failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
+    }
+
+    // 배포용 .dmg.
+    if (want_dmg) {
+        const dmg = bundle_macos.createDmg(allocator, config.app.name, config.app.version) catch |err| {
+            std.debug.print("[suji] dmg failed: {s}\n", .{@errorName(err)});
+            return err;
+        };
+        allocator.free(dmg);
+    }
 }
 
 // ============================================

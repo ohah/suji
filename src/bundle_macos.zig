@@ -19,6 +19,25 @@ const Dir = std.Io.Dir;
 /// │   │   └── {name} Helper (Plugin).app/
 /// │   └── Resources/
 /// │       └── frontend/           ← 프론트엔드 빌드 결과
+/// 코드 서명 모드 (zero-native `--signing` 패리티).
+/// - none: 서명 생략 (로컬 빌드/검증용).
+/// - adhoc: ad-hoc 서명 (`codesign --sign -`) — 기본, 배포 불가하나 로컬 실행 OK.
+/// - identity: Developer ID 서명 + hardened runtime(`--options runtime`) +
+///   secure timestamp(`--timestamp`) — 공증/배포 전제.
+pub const SigningMode = enum { none, adhoc, identity };
+
+/// 공증 자격증명 (xcrun notarytool). app-specific password 또는 keychain
+/// profile 둘 중 하나. CI 는 secret env 로 주입.
+pub const NotarizeCreds = struct {
+    apple_id: ?[]const u8 = null,
+    team_id: ?[]const u8 = null,
+    /// app-specific password (apple_id 와 함께).
+    password: ?[]const u8 = null,
+    /// `xcrun notarytool store-credentials` 로 저장한 keychain profile 이름
+    /// (apple_id/password 대신 사용 가능, 우선).
+    keychain_profile: ?[]const u8 = null,
+};
+
 pub const BundleOptions = struct {
     /// 사용자 추가 entitlements plist 경로. 비어있으면 Suji default helper별 entitlements
     /// (assets/entitlements/{main,helper,helper-{gpu,renderer,plugin}}.plist) 자동 부착.
@@ -30,6 +49,11 @@ pub const BundleOptions = struct {
     /// CEF framework binary strip — debug symbols 제거로 ~30MB 절약. default true.
     /// 디버깅 필요 시 `false`.
     strip_cef: bool = true,
+    /// 서명 모드. 기본 adhoc(기존 동작 유지 — 하위호환).
+    signing: SigningMode = .adhoc,
+    /// identity 모드의 서명 ID (예: "Developer ID Application: Acme (TEAMID)").
+    /// signing == .identity 인데 null 이면 error.MissingSigningIdentity.
+    identity: ?[]const u8 = null,
 };
 
 pub fn createBundle(
@@ -285,7 +309,12 @@ fn fixMainBinaryRpath(allocator: std.mem.Allocator, app_name: []const u8, name: 
 }
 
 fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, opts: BundleOptions) !void {
-    std.debug.print("[suji] code signing...\n", .{});
+    if (opts.signing == .none) {
+        std.debug.print("[suji] code signing skipped (--sign=none)\n", .{});
+        return;
+    }
+    if (opts.signing == .identity and opts.identity == null) return error.MissingSigningIdentity;
+    std.debug.print("[suji] code signing ({s})...\n", .{@tagName(opts.signing)});
 
     // entitlements 디렉토리는 5번 codesign 호출에서 같으니 한 번만 resolve.
     var exe_buf: [1024]u8 = undefined;
@@ -299,7 +328,7 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     // 1. CEF 프레임워크 — entitlements 없이 (receiver process가 inherit).
     const fw = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/Chromium Embedded Framework.framework", .{app_name});
     defer allocator.free(fw);
-    try codesignNoEntitlements(allocator, fw);
+    try codesignNoEntitlements(allocator, fw, opts);
 
     // 2. Helper 앱들 — helper별 적절 entitlements.
     const helpers = [_]struct { suffix: []const u8, plist: []const u8 }{
@@ -321,12 +350,30 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     try codesignWithEntitlements(allocator, app_name, "main.plist", opts, entitlements_dir);
 }
 
-fn codesignNoEntitlements(allocator: std.mem.Allocator, path: []const u8) !void {
-    try runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", path });
+/// 서명 ID — adhoc="-", identity=opts.identity (none 은 호출 전 차단됨).
+fn signId(opts: BundleOptions) []const u8 {
+    return if (opts.signing == .identity) opts.identity.? else "-";
+}
+
+/// codesign argv 조립 후 실행. identity 모드면 hardened runtime + secure
+/// timestamp 부착(공증 전제). entitlements null 이면 미부착.
+fn runCodesign(allocator: std.mem.Allocator, path: []const u8, entitlements: ?[]const u8, opts: BundleOptions) !void {
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &.{ "codesign", "--force", "--sign", signId(opts) });
+    if (opts.signing == .identity) try argv.appendSlice(allocator, &.{ "--options", "runtime", "--timestamp" });
+    if (entitlements) |e| try argv.appendSlice(allocator, &.{ "--entitlements", e });
+    try argv.append(allocator, path);
+    try runCmd(allocator, argv.items);
+}
+
+fn codesignNoEntitlements(allocator: std.mem.Allocator, path: []const u8, opts: BundleOptions) !void {
+    try runCodesign(allocator, path, null, opts);
 }
 
 /// user_entitlements 지정 시 그것 모든 binary에 단독, 없으면 entitlements_dir/<plist>.
-/// entitlements_dir이 null (executablePath 실패) 시 entitlements 없이 ad-hoc sign.
+/// entitlements_dir이 null (executablePath 실패) 시 entitlements 없이 sign.
+/// identity 모드는 fallback(entitlements 없이) 시에도 hardened runtime 유지.
 fn codesignWithEntitlements(
     allocator: std.mem.Allocator,
     path: []const u8,
@@ -335,20 +382,20 @@ fn codesignWithEntitlements(
     entitlements_dir: ?[]const u8,
 ) !void {
     if (opts.user_entitlements) |user_path| {
-        runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", user_path, path }) catch {
-            try codesignNoEntitlements(allocator, path);
+        runCodesign(allocator, path, user_path, opts) catch {
+            try codesignNoEntitlements(allocator, path, opts);
         };
         return;
     }
     const dir = entitlements_dir orelse {
-        try codesignNoEntitlements(allocator, path);
+        try codesignNoEntitlements(allocator, path, opts);
         return;
     };
     const entitlements = try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ dir, plist_filename });
     defer allocator.free(entitlements);
 
-    runCmd(allocator, &.{ "codesign", "--force", "--sign", "-", "--entitlements", entitlements, path }) catch {
-        try codesignNoEntitlements(allocator, path);
+    runCodesign(allocator, path, entitlements, opts) catch {
+        try codesignNoEntitlements(allocator, path, opts);
     };
 }
 
@@ -373,4 +420,57 @@ fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
         .exited => |code| if (code != 0) return error.CommandFailed,
         else => return error.CommandFailed,
     }
+}
+
+/// Apple 공증 — `<name>.app` 을 zip 후 notarytool 제출(--wait, 동기 차단)
+/// 하고 성공 시 ticket 을 stapler 로 부착(오프라인 Gatekeeper 통과).
+/// identity 서명(hardened runtime) 된 번들이어야 통과 — 호출자 책임.
+/// creds: keychain_profile 우선, 없으면 apple_id+team_id+password 필수.
+pub fn notarizeBundle(allocator: std.mem.Allocator, name: []const u8, creds: NotarizeCreds) !void {
+    const app = try std.fmt.allocPrint(allocator, "{s}.app", .{name});
+    defer allocator.free(app);
+    const zip = try std.fmt.allocPrint(allocator, "{s}.notarize.zip", .{name});
+    defer allocator.free(zip);
+
+    std.debug.print("[suji] notarize: zipping {s}...\n", .{app});
+    try runCmd(allocator, &.{ "ditto", "-c", "-k", "--keepParent", app, zip });
+
+    var argv: std.ArrayList([]const u8) = .empty;
+    defer argv.deinit(allocator);
+    try argv.appendSlice(allocator, &.{ "xcrun", "notarytool", "submit", zip, "--wait" });
+    if (creds.keychain_profile) |p| {
+        try argv.appendSlice(allocator, &.{ "--keychain-profile", p });
+    } else {
+        const id = creds.apple_id orelse return error.MissingNotarizeCredentials;
+        const team = creds.team_id orelse return error.MissingNotarizeCredentials;
+        const pw = creds.password orelse return error.MissingNotarizeCredentials;
+        try argv.appendSlice(allocator, &.{ "--apple-id", id, "--team-id", team, "--password", pw });
+    }
+    std.debug.print("[suji] notarize: submitting (this may take minutes)...\n", .{});
+    try runCmd(allocator, argv.items);
+
+    std.debug.print("[suji] notarize: stapling ticket...\n", .{});
+    try runCmd(allocator, &.{ "xcrun", "stapler", "staple", app });
+    std.debug.print("[suji] notarized: {s}\n", .{app});
+}
+
+/// 배포용 .dmg 생성 (압축 UDZO). 반환 경로는 caller 가 free.
+pub fn createDmg(allocator: std.mem.Allocator, name: []const u8, version: []const u8) ![]const u8 {
+    const app = try std.fmt.allocPrint(allocator, "{s}.app", .{name});
+    defer allocator.free(app);
+    const dmg = try std.fmt.allocPrint(allocator, "{s}-{s}.dmg", .{ name, version });
+    errdefer allocator.free(dmg);
+
+    std.debug.print("[suji] creating dmg: {s}\n", .{dmg});
+    // 기존 산출물 있으면 hdiutil 이 거부 → 선제 제거.
+    runCmd(allocator, &.{ "rm", "-f", dmg }) catch {};
+    try runCmd(allocator, &.{
+        "hdiutil",      "create",
+        "-volname",     name,
+        "-srcfolder",   app,
+        "-ov",          "-format",
+        "UDZO",         dmg,
+    });
+    std.debug.print("[suji] dmg created: {s}\n", .{dmg});
+    return dmg;
 }
