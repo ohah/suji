@@ -20,9 +20,15 @@ bun.lock
 examples/*/Cargo.lock
 examples/*/backends/*/Cargo.lock
 
-# Mobile host 생성 아티팩트 (build-lib.sh / xcodegen 산출물)
+# Mobile host 생성 아티팩트 (build-lib.sh / xcodegen / gradle 산출물)
 examples/ios/Vendor/
 examples/*/*.xcodeproj/
+examples/android/app/src/main/cpp/libs/
+examples/android/.gradle/
+examples/android/build/
+examples/android/app/build/
+examples/android/app/.cxx/
+examples/android/local.properties
 
 # OS
 .DS_Store

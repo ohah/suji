@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Suji Android</title>
+  <style>
+    body { font: 16px system-ui, sans-serif; padding: 2rem; color: #111; }
+    h1 { font-size: 1.4rem; }
+    .row { margin: .8rem 0; }
+    code { background: #eee; padding: .15rem .4rem; border-radius: 4px; }
+    #ticks { font-variant-numeric: tabular-nums; color: #0a7; }
+  </style>
+  <script>
+    // 브리지 shim — 인라인 최상단이라 아래 앱 스크립트보다 먼저 실행됨.
+    // window.SujiNative 는 addJavascriptInterface 로 페이지 로드 시 주입됨.
+    (function () {
+      var _id = 0, _pending = {}, _listeners = {};
+      function invoke(channel, payload) {
+        return new Promise(function (res) {
+          var id = ++_id; _pending[id] = res;
+          window.SujiNative.invoke(id, String(channel),
+            JSON.stringify(payload === undefined ? {} : payload));
+        });
+      }
+      function __resolve__(id, json) {
+        var r = _pending[id]; if (!r) return; delete _pending[id];
+        try { r(json ? JSON.parse(json) : null); } catch (e) { r(json); }
+      }
+      function on(name, cb) { (_listeners[name] = _listeners[name] || []).push(cb); }
+      function __emit__(name, json) {
+        var ls = _listeners[name]; if (!ls) return;
+        var d; try { d = json ? JSON.parse(json) : null; } catch (e) { d = json; }
+        ls.forEach(function (f) { try { f(d); } catch (e) {} });
+      }
+      var api = { invoke: invoke, on: on, __resolve__: __resolve__, __emit__: __emit__ };
+      window.__suji__ = api; window.suji = api;
+    })();
+  </script>
+</head>
+<body>
+  <h1>Suji Android 호스트</h1>
+  <p>WebView ↔ JNI ↔ <code>libsuji_core.a</code> 왕복 데모.</p>
+
+  <div class="row">JS → JNI → 코어 invoke:
+    <strong id="invoke">…</strong>
+  </div>
+  <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
+    <span id="ticks">대기 중…</span>
+  </div>
+
+  <script>
+    suji.invoke("ping", { from: "android" }).then(function (res) {
+      document.getElementById("invoke").textContent = "응답 = " + JSON.stringify(res);
+    });
+    var n = 0;
+    suji.on("demo:tick", function (d) {
+      n++;
+      document.getElementById("ticks").textContent =
+        "tick #" + n + "  payload=" + JSON.stringify(d);
+    });
+  </script>
+</body>
+</html>

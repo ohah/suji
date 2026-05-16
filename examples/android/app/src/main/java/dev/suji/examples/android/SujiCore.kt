@@ -1,0 +1,20 @@
+package dev.suji.examples.android
+
+/// libsujihost.so (정적 링크된 libsuji_core.a) 의 JNI 바인딩.
+object SujiCore {
+    init { System.loadLibrary("sujihost") }
+
+    external fun nativeInit(): Int
+    external fun nativeDestroy()
+    external fun nativeInvoke(channel: String, json: String): String
+    external fun nativeEmit(event: String, json: String)
+    external fun nativeRegisterEvents(event: String): Long
+    external fun nativeOff(id: Long)
+
+    /// 네이티브 이벤트 수신 지점 (suji_jni.c event_trampoline 가 호출).
+    /// 활성 호스트로 위임 — UI 스레드 전환은 호스트가 책임.
+    @JvmStatic
+    fun onNativeEvent(name: String, data: String) {
+        MainActivity.active?.emitToJs(name, data)
+    }
+}
