@@ -21,8 +21,9 @@ examples/*/Cargo.lock
 examples/*/backends/*/Cargo.lock
 
 # Mobile host 생성 아티팩트 (build-lib.sh / xcodegen / gradle 산출물)
-examples/ios/Vendor/
+examples/ios/*/Vendor/
 examples/*/*.xcodeproj/
+examples/ios/*/*.xcodeproj/
 examples/android/app/src/main/cpp/libs/
 examples/android/.gradle/
 examples/android/build/

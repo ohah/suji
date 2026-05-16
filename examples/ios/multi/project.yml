@@ -1,4 +1,4 @@
-name: SujiIOSExample
+name: SujiIOSMulti
 
 options:
   bundleIdPrefix: dev.suji.examples
@@ -6,34 +6,31 @@ options:
     iOS: "15.0"
 
 targets:
-  SujiIOSExample:
+  SujiIOSMulti:
     type: application
     platform: iOS
     sources:
-      - path: Sources
+      - path: ../_shared      # 공유 호스트(AppDelegate/VC/bridging/Info)
+      - path: Backends.swift  # 변형별 백엔드 등록 (Rust+Go)
+      - path: web             # 번들 프론트엔드
     info:
-      path: Sources/Info.plist
+      path: ../_shared/Info.plist
       properties:
         UILaunchStoryboardName: ""
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
     settings:
       base:
-        # Swift ← C 헤더
-        SWIFT_OBJC_BRIDGING_HEADER: Sources/Suji-Bridging-Header.h
-        # 레포 include/ 의 suji_core.h 직접 참조
+        SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
         HEADER_SEARCH_PATHS:
-          - $(SRCROOT)/../../include
-        # build-lib.sh 가 스테이징한 코어 + Rust/Go 정적 백엔드
+          - $(SRCROOT)/../../../include
         LIBRARY_SEARCH_PATHS:
           - $(SRCROOT)/Vendor
         OTHER_LDFLAGS:
           - -lsuji_core
           - -lsuji_rs_backend
           - -lsuji_go_backend
-          # Go c-archive 런타임 의존
           - -lresolv
     dependencies:
-      # Go 런타임(darwin)이 요구하는 시스템 프레임워크
       - sdk: CoreFoundation.framework
       - sdk: Security.framework

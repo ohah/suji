@@ -1,0 +1,32 @@
+name: SujiIOSRust
+
+options:
+  bundleIdPrefix: dev.suji.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  SujiIOSRust:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../_shared      # 공유 호스트
+      - path: Backends.swift  # Rust 만 등록
+      - path: web
+    info:
+      path: ../_shared/Info.plist
+      properties:
+        UILaunchStoryboardName: ""
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/../../../include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/Vendor
+        OTHER_LDFLAGS:
+          - -lsuji_core
+          - -lsuji_rs_backend
+    # Go 미링크 → CoreFoundation/Security/-lresolv 불필요

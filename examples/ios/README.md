@@ -1,63 +1,39 @@
-# Suji iOS 호스트 예제
+# Suji iOS 예제 (언어별)
 
-CEF 무관 Suji 코어(`libsuji_core.a`)를 iOS 앱에 임베드하는 최소 호스트.
-Swift가 `WKWebView`를 띄우고 `suji_core_*` C ABI를 호출, 프론트엔드의
-`window.__suji__.invoke()` ↔ 네이티브를 왕복한다.
+PC 예제(`examples/{rust,go,multi}-backend`)에 대응하는 iOS 호스트들.
+모바일은 `suji dev`/CEF/dlopen 이 없어 **호스트 셸에 정적 링크**한다 — 그래서
+"언어별"은 별도 앱이 아니라 *어떤 백엔드를 링크/등록하느냐*의 차이다.
+Xcode 스캐폴딩 중복을 피하려고 호스트 소스를 [`_shared/`](./_shared)에 두고
+변형은 thin(`project.yml` + `Backends.swift` + `web/`)으로 둔다.
 
-> 데스크톱은 CEF가 창/렌더러를 들지만, iOS에는 CEF가 안 들어간다.
-> 대신 OS의 `WKWebView`가 렌더러, Suji 코어는 정적 라이브러리로 임베드된다.
+| 변형 | 백엔드 | 빌드 |
+|---|---|---|
+| [`multi/`](./multi) | Rust + Go + Swift 네이티브 | `multi/build-lib.sh` |
+| [`rust/`](./rust) | Rust(`.a`) + Swift 네이티브 | `rust/build-lib.sh` |
+| `go/` | (후속) Go(`.a` c-archive) | iOS와 동형, multi 에서 Go 만 |
+| `zig/` | (후속) Zig staticlib 백엔드 | |
 
-## 1. 코어 정적 라이브러리 빌드
+> **Node 는 iOS 미지원** — V8 JIT 가 iOS 코드서명 샌드박스에서 금지. (정적
+> 링크해도 런타임 코드 생성 불가, `--jitless` 비실용.)
 
-레포 루트에서 (또는 `examples/ios/build-lib.sh` 실행):
-
-```bash
-zig build lib -Dtarget=aarch64-ios -Doptimize=ReleaseSafe
-mkdir -p examples/ios/Vendor
-cp zig-out/lib/libsuji_core.a examples/ios/Vendor/
-```
-
-C 헤더는 레포의 [`include/suji_core.h`](../../include/suji_core.h)를 그대로 쓴다
-(Xcode 프로젝트가 header search path로 참조).
-
-## 2. Xcode 프로젝트 생성
-
-손으로 관리하기 어려운 `.xcodeproj` 대신 [XcodeGen](https://github.com/yonaskolb/XcodeGen)
-스펙(`project.yml`)으로 생성한다:
+## 실행
 
 ```bash
-brew install xcodegen          # 최초 1회
-cd examples/ios
-./build-lib.sh                 # 코어 .a 빌드 + 스테이징
-xcodegen generate              # project.yml → SujiIOSExample.xcodeproj
-open SujiIOSExample.xcodeproj
+brew install xcodegen                       # 최초 1회
+cd examples/ios/<variant>
+./build-lib.sh                              # 코어+백엔드 .a 스테이징(Vendor/)
+xcodegen generate && open *.xcodeproj       # 시뮬레이터 실행
 ```
 
-시뮬레이터(arm64) 또는 디바이스 선택 후 `SujiIOSExample` 스킴 실행.
+## 구조
 
-## 3. 동작
+- `_shared/` — AppDelegate / SujiHostViewController(WKWebView+`suji_core_*` +
+  ping/counter Swift 데모 + `demo:tick` 이벤트) / Suji-Bridging-Header.h / Info.plist.
+  모든 변형이 `project.yml` 의 `sources: ../_shared` 로 공유.
+- `<variant>/Backends.swift` — `registerStaticBackends()` 가 그 변형의 백엔드만
+  `suji_core_register_handler` 로 등록. `(channel,json)→{"cmd":..}` 브리지 포함.
+- `backends/{rust,go}` — iOS·Android 공유 백엔드 소스(언어 고유 심볼
+  `suji_rs_*`/`suji_go_*`). 메커니즘은 `tests/mobile-backends` 가 호스트 실증.
 
-- `Sources/SujiHostViewController.swift` — `WKWebView` 호스팅, `suji_core_init()`,
-  `WKScriptMessageHandler`로 JS→네이티브, `suji_core_on`으로 네이티브→JS 이벤트.
-- `Sources/web/index.html` — `window.__suji__.invoke("ping")` 왕복 + 이벤트 수신
-  데모 (번들러 없이 인라인 로드).
-- `Sources/Suji-Bridging-Header.h` — `suji_core.h`를 Swift로 노출.
-
-## 파일
-
-| 파일 | 역할 |
-|---|---|
-| `project.yml` | XcodeGen 프로젝트 스펙 (target/링크/bridging header) |
-| `build-lib.sh` | `zig build lib -Dtarget=aarch64-ios` + `.a` 스테이징 |
-| `Sources/AppDelegate.swift` | UIApplication 진입 |
-| `Sources/SujiHostViewController.swift` | WKWebView + C ABI 브릿지 |
-| `Sources/Suji-Bridging-Header.h` | C 헤더 → Swift |
-| `Sources/web/index.html` | 데모 프론트엔드 |
-| `Sources/Info.plist` | 앱 메타 |
-
-## 한계 (현재)
-
-C ABI 표면은 `invoke/emit/on/off`만. 윈도우/clipboard/dialog 등 데스크톱
-네이티브 API는 CEF 호스트 전용이라 iOS에서는 동작하지 않는다 (코어 라우팅과
-이벤트, 백엔드 invoke만 검증 가능). 렌더러 eval은 호스트가 `suji_core_on`
-콜백에서 `evaluateJavaScript`로 직접 펌핑한다.
+API 차이: 모바일은 invoke/emit/on + 호스트 핸들러만. `windows.*`/`clipboard`/
+`dialog`/플러그인 등 데스크톱 네이티브 API·플러그인은 CEF 호스트 전용.
