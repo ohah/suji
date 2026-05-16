@@ -33,4 +33,23 @@ android {
         targetCompatibility JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
+
+    // 릴리스 서명 — env(ANDROID_KEYSTORE_*) 주입 시에만 적용(없으면 unsigned
+    // release 유지 → keystore 없이도 빌드 가능). CI 가 secret 주입.
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig System.getenv("ANDROID_KEYSTORE_PATH") ? signingConfigs.release : null
+        }
+    }
 }

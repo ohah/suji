@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- xcodebuild -exportArchive 용 템플릿. archive-ios.sh 가 __METHOD__/
+     __TEAM_ID__ 를 env(SUJI_IOS_EXPORT_METHOD / SUJI_IOS_TEAM_ID)로 치환해
+     임시 복사본을 만든다(원본 토큰 유지 — 시크릿 미커밋). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>__METHOD__</string>
+  <key>teamID</key>
+  <string>__TEAM_ID__</string>
+  <key>signingStyle</key>
+  <string>automatic</string>
+  <key>stripSwiftSymbols</key>
+  <true/>
+  <key>uploadSymbols</key>
+  <true/>
+  <key>destination</key>
+  <string>export</string>
+</dict>
+</plist>

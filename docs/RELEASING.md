@@ -1,0 +1,98 @@
+# 릴리스 / 코드 서명 / 배포
+
+zero-native 패리티의 인-트리 Zig 서명·패키징 + GitHub Releases 자동화.
+
+## 버전 단일 출처
+
+`build.zig.zon` 의 `.version` 가 유일 출처. `scripts/version.sh` 가 추출,
+`scripts/version.sh --check vX.Y.Z` 로 태그 일치 검증(release.yml 이 태그
+푸시 시 자동 실행 — 불일치면 실패).
+
+릴리스 절차:
+1. `build.zig.zon` `.version` 갱신.
+2. `CHANGELOG.md` 의 `<!-- release:start -->`~`<!-- release:end -->` 블록 작성
+   (GitHub Release 본문으로 추출됨).
+3. `git tag vX.Y.Z && git push --tags` → release.yml 정식 릴리스.
+
+검증만(퍼블리시 X): Actions → release → Run workflow → `dry_run=true`
+(기본). 3-OS CLI 빌드/패키징 + 임베드 라이브러리 크로스빌드 + 아티팩트
+업로드까지 수행, GitHub Release 생성은 생략.
+
+## 데스크톱 서명 (`suji build`)
+
+사용자 앱 빌드 시 서명/공증/패키징 — zero-native `--signing` 패리티.
+플래그 > env(CI secret) 우선:
+
+```
+suji build --sign=identity --identity="Developer ID Application: Acme (TEAMID)" \
+           --notarize --dmg
+```
+
+| 플래그 | env | 의미 |
+|---|---|---|
+| `--sign=none\|adhoc\|identity` | `SUJI_SIGN` | 서명 모드(기본 adhoc) |
+| `--identity=<id>` | `SUJI_SIGN_IDENTITY` | identity 서명 ID |
+| `--notarize` | `SUJI_NOTARIZE` | xcrun notarytool + stapler |
+| `--dmg` | `SUJI_DMG` | hdiutil UDZO .dmg |
+| | `SUJI_NOTARIZE_APPLE_ID` / `SUJI_NOTARIZE_TEAM_ID` / `SUJI_NOTARIZE_PASSWORD` | 공증 자격증명 |
+| | `SUJI_NOTARIZE_KEYCHAIN_PROFILE` | 위 대신 notarytool keychain profile |
+| | `SUJI_WIN_SIGN_CERT` / `SUJI_WIN_SIGN_PASSWORD` | Windows signtool PFX |
+
+- macOS: `none`=서명 생략, `adhoc`=로컬 실행용(배포 불가), `identity`=
+  hardened runtime(`--options runtime`)+secure timestamp → 공증 전제.
+  공증은 `identity` 서명 필수.
+- Linux: `<name>-<ver>-linux-<arch>.tar.gz` (bin/ + resources/frontend +
+  `<name>.desktop`). 서명 없음(배포처 위임 — zero-native 동일).
+- Windows: `<name>-<ver>-windows-<arch>.zip`. `SUJI_WIN_SIGN_CERT` 있으면
+  signtool Authenticode 서명.
+
+## 모바일 서명 (배포)
+
+### Android (`examples/android/<variant>`)
+`app/build.gradle` 의 `signingConfigs.release` 가 env 주입 시에만 적용
+(없으면 unsigned release — keystore 없이도 빌드 가능):
+
+```
+ANDROID_KEYSTORE_PATH=/path/key.jks ANDROID_KEYSTORE_PASSWORD=... \
+ANDROID_KEY_ALIAS=... ANDROID_KEY_PASSWORD=... \
+  ./gradlew :app:bundleRelease   # 서명된 AAB
+```
+
+### iOS (`examples/ios/<variant>`)
+`_shared/archive-ios.sh` 가 archive+exportArchive(IPA):
+
+```
+SUJI_IOS_TEAM_ID=ABCDE12345 SUJI_IOS_EXPORT_METHOD=app-store \
+  examples/ios/_shared/archive-ios.sh multi
+# Apple 계정 없이 빌드 검증만:
+SUJI_IOS_UNSIGNED=1 examples/ios/_shared/archive-ios.sh zig
+```
+
+`project.yml` 은 `DEVELOPMENT_TEAM=${SUJI_IOS_TEAM_ID}`/`CODE_SIGN_STYLE=
+Automatic`(xcodegen env 치환). archive-ios.sh 가 xcodebuild 커맨드라인으로
+재차 override(권위). `exportOptions.plist` 의 `__METHOD__`/`__TEAM_ID__`
+토큰은 스크립트가 임시 치환(시크릿 미커밋).
+
+## GitHub Secrets 일람
+
+| Secret | 용도 | 사용처 |
+|---|---|---|
+| `MACOS_SIGN_IDENTITY` | suji CLI 바이너리 Developer ID 서명(선택) | release.yml cli(macOS) |
+| `SUJI_SIGN_IDENTITY` | 사용자 앱 identity 서명 | `suji build` (env) |
+| `SUJI_NOTARIZE_APPLE_ID` / `SUJI_NOTARIZE_TEAM_ID` / `SUJI_NOTARIZE_PASSWORD` | 공증 | `suji build --notarize` |
+| `SUJI_NOTARIZE_KEYCHAIN_PROFILE` | 공증(keychain profile 방식) | 〃 |
+| `SUJI_WIN_SIGN_CERT` / `SUJI_WIN_SIGN_PASSWORD` | Windows signtool PFX | `suji build`(Windows) |
+| `ANDROID_KEYSTORE_PATH` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_ALIAS` / `ANDROID_KEY_PASSWORD` | Android AAB/APK 서명 | gradle release |
+| `SUJI_IOS_TEAM_ID` | iOS Apple Developer Team ID | archive-ios.sh / project.yml |
+| `GITHUB_TOKEN` | Release 생성(기본 제공) | release.yml |
+
+CI 에서는 위 secret 을 해당 job step 의 `env:` 로 매핑해 주입한다(시크릿은
+저장소에 커밋하지 않음 — `${SUJI_IOS_TEAM_ID}` 등은 런타임 치환).
+
+## 검증 경계 (정직)
+
+- 로컬 실증: `--sign=none/adhoc`, `--dmg`(UDZO), `--sign=identity` 누락 시
+  에러, 비-macOS 패키징 의미컴파일, gradle/xcodegen 서명키 파싱.
+- Apple 인증서/keystore/Apple 계정 필요 경로(identity 서명, 공증, 실 IPA,
+  서명 AAB)는 시크릿 보유 환경에서만 실검증 가능 — 코드 경로/실패-fast는
+  검증됨. release.yml `dry_run` 으로 CLI/임베드 파이프라인 전체 실검증.

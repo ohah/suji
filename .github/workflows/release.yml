@@ -1,0 +1,237 @@
+name: release
+
+# 트리거: vX.Y.Z 태그 푸시 → 정식 릴리스. workflow_dispatch(dry_run=true
+# 기본) → 빌드/패키징/아티팩트 업로드까지만(퍼블리시 없이 파이프라인 검증).
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '빌드/패키징만 (GitHub Release 생성 생략)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '24.14.1'
+  RUST_TOOLCHAIN: '1.93.0'
+  GO_VERSION: '1.26.0'
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          V="$(bash scripts/version.sh)"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "suji version: $V"
+      - name: 태그 ↔ build.zig.zon 버전 일치 검증
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: bash scripts/version.sh --check "${GITHUB_REF_NAME}"
+
+  cli:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            cef_platform: macos-arm64
+            cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_macosarm64_minimal.tar.bz2"
+            node_platform: macos-arm64
+            asset: suji-macos-arm64
+          - os: ubuntu-24.04
+            cef_platform: linux-x86_64
+            cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_linux64_minimal.tar.bz2"
+            node_platform: linux-x86_64
+            asset: suji-linux-x64
+          - os: windows-latest
+            cef_platform: windows-x86_64
+            cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_windows64_minimal.tar.bz2"
+            node_platform: windows-x86_64
+            asset: suji-windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libx11-dev libnss3 libatk-bridge2.0-0 libdrm2 libgbm1
+      - name: Download CEF (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p ~/.suji/cef/${{ matrix.cef_platform }}/Release
+          mkdir -p ~/.suji/cef/${{ matrix.cef_platform }}/Resources/locales
+          mkdir -p ~/.suji/cef/cache
+          curl -fSL "https://cef-builds.spotifycdn.com/${{ matrix.cef_file }}" -o /tmp/cef.tar.bz2
+          tar xjf /tmp/cef.tar.bz2 -C /tmp
+          CEF_DIR=$(ls -d /tmp/cef_binary_* | head -1)
+          cp -R "$CEF_DIR/include" ~/.suji/cef/${{ matrix.cef_platform }}/
+          cp -R "$CEF_DIR/Release/"* ~/.suji/cef/${{ matrix.cef_platform }}/Release/ || true
+          cp -R "$CEF_DIR/Resources/"* ~/.suji/cef/${{ matrix.cef_platform }}/Resources/ || true
+      - name: Download CEF (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $cefDir = "$env:USERPROFILE\.suji\cef\windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "$cefDir\Release"
+          New-Item -ItemType Directory -Force -Path "$cefDir\Resources\locales"
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.suji\cef\cache"
+          $url = "https://cef-builds.spotifycdn.com/${{ matrix.cef_file }}"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\cef.tar.bz2"
+          tar xjf "$env:TEMP\cef.tar.bz2" -C "$env:TEMP"
+          $extracted = Get-ChildItem "$env:TEMP\cef_binary_*" -Directory | Select-Object -First 1
+          Copy-Item -Recurse "$($extracted.FullName)\include" "$cefDir\" -Force
+          Copy-Item "$($extracted.FullName)\Release\*" "$cefDir\Release\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$($extracted.FullName)\Resources\*" "$cefDir\Resources\" -Recurse -Force -ErrorAction SilentlyContinue
+      - name: Download libnode (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          NODE_DIR="$HOME/.suji/node/${{ env.NODE_VERSION }}"
+          mkdir -p "$NODE_DIR"
+          ASSET="libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
+          URL="https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$ASSET"
+          curl -fSL "$URL" -o /tmp/libnode.tar.gz 2>/dev/null && \
+            tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
+            echo "libnode installed" || echo "libnode skipped"
+      - name: Download libnode (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
+          New-Item -ItemType Directory -Force -Path $nodeDir
+          $asset = "libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
+          $url = "https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$asset"
+          try {
+            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\libnode.tar.gz"
+            tar xzf "$env:TEMP\libnode.tar.gz" -C $nodeDir
+          } catch { Write-Host "libnode skipped" }
+      - name: Build suji CLI (ReleaseSafe)
+        run: zig build -Doptimize=ReleaseSafe
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          DIR="${{ matrix.asset }}-$V"
+          mkdir -p "$DIR"
+          cp zig-out/bin/suji "$DIR/"
+          # macOS: CLI 바이너리 ad-hoc 서명(배포 식별자는 사용자 앱 빌드용 —
+          # docs/RELEASING.md). identity 시크릿 있으면 그걸로.
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            if [ -n "${{ secrets.MACOS_SIGN_IDENTITY }}" ]; then
+              codesign --force --options runtime --timestamp \
+                --sign "${{ secrets.MACOS_SIGN_IDENTITY }}" "$DIR/suji" || true
+            else
+              codesign --force --sign - "$DIR/suji" || true
+            fi
+          fi
+          cp README.md LICENSE "$DIR/" 2>/dev/null || true
+          tar czf "${{ matrix.asset }}.tar.gz" "$DIR"
+          shasum -a 256 "${{ matrix.asset }}.tar.gz" > "${{ matrix.asset }}.tar.gz.sha256"
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $V = "${{ needs.version.outputs.version }}"
+          $dir = "${{ matrix.asset }}-$V"
+          New-Item -ItemType Directory -Force -Path $dir
+          Copy-Item zig-out/bin/suji.exe "$dir/"
+          Compress-Archive -Path $dir -DestinationPath "${{ matrix.asset }}.zip" -Force
+          (Get-FileHash "${{ matrix.asset }}.zip" -Algorithm SHA256).Hash > "${{ matrix.asset }}.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}.tar.gz
+            ${{ matrix.asset }}.tar.gz.sha256
+            ${{ matrix.asset }}.zip
+            ${{ matrix.asset }}.zip.sha256
+          if-no-files-found: ignore
+
+  embed-libs:
+    needs: version
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Cross-build embed core libs
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          declare -A T=(
+            [host-macos-arm64]=""
+            [ios-arm64]="-Dtarget=aarch64-ios"
+            [android-arm64]="-Dtarget=aarch64-linux-android"
+            [windows-x64]="-Dtarget=x86_64-windows"
+          )
+          for name in "${!T[@]}"; do
+            rm -rf zig-out
+            # shellcheck disable=SC2086
+            zig build lib ${T[$name]}
+            LIB=$(ls zig-out/lib/libsuji_core.* | head -1)
+            cp "$LIB" "libsuji_core-$name$(echo "$LIB" | grep -oE '\.[a-z]+$')"
+          done
+          tar czf "suji-embed-libs-$V.tar.gz" libsuji_core-* include/suji_core.h include/suji_mobile_bridge.h
+          shasum -a 256 "suji-embed-libs-$V.tar.gz" > "suji-embed-libs-$V.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: suji-embed-libs
+          path: |
+            suji-embed-libs-*.tar.gz
+            suji-embed-libs-*.tar.gz.sha256
+
+  release:
+    needs: [version, cli, embed-libs]
+    # dry_run(workflow_dispatch 기본) 이면 퍼블리시 생략 — 파이프라인만 검증.
+    if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: CHECKSUMS
+        run: |
+          cd dist
+          sha256sum ./*.tar.gz ./*.zip 2>/dev/null > CHECKSUMS.txt || true
+          ls -la
+      - name: Extract changelog block
+        id: cl
+        run: |
+          BODY=$(awk '/<!-- release:start -->/{f=1;next}/<!-- release:end -->/{f=0}f' CHANGELOG.md)
+          {
+            echo 'body<<__EOF__'
+            echo "$BODY"
+            echo '__EOF__'
+          } >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: suji v${{ needs.version.outputs.version }}
+          body: ${{ steps.cl.outputs.body }}
+          files: dist/*
+          fail_on_unmatched_files: false

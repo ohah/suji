@@ -29,6 +29,7 @@ const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") e
         strip_cef: bool = true,
     };
 };
+const package_desktop = @import("package_desktop.zig");
 
 pub fn main(init: std.process.Init) !void {
     runtime.init(.{
@@ -262,54 +263,73 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     };
     const exe_path = exe_buf[0..exe_len];
 
-    // 번들 ID: config 또는 기본값
-    const identifier = config.app.name;
-
-    // macOS .app 번들 생성
-    // [:0]const u8 slice → []const u8 slice 변환 (BundleOptions는 sentinel 무관).
-    const locales_slice: []const []const u8 = blk: {
-        if (config.app.locales.len == 0) break :blk &.{};
-        var buf = allocator.alloc([]const u8, config.app.locales.len) catch break :blk &.{};
-        for (config.app.locales, 0..) |s, i| buf[i] = s;
-        break :blk buf;
-    };
-    try bundle_macos.createBundle(
-        allocator,
-        config.app.name,
-        config.app.version,
-        identifier,
-        exe_path,
-        config.frontend.dist_dir,
-        bundle_macos.BundleOptions{
-            .user_entitlements = config.app.entitlements,
-            .locales = locales_slice,
-            .strip_cef = config.app.strip_cef,
-            .signing = signing,
-            .identity = identity,
+    // OS 별 패키징 (host os 분기 — release.yml 이 네이티브 러너에서 호출).
+    // builtin.os.tag 는 comptime → 매칭 arm 만 분석(비-macOS 가 bundle_macos
+    // 스텁의 미존재 심볼 참조 회피).
+    switch (comptime builtin.os.tag) {
+        .macos => {
+            const identifier = config.app.name;
+            // [:0]const u8 → []const u8 변환 (BundleOptions 는 sentinel 무관).
+            const locales_slice: []const []const u8 = blk: {
+                if (config.app.locales.len == 0) break :blk &.{};
+                var buf = allocator.alloc([]const u8, config.app.locales.len) catch break :blk &.{};
+                for (config.app.locales, 0..) |s, i| buf[i] = s;
+                break :blk buf;
+            };
+            try bundle_macos.createBundle(
+                allocator,
+                config.app.name,
+                config.app.version,
+                identifier,
+                exe_path,
+                config.frontend.dist_dir,
+                bundle_macos.BundleOptions{
+                    .user_entitlements = config.app.entitlements,
+                    .locales = locales_slice,
+                    .strip_cef = config.app.strip_cef,
+                    .signing = signing,
+                    .identity = identity,
+                },
+            );
+            if (want_notarize) {
+                bundle_macos.notarizeBundle(allocator, config.app.name, .{
+                    .apple_id = runtime.env("SUJI_NOTARIZE_APPLE_ID"),
+                    .team_id = runtime.env("SUJI_NOTARIZE_TEAM_ID"),
+                    .password = runtime.env("SUJI_NOTARIZE_PASSWORD"),
+                    .keychain_profile = runtime.env("SUJI_NOTARIZE_KEYCHAIN_PROFILE"),
+                }) catch |err| {
+                    std.debug.print("[suji] notarize failed: {s}\n", .{@errorName(err)});
+                    return err;
+                };
+            }
+            if (want_dmg) {
+                const dmg = bundle_macos.createDmg(allocator, config.app.name, config.app.version) catch |err| {
+                    std.debug.print("[suji] dmg failed: {s}\n", .{@errorName(err)});
+                    return err;
+                };
+                allocator.free(dmg);
+            }
         },
-    );
-
-    // 공증 (identity 서명 + hardened runtime 전제). 자격증명은 env secret.
-    if (want_notarize) {
-        bundle_macos.notarizeBundle(allocator, config.app.name, .{
-            .apple_id = runtime.env("SUJI_NOTARIZE_APPLE_ID"),
-            .team_id = runtime.env("SUJI_NOTARIZE_TEAM_ID"),
-            .password = runtime.env("SUJI_NOTARIZE_PASSWORD"),
-            .keychain_profile = runtime.env("SUJI_NOTARIZE_KEYCHAIN_PROFILE"),
-        }) catch |err| {
-            std.debug.print("[suji] notarize failed: {s}\n", .{@errorName(err)});
-            return err;
-        };
+        .linux => {
+            const archive = try package_desktop.packageLinux(allocator, config.app.name, config.app.version, exe_path, config.frontend.dist_dir);
+            allocator.free(archive);
+        },
+        .windows => {
+            const archive = try package_desktop.packageWindows(
+                allocator,
+                config.app.name,
+                config.app.version,
+                exe_path,
+                config.frontend.dist_dir,
+                runtime.env("SUJI_WIN_SIGN_CERT"),
+                runtime.env("SUJI_WIN_SIGN_PASSWORD"),
+            );
+            allocator.free(archive);
+        },
+        else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
-
-    // 배포용 .dmg.
-    if (want_dmg) {
-        const dmg = bundle_macos.createDmg(allocator, config.app.name, config.app.version) catch |err| {
-            std.debug.print("[suji] dmg failed: {s}\n", .{@errorName(err)});
-            return err;
-        };
-        allocator.free(dmg);
-    }
+    // adhoc/identity/none 분기 변수 — macOS arm 외엔 미사용.
+    _ = .{ signing, identity, want_notarize, want_dmg };
 }
 
 // ============================================

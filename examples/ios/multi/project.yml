@@ -16,6 +16,10 @@ targets:
       - path: web             # 번들 프론트엔드
     settings:
       base:
+        # 배포 서명 — env SUJI_IOS_TEAM_ID 주입 시 자동 서명(미설정이면 빈
+        # 값 → 미서명 로컬은 archive-ios.sh 의 CODE_SIGNING_ALLOWED=NO).
+        DEVELOPMENT_TEAM: ${SUJI_IOS_TEAM_ID}
+        CODE_SIGN_STYLE: Automatic
         # xcodegen 이 공유 Info.plist 를 덮어쓰지 않도록 생성 대신 참조
         INFOPLIST_FILE: $(SRCROOT)/../_shared/Info.plist
         SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
