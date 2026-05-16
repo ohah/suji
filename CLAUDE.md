@@ -436,16 +436,24 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
   ([`include/suji_core.h`](./include/suji_core.h), 수기 동기화).
 - `main.zig`(CEF 호스트)도 `embed.init/registry()/eventBus()` 경유 — 호스트는
   embed 경계로만 코어 접근, 경계가 CEF 의존을 컴파일 단계에서 차단.
-- 모바일 호스트 예제:
-  - `examples/ios` — XcodeGen `project.yml` + Swift `WKWebView` + bridging header.
-  - `examples/android` — Gradle + JNI(`suji_jni.c`)가 `libsuji_core.a` 정적 링크
-    → `libsujihost.so`, Kotlin `WebView`.
-  - 둘 다 `build-lib.sh`로 `.a` 스테이징. `suji.invoke(...)` → 호스트가
-    `suji_core_register_handler`로 등록한 핸들러가 응답 + `suji_core_on` 이벤트.
-  - **iOS는 Rust/Go 백엔드까지 정적 링크 동작**: `examples/ios/backends/{rust,go}`
-    가 언어 고유 심볼(`export_handlers_static!`→`suji_rs_*` / cgo `suji_go_*`)로
-    빌드돼 단일 바이너리에 충돌 없이 링크. `greet`/`add`(Rust)·`go:ping`/
-    `go:upper`(Go)가 실제 백엔드 왕복.
+- 모바일 호스트 예제 — **언어별 변형**(PC `examples/*-backend` 대응). 모바일은
+  호스트에 정적 링크라 "언어별"=링크/등록 백엔드 차이. 호스트 스캐폴딩은
+  `_shared/`에 두고 변형은 thin:
+  - `examples/ios/{_shared, multi, rust, go, zig}` — XcodeGen `project.yml`
+    (`sources: ../_shared`) + Swift `WKWebView`. `_shared/BackendBridge.swift`
+    공용. multi=Rust+Go, 단일=해당 언어.
+  - `examples/android/{_shared, multi, rust, go, zig}` — Gradle(`sourceSets`로
+    `_shared` 공유) + JNI. `_shared/cpp/suji_jni_core.c`(코어 JNI+공용
+    `suji_reg_backend`) + 변형 `cpp/backends.c`. Rust/Zig=`.a` 정적,
+    Go=`.so` c-shared(Android는 Go c-archive 미지원).
+  - 백엔드 소스 `examples/ios/backends/{rust,go,zig}` iOS·Android 공유.
+    언어 고유 심볼(`export_handlers_static!`→`suji_rs_*`/cgo `suji_go_*`/
+    `suji_zig_*`)로 단일 바이너리 무충돌. 각 `build-lib.sh`로 `.a`/`.so`
+    스테이징, `suji_core_register_handler` 등록 + `(channel,json)→{"cmd":..}`
+    는 `include/suji_mobile_bridge.h` 공용(verify.c·JNI 공유).
+  - Gradle/Xcode 빌드는 사용자 환경 필요 — 레포는 NDK/cargo/go 크로스
+    컴파일·심볼만 검증. 메커니즘은 `tests/mobile-backends`(호스트 하니스,
+    CI `mobile-backends` job)가 실증.
 
 **한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
 모바일 미동작. **iOS·Android 둘 다 Rust·Go 백엔드 동작**(언어별 고유 심볼

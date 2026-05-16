@@ -1473,8 +1473,14 @@ CEF import 0이라 분리선이 이미 존재했음.
         로 등록, `(channel,json)→{"cmd":..}` 브리지는 `include/suji_mobile_bridge.h`
         공용(verify.c·JNI 공유, 동일 C 중복 제거). NDK 컴파일·심볼 검증,
         tests/mobile-backends 하니스 ALL PASS.
-
-### 한계 / 후속
+  - [x] **모바일 언어별 예제**(PC `examples/*-backend` 대응) — 모바일은
+        호스트 정적 링크라 "언어별"=링크/등록 백엔드 차이. 호스트 스캐폴딩을
+        `_shared/`에 두고 변형 thin: `examples/{ios,android}/{_shared, multi,
+        rust, go, zig}`. iOS=XcodeGen `sources: ../_shared` + `BackendBridge.swift`
+        공용, Android=Gradle `sourceSets` 공유 + `_shared/cpp/suji_jni_core.c`
+        (공용 `suji_reg_backend`). 백엔드 소스(`examples/ios/backends/{rust,
+        go,zig}`)·`suji_mobile_bridge.h`·CI(`mobile-backends`) 공유로 중복
+        최소화. Node: iOS 불가(V8 JIT), Android 후속.
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).
