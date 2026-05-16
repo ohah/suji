@@ -9,8 +9,8 @@ iOS(`examples/ios`)와 동형. 모바일은 호스트(JNI `.so`)에 백엔드를
 |---|---|---|
 | [`multi/`](./multi) | Rust(`.a`) + Go(`.so`) + Kotlin 네이티브 | `multi/build-lib.sh` |
 | [`rust/`](./rust) | Rust(`.a`) + Kotlin 네이티브 | `rust/build-lib.sh` |
-| `go/` | (후속) Go(`.so` c-shared) | iOS go 와 동형 |
-| `zig/` | (후속) Zig staticlib | iOS zig 와 동형 |
+| [`go/`](./go) | Go(`.so` c-shared) + Kotlin 네이티브 | `go/build-lib.sh` |
+| [`zig/`](./zig) | Zig staticlib(`backends/zig`) + Kotlin 네이티브 | `zig/build-lib.sh` |
 
 > **Go 는 Android 에서 c-archive 미지원 → `c-shared`(`.so`)**. Gradle 이
 > `jniLibs/<abi>/` 의 `.so` 를 자동 패키징, CMake 는 SHARED IMPORTED 로 링크.
