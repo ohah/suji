@@ -3,8 +3,10 @@
     .version = "0.1.0",
     .dependencies = .{
         .toml = .{
-            .url = "https://github.com/sam701/zig-toml/archive/refs/heads/main.tar.gz",
-            .hash = "toml-0.3.0-bV14Be6EAQDr0fkyURz4jYFyTAMPcwlNN0FEPVjDnXTR",
+            // 불변 핀(커밋 SHA) — refs/heads/main 은 movable 라 upstream
+            // 전진 시 tarball 해시가 바뀌어 CI fresh fetch 가 깨졌었음.
+            .url = "https://github.com/sam701/zig-toml/archive/24e0deeceaad1b7f1b12027ebae1c65ff1d86e33.tar.gz",
+            .hash = "toml-0.3.0-bV14BVqIAQANb68hDuVPZ72hrcIhT-fv_fcIbetQIAyg",
         },
     },
     .fingerprint = 0xa1882004288224ac,
