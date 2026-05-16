@@ -1,0 +1,32 @@
+name: SujiIOSZig
+
+options:
+  bundleIdPrefix: dev.suji.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  SujiIOSZig:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../_shared
+      - path: Backends.swift
+      - path: web
+    info:
+      path: ../_shared/Info.plist
+      properties:
+        UILaunchStoryboardName: ""
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+    settings:
+      base:
+        SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/../../../include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/Vendor
+        OTHER_LDFLAGS:
+          - -lsuji_core
+          - -lsuji_zig_backend
+    # 순수 Zig+libc → Go 런타임 프레임워크 불필요

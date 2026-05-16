@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Suji iOS · Zig</title>
+  <style>
+    body { font: 16px -apple-system, system-ui; padding: 2rem; color: #111; }
+    h1 { font-size: 1.4rem; letter-spacing: .02em; }
+    .row { margin: .8rem 0; }
+    code { background: #f2f2f7; padding: .15rem .4rem; border-radius: 4px; }
+    #ticks { font-variant-numeric: tabular-nums; color: #0a7; }
+  </style>
+</head>
+<body>
+  <h1>Suji iOS · Zig 백엔드</h1>
+  <p>WKWebView ↔ 정적 링크 <code>libsuji_zig_backend.a</code> 왕복.</p>
+
+  <div class="row">
+    <button id="ping">ping (Swift)</button>
+    <button id="inc">counter:inc (Swift)</button>
+    <button id="zping">zig:ping (Zig)</button>
+    <button id="zrev">zig:rev (Zig)</button>
+  </div>
+  <div class="row">응답: <strong id="out">…</strong></div>
+  <div class="row">네이티브 → JS 이벤트 (<code>demo:tick</code>):
+    <span id="ticks">대기 중…</span>
+  </div>
+
+  <script>
+    var out = document.getElementById("out");
+    document.getElementById("ping").onclick = function () {
+      suji.invoke("ping", { from: "ios" }).then(function (r) {
+        out.textContent = "ping → " + JSON.stringify(r);
+      });
+    };
+    document.getElementById("inc").onclick = function () {
+      suji.invoke("counter:inc").then(function (r) {
+        out.textContent = "counter → " + JSON.stringify(r);
+      });
+    };
+    function call(id, ch, payload) {
+      document.getElementById(id).onclick = function () {
+        suji.invoke(ch, payload).then(function (r) {
+          out.textContent = ch + " → " + JSON.stringify(r);
+        });
+      };
+    }
+    call("zping", "zig:ping", {});
+    call("zrev", "zig:rev", { s: "hello zig" });
+
+    var n = 0;
+    suji.on("demo:tick", function (d) {
+      n++;
+      document.getElementById("ticks").textContent =
+        "tick #" + n + "  payload=" + JSON.stringify(d);
+    });
+  </script>
+</body>
+</html>
