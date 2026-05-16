@@ -30,6 +30,11 @@ xcrun simctl install booted "$(find ~/Library/Developer/Xcode/DerivedData -name 
 # 실기기는: ./build-lib.sh device && open *.xcodeproj (Xcode 서명/실행)
 ```
 
+위 절차 전체(build-lib→xcodegen→build→install→launch→생존 어서트)를
+변형별로 자동화한 스모크: `bash tests/mobile-backends/ios-sim-smoke.sh
+[zig multi ...]` (부팅된 시뮬레이터 필요, 좌표 탭 없이 링크/기동 회귀만
+게이트, 화면은 `/tmp/ios-smoke-<v>.png` 아티팩트).
+
 > `build-lib.sh [sim|device]` — **sim 기본**(디바이스/프로비저닝 불필요).
 > 코어는 `ReleaseSmall`(임베드 모바일 적합: 작고, 패닉 스택트레이스의 dyld
 > 의존 제거 — 시뮬레이터 링크에 필수). Apple Silicon 가정(arm64 sim).

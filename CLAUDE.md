@@ -38,6 +38,9 @@ bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + comple
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
 bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive) 정적
                                         # 링크 → register_handler 왕복 11 케이스
+bash tests/mobile-backends/ios-sim-smoke.sh  # iOS 시뮬레이터 변형별 빌드+기동
+                                        # 스모크(링크/TLS/심볼충돌 회귀; xcodegen+
+                                        # 부팅 시뮬 필요; 기본 zig multi)
 ```
 
 E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어
