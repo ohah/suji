@@ -544,14 +544,18 @@ BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runti
 | npm/npx | `npx @suji/cli init my-app` | npm 패키지 필요 |
 | curl 스크립트 | `curl -fsSL https://get.suji.dev \| sh` | 스크립트 작성 필요 |
 
-### SDK 배포 (예정)
+### SDK 배포
+
+워크플로 구현 완료(`.github/workflows/sdk-publish.yml`) — `sdk-v*` 태그
+또는 `workflow_dispatch`. 기본 dry_run=검증만, 토큰 시크릿 보유 시 발행.
+상세: [docs/RELEASING.md](./docs/RELEASING.md#sdk-배포-sdk-publishyml).
 
 | SDK | 채널 | 패키지명 | 상태 |
 |-----|------|----------|------|
-| 프론트엔드 JS | npm | `@suji/api` | `packages/suji-js` 존재 |
-| Rust SDK | crates.io | `suji` | `crates/suji-rs` 존재 |
-| Go SDK | go module | `github.com/ohah/suji-go` | `sdks/suji-go` 존재 |
-| Node.js SDK | npm | `@suji/node` (require) | `packages/suji-node` 존재 |
+| 프론트엔드 JS | npm | `@suji/api` | 워크플로 ✅ (발행 토큰 대기) |
+| Rust SDK | crates.io | `suji` | 워크플로 ✅ (발행 토큰 대기) |
+| Go SDK | go module | `github.com/ohah/suji-go` | 워크플로 ✅ (VCS 태그 소비) |
+| Node.js SDK | npm | `@suji/node` (require) | 워크플로 ✅ (발행 토큰 대기) |
 
 ### 배포 우선순위
 1. GitHub Releases — CI에서 플랫폼별 바이너리 빌드 + 자동 릴리즈

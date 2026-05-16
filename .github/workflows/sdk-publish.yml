@@ -1,0 +1,101 @@
+name: sdk-publish
+
+# SDK 배포 워크플로. 기본(workflow_dispatch, dry_run=true)은 pack /
+# --dry-run / build·vet 검증만 — 실제 발행 안 함. 실제 발행은
+# `sdk-vX.Y.Z` 태그 푸시 또는 dry_run=false + 레지스트리 토큰 시크릿
+# 보유 시에만(토큰 없으면 자동 skip). app 릴리스(release.yml, v* 태그)
+# 와 태그 네임스페이스 분리(sdk-v*).
+on:
+  push:
+    tags: ['sdk-v*.*.*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: '검증만 (실제 npm/crates 발행 생략)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24.14.1'
+  RUST_TOOLCHAIN: '1.93.0'
+  GO_VERSION: '1.26.0'
+
+jobs:
+  npm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: packages/suji-js
+            pkg: '@suji/api'
+          - dir: packages/suji-node
+            pkg: '@suji/node'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install + build
+        working-directory: ${{ matrix.dir }}
+        run: |
+          npm ci
+          npm run build --if-present
+      - name: Pack + publish --dry-run (항상 — packability 검증)
+        working-directory: ${{ matrix.dir }}
+        run: |
+          npm pack --dry-run
+          npm publish --dry-run --access public
+      - name: Publish to npm
+        # sdk 태그 푸시 또는 명시적 dry_run=false 일 때만. 토큰 없으면 skip.
+        if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        working-directory: ${{ matrix.dir }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN 미설정 — ${{ matrix.pkg }} 발행 skip"
+            exit 0
+          fi
+          npm publish --access public
+
+  crate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+      - name: cargo publish --dry-run (항상 — 검증)
+        run: cargo publish --dry-run --allow-dirty --manifest-path crates/suji-rs/Cargo.toml
+      - name: Publish to crates.io
+        if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          if [ -z "$CARGO_REGISTRY_TOKEN" ]; then
+            echo "::warning::CARGO_REGISTRY_TOKEN 미설정 — crate 'suji' 발행 skip"
+            exit 0
+          fi
+          cargo publish --manifest-path crates/suji-rs/Cargo.toml
+
+  go:
+    # Go 모듈은 레지스트리 발행이 없음 — VCS 태그로 소비(go get
+    # github.com/ohah/suji-go@<tag>). 여기선 빌드/vet 검증만 하고 태깅은
+    # 수동(docs/RELEASING.md). cgo bridge.c 때문에 CC 필요.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build + vet (검증)
+        working-directory: sdks/suji-go
+        run: |
+          go build ./...
+          go vet ./...
+          echo "Go SDK 검증 OK — 발행은 'sdk-vX.Y.Z' 태그로 (go get @태그)"
