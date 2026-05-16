@@ -1,5 +1,6 @@
 const std = @import("std");
 const runtime = @import("runtime");
+const proc = @import("core/proc.zig");
 
 const Dir = std.Io.Dir;
 
@@ -414,12 +415,7 @@ fn copyDir(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !void
 
 fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
     _ = allocator;
-    var child = try std.process.spawn(runtime.io, .{ .argv = argv });
-    const result = try child.wait(runtime.io);
-    switch (result) {
-        .exited => |code| if (code != 0) return error.CommandFailed,
-        else => return error.CommandFailed,
-    }
+    try proc.run(argv);
 }
 
 /// Apple 공증 — `<name>.app` 을 zip 후 notarytool 제출(--wait, 동기 차단)

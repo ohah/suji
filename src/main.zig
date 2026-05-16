@@ -172,6 +172,7 @@ fn printUsage() void {
 }
 
 const init_mod = @import("core/init.zig");
+const proc = @import("core/proc.zig");
 
 fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
     if (init_args.len == 0) {
@@ -328,8 +329,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         },
         else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
-    // adhoc/identity/none 분기 변수 — macOS arm 외엔 미사용.
-    _ = .{ signing, identity, want_notarize, want_dmg };
+    _ = .{ signing, identity, want_notarize, want_dmg }; // 비-macOS arm 미사용 해소
 }
 
 // ============================================
@@ -604,12 +604,7 @@ fn getDylibPath(allocator: std.mem.Allocator, lang: []const u8, entry: []const u
 
 fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
     _ = allocator;
-    var child = try std.process.spawn(runtime.io, .{ .argv = argv });
-    const result = try child.wait(runtime.io);
-    switch (result) {
-        .exited => |code| if (code != 0) return error.CommandFailed,
-        else => return error.CommandFailed,
-    }
+    try proc.run(argv);
 }
 
 fn runCmdEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pairs: []const [2][]const u8) !void {

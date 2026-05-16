@@ -12,6 +12,7 @@
 const std = @import("std");
 const runtime = @import("runtime");
 const builtin = @import("builtin");
+const proc = @import("core/proc.zig");
 
 const Dir = std.Io.Dir;
 
@@ -23,13 +24,7 @@ fn archName() []const u8 {
     };
 }
 
-fn runCmd(argv: []const []const u8) !void {
-    var child = try std.process.spawn(runtime.io, .{ .argv = argv });
-    switch (try child.wait(runtime.io)) {
-        .exited => |c| if (c != 0) return error.CommandFailed,
-        else => return error.CommandFailed,
-    }
-}
+const runCmd = proc.run;
 
 fn writeFile(path: []const u8, content: []const u8) !void {
     const io = runtime.io;
@@ -52,17 +47,22 @@ fn stageCommon(
 ) !void {
     const bin_dir = try std.fmt.allocPrint(allocator, "{s}/bin", .{stage});
     defer allocator.free(bin_dir);
-    const res_dir = try std.fmt.allocPrint(allocator, "{s}/resources/frontend", .{stage});
+    // resources/ 만 만들고 frontend 는 cp 가 생성 — 미리 만들면 cp -R 가
+    // dist 를 그 안에 중첩(resources/frontend/<dist>/...)시킴.
+    const res_parent = try std.fmt.allocPrint(allocator, "{s}/resources", .{stage});
+    defer allocator.free(res_parent);
+    const res_dir = try std.fmt.allocPrint(allocator, "{s}/frontend", .{res_parent});
     defer allocator.free(res_dir);
     runCmd(&.{ "rm", "-rf", stage }) catch {};
     Dir.cwd().createDirPath(runtime.io, bin_dir) catch {};
-    Dir.cwd().createDirPath(runtime.io, res_dir) catch {};
+    Dir.cwd().createDirPath(runtime.io, res_parent) catch {};
 
     const bin_dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ bin_dir, exe_name });
     defer allocator.free(bin_dst);
     try runCmd(&.{ "cp", exe_path, bin_dst });
     try runCmd(&.{ "chmod", "+x", bin_dst });
-    // frontend dist 가 없을 수도(빌드 실패) — best-effort.
+    // frontend dist 가 없을 수도(빌드 실패) — best-effort. dst 미존재라
+    // cp -R 가 dist 내용을 resources/frontend 로 그대로 복사.
     runCmd(&.{ "cp", "-R", frontend_dist, res_dir }) catch {};
 }
 

@@ -130,17 +130,20 @@ jobs:
         run: zig build -Doptimize=ReleaseSafe
       - name: Package (Unix)
         if: runner.os != 'Windows'
+        env:
+          # secret 을 env 로 매핑(셸 직접 보간 회피 — 특수문자/인젝션 견고).
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
         run: |
           V="${{ needs.version.outputs.version }}"
           DIR="${{ matrix.asset }}-$V"
           mkdir -p "$DIR"
           cp zig-out/bin/suji "$DIR/"
-          # macOS: CLI 바이너리 ad-hoc 서명(배포 식별자는 사용자 앱 빌드용 —
-          # docs/RELEASING.md). identity 시크릿 있으면 그걸로.
+          # macOS: CLI 바이너리 서명. identity secret 있으면 그걸로(hardened
+          # runtime+timestamp), 없으면 ad-hoc. 배포 식별자 상세는 RELEASING.md.
           if [ "${{ runner.os }}" = "macOS" ]; then
-            if [ -n "${{ secrets.MACOS_SIGN_IDENTITY }}" ]; then
+            if [ -n "$MACOS_SIGN_IDENTITY" ]; then
               codesign --force --options runtime --timestamp \
-                --sign "${{ secrets.MACOS_SIGN_IDENTITY }}" "$DIR/suji" || true
+                --sign "$MACOS_SIGN_IDENTITY" "$DIR/suji" || true
             else
               codesign --force --sign - "$DIR/suji" || true
             fi
