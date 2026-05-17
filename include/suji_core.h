@@ -40,13 +40,20 @@ void suji_core_free(const char *ptr);
 
 /* 호스트 invoke 핸들러.
  * channel/json 은 널종단(코어 소유, 콜백 동안만 유효).
+ * ⚠️ `channel` 인자는 *등록명이 아닐 수 있다*: 요청 json 에 "cmd" 필드가
+ *    있으면 코어가 그 cmd 값을 channel 로 넘긴다(extractCmdField; 없으면
+ *    등록명). 즉 `__core__` 처럼 cmd 를 멀티플렉싱하는 단일 채널을 등록하면
+ *    콜백은 channel="clipboard_write_text" 등을 받는다. **호스트는 channel
+ *    인자에 의존하지 말고 json 의 cmd 로 분기하라**(channel==등록명 가정은
+ *    Android 호스트가 빠졌던 함정 — git 8a86c91).
  * 반환: 응답 JSON(널종단, 호스트 소유) 또는 NULL(미처리 → 백엔드로 폴백).
  */
 typedef const char *(*suji_core_handler_cb)(const char *channel, const char *json);
 /* 위 콜백이 반환한 포인터 해제(코어가 복사 후 호출). NULL 이면 호스트가 미관리. */
 typedef void (*suji_core_handler_free_cb)(const char *ptr);
 
-/* 채널을 네이티브로 응답하도록 등록 (채널명 == 등록명 정확 매치).
+/* 채널을 네이티브로 응답하도록 등록. (라우팅은 등록명 정확 매치지만
+ * 콜백에 넘어오는 channel 인자는 위 cb typedef 주석 참조 — cmd 일 수 있음.)
  * dlopen 백엔드 없는 모바일에서 invoke 를 의미있게 만든다.
  * 같은 채널 재등록은 에러가 아니라 덮어쓰기. 0=성공, -1=실패(미초기화/메모리).
  */

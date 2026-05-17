@@ -155,8 +155,13 @@ export fn suji_core_free(ptr: [*c]const u8) void {
 /// dlopen 백엔드가 없는 모바일에서 invoke를 의미 있게 만든다 — Node가 쓰는
 /// `embed_runtimes` 경로를 그대로 재사용(코어 측 신규 상태 0).
 ///
-/// 채널명 == 등록명 정확 매치. invoke_cb 반환 문자열은 호스트 소유 —
-/// 코어가 즉시 복사하고 free_cb로 원본을 호스트에 돌려준다. 0=성공, -1=실패.
+/// 라우팅은 등록명 정확 매치. ⚠️ 단 invoke_cb 의 channel 인자는 등록명이
+/// 아닐 수 있음 — `coreInvoke`(loader.zig)가 embed_runtimes 폴백에서
+/// `extractCmdField(req) orelse name`를 넘기므로, 요청 json 에 "cmd"가 있으면
+/// 그 cmd 값이 channel 로 온다(`__core__` 멀티플렉싱). 호스트는 channel 대신
+/// json 의 cmd 로 분기할 것(include/suji_core.h cb 주석 참조).
+/// invoke_cb 반환 문자열은 호스트 소유 — 코어가 즉시 복사하고 free_cb로
+/// 원본을 호스트에 돌려준다. 0=성공, -1=실패.
 export fn suji_core_register_handler(
     channel: [*c]const u8,
     invoke_cb: ?*const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
