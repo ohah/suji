@@ -322,6 +322,68 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /// 데스크톱 dialog_show_error_box(success:true; 프론트 void) 키-동형.
+    /// 1버튼 알림 — dismiss 시 resolve(message_box 가로채기와 동일 deferred).
+    private fun presentErrorBox(id: Int, opts: JSONObject) {
+        fun resolve() {
+            val r = JSONObject().put("from", "zig-core")
+                .put("cmd", "dialog_show_error_box").put("success", true)
+            webView.evaluateJavascript(
+                "window.__suji__.__resolve__($id, ${JSONObject.quote(r.toString())});", null)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(opts.optString("title").ifEmpty { null })
+            .setMessage(opts.optString("content"))
+            .setPositiveButton("OK") { _, _ -> resolve() }
+            .setOnCancelListener { resolve() }
+            .show()
+    }
+
+    // open/save → Storage Access Framework Intent(비동기 onActivityResult).
+    // ⚠️ 모바일은 데스크톱 절대경로가 아니라 content:// URI 를 돌려준다
+    // (filePaths/filePath 에 URI 문자열 — 의미 다름, 정직). 키-동형
+    // (open: canceled+filePaths[], save: canceled+filePath"").
+    private var pendingDoc: Pair<Int, Boolean>? = null
+    private val RC_DOC = 0x5113
+    private fun startDocPicker(id: Int, save: Boolean) {
+        pendingDoc = id to save
+        val i = if (save)
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+                putExtra(Intent.EXTRA_TITLE, "suji-save")
+            }
+        else
+            Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            }
+        runCatching { startActivityForResult(i, RC_DOC) }
+            .onFailure { resolveDoc(null) }
+    }
+
+    private fun resolveDoc(uri: Uri?) {
+        val p = pendingDoc ?: return
+        pendingDoc = null
+        val canceled = uri == null
+        val r = JSONObject().put("from", "zig-core")
+        if (p.second) {
+            r.put("cmd", "dialog_show_save_dialog").put("canceled", canceled)
+                .put("filePath", uri?.toString() ?: "")
+        } else {
+            r.put("cmd", "dialog_show_open_dialog").put("canceled", canceled)
+                .put("filePaths", org.json.JSONArray().apply {
+                    uri?.let { put(it.toString()) }
+                })
+        }
+        webView.evaluateJavascript(
+            "window.__suji__.__resolve__(${p.first}, ${JSONObject.quote(r.toString())});", null)
+    }
+
+    @Deprecated("SAF 결과 콜백 — registerForActivityResult 대안이나 단일 호스트라 충분")
+    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
+        super.onActivityResult(req, res, data)
+        if (req == RC_DOC) resolveDoc(if (res == RESULT_OK) data?.data else null)
+    }
+
     private inner class Bridge {
         // JS → 네이티브. WebView JS 스레드에서 호출되므로 UI 스레드로 마샬링.
         @JavascriptInterface
@@ -332,9 +394,11 @@ class MainActivity : Activity() {
                 // (코어 무변경). 비-dialog 는 기존 동기 경로.
                 if (channel == "__core__") {
                     val o = try { JSONObject(json) } catch (e: Exception) { JSONObject() }
-                    if (o.optString("cmd") == "dialog_show_message_box") {
-                        presentMessageBox(id, o)
-                        return@post
+                    when (o.optString("cmd")) {
+                        "dialog_show_message_box" -> { presentMessageBox(id, o); return@post }
+                        "dialog_show_error_box" -> { presentErrorBox(id, o); return@post }
+                        "dialog_show_open_dialog" -> { startDocPicker(id, false); return@post }
+                        "dialog_show_save_dialog" -> { startDocPicker(id, true); return@post }
                     }
                 }
                 val resp = SujiCore.nativeInvoke(channel, json)

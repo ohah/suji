@@ -1,5 +1,6 @@
 import Security
 import UIKit
+import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 
@@ -301,10 +302,14 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         // 무변경, _pending[id] 는 그때까지 유지). 비-dialog 는 기존 동기 경로.
         if channel == "__core__",
            let d = (try? JSONSerialization.jsonObject(with: Data(json.utf8)))
-               as? [String: Any],
-           (d["cmd"] as? String) == "dialog_show_message_box" {
-            presentMessageBox(id: id, opts: d)
-            return
+               as? [String: Any] {
+            switch (d["cmd"] as? String) ?? "" {
+            case "dialog_show_message_box": presentMessageBox(id: id, opts: d); return
+            case "dialog_show_error_box": presentErrorBox(id: id, opts: d); return
+            case "dialog_show_open_dialog": presentDocPicker(id: id, save: false); return
+            case "dialog_show_save_dialog": presentDocPicker(id: id, save: true); return
+            default: break
+            }
         }
 
         let result: String = channel.withCString { ch in
@@ -338,6 +343,65 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
             })
         }
         present(alert, animated: true)
+    }
+
+    // 데스크톱 dialog_show_error_box(success:true; 프론트는 void)와 키-동형.
+    // 1버튼 알림 — dismiss 시 resolve(message_box 가로채기와 동일 deferred).
+    private func presentErrorBox(id: Int, opts: [String: Any]) {
+        let alert = UIAlertController(title: opts["title"] as? String,
+                                     message: opts["content"] as? String,
+                                     preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+            let j = "{\"from\":\"zig-core\",\"cmd\":\"dialog_show_error_box\",\"success\":true}"
+            self?.webView.evaluateJavaScript(
+                "window.__suji__.__resolve__(\(id), \(Self.jsLiteral(j)));", completionHandler: nil)
+        })
+        present(alert, animated: true)
+    }
+
+    // open/save → UIDocumentPicker(비동기 delegate). ⚠️ 모바일은 데스크톱
+    // 절대경로가 아니라 보안스코프 URL 을 돌려준다(filePaths/filePath 에 .path
+    // 문자열 — 의미 다름, 정직). save 는 iOS Files export 모델이라 빈 임시
+    // 파일이 실제 생성됨(데스크톱 save panel 은 경로만 — 의미 근사). 키-동형
+    // (open: canceled+filePaths[], save: canceled+filePath"").
+    private var pendingDoc: (id: Int, save: Bool)?
+    private func presentDocPicker(id: Int, save: Bool) {
+        pendingDoc = (id, save)
+        let picker: UIDocumentPickerViewController
+        if save {
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("suji-save-\(id)")
+            FileManager.default.createFile(atPath: tmp.path, contents: Data())
+            picker = UIDocumentPickerViewController(forExporting: [tmp])
+        } else {
+            picker = UIDocumentPickerViewController(
+                forOpeningContentTypes: [UTType.item])
+        }
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    private func resolveDoc(_ urls: [URL], canceled: Bool) {
+        guard let p = pendingDoc else { return }
+        pendingDoc = nil
+        let j: String
+        if p.save {
+            // forExporting 용 빈 임시파일 정리(pick/cancel 모두 여기 경유) —
+            // id 로 결정적 경로라 재구성 삭제 안전. tmp 누적 방지.
+            try? FileManager.default.removeItem(at: FileManager.default
+                .temporaryDirectory.appendingPathComponent("suji-save-\(p.id)"))
+            let fp = canceled ? "" : (urls.first?.path ?? "")
+            j = "{\"from\":\"zig-core\",\"cmd\":\"dialog_show_save_dialog\","
+                + "\"canceled\":\(canceled),\"filePath\":\(Self.jsLiteral(fp))}"
+        } else {
+            let arr = canceled ? [] : urls.map { $0.path }
+            let list = arr.map { Self.jsLiteral($0) }.joined(separator: ",")
+            j = "{\"from\":\"zig-core\",\"cmd\":\"dialog_show_open_dialog\","
+                + "\"canceled\":\(canceled),\"filePaths\":[\(list)]}"
+        }
+        webView.evaluateJavaScript(
+            "window.__suji__.__resolve__(\(p.id), \(Self.jsLiteral(j)));",
+            completionHandler: nil)
     }
 
     // MARK: 네이티브 → JS
@@ -400,4 +464,14 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
     <body style="font:16px -apple-system;padding:2rem">
     <h2>Suji iOS host</h2><p>index.html 번들 누락 — 브릿지만 로드됨.</p></body>
     """
+}
+
+extension SujiHostViewController: UIDocumentPickerDelegate {
+    func documentPicker(_ c: UIDocumentPickerViewController,
+                         didPickDocumentsAt urls: [URL]) {
+        resolveDoc(urls, canceled: false)
+    }
+    func documentPickerWasCancelled(_ c: UIDocumentPickerViewController) {
+        resolveDoc([], canceled: true)
+    }
 }

@@ -1620,6 +1620,19 @@ CEF import 0이라 분리선이 이미 존재했음.
           키-동형(read=html/rtf/data, write=success). 검증: harness 40/40 +
           iOS 20/20 + Android 20/20 e2e(html/rtf/PNG 1x1 실 round-trip).
           buffer/has/available_formats 는 후속.
+    - [x] **Slice 8: dialog 확장(error/open/save)** — Slice 4 호스트-async
+          가로채기 패턴 확장(코어 무변경, deferred __resolve__). iOS
+          UIAlertController(error_box 1버튼) + UIDocumentPicker(open/save,
+          UIDocumentPickerDelegate) / Android AlertDialog(error_box) + SAF
+          Intent(ACTION_OPEN/CREATE_DOCUMENT, onActivityResult). 데스크톱
+          키-동형(error=success, open=canceled+filePaths[], save=canceled+
+          filePath""). ⚠️ 정직: 모바일은 절대경로가 아니라 보안스코프 URL
+          (iOS .path)/content:// URI(Android) 반환 — 데스크톱 경로와 의미
+          다름. iOS save 는 Files export 모델이라 빈 임시파일이 실제 생성
+          (데스크톱 save panel 은 경로만 — 의미 근사). 검증: iOS/Android
+          빌드 컴파일·링크 + 기존 20/20 무회귀. dialog 는 사용자 상호작용
+          (탭/파일선택) 이라 verify.c/e2e 자동 assert 불가(Slice 4 와 동일
+          경계 — iOS 시뮬 빌드+코드리뷰+가로채기 메커니즘 재사용 입증).
 
 ### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
 
@@ -1628,8 +1641,8 @@ CEF import 0이라 분리선이 이미 존재했음.
 
 | 분류 | 영역/cmd | 모바일 |
 |---|---|---|
-| ✅ 배선됨 | clipboard(text 3 + **html/rtf/image 6**) · notification(4) · shell_open_external · dialog_show_message_box · safe_storage(3) · app 메타(get_path/locale/name/version) | iOS/Android e2e 실증 |
-| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · dialog(error/open/save) · shell(open_path/show_item/beep/trash) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
+| ✅ 배선됨 | clipboard(text+html/rtf/image 9) · notification(4) · shell_open_external · **dialog(message_box/error/open/save 4)** · safe_storage(3) · app 메타(4) | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
+| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · shell(open_path/show_item/beep/trash) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
 | ❌ 개념 없음 | window 제어 · webContents(load_url/zoom/devtools/capture/pdf/UA) · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd` graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
