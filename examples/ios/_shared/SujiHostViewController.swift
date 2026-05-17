@@ -81,6 +81,32 @@ private func sujiCoreDispatch(
     case "clipboard_clear":
         UIPasteboard.general.items = []
         resp["success"] = true
+    case "clipboard_write_html", "clipboard_write_rtf":
+        // setValue 는 public.html/rtf 를 Data 로 저장해 String 왕복 실패
+        // (e2e 적발) → setData(UTF-8) 로 명시 저장.
+        let uti = cmd == "clipboard_write_html" ? "public.html" : "public.rtf"
+        let key = cmd == "clipboard_write_html" ? "html" : "rtf"
+        UIPasteboard.general.setData(
+            Data(((obj[key] as? String) ?? "").utf8), forPasteboardType: uti)
+        resp["success"] = true
+    case "clipboard_read_html", "clipboard_read_rtf":
+        let uti = cmd == "clipboard_read_html" ? "public.html" : "public.rtf"
+        let key = cmd == "clipboard_read_html" ? "html" : "rtf"
+        resp[key] = UIPasteboard.general.data(forPasteboardType: uti)
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+    case "clipboard_write_image":
+        // base64 PNG → raw Data 를 public.png UTI 로(UIImage 재인코딩 회피 →
+        // 바이트 정확 왕복). 데스크톱 raw PNG base64 계약과 동형.
+        if let d = Data(base64Encoded: (obj["data"] as? String) ?? "") {
+            UIPasteboard.general.setData(d, forPasteboardType: "public.png")
+            resp["success"] = true
+        } else {
+            resp["success"] = false
+        }
+    case "clipboard_read_image":
+        resp["data"] = UIPasteboard.general
+            .data(forPasteboardType: "public.png")?
+            .base64EncodedString() ?? ""
     case "shell_open_external":
         // canOpenURL 로 동기 판정(데스크톱 success 의미=열기 시도 가능과 동등),
         // open 은 fire-and-forget(completionHandler 비동기 — 동기 반환 불가).

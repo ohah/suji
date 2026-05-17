@@ -1610,6 +1610,16 @@ CEF import 0이라 분리선이 이미 존재했음.
           의미 동형 아님 — 정직). 검증: harness
           34/34 + iOS 17/17 + Android 17/17 e2e(locale BCP47·name·version
           non-empty·documents/temp 절대경로·desktop graceful "").
+    - [x] **Slice 7: clipboard 확장(html/rtf/image)** — read/write 각 3.
+          iOS UIPasteboard typed UTI(public.html/rtf/png — html/rtf 는
+          `setData`(UTF-8); `setValue` 가 Data 로 저장해 String 왕복 실패하던
+          것을 e2e 가 적발·수정. image 는 raw PNG Data 로 바이트 정확 왕복).
+          Android: html=`ClipData.newHtmlText`(네이티브), rtf/image=custom
+          MIME ClipData(시스템 RTF/in-band image 네이티브 부재 — 앱 내 왕복
+          동작, 타 앱 상호운용 아님, 플랫폼 한계 정직 명시). 데스크톱
+          키-동형(read=html/rtf/data, write=success). 검증: harness 40/40 +
+          iOS 20/20 + Android 20/20 e2e(html/rtf/PNG 1x1 실 round-trip).
+          buffer/has/available_formats 는 후속.
 
 ### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
 
@@ -1618,8 +1628,8 @@ CEF import 0이라 분리선이 이미 존재했음.
 
 | 분류 | 영역/cmd | 모바일 |
 |---|---|---|
-| ✅ 배선됨 | clipboard(text 3) · notification(4) · shell_open_external · dialog_show_message_box · safe_storage(3) · **app 메타(get_path/locale/name/version)** | iOS/Android e2e 실증 |
-| 🟡 미배선·대응가능 | clipboard 확장(html/rtf/image/buffer/has) · dialog(error/open/save) · shell(open_path/show_item/beep/trash) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
+| ✅ 배선됨 | clipboard(text 3 + **html/rtf/image 6**) · notification(4) · shell_open_external · dialog_show_message_box · safe_storage(3) · app 메타(get_path/locale/name/version) | iOS/Android e2e 실증 |
+| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · dialog(error/open/save) · shell(open_path/show_item/beep/trash) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
 | ❌ 개념 없음 | window 제어 · webContents(load_url/zoom/devtools/capture/pdf/UA) · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd` graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일

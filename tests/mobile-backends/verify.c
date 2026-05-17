@@ -70,6 +70,22 @@ static void zig_f(const char *p) { suji_zig_backend_free((char *)p); }
 // 넘기므로(loader.zig embed_runtimes 폴백) ch == cmd.
 static char mock_clip[256];
 static char mock_ss[256];
+static char mock_html[512];
+static char mock_rtf[512];
+static char mock_img[1024];
+
+// "key":"..." 값을 dst 로 추출(escape 미지원 단순 스캐너 — 테스트 입력 통제).
+static void mock_extract(const char *j, const char *quoted_key, char *dst, size_t cap) {
+    dst[0] = 0;
+    const char *p = j ? strstr(j, quoted_key) : NULL;
+    if (!p) return;
+    p += strlen(quoted_key);
+    const char *e = strchr(p, '"');
+    size_t n = e ? (size_t)(e - p) : 0;
+    if (n >= cap) n = cap - 1;
+    memcpy(dst, p, n);
+    dst[n] = 0;
+}
 
 static const char *core_h(const char *ch, const char *j) {
     char buf[512];
@@ -142,6 +158,30 @@ static const char *core_h(const char *ch, const char *j) {
     } else if (strcmp(ch, "app_get_version") == 0) {
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"app_get_version\",\"version\":\"1.0.0\"}");
+    } else if (strcmp(ch, "clipboard_write_html") == 0) {
+        mock_extract(j, "\"html\":\"", mock_html, sizeof(mock_html));
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_html\",\"success\":true}");
+    } else if (strcmp(ch, "clipboard_read_html") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_html\",\"html\":\"%s\"}",
+            mock_html);
+    } else if (strcmp(ch, "clipboard_write_rtf") == 0) {
+        mock_extract(j, "\"rtf\":\"", mock_rtf, sizeof(mock_rtf));
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_rtf\",\"success\":true}");
+    } else if (strcmp(ch, "clipboard_read_rtf") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_rtf\",\"rtf\":\"%s\"}",
+            mock_rtf);
+    } else if (strcmp(ch, "clipboard_write_image") == 0) {
+        mock_extract(j, "\"data\":\"", mock_img, sizeof(mock_img));
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_image\",\"success\":true}");
+    } else if (strcmp(ch, "clipboard_read_image") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_image\",\"data\":\"%s\"}",
+            mock_img);
     } else if (strcmp(ch, "app_get_path") == 0) {
         // mock — 실 경로는 iOS FileManager / Android filesDir 몫. 라우팅+포맷만.
         snprintf(buf, sizeof(buf),
@@ -322,6 +362,18 @@ int main(void) {
               "\"version\":\"1.0.0\"", "core app_get_version");
     roundtrip("__core__", "{\"cmd\":\"app_get_path\",\"name\":\"documents\"}",
               "\"cmd\":\"app_get_path\",\"path\":\"/mock/docs\"", "core app_get_path");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_write_html\",\"html\":\"<b>hi</b>\"}",
+              "\"cmd\":\"clipboard_write_html\",\"success\":true", "core clipboard write_html");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_read_html\"}",
+              "\"html\":\"<b>hi</b>\"", "core clipboard read_html (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_write_rtf\",\"rtf\":\"{rtf1 x}\"}",
+              "\"cmd\":\"clipboard_write_rtf\",\"success\":true", "core clipboard write_rtf");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_read_rtf\"}",
+              "\"rtf\":\"{rtf1 x}\"", "core clipboard read_rtf (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_write_image\",\"data\":\"UABNAGc=\"}",
+              "\"cmd\":\"clipboard_write_image\",\"success\":true", "core clipboard write_image");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_read_image\"}",
+              "\"data\":\"UABNAGc=\"", "core clipboard read_image (round-trip)");
     roundtrip("__core__", "{\"cmd\":\"window_create\"}",
               "\"error\":\"unknown_cmd\"", "core unsupported cmd → coreError 동형");
 

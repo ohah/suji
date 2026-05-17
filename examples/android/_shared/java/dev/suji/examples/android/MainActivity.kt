@@ -7,6 +7,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -140,6 +141,27 @@ class MainActivity : Activity() {
                 cb.setPrimaryClip(ClipData.newPlainText("", ""))
                 resp.put("success", true)
             }
+            "clipboard_write_html" -> {
+                val h = obj.optString("html")
+                cb.setPrimaryClip(ClipData.newHtmlText("suji", h, h))
+                resp.put("success", true)
+            }
+            "clipboard_read_html" ->
+                resp.put("html", cb.primaryClip?.getItemAt(0)?.htmlText ?: "")
+            "clipboard_write_rtf" -> {
+                clipCustomWrite("text/rtf", obj.optString("rtf")); resp.put("success", true)
+            }
+            "clipboard_read_rtf" -> resp.put("rtf", clipCustomRead("text/rtf"))
+            "clipboard_write_image" -> {
+                // ⚠️ Android 시스템 클립보드는 in-band image 네이티브 타입이
+                // 없음(content:// URI+FileProvider 필요). 데스크톱 raw PNG
+                // base64 패리티를 위해 custom MIME 으로 왕복 — 앱 내 동작하나
+                // 타 앱 이미지 클립과 상호운용 아님(플랫폼 한계, 정직).
+                clipCustomWrite("application/x-suji-png-b64", obj.optString("data"))
+                resp.put("success", true)
+            }
+            "clipboard_read_image" ->
+                resp.put("data", clipCustomRead("application/x-suji-png-b64"))
             "shell_open_external" -> {
                 val ok = try {
                     val i = Intent(Intent.ACTION_VIEW, Uri.parse(obj.optString("url", "")))
@@ -222,6 +244,22 @@ class MainActivity : Activity() {
                 .build()
         )
         return kg.generateKey()
+    }
+
+    // Android 시스템 클립보드는 RTF/in-band image 네이티브 타입이 없어
+    // custom MIME ClipData 로 왕복(앱 내 동작, 타 앱 RTF/이미지 상호운용
+    // 아님 — 플랫폼 한계). HTML 은 ClipData.newHtmlText 네이티브 사용.
+    private fun clipCustomWrite(mime: String, payload: String) {
+        val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cb.setPrimaryClip(ClipData(ClipDescription("suji", arrayOf(mime)),
+                                   ClipData.Item(payload)))
+    }
+
+    private fun clipCustomRead(mime: String): String {
+        val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = cb.primaryClip ?: return ""
+        return if (clip.description.hasMimeType(mime))
+            clip.getItemAt(0).text?.toString() ?: "" else ""
     }
 
     private fun safeStorage(cmd: String, obj: JSONObject, resp: JSONObject) {
