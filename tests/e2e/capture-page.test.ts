@@ -13,6 +13,7 @@ import { existsSync, statSync, readFileSync, unlinkSync } from "node:fs";
 
 let browser: Browser;
 let page: Page;
+let capturedPath: string | null = null; // afterAll 정리(assert 실패 시 leftover 방지)
 const windowId = 1; // multi-backend 첫 창(실 프론트엔드 콘텐츠)
 
 const core = <T = any>(req: Record<string, unknown>): Promise<T> =>
@@ -34,12 +35,14 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  if (capturedPath && existsSync(capturedPath)) unlinkSync(capturedPath);
   await browser?.disconnect();
 });
 
 describe("capture_page (CDP Page.captureScreenshot)", () => {
   test("ack ok + window:page-captured 이벤트 + 실 PNG 파일(매직바이트) 생성", async () => {
     const path = `/tmp/suji-e2e-capture-${Date.now()}.png`;
+    capturedPath = path; // assert 실패해도 afterAll 이 정리
 
     // 완료 이벤트 listener 등록(SDK 와 동일 — path 매칭).
     const captured = page.evaluate(

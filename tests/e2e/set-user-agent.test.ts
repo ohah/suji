@@ -61,7 +61,9 @@ describe("set_user_agent / get_user_agent", () => {
 
     const setR: any = await core({ cmd: "set_user_agent", windowId: id, userAgent: ua });
     expect(setR.ok).toBe(true);
-    await new Promise((r) => setTimeout(r, 400)); // CDP override 적용 선행 보장
+    // happy-path 단축용 짧은 settle — 정확성 게이트는 아래 폴링 루프(override
+    // 가 load 보다 늦게 적용돼도 title===ua 될 때까지 재시도가 흡수).
+    await new Promise((r) => setTimeout(r, 400));
 
     const marker = `UAMARK_${Date.now()}`;
     const html = `<!--${marker}--><script>document.title=navigator.userAgent</script>`;
