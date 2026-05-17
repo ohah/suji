@@ -1340,7 +1340,7 @@ suji build → 결과물:
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ❌ |
 | Homebrew tap | 사용자 직접 | -- | ❌ (CLAUDE.md "예정") |
-| `npx @suji/cli` | -- | `create-tauri-app` | ❌ (CLAUDE.md "예정") |
+| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep). 로컬 실증: npm pack→npx zig/rust/go/multi + 에러케이스. npm publish 는 토큰 대기(워크플로 후속) |
 
 ### 플러그인 / 확장 API
 

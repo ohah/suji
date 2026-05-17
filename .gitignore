@@ -44,3 +44,6 @@ tests/mobile-backends/.build/
 reference/
 test-results/
 *.app/
+
+# npm pack artifacts
+*.tgz

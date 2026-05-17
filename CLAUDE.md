@@ -609,7 +609,7 @@ BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runti
 |------|--------|------|
 | GitHub Releases | 직접 다운로드 | CI 추가 필요 |
 | Homebrew | `brew install ohah/tap/suji` | tap 레포 생성 필요 |
-| npm/npx | `npx @suji/cli init my-app` | npm 패키지 필요 |
+| npm/npx | `npx @suji/cli init my-app` | ✅ `packages/suji-cli`(의존 0, 바이너리 불요, init.zig 동형) — npm publish 토큰 대기 |
 | curl 스크립트 | `curl -fsSL https://get.suji.dev \| sh` | 스크립트 작성 필요 |
 
 ### SDK 배포
