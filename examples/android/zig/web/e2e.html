@@ -160,13 +160,29 @@
           wi && wi.success === true && ri && ri.data === png);
   }
 
+  async function shellExtSuite() {
+    // beep 는 실 네이티브(iOS AudioServices / Android ToneGenerator) →
+    // success:true(실 사운드는 자동검증 불가, 호출 성공만). open_path/
+    // show_item/trash 는 모바일 플랫폼 한계로 graceful success:false
+    // (데스크톱 키-동형 — 프론트 안 깨짐).
+    var b = await core({ cmd: "shell_beep" });
+    check("shell_beep success", b && b.success === true);
+    var op = await core({ cmd: "shell_open_path", path: "/x" });
+    check("shell_open_path graceful false", op && op.success === false);
+    var si = await core({ cmd: "shell_show_item_in_folder", path: "/x" });
+    check("shell_show_item graceful false", si && si.success === false);
+    var tr = await core({ cmd: "shell_trash_item", path: "/x" });
+    check("shell_trash graceful false", tr && tr.success === false);
+  }
+
   async function run() {
     try {
       await clipboardSuite(); await safeStorageSuite();
       await appMetaSuite(); await clipboardExtSuite();
+      await shellExtSuite();
     } catch (e) { check("suite threw: " + e, false); }
     var fail = cases.filter(function (c) { return !c.ok; }).length;
-    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt",
+    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt+shellExt",
                     ok: fail === 0, fail: fail, cases: cases };
     document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
     document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";

@@ -1633,6 +1633,15 @@ CEF import 0이라 분리선이 이미 존재했음.
           빌드 컴파일·링크 + 기존 20/20 무회귀. dialog 는 사용자 상호작용
           (탭/파일선택) 이라 verify.c/e2e 자동 assert 불가(Slice 4 와 동일
           경계 — iOS 시뮬 빌드+코드리뷰+가로채기 메커니즘 재사용 입증).
+    - [x] **Slice 9: shell 확장(beep/open_path/show_item/trash)** —
+          `shell_beep` 만 실 네이티브(iOS AudioServices 1057 / Android
+          ToneGenerator) → success:true. `shell_open_path`/`show_item_in_
+          folder`/`trash_item` 은 모바일 플랫폼 한계로 graceful success:false
+          (open_path=iOS 샌드박스 file:// 불가·Android FileProvider 미배선,
+          show_item=파일탐색기 개념 부재, trash=휴지통(복구가능) 부재로
+          영구삭제 근사는 위험) — 데스크톱 success:false 와 키-동형(프론트
+          무손상). 검증: harness 42/42 + iOS 24/24 + Android 24/24 e2e
+          (beep success:true·나머지 graceful false 디바이스 실증).
 
 ### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
 
@@ -1641,9 +1650,9 @@ CEF import 0이라 분리선이 이미 존재했음.
 
 | 분류 | 영역/cmd | 모바일 |
 |---|---|---|
-| ✅ 배선됨 | clipboard(text+html/rtf/image 9) · notification(4) · shell_open_external · **dialog(message_box/error/open/save 4)** · safe_storage(3) · app 메타(4) | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
-| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · shell(open_path/show_item/beep/trash) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
-| ❌ 개념 없음 | window 제어 · webContents(load_url/zoom/devtools/capture/pdf/UA) · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd` graceful 폴백 |
+| ✅ 배선됨 | clipboard(text+html/rtf/image 9) · notification(4) · shell(open_external+**beep**) · dialog(message_box/error/open/save 4) · safe_storage(3) · app 메타(4) | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
+| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
+| ❌ 개념 없음/모바일 한계 | shell(open_path/show_item/trash — 샌드박스/탐색기/휴지통 부재, graceful false) · window 제어 · webContents · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd`/graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).

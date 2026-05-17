@@ -1,3 +1,4 @@
+import AudioToolbox
 import Security
 import UIKit
 import UniformTypeIdentifiers
@@ -118,6 +119,15 @@ private func sujiCoreDispatch(
         } else {
             resp["success"] = false
         }
+    case "shell_beep":
+        AudioServicesPlaySystemSound(1057) // 시스템 사운드(데스크톱 beep 동등)
+        resp["success"] = true
+    case "shell_open_path", "shell_show_item_in_folder", "shell_trash_item":
+        // ⚠️ 모바일 플랫폼 한계: open_path=샌드박스라 file:// 외부앱 열기 불가
+        // (UIDocumentInteraction 별개 UX), show_item=파일탐색기 개념 부재,
+        // trash=휴지통(복구가능) 부재(영구삭제 근사는 데스크톱 의미와 달라
+        // 위험). 데스크톱 success:false 와 키-동형 graceful(프론트 무손상).
+        resp["success"] = false
     case "notification_is_supported":
         resp["supported"] = true
     case "notification_request_permission":

@@ -11,6 +11,8 @@ import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -171,6 +173,21 @@ class MainActivity : Activity() {
                 } catch (e: Exception) { false }
                 resp.put("success", ok)
             }
+            "shell_beep" -> {
+                runCatching {
+                    // 지역 참조 보유 + 200ms 후 release — GC 즉시 수거로 톤이
+                    // 잘리거나 네이티브 AudioTrack 누수되는 것 방지.
+                    val tg = ToneGenerator(AudioManager.STREAM_SYSTEM, 80)
+                    tg.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
+                    ui.postDelayed({ tg.release() }, 200)
+                }
+                resp.put("success", true) // 데스크톱 shell_beep 동등(항상 true)
+            }
+            "shell_open_path", "shell_show_item_in_folder", "shell_trash_item" ->
+                // ⚠️ 모바일 한계: open_path=FileProvider 필요(예제 미배선),
+                // show_item=파일탐색기 개념 부재, trash=휴지통 부재(영구삭제
+                // 근사는 위험). 데스크톱 success:false 키-동형 graceful.
+                resp.put("success", false)
             "notification_is_supported" -> resp.put("supported", true)
             "notification_request_permission" ->
                 // areNotificationsEnabled() 는 동기 — 현재 상태값(정직). API33+

@@ -496,11 +496,11 @@ HTTPS 는 std 만으로 미해결(후속: Security.framework SecTrust/번들 PEM
 (`coreInvoke` → embed_runtimes 폴백 → `extractCmdField`). 응답은 데스크톱
 `src/main.zig cefHandleCore` 와 **키-동형** → `packages/suji-js` **무수정**
 (데스크톱 무회귀). bridgeJS `api.core`(재인코딩 금지) 추가 — iOS `_shared` +
-Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1~8**(⚠️
-Android rtf/image 는 시스템 네이티브 부재로 custom-MIME 앱-내 한정;
-dialog open/save 는 모바일 절대경로 아닌 보안스코프/content URI — 정직
-한계 PLAN 참조):
-clipboard(text+html/rtf/image 9)·shell_open_external·notification(4)·
+Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1~9**(⚠️
+Android rtf/image custom-MIME 앱-내 한정; dialog open/save 보안스코프/
+content URI; shell open_path/show_item/trash 모바일 한계 graceful false
+— beep 만 실 네이티브; 정직 한계 PLAN 참조):
+clipboard(text+html/rtf/image 9)·shell(open_external+beep)·notification(4)·
 **dialog(message_box/error/open/save — 호스트-async 가로채기, 사용자
 상호작용이라 자동 e2e 불가·빌드+메커니즘 검증)**·safe_storage(3, iOS
 Keychain / Android Keystore AES-GCM)·app 메타(get_path/locale/name/version).

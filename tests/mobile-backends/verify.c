@@ -182,6 +182,15 @@ static const char *core_h(const char *ch, const char *j) {
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_image\",\"data\":\"%s\"}",
             mock_img);
+    } else if (strcmp(ch, "shell_beep") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"shell_beep\",\"success\":true}");
+    } else if (strcmp(ch, "shell_open_path") == 0 ||
+               strcmp(ch, "shell_show_item_in_folder") == 0 ||
+               strcmp(ch, "shell_trash_item") == 0) {
+        // mock — 모바일 한계로 graceful false(데스크톱 키-동형). 라우팅+포맷만.
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false}", ch);
     } else if (strcmp(ch, "app_get_path") == 0) {
         // mock — 실 경로는 iOS FileManager / Android filesDir 몫. 라우팅+포맷만.
         snprintf(buf, sizeof(buf),
@@ -374,6 +383,11 @@ int main(void) {
               "\"cmd\":\"clipboard_write_image\",\"success\":true", "core clipboard write_image");
     roundtrip("__core__", "{\"cmd\":\"clipboard_read_image\"}",
               "\"data\":\"UABNAGc=\"", "core clipboard read_image (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"shell_beep\"}",
+              "\"cmd\":\"shell_beep\",\"success\":true", "core shell beep");
+    roundtrip("__core__", "{\"cmd\":\"shell_trash_item\",\"path\":\"/x\"}",
+              "\"cmd\":\"shell_trash_item\",\"success\":false",
+              "core shell trash graceful false");
     roundtrip("__core__", "{\"cmd\":\"window_create\"}",
               "\"error\":\"unknown_cmd\"", "core unsupported cmd → coreError 동형");
 
