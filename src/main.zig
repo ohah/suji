@@ -17,19 +17,11 @@ const node_mod = @import("platform/node.zig");
 const NodeRuntime = node_mod.NodeRuntime;
 const node_enabled = node_mod.node_enabled;
 const builtin = @import("builtin");
-const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") else struct {
-    pub fn createBundle(_: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype, _: anytype) !void {
-        @panic("macOS bundle not supported on this platform");
-    }
-    // 비-macOS 스텁 — createBundle 등은 .macos arm 에서만 분석돼 panic 본문
-    // 으로 충분. SigningMode 는 release_opts(std-only)로 단일화되어 스텁
-    // 불필요(main 이 release_opts.SigningMode 직접 사용).
-    pub const BundleOptions = struct {
-        user_entitlements: ?[]const u8 = null,
-        locales: []const []const u8 = &.{},
-        strip_cef: bool = true,
-    };
-};
+// bundle_macos 의 모든 참조(createBundle/BundleOptions/notarizeBundle/
+// createDmg)가 runBuild 의 `switch (comptime builtin.os.tag) { .macos =>
+// {...} }` arm 안에만 있어 비-macOS 에선 미분석 → 스텁 본문 불필요(빈
+// struct). #13: 스텁 BundleOptions 중복/드리프트 원천 제거.
+const bundle_macos = if (builtin.os.tag == .macos) @import("bundle_macos.zig") else struct {};
 const package_desktop = @import("package_desktop.zig");
 
 pub fn main(init: std.process.Init) !void {

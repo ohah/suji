@@ -530,11 +530,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           (per-browser 동적 변경 미지원). Phase 7 보안과 함께 처리.
 
     C 기술 부채 (가치 낮음 / 코드 정리):
-    - [ ] **`cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화**.
-          두 경로가 같은 `cefHandleCore/Fanout/Chain` 핸들러를 호출하지만 응답 버퍼/래핑 포맷이
-          달라 dispatcher 2벌 (CEF는 wrapped `{__core,request}`, backend는 raw cmd JSON).
-          `SPECIAL_DISPATCHERS` 테이블은 공유 중. 통합 시: cefHandleCore의 두 입력 형식 분기를
-          제거하고 backend 경유로 단일화. Phase 4 완전히 끝난 뒤 진행 (모듈 안정화).
+    - [~] **`cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화** — 부분 해소·잔여 의도적 보류.
+          현 상태(평가 완료): `SPECIAL_DISPATCHERS` 테이블 + `cefHandleCore/Fanout/Chain`
+          핸들러를 두 경로가 **공유**, 디스패처는 각 ~5줄 thin loop(차이는 cefInvokeHandler 의
+          backend 라우팅/node 폴백, backendSpecialDispatch 의 `g_in_backend_invoke` 마커 —
+          본질적 관심사 차이라 통합 부적절). 잔여 = `cefHandleCore` 의 입력 정규화 2줄
+          (`if request 필드 → unescape, else raw`) — 깔끔한 어댑터. 완전 제거하려면 CEF/JS
+          `__suji__.core` 와이어 포맷 변경 필요 → 200회 stress·chain/fanout e2e 회귀 위험 大.
+          가치 낮음(plan 명시) 대비 위험 과다 → **보류 유지**(억지 단일화 안 함).
   - [~] **Phase 5-A: Native API (Clipboard / Shell / Dialog)** — 5개 진입점 모두 노출 완료.
         - [x] **Clipboard** (`readText/writeText/clear`) — NSPasteboard. Frontend `@suji/api` +
               Zig/Rust/Go/Node SDK 4개. E2E 37 케이스 (write/read/clear, 길이 한도, JSON wire,
@@ -855,18 +858,12 @@ app.on("ready", () => {
 
 **선행 작업 (아키텍처 일반화)**:
 
-현재 `src/backends/loader.zig`의 `BackendRegistry.node_invoke_fallback`은 Node 전용 하드코딩. 새 임베드 런타임마다 분기를 추가하면 지저분해지므로 먼저 일반화가 필요하다.
+**✅ 완료** — `src/backends/loader.zig`에 일반화 구현됨(아래 항목 stale 였어 정정).
 
-- [ ] `EmbedRuntime` struct 도입
-  ```zig
-  pub const EmbedRuntime = extern struct {
-      invoke: *const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
-      free_response: ?*const fn ([*:0]const u8) callconv(.c) void = null,
-  };
-  ```
-- [ ] `BackendRegistry.embed_runtimes: std.StringHashMap(EmbedRuntime)` 필드 — "node"/"python"/"lua" 등 이름으로 등록
-- [ ] `coreInvoke`에서 `registry.invoke(name, ...)`가 null이면 `embed_runtimes.get(name)` 폴백 (현재 Node 전용 if문 제거)
-- [ ] 기존 `node_invoke_fallback`을 `EmbedRuntime` 등록으로 이관 (하위 호환 제거)
+- [x] `EmbedRuntime` struct 도입 (`loader.zig:31`)
+- [x] `BackendRegistry.embed_runtimes: std.StringHashMap(EmbedRuntime)` 필드 (`loader.zig:173`, `registerEmbedRuntime` `:177`) — "node" 등 이름 등록
+- [x] `coreInvoke`(invoke) 가 native 실패 시 `embed_runtimes.get(name)` 제너릭 폴백 (`loader.zig:412`) — Node 전용 하드코딩 if 없음
+- [x] Node 는 `registerEmbedRuntime("node", ...)` 로 주입(이관 완료) — CLAUDE.md 구현 노트와 일치
 
 **Python 임베드**:
 
