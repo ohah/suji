@@ -53,6 +53,11 @@ pub const BundleOptions = struct {
     /// identity 모드의 서명 ID (예: "Developer ID Application: Acme (TEAMID)").
     /// signing == .identity 인데 null 이면 error.MissingSigningIdentity.
     identity: ?[]const u8 = null,
+    /// App Sandbox 모드. 기본 false = non-sandbox(Developer ID + Notarization,
+    /// Hardened Runtime 만 — `assets/entitlements/*.plist`). true = Mac App
+    /// Store(App Sandbox + inherit — `assets/entitlements/sandbox/*.plist`).
+    /// `suji build --sandbox` / `SUJI_SANDBOX`.
+    sandbox: bool = false,
 };
 
 pub fn createBundle(
@@ -390,7 +395,10 @@ fn codesignWithEntitlements(
         try codesignNoEntitlements(allocator, path, opts);
         return;
     };
-    const entitlements = try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}", .{ dir, plist_filename });
+    // sandbox=true → Mac App Store 세트(app-sandbox+inherit), 기본 → non-sandbox
+    // Hardened Runtime 세트.
+    const subdir: []const u8 = if (opts.sandbox) "sandbox/" else "";
+    const entitlements = try std.fmt.allocPrint(allocator, "{s}/assets/entitlements/{s}{s}", .{ dir, subdir, plist_filename });
     defer allocator.free(entitlements);
 
     runCodesign(allocator, path, entitlements, opts) catch {

@@ -3212,16 +3212,30 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
     try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper-renderer.plist") != null);
     try std.testing.expect(std.mem.indexOf(u8, bundle_src, "helper-plugin.plist") != null);
     try std.testing.expect(std.mem.indexOf(u8, bundle_src, "main.plist") != null);
+    // --sandbox 분기: BundleOptions.sandbox + sandbox/ 서브디렉토리 선택.
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "sandbox: bool") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bundle_src, "\"sandbox/\"") != null);
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "SUJI_SANDBOX") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, ".sandbox = want_sandbox") != null);
 
     // 5개 entitlements plist 파일 모두 존재 + 각 helper의 CEF 요구 key 검증.
     const Plist = struct {
         path: []const u8,
         required_keys: []const []const u8,
+        forbidden_keys: []const []const u8 = &.{},
     };
-    const plists = [_]Plist{
+    // sandbox/ = Mac App Store 진출용 (app-sandbox + helper별 inherit).
+    const sandbox_plists = [_]Plist{
         // 메인: app-sandbox + JIT + network + 사용자 file 접근.
         .{
-            .path = "assets/entitlements/main.plist",
+            .path = "assets/entitlements/sandbox/main.plist",
             .required_keys = &.{
                 "com.apple.security.app-sandbox",
                 "com.apple.security.cs.allow-jit",
@@ -3232,7 +3246,7 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
         },
         // Browser/Alerts helper — sandbox + parent inherit.
         .{
-            .path = "assets/entitlements/helper.plist",
+            .path = "assets/entitlements/sandbox/helper.plist",
             .required_keys = &.{
                 "com.apple.security.app-sandbox",
                 "com.apple.security.inherit",
@@ -3240,7 +3254,7 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
         },
         // GPU helper — Metal/ANGLE 그래픽 + dynamic library 로드.
         .{
-            .path = "assets/entitlements/helper-gpu.plist",
+            .path = "assets/entitlements/sandbox/helper-gpu.plist",
             .required_keys = &.{
                 "com.apple.security.app-sandbox",
                 "com.apple.security.cs.allow-jit",
@@ -3251,7 +3265,7 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
         },
         // Renderer helper — V8 JIT 필수 (allow-jit 빠지면 JS 실행 불가).
         .{
-            .path = "assets/entitlements/helper-renderer.plist",
+            .path = "assets/entitlements/sandbox/helper-renderer.plist",
             .required_keys = &.{
                 "com.apple.security.app-sandbox",
                 "com.apple.security.cs.allow-jit",
@@ -3261,7 +3275,7 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
         },
         // Plugin helper — JIT + unsigned-executable-memory (PPAPI/native plugin).
         .{
-            .path = "assets/entitlements/helper-plugin.plist",
+            .path = "assets/entitlements/sandbox/helper-plugin.plist",
             .required_keys = &.{
                 "com.apple.security.app-sandbox",
                 "com.apple.security.cs.allow-jit",
@@ -3270,11 +3284,27 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
             },
         },
     };
-    for (plists) |p| {
+    // 루트 = Developer ID/notarize 기본 (Hardened Runtime, app-sandbox 부재).
+    // required = CEF V8 JIT/라이브러리 검증 우회, forbidden = app-sandbox 키 없음.
+    const hardened = &[_][]const u8{
+        "com.apple.security.cs.allow-jit",
+        "com.apple.security.cs.disable-library-validation",
+    };
+    const root_plists = [_]Plist{
+        .{ .path = "assets/entitlements/main.plist", .required_keys = hardened, .forbidden_keys = &.{"com.apple.security.app-sandbox"} },
+        .{ .path = "assets/entitlements/helper.plist", .required_keys = hardened, .forbidden_keys = &.{"com.apple.security.app-sandbox"} },
+        .{ .path = "assets/entitlements/helper-gpu.plist", .required_keys = hardened, .forbidden_keys = &.{"com.apple.security.app-sandbox"} },
+        .{ .path = "assets/entitlements/helper-renderer.plist", .required_keys = hardened, .forbidden_keys = &.{"com.apple.security.app-sandbox"} },
+        .{ .path = "assets/entitlements/helper-plugin.plist", .required_keys = hardened, .forbidden_keys = &.{"com.apple.security.app-sandbox"} },
+    };
+    for (sandbox_plists ++ root_plists) |p| {
         const content = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p.path, std.testing.allocator, .limited(8 * 1024));
         defer std.testing.allocator.free(content);
         for (p.required_keys) |key| {
             try std.testing.expect(std.mem.indexOf(u8, content, key) != null);
+        }
+        for (p.forbidden_keys) |key| {
+            try std.testing.expect(std.mem.indexOf(u8, content, key) == null);
         }
     }
 }

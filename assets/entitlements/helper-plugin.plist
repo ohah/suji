@@ -1,17 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  Plugin Helper — PPAPI / native plugin host. JIT + unsigned-executable-memory.
--->
+<!-- Plugin Helper — non-sandbox 기본 (Developer ID + Notarization). Hardened Runtime
+     3종만 (CEF JIT/동적로드 필수). MAS 는 `suji build --sandbox` → sandbox/ 세트. -->
 <plist version="1.0">
 <dict>
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
-    <key>com.apple.security.inherit</key>
+    <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>
 </plist>

@@ -224,6 +224,9 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     const identity = flagOrEnv(args, "--identity", "SUJI_SIGN_IDENTITY");
     const want_notarize = release_opts.hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
     const want_dmg = release_opts.hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
+    // App Sandbox(MAS) vs non-sandbox(Developer ID, 기본). 기본 false 라
+    // 기존 Developer ID/notarize 배포 무회귀.
+    const want_sandbox = release_opts.hasFlag(args, "--sandbox") or runtime.env("SUJI_SANDBOX") != null;
 
     // 백엔드 릴리스 빌드
     try buildBackendsFromConfig(allocator, &config, true);
@@ -268,6 +271,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     .strip_cef = config.app.strip_cef,
                     .signing = signing,
                     .identity = identity,
+                    .sandbox = want_sandbox,
                 },
             );
             if (want_notarize) {
@@ -307,7 +311,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         },
         else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
-    _ = .{ signing, identity, want_notarize, want_dmg }; // 비-macOS arm 미사용 해소
+    _ = .{ signing, identity, want_notarize, want_dmg, want_sandbox }; // 비-macOS arm 미사용 해소
 }
 
 // ============================================
