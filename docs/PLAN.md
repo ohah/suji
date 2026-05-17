@@ -1290,7 +1290,7 @@ suji build → 결과물:
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |
 | webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ✅ declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max) + dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) — `webRequest.onBeforeRequest({urls}, listener)`로 cancel/allow round-trip. 5 SDK 노출 + e2e 13 케이스 (cancel/allow round-trip 포함). timeout fallback은 미구현 |
-| safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | 🟡 macOS만 (`safe_storage_set/get/delete` — Keychain Services). Win DPAPI / Linux libsecret 미구현 |
+| safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | ✅ 3-OS (`safe_storage_set/get/delete`): macOS Keychain Services, Linux `secret-tool`(libsecret Secret Service), Windows DPAPI(`CryptProtectData`)+`%LOCALAPPDATA%` 백킹. `tests/safe-storage` 라운드트립 + ci.yml 비-macOS 가드 |
 
 ### 앱 배포 & 패키징
 

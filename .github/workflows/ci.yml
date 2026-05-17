@@ -55,7 +55,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libx11-dev libnss3 libatk-bridge2.0-0 libdrm2 libgbm1
+          sudo apt-get install -y libgtk-3-dev libx11-dev libnss3 libatk-bridge2.0-0 libdrm2 libgbm1 \
+            libsecret-tools gnome-keyring dbus-x11
 
       - name: Download CEF (Unix)
         if: runner.os != 'Windows'
@@ -132,6 +133,13 @@ jobs:
 
       - name: Test state plugin Go wrapper
         run: zig build test-state-go
+
+      # 비-macOS safeStorage 패리티(Linux secret-tool / Windows DPAPI)
+      # 라운드트립. macOS 는 cef.zig Keychain(별도 경로) — 게이트.
+      - name: safeStorage round-trip (non-macOS)
+        if: runner.os != 'macOS'
+        shell: bash
+        run: bash tests/safe-storage/run.sh
 
   # CEF 무관 임베드 코어 라이브러리 회귀 방지.
   # CEF/Node/Rust/Go 불필요 — 경계가 데스크톱 의존을 다시 끌어오거나

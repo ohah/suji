@@ -25,6 +25,10 @@ pub const c = @cImport({
 
 const builtin = @import("builtin");
 const runtime = @import("runtime");
+// 비-macOS safeStorage(Linux secret-tool / Windows DPAPI). macOS 는 이
+// 파일 내 Keychain. import 만으로 @compileError 안 나도록 호출은 전부
+// `if (comptime !is_macos)` 가드(macOS 빌드는 모듈 미분석).
+const safe_storage_os = @import("safe_storage_os.zig");
 const window_mod = @import("window");
 const window_ipc = @import("window_ipc");
 const logger = @import("logger");
@@ -1830,7 +1834,7 @@ fn buildKeychainQuery(class_val: ?*anyopaque, service: []const u8, account: []co
 /// 키체인에 utf-8 값을 저장. 같은 key가 있으면 update. 성공 = true.
 /// Add → DuplicateItem이면 Update fallback — race-free + 1 syscall (Apple 권장 패턴).
 pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u8) bool {
-    if (!comptime is_macos) return false;
+    if (comptime !is_macos) return safe_storage_os.set(service, account, value);
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
     const data = CFDataCreate(null, value.ptr, @intCast(value.len)) orelse return false;
     defer CFRelease(data);
@@ -1851,7 +1855,7 @@ pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u
 
 /// 키체인에서 utf-8 값 read. out_buf에 복사 후 length 반환. 못 찾으면 빈 slice.
 pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) []const u8 {
-    if (!comptime is_macos) return out_buf[0..0];
+    if (comptime !is_macos) return safe_storage_os.get(service, account, out_buf);
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return out_buf[0..0];
     msgSendVoid2(query, "setObject:forKey:", kCFBooleanTrue, kSecReturnData);
     msgSendVoid2(query, "setObject:forKey:", kSecMatchLimitOne, kSecMatchLimit);
@@ -1869,7 +1873,7 @@ pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) [
 }
 
 pub fn safeStorageDelete(service: []const u8, account: []const u8) bool {
-    if (!comptime is_macos) return false;
+    if (comptime !is_macos) return safe_storage_os.delete(service, account);
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
     const r = SecItemDelete(query);
     return r == errSecSuccess or r == errSecItemNotFound;
