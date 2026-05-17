@@ -1553,12 +1553,22 @@ CEF import 0이라 분리선이 이미 존재했음.
           시뮬레이터 빌드·기동(Swift/bridgeJS 컴파일·링크·생존). ⚠️ **미검증**:
           실 UIPasteboard/ClipboardManager 동작(실기기), **Android 컴파일**
           (로컬 SDK env 부재 — 코드리뷰+verify.c 메커니즘 간접 보강만, 정직).
-    - [ ] Slice 2: `shell_open_external` (iOS UIApplication.open / Android
-          Intent.ACTION_VIEW). open_path/show_item_in_folder 등은 unknown_cmd 폴백.
-    - [ ] Slice 3: notification (UNUserNotificationCenter/NotificationManager) —
-          권한 비동기·click 이벤트(`suji_core_emit`) 특수성.
-    - [ ] Slice 4: dialog (UIAlertController/AlertDialog) — 사용자 응답 비동기
-          (semaphore/latch + 백그라운드 디스패치, 데드락 회피) 별도 설계 게이트.
+    - [x] **Slice 2: `shell_open_external`** — iOS `UIApplication.open`
+          (canOpenURL 동기 판정+fire-and-forget) / Android `Intent.ACTION_VIEW`.
+          open_path/show_item_in_folder/beep/trash_item 은 unknown_cmd 폴백.
+          검증: harness 23/23 + iOS 시뮬 빌드·기동.
+    - [x] **Slice 3: notification** — `is_supported/request_permission/show/
+          close`. iOS `UNUserNotificationCenter`(권한은 *완전 비동기* — 동기
+          `granted:false` 즉시 반환 + 콜백서 `notification:permission` 이벤트
+          emit, 정직한 한계) / Android `android.app.NotificationManager`+
+          `NotificationChannel`(`areNotificationsEnabled()` 동기값, Builder
+          API26+ 전제). 검증: harness 26/26 + iOS 시뮬 빌드·기동. ⚠️ 실기기
+          알림 표시·권한 프롬프트·click 이벤트는 미검증(정직).
+    - [ ] (게이트) Slice 4: dialog — **설계 블로커**: `coreCall` 은 단일
+          Promise 를 await 하는데 iOS `userContentController`(WKScriptMessage)는
+          메인스레드라 `UIAlertController` 결과를 동기 블로킹 대기하면 데드락
+          (alert presentation/탭도 메인스레드 필요). 동기 `__core__` 디스패치로
+          불가 → id-상관 deferred-resolve **프로토콜 확장** 필요(별개 설계).
           open/save dialog 는 모바일 파일모델 차이로 1차 unknown_cmd 폴백.
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일

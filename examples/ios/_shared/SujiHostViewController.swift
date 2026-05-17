@@ -1,4 +1,5 @@
 import UIKit
+import UserNotifications
 import WebKit
 
 /// 네이티브 → JS 이벤트 트램폴린. `@convention(c)` 로 쓰려면 캡처 없는
@@ -20,6 +21,7 @@ private func sujiEventTrampoline(
 // 락 없는 전역: invoke 는 WKScriptMessageHandler(메인 스레드) + single-threaded
 // 코어 경로로만 진입하므로 데이터 레이스 없음.
 private var sujiCounter = 0
+private var sujiNotifSeq = 0
 
 private func sujiPingHandler(
     _ channel: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?
@@ -61,6 +63,53 @@ private func sujiCoreDispatch(
         resp["success"] = true
     case "clipboard_clear":
         UIPasteboard.general.items = []
+        resp["success"] = true
+    case "shell_open_external":
+        // canOpenURL 로 동기 판정(데스크톱 success 의미=열기 시도 가능과 동등),
+        // open 은 fire-and-forget(completionHandler 비동기 — 동기 반환 불가).
+        if let u = URL(string: (obj["url"] as? String) ?? ""),
+           UIApplication.shared.canOpenURL(u) {
+            UIApplication.shared.open(u, options: [:], completionHandler: nil)
+            resp["success"] = true
+        } else {
+            resp["success"] = false
+        }
+    case "notification_is_supported":
+        resp["supported"] = true
+    case "notification_request_permission":
+        // ⚠️ iOS UNUserNotificationCenter 권한은 *완전 비동기* — 동기
+        // `granted` 산출 불가(getNotificationSettings 도 콜백). 데스크톱
+        // 동기 계약을 깨지 않도록: 권한 요청을 발사하고 즉시 현재값(미정이면
+        // false) 반환 + 콜백 확정 시 `notification:permission {granted}` 이벤트
+        // 발신(앱이 재질의/이벤트로 반응). 정직한 한계.
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound]
+        ) { granted, _ in
+            let js = "{\"granted\":\(granted)}"
+            "notification:permission".withCString { ev in
+                js.withCString { p in suji_core_emit(ev, p) }
+            }
+        }
+        resp["granted"] = false
+    case "notification_show":
+        let n = sujiNotifSeq
+        sujiNotifSeq += 1
+        let nid = "suji-notif-\(n)"
+        let content = UNMutableNotificationContent()
+        content.title = (obj["title"] as? String) ?? ""
+        content.body = (obj["body"] as? String) ?? ""
+        if (obj["silent"] as? Bool) != true { content.sound = .default }
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: nid, content: content, trigger: nil)
+        )
+        resp["notificationId"] = nid
+        resp["success"] = true
+    case "notification_close":
+        let nid = (obj["notificationId"] as? String) ?? ""
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [nid])
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: [nid])
         resp["success"] = true
     default:
         resp["success"] = false

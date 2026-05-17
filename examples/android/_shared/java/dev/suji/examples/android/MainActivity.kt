@@ -2,9 +2,15 @@ package dev.suji.examples.android
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -64,6 +70,21 @@ class MainActivity : Activity() {
     }
 
     private var counter = 0
+    private var notifSeq = 0
+    private var notifChannelReady = false
+
+    private fun notifManager() =
+        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    private fun ensureNotifChannel() {
+        if (notifChannelReady || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        notifManager().createNotificationChannel(
+            NotificationChannel(NOTIF_CHANNEL, "Suji", NotificationManager.IMPORTANCE_DEFAULT)
+        )
+        notifChannelReady = true
+    }
+
+    private val NOTIF_CHANNEL = "suji"
 
     /// SujiCore.onInvoke 위임 대상 (UI 스레드). 백엔드 자리 네이티브 응답.
     fun handleInvoke(channel: String, json: String): String = when (channel) {
@@ -93,6 +114,39 @@ class MainActivity : Activity() {
             "clipboard_clear" -> {
                 // clearPrimaryClip() 은 API 28+ — 빈 ClipData 덮어쓰기로 하위호환.
                 cb.setPrimaryClip(ClipData.newPlainText("", ""))
+                resp.put("success", true)
+            }
+            "shell_open_external" -> {
+                val ok = try {
+                    val i = Intent(Intent.ACTION_VIEW, Uri.parse(obj.optString("url", "")))
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    startActivity(i)
+                    true
+                } catch (e: Exception) { false }
+                resp.put("success", ok)
+            }
+            "notification_is_supported" -> resp.put("supported", true)
+            "notification_request_permission" ->
+                // areNotificationsEnabled() 는 동기 — 현재 상태값(정직). API33+
+                // POST_NOTIFICATIONS 런타임 프롬프트는 비동기라 별도(데스크톱
+                // 동기 계약 유지 위해 현재값 반환).
+                resp.put("granted", notifManager().areNotificationsEnabled())
+            "notification_show" -> {
+                val n = notifSeq++
+                val nid = "suji-notif-$n"
+                ensureNotifChannel()
+                // Notification.Builder(Context,String) 은 API 26+ (예제 minSdk 전제).
+                val builder = Notification.Builder(this, NOTIF_CHANNEL)
+                    .setContentTitle(obj.optString("title", ""))
+                    .setContentText(obj.optString("body", ""))
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                if (obj.optBoolean("silent", false)) builder.setSound(null)
+                notifManager().notify(n, builder.build())
+                resp.put("notificationId", nid).put("success", true)
+            }
+            "notification_close" -> {
+                val nid = obj.optString("notificationId", "")
+                nid.removePrefix("suji-notif-").toIntOrNull()?.let { notifManager().cancel(it) }
                 resp.put("success", true)
             }
             else -> resp.put("success", false).put("error", "unknown_cmd")

@@ -94,6 +94,23 @@ static const char *core_h(const char *ch, const char *j) {
         mock_clip[0] = 0;
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"clipboard_clear\",\"success\":true}");
+    } else if (strcmp(ch, "shell_open_external") == 0) {
+        // mock — 실 open 은 iOS UIApplication / Android Intent 몫. 라우팅+포맷만.
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"shell_open_external\",\"success\":true}");
+    } else if (strcmp(ch, "notification_is_supported") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"notification_is_supported\",\"supported\":true}");
+    } else if (strcmp(ch, "notification_request_permission") == 0) {
+        // mock — iOS 는 비동기라 실제론 false+이벤트, Android 는 동기. 포맷만.
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"notification_request_permission\",\"granted\":true}");
+    } else if (strcmp(ch, "notification_show") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"notification_show\",\"notificationId\":\"suji-notif-0\",\"success\":true}");
+    } else if (strcmp(ch, "notification_close") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"notification_close\",\"success\":true}");
     } else {
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false,\"error\":\"unknown_cmd\"}",
@@ -246,6 +263,14 @@ int main(void) {
               "\"cmd\":\"clipboard_clear\",\"success\":true", "core clipboard clear");
     roundtrip("__core__", "{\"cmd\":\"clipboard_read_text\"}",
               "\"text\":\"\"", "core clipboard read after clear");
+    roundtrip("__core__", "{\"cmd\":\"shell_open_external\",\"url\":\"https://suji.dev\"}",
+              "\"cmd\":\"shell_open_external\",\"success\":true", "core shell open_external");
+    roundtrip("__core__", "{\"cmd\":\"notification_is_supported\"}",
+              "\"supported\":true", "core notification is_supported");
+    roundtrip("__core__", "{\"cmd\":\"notification_show\",\"title\":\"Hi\",\"body\":\"B\"}",
+              "\"notificationId\":\"suji-notif-0\",\"success\":true", "core notification show");
+    roundtrip("__core__", "{\"cmd\":\"notification_close\",\"notificationId\":\"suji-notif-0\"}",
+              "\"cmd\":\"notification_close\",\"success\":true", "core notification close");
     roundtrip("__core__", "{\"cmd\":\"window_create\"}",
               "\"error\":\"unknown_cmd\"", "core unsupported cmd → coreError 동형");
 
