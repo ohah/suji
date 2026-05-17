@@ -62,6 +62,47 @@ static const char *zig_h(const char *ch, const char *j) {
 }
 static void zig_f(const char *p) { suji_zig_backend_free((char *)p); }
 
+// __core__ 모바일 디스패처 mock. iOS sujiCoreDispatch / Android coreDispatch 와
+// 동일 계약을 C 로 흉내 — register_handler("__core__") 라우팅과 데스크톱
+// cefHandleCore 와 키-동형 응답 포맷을 자동 실증한다. ⚠️ C 하니스라 실
+// UIPasteboard/ClipboardManager 는 못 탐 — 라우팅+응답포맷만 검증(실 네이티브
+// 동작은 시뮬레이터/실기기 몫, 정직). coreInvoke 가 cmd 를 추출해 channel 인자로
+// 넘기므로(loader.zig embed_runtimes 폴백) ch == cmd.
+static char mock_clip[256];
+
+static const char *core_h(const char *ch, const char *j) {
+    char buf[512];
+    if (strcmp(ch, "clipboard_read_text") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_text\",\"text\":\"%s\"}",
+            mock_clip);
+    } else if (strcmp(ch, "clipboard_write_text") == 0) {
+        // escape 미지원 단순 스캐너 — 테스트 입력(ASCII, escape 없음) 통제 전제.
+        const char *p = j ? strstr(j, "\"text\":\"") : NULL;
+        mock_clip[0] = 0;
+        if (p) {
+            p += 8;
+            const char *e = strchr(p, '"');
+            size_t n = e ? (size_t)(e - p) : 0;
+            if (n >= sizeof(mock_clip)) n = sizeof(mock_clip) - 1;
+            memcpy(mock_clip, p, n);
+            mock_clip[n] = 0;
+        }
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_text\",\"success\":true}");
+    } else if (strcmp(ch, "clipboard_clear") == 0) {
+        mock_clip[0] = 0;
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_clear\",\"success\":true}");
+    } else {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false,\"error\":\"unknown_cmd\"}",
+            ch);
+    }
+    return strdup(buf);
+}
+static void core_f(const char *p) { free((char *)p); }
+
 // 인프로세스 localhost 평문 HTTP 서버 (zig:http 실증용). GET→고정 본문,
 // POST→요청 바디 echo. 외부 네트워크/TLS 없이 std.http 왕복만 검증.
 static int http_port = 0;
@@ -151,7 +192,8 @@ int main(void) {
         suji_core_register_handler("go:upper", go_h, go_f) != 0 ||
         suji_core_register_handler("zig:ping", zig_h, zig_f) != 0 ||
         suji_core_register_handler("zig:rev", zig_h, zig_f) != 0 ||
-        suji_core_register_handler("zig:http", zig_h, zig_f) != 0) {
+        suji_core_register_handler("zig:http", zig_h, zig_f) != 0 ||
+        suji_core_register_handler("__core__", core_h, core_f) != 0) {
         printf("FAIL: register_handler\n");
         suji_core_destroy(); // init 후 실패 — LSan 클린 유지
         return 1;
@@ -194,6 +236,18 @@ int main(void) {
         roundtrip("zig:http", post_url, "ZIGPOST42", "zig http POST echo");
     }
     roundtrip("zig:http", "{}", "MissingUrl", "zig http missing url → error");
+
+    printf("== __core__ 네이티브 디스패치 (clipboard, 모바일=iOS/Android 동형) ==\n");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_write_text\",\"text\":\"SujiClip\"}",
+              "\"cmd\":\"clipboard_write_text\",\"success\":true", "core clipboard write");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_read_text\"}",
+              "\"text\":\"SujiClip\"", "core clipboard read (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_clear\"}",
+              "\"cmd\":\"clipboard_clear\",\"success\":true", "core clipboard clear");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_read_text\"}",
+              "\"text\":\"\"", "core clipboard read after clear");
+    roundtrip("__core__", "{\"cmd\":\"window_create\"}",
+              "\"error\":\"unknown_cmd\"", "core unsupported cmd → coreError 동형");
 
     printf("== 안정성 / free 계약 (200x 교차) ==\n");
     int loop_fails = 0;

@@ -483,8 +483,23 @@ localhost 평문 왕복). 빌드-only 검증=aarch64-ios/-simulator/android-cros
 HTTPS 는 std 만으로 미해결(후속: Security.framework SecTrust/번들 PEM).
 `process.run` 은 iOS 샌드박스 fork/exec 금지로 모바일 제외.
 
-**한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
-모바일 미동작. **iOS·Android 둘 다 Rust·Go 백엔드 동작**(언어별 고유 심볼
+**모바일 네이티브 `@suji/api` (`__core__` 와이어, Tauri 동형)**: 데스크톱과
+*동일* 프론트 API(`suji.clipboard.*` = `coreCall→__suji__.core`)가 모바일에서도
+동작 — 호스트(iOS Swift `sujiCoreDispatch`/Android Kotlin `coreDispatch`)가
+`suji_core_register_handler("__core__", …)` 로 cmd 를 네이티브 디스패치
+(`coreInvoke` → embed_runtimes 폴백 → `extractCmdField`). 응답은 데스크톱
+`src/main.zig cefHandleCore` 와 **키-동형** → `packages/suji-js` **무수정**
+(데스크톱 무회귀). bridgeJS `api.core`(재인코딩 금지) 추가 — iOS `_shared` +
+Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1=clipboard**
+(read/write/clear). 검증: `tests/mobile-backends`(mock `__core__` 라우팅+
+키-동형 응답+unknown_cmd 폴백) + `ios-sim-smoke.sh`(Swift/bridgeJS 컴파일·
+기동). ⚠️ **미검증**: 실기기 UIPasteboard/ClipboardManager, **Android 컴파일**
+(로컬 SDK env 부재 — 코드리뷰+verify.c 메커니즘만, 정직). shell/notification/
+dialog 는 후속 슬라이스(docs/PLAN.md).
+
+**한계**: window/tray/menu/globalShortcut 등 모바일에 개념 없는 데스크톱
+네이티브 API는 호스트가 `unknown_cmd` 동형 반환(프론트 graceful false/빈값).
+나머지(clipboard 등)는 위 `__core__` 슬라이스로 점진 배선. **iOS·Android 둘 다 Rust·Go 백엔드 동작**(언어별 고유 심볼
 `suji_rs_*`/`suji_go_*` + `suji_core_register_handler`). iOS=Rust staticlib
 + Go c-archive(둘 다 `.a` 정적 링크), Android=Rust `.a` 정적 + Go `.so`
 c-shared(Android는 Go c-archive 미지원 → JNI `.so`가 정적/공유 혼합 링크).

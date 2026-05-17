@@ -38,6 +38,39 @@ private func sujiHandlerFree(_ ptr: UnsafePointer<CChar>?) {
     free(UnsafeMutableRawPointer(mutating: ptr))
 }
 
+// 데스크톱 `__core__`(src/main.zig cefHandleCore) 의 모바일 대응 — 같은
+// `@suji/api`(coreCall→`__suji__.core`) 가 iOS 에서도 동작하도록 cmd 를
+// iOS 네이티브로 디스패치. 응답 JSON 은 데스크톱과 키-동형(프론트 무수정).
+// JSONSerialization 으로 직렬화해 text 이스케이프 drift 방지(수동 조립 금지).
+// WKScriptMessageHandler(메인 스레드)+single-thread 코어 경로라 UIPasteboard
+// 접근 안전. 미지원 cmd 는 데스크톱 coreError 와 동형(unknown_cmd).
+private func sujiCoreDispatch(
+    _ channel: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?
+) -> UnsafePointer<CChar>? {
+    let raw = json.map { String(cString: $0) } ?? "{}"
+    let obj = (try? JSONSerialization.jsonObject(with: Data(raw.utf8)))
+        as? [String: Any] ?? [:]
+    let cmd = (obj["cmd"] as? String) ?? ""
+
+    var resp: [String: Any] = ["from": "zig-core", "cmd": cmd]
+    switch cmd {
+    case "clipboard_read_text":
+        resp["text"] = UIPasteboard.general.string ?? ""
+    case "clipboard_write_text":
+        UIPasteboard.general.string = (obj["text"] as? String) ?? ""
+        resp["success"] = true
+    case "clipboard_clear":
+        UIPasteboard.general.items = []
+        resp["success"] = true
+    default:
+        resp["success"] = false
+        resp["error"] = "unknown_cmd"
+    }
+    let data = (try? JSONSerialization.data(withJSONObject: resp))
+        ?? Data(#"{"from":"zig-core","success":false,"error":"serialize"}"#.utf8)
+    return UnsafePointer(strdup(String(decoding: data, as: UTF8.self)))
+}
+
 final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
     private var webView: WKWebView!
     private var tickListenerId: UInt64 = 0
@@ -54,6 +87,8 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         // 순수 Swift 핸들러 데모.
         _ = suji_core_register_handler("ping", sujiPingHandler, sujiHandlerFree)
         _ = suji_core_register_handler("counter:inc", sujiCounterHandler, sujiHandlerFree)
+        // 데스크톱과 동일한 @suji/api(clipboard 등)용 __core__ 네이티브 디스패치.
+        _ = suji_core_register_handler("__core__", sujiCoreDispatch, sujiHandlerFree)
         // 정적 링크된 Rust/Go 백엔드 등록 (greet/add/go:ping/go:upper).
         registerStaticBackends()
 
@@ -150,6 +185,17 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
           });
         });
       }
+      // coreCall(@suji/api) 전용 — 이미 stringify 된 문자열을 그대로(재인코딩
+      // 금지) __core__ 채널로. 데스크톱 __suji__.core 계약과 동형.
+      function core(json) {
+        return new Promise(function (res) {
+          var id = ++_id; _pending[id] = res;
+          window.webkit.messageHandlers.suji.postMessage({
+            id: id, channel: "__core__",
+            json: (typeof json === "string" ? json : JSON.stringify(json))
+          });
+        });
+      }
       function __resolve__(id, json) {
         var r = _pending[id]; if (!r) return; delete _pending[id];
         try { r(json ? JSON.parse(json) : null); } catch (e) { r(json); }
@@ -160,7 +206,7 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         var d; try { d = json ? JSON.parse(json) : null; } catch (e) { d = json; }
         ls.forEach(function (f) { try { f(d); } catch (e) {} });
       }
-      var api = { invoke: invoke, on: on, __resolve__: __resolve__, __emit__: __emit__ };
+      var api = { invoke: invoke, core: core, on: on, __resolve__: __resolve__, __emit__: __emit__ };
       window.__suji__ = api; window.suji = api;
     })();
     """

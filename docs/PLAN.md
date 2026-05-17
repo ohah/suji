@@ -1534,6 +1534,32 @@ CEF import 0이라 분리선이 이미 존재했음.
         검증 실패. 해결: iOS Security.framework `SecTrust` 연동 또는 앱 번들
         PEM 주입(Android는 `/system/etc/security/cacerts` 경로 확인 필요).
         위 평문 http 배선의 상위 단계.
+  - [~] **모바일 네이티브 `@suji/api` (`__core__` 와이어, Tauri 동형)** — 데스크톱과
+        *동일* 프론트 API(`suji.clipboard.*` 등 `coreCall→__suji__.core`)가 모바일에서도
+        동작하도록, 호스트(iOS Swift/Android Kotlin)가 `suji_core_register_handler
+        ("__core__", dispatch, free)` 로 cmd 를 네이티브 디스패치. `coreInvoke` 가
+        special_dispatch null(모바일) → `embed_runtimes["__core__"]` 폴백,
+        `extractCmdField` 로 cmd→channel 추출(loader.zig). 응답 JSON 은 데스크톱
+        `src/main.zig cefHandleCore` 와 **키-동형**(프론트 `packages/suji-js`
+        **무수정** — 데스크톱 무회귀). 미지원 cmd 는 `coreError` 동형
+        (`success:false,error:"unknown_cmd"`). bridgeJS `api` 에 `core`(재인코딩
+        금지, channel `__core__` 고정) 추가 — iOS `_shared` + Android 4×
+        `web/index.html`(동일 변경, 단일출처 없음 → drift 주의).
+    - [x] **Slice 1: clipboard** — iOS `sujiCoreDispatch`(UIPasteboard,
+          JSONSerialization) + Android `coreDispatch`(ClipboardManager,
+          JSONObject) — `clipboard_read_text/write_text/clear`. 검증:
+          `tests/mobile-backends` 22/22(mock `__core__` 라우팅+write→read
+          왕복+clear+unknown_cmd 폴백, 데스크톱 키-동형 응답 실증) + iOS
+          시뮬레이터 빌드·기동(Swift/bridgeJS 컴파일·링크·생존). ⚠️ **미검증**:
+          실 UIPasteboard/ClipboardManager 동작(실기기), **Android 컴파일**
+          (로컬 SDK env 부재 — 코드리뷰+verify.c 메커니즘 간접 보강만, 정직).
+    - [ ] Slice 2: `shell_open_external` (iOS UIApplication.open / Android
+          Intent.ACTION_VIEW). open_path/show_item_in_folder 등은 unknown_cmd 폴백.
+    - [ ] Slice 3: notification (UNUserNotificationCenter/NotificationManager) —
+          권한 비동기·click 이벤트(`suji_core_emit`) 특수성.
+    - [ ] Slice 4: dialog (UIAlertController/AlertDialog) — 사용자 응답 비동기
+          (semaphore/latch + 백그라운드 디스패치, 데드락 회피) 별도 설계 게이트.
+          open/save dialog 는 모바일 파일모델 차이로 1차 unknown_cmd 폴백.
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).

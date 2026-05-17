@@ -23,6 +23,15 @@
             JSON.stringify(payload === undefined ? {} : payload));
         });
       }
+      // coreCall(@suji/api) 전용 — 이미 stringify 된 문자열을 그대로(재인코딩
+      // 금지) __core__ 채널로. 데스크톱 __suji__.core 계약과 동형.
+      function core(json) {
+        return new Promise(function (res) {
+          var id = ++_id; _pending[id] = res;
+          window.SujiNative.invoke(id, "__core__",
+            (typeof json === "string" ? json : JSON.stringify(json)));
+        });
+      }
       function __resolve__(id, json) {
         var r = _pending[id]; if (!r) return; delete _pending[id];
         try { r(json ? JSON.parse(json) : null); } catch (e) { r(json); }
@@ -33,7 +42,7 @@
         var d; try { d = json ? JSON.parse(json) : null; } catch (e) { d = json; }
         ls.forEach(function (f) { try { f(d); } catch (e) {} });
       }
-      var api = { invoke: invoke, on: on, __resolve__: __resolve__, __emit__: __emit__ };
+      var api = { invoke: invoke, core: core, on: on, __resolve__: __resolve__, __emit__: __emit__ };
       window.__suji__ = api; window.suji = api;
     })();
   </script>
