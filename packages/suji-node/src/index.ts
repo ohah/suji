@@ -403,6 +403,11 @@ export interface GetUrlResponse extends WindowOpResponse {
   url: string | null;
 }
 
+export interface GetUserAgentResponse extends WindowOpResponse {
+  cmd: 'get_user_agent';
+  userAgent: string | null;
+}
+
 export interface IsLoadingResponse extends WindowOpResponse {
   cmd: 'is_loading';
   loading: boolean;
@@ -462,6 +467,14 @@ export const windows = {
   },
   getURL(windowId: number): Promise<GetUrlResponse> {
     return invoke<GetUrlResponse>('__core__', { cmd: 'get_url', windowId });
+  },
+  /** UA 동적 변경 (Electron `webContents.setUserAgent`, CDP override). */
+  setUserAgent(windowId: number, userAgent: string): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_user_agent', windowId, userAgent });
+  },
+  /** 설정한 UA override 조회. 미설정 시 userAgent=null. */
+  getUserAgent(windowId: number): Promise<GetUserAgentResponse> {
+    return invoke<GetUserAgentResponse>('__core__', { cmd: 'get_user_agent', windowId });
   },
   isLoading(windowId: number): Promise<IsLoadingResponse> {
     return invoke<IsLoadingResponse>('__core__', { cmd: 'is_loading', windowId });
@@ -627,6 +640,12 @@ export class BrowserWindow {
   }
   getURL() {
     return windows.getURL(this.#id);
+  }
+  setUserAgent(userAgent: string) {
+    return windows.setUserAgent(this.#id, userAgent);
+  }
+  getUserAgent() {
+    return windows.getUserAgent(this.#id);
   }
   isLoading() {
     return windows.isLoading(this.#id);

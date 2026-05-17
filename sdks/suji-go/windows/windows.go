@@ -57,6 +57,19 @@ func GetURL(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_url","windowId":%d}`, windowID))
 }
 
+// SetUserAgent — UA 동적 변경 (Electron webContents.setUserAgent, CDP override).
+func SetUserAgent(windowID uint32, userAgent string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"set_user_agent","windowId":%d,"userAgent":"%s"}`,
+		windowID, jsonesc.Full(userAgent),
+	))
+}
+
+// GetUserAgent — 설정한 UA override 조회. 미설정 시 응답 userAgent=null.
+func GetUserAgent(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_user_agent","windowId":%d}`, windowID))
+}
+
 func IsLoading(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"is_loading","windowId":%d}`, windowID))
 }
@@ -228,7 +241,11 @@ func (w *BrowserWindow) Reload(ignoreCache bool) string {
 func (w *BrowserWindow) ExecuteJavaScript(code string) string {
 	return ExecuteJavaScript(w.ID, code)
 }
-func (w *BrowserWindow) GetURL() string                 { return GetURL(w.ID) }
+func (w *BrowserWindow) GetURL() string { return GetURL(w.ID) }
+func (w *BrowserWindow) SetUserAgent(ua string) string {
+	return SetUserAgent(w.ID, ua)
+}
+func (w *BrowserWindow) GetUserAgent() string           { return GetUserAgent(w.ID) }
 func (w *BrowserWindow) IsLoading() string              { return IsLoading(w.ID) }
 func (w *BrowserWindow) OpenDevTools() string           { return OpenDevTools(w.ID) }
 func (w *BrowserWindow) CloseDevTools() string          { return CloseDevTools(w.ID) }

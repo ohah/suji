@@ -228,6 +228,8 @@ pub const Native = struct {
         reload: *const fn (ctx: ?*anyopaque, handle: u64, ignore_cache: bool) void,
         execute_javascript: *const fn (ctx: ?*anyopaque, handle: u64, code: []const u8) void,
         get_url: *const fn (ctx: ?*anyopaque, handle: u64) ?[]const u8,
+        set_user_agent: *const fn (ctx: ?*anyopaque, handle: u64, ua: []const u8) void,
+        get_user_agent: *const fn (ctx: ?*anyopaque, handle: u64) ?[]const u8,
         is_loading: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         // Phase 4-C: DevTools
         open_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -308,6 +310,12 @@ pub const Native = struct {
     }
     pub fn getUrl(self: Native, handle: u64) ?[]const u8 {
         return self.vtable.get_url(self.ctx, handle);
+    }
+    pub fn setUserAgent(self: Native, handle: u64, ua: []const u8) void {
+        self.vtable.set_user_agent(self.ctx, handle, ua);
+    }
+    pub fn getUserAgent(self: Native, handle: u64) ?[]const u8 {
+        return self.vtable.get_user_agent(self.ctx, handle);
     }
     pub fn isLoading(self: Native, handle: u64) bool {
         return self.vtable.is_loading(self.ctx, handle);
@@ -1129,6 +1137,20 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.getUrl(win.native_handle);
+    }
+
+    pub fn setUserAgent(self: *WindowManager, id: u32, ua: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setUserAgent(win.native_handle, ua);
+    }
+
+    pub fn getUserAgent(self: *WindowManager, id: u32) Error!?[]const u8 {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.getUserAgent(win.native_handle);
     }
 
     pub fn isLoading(self: *WindowManager, id: u32) Error!bool {

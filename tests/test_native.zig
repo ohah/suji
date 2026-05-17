@@ -32,6 +32,7 @@ pub const TestNative = struct {
     last_executed_js: ?[]const u8 = null,
     /// getUrl가 반환할 값 (테스트가 미리 세팅; 기본 null)
     stub_url: ?[]const u8 = null,
+    stub_user_agent: ?[]const u8 = null,
     /// isLoading 반환값 (기본 false)
     stub_is_loading: bool = false,
 
@@ -126,6 +127,8 @@ pub const TestNative = struct {
         .reload = reload,
         .execute_javascript = executeJavascript,
         .get_url = getUrl,
+        .set_user_agent = setUserAgent,
+        .get_user_agent = getUserAgent,
         .is_loading = isLoading,
         .open_dev_tools = openDevTools,
         .close_dev_tools = closeDevTools,
@@ -243,6 +246,14 @@ pub const TestNative = struct {
 
     fn getUrl(ctx: ?*anyopaque, _: u64) ?[]const u8 {
         return fromCtx(ctx).stub_url;
+    }
+
+    fn setUserAgent(ctx: ?*anyopaque, _: u64, ua: []const u8) void {
+        fromCtx(ctx).stub_user_agent = ua;
+    }
+
+    fn getUserAgent(ctx: ?*anyopaque, _: u64) ?[]const u8 {
+        return fromCtx(ctx).stub_user_agent;
     }
 
     fn isLoading(ctx: ?*anyopaque, _: u64) bool {

@@ -279,6 +279,26 @@ pub mod windows {
         )
     }
 
+    /// UA 동적 변경 (Electron `webContents.setUserAgent`, CDP override).
+    pub fn set_user_agent(window_id: u32, user_agent: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_user_agent","windowId":{},"userAgent":"{}"}}"#,
+                window_id,
+                escape_json(user_agent),
+            ),
+        )
+    }
+
+    /// 설정한 UA override 조회. 미설정 시 응답 userAgent=null.
+    pub fn get_user_agent(window_id: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"get_user_agent","windowId":{}}}"#, window_id),
+        )
+    }
+
     pub fn is_loading(window_id: u32) -> Option<String> {
         invoke(
             "__core__",
@@ -571,6 +591,12 @@ pub mod windows {
         }
         pub fn get_url(&self) -> Option<String> {
             get_url(self.id)
+        }
+        pub fn set_user_agent(&self, user_agent: &str) -> Option<String> {
+            set_user_agent(self.id, user_agent)
+        }
+        pub fn get_user_agent(&self) -> Option<String> {
+            get_user_agent(self.id)
         }
         pub fn is_loading(&self) -> Option<String> {
             is_loading(self.id)

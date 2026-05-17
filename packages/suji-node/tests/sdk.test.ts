@@ -107,3 +107,24 @@ describe("BrowserWindow (OO wrapper)", () => {
     expect(JSON.parse(calls[1][1])).toEqual({ cmd: "get_url", windowId: 3 });
   });
 });
+
+describe("windows.setUserAgent/getUserAgent (node)", () => {
+  function stubUA() {
+    const calls: Array<[string, string]> = [];
+    (globalThis as any).suji = {
+      quit: () => {}, platform: () => "macos", handle: () => {},
+      invoke: async (b: string, j: string) => { calls.push([b, j]); return JSON.stringify({ ok: true, userAgent: "Suji/1.0" }); },
+      invokeSync: () => "", send: () => {}, on: () => 0, off: () => {}, register: () => {},
+    };
+    return calls;
+  }
+  test("BrowserWindow.setUserAgent/getUserAgent 위임", async () => {
+    const calls = stubUA();
+    const win = BrowserWindow.fromId(8);
+    await win.setUserAgent("UA-X");
+    expect(JSON.parse(calls[0][1])).toEqual({ cmd: "set_user_agent", windowId: 8, userAgent: "UA-X" });
+    const r = await win.getUserAgent();
+    expect(r.userAgent).toBe("Suji/1.0");
+    expect(JSON.parse(calls[1][1])).toEqual({ cmd: "get_user_agent", windowId: 8 });
+  });
+});

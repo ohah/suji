@@ -2162,6 +2162,18 @@ test "getUrl: native가 stub_url 반환하면 그대로 전달, null이면 null"
     try std.testing.expectEqualStrings("http://localhost/", (try wm.getUrl(id)).?);
 }
 
+test "setUserAgent/getUserAgent: 미설정 null, set 후 그대로 반환, 없는 창 에러" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try std.testing.expectEqual(@as(?[]const u8, null), try wm.getUserAgent(id));
+    try wm.setUserAgent(id, "Suji/1.0 (custom)");
+    try std.testing.expectEqualStrings("Suji/1.0 (custom)", (try wm.getUserAgent(id)).?);
+    try std.testing.expectError(window.Error.WindowNotFound, wm.setUserAgent(999, "x"));
+    try std.testing.expectError(window.Error.WindowNotFound, wm.getUserAgent(999));
+}
+
 test "isLoading: native stub_is_loading을 그대로 전달" {
     var native = TestNative{};
     var wm = newManager(&native);

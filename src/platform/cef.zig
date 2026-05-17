@@ -405,6 +405,11 @@ pub const CefNative = struct {
         /// 매 invoke마다 frame.get_url alloc/free를 피하기 위함. len=0이면 미캐싱(폴백).
         url_cache_buf: [URL_CACHE_LEN]u8 = undefined,
         url_cache_len: usize = 0,
+        /// set_user_agent 로 적용한 UA override 보관(get_user_agent 가 반환).
+        /// CEF 는 per-browser UA getter 미제공 → 설정값을 inline 추적
+        /// (url_cache 와 동일 패턴 — alloc/free 불필요). len=0=미설정(기본).
+        ua_buf: [2048]u8 = undefined,
+        ua_len: usize = 0,
         /// CEF가 계산한 `-webkit-app-region` rectangle들. browser id별로 보관하고
         /// macOS NSWindow.sendEvent:에서 native drag hit-test에 사용.
         drag_regions: []drag_region.DragRegion = &.{},
@@ -479,6 +484,8 @@ pub const CefNative = struct {
         .close_dev_tools = closeDevToolsImpl,
         .is_dev_tools_opened = isDevToolsOpenedImpl,
         .toggle_dev_tools = toggleDevToolsImpl,
+        .set_user_agent = setUserAgentImpl,
+        .get_user_agent = getUserAgentImpl,
         .set_zoom_level = setZoomLevelImpl,
         .get_zoom_level = getZoomLevelImpl,
         .set_audio_muted = setAudioMutedImpl,
@@ -921,6 +928,37 @@ pub const CefNative = struct {
     }
 
     // ==================== Phase 4-B: 줌 ====================
+
+    /// 동적 UA override — CEF 는 per-browser UA setter 미제공 →
+    /// CDP `Network.setUserAgentOverride`(send_dev_tools_message, raw JSON).
+    /// 이후 네비/요청에 적용. 설정값은 entry 에 추적(get_user_agent 용).
+    fn setUserAgentImpl(ctx: ?*anyopaque, handle: u64, ua: []const u8) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.getPtr(handle) orelse return;
+        const n = @min(ua.len, entry.ua_buf.len);
+        @memcpy(entry.ua_buf[0..n], ua[0..n]);
+        entry.ua_len = n;
+
+        var esc: [4096]u8 = undefined;
+        const en = window_mod.escapeJsonChars(entry.ua_buf[0..n], &esc);
+        var msg: [4352]u8 = undefined;
+        const m = std.fmt.bufPrint(
+            &msg,
+            "{{\"id\":1,\"method\":\"Network.setUserAgentOverride\",\"params\":{{\"userAgent\":\"{s}\"}}}}",
+            .{esc[0..en]},
+        ) catch return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+        const send = host.send_dev_tools_message orelse return;
+        _ = send(host, m.ptr, m.len);
+    }
+
+    fn getUserAgentImpl(ctx: ?*anyopaque, handle: u64) ?[]const u8 {
+        const self = fromCtx(ctx);
+        const entry = self.browsers.getPtr(handle) orelse return null;
+        if (entry.ua_len == 0) return null;
+        return entry.ua_buf[0..entry.ua_len];
+    }
 
     fn setZoomLevelImpl(ctx: ?*anyopaque, handle: u64, level: f64) void {
         assertUiThread();

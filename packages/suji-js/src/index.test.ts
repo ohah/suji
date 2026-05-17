@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, BrowserWindow } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, BrowserWindow, windows } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -420,5 +420,26 @@ describe("BrowserWindow (OO wrapper)", () => {
     await win.findInPage("hi", { matchCase: true });
     const req = JSON.parse(mockBridge.core.mock.calls[0][0]);
     expect(req).toMatchObject({ cmd: "find_in_page", windowId: 2, text: "hi", matchCase: true });
+  });
+});
+
+describe("windows.setUserAgent/getUserAgent", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+  it("setUserAgent → set_user_agent 라우팅", async () => {
+    mockBridge.core.mockResolvedValueOnce({ ok: true });
+    await windows.setUserAgent(3, "Suji/1.0");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "set_user_agent", windowId: 3, userAgent: "Suji/1.0" });
+  });
+  it("getUserAgent → get_user_agent, userAgent 반환", async () => {
+    mockBridge.core.mockResolvedValueOnce({ ok: true, userAgent: "Suji/1.0" });
+    const r = await windows.getUserAgent(3);
+    expect(r.userAgent).toBe("Suji/1.0");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "get_user_agent", windowId: 3 });
+  });
+  it("BrowserWindow.setUserAgent/getUserAgent 위임", async () => {
+    const win = BrowserWindow.fromId(8);
+    mockBridge.core.mockResolvedValueOnce({ ok: true });
+    await win.setUserAgent("UA-X");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "set_user_agent", windowId: 8, userAgent: "UA-X" });
   });
 });

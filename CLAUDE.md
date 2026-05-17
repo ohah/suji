@@ -255,6 +255,9 @@ suji.platform                                                // "macos" | "linux
 // await windows.create({ title:"Settings", url:"...", frame:false }) — 새 창
 // await windows.loadURL(id, url) / reload(id, true) / executeJavaScript(id, code)  (Phase 4-A)
 // await windows.getURL(id) / isLoading(id) / setTitle(id, t) / setBounds(id, {...})
+// await windows.setUserAgent(id, ua) / getUserAgent(id)  — 동적 UA(CDP override)
+//   ※ class BrowserWindow OO 래퍼: BrowserWindow.create(opts)/fromId(id) +
+//     인스턴스 메서드(setTitle/loadURL/setUserAgent/…) — 4 SDK 동형(Electron 패리티)
 // await windows.setZoomFactor(id, 1.2) / setZoomLevel(id, 1.5)  (Phase 4-B)
 // await windows.openDevTools(id) / toggleDevTools(id) / isDevToolsOpened(id)  (Phase 4-C)
 // await windows.undo(id) / copy(id) / paste(id) / findInPage(id, "x", {})  (Phase 4-E)

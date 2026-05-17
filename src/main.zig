@@ -1268,6 +1268,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleGetUrl(win_id, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "set_user_agent")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetUserAgent(win_id, util.extractJsonString(req_clean, "userAgent") orelse "", response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "get_user_agent")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleGetUserAgent(win_id, response_buf, wm);
+    }
     if (std.mem.eql(u8, cmd, "is_loading")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);

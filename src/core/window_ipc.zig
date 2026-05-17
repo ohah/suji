@@ -332,6 +332,38 @@ pub fn handleGetUrl(window_id: u32, response_buf: []u8, wm: *window.WindowManage
     ) catch null;
 }
 
+// ==================== User-Agent (Electron `webContents.setUserAgent`/`getUserAgent`) ====================
+// 동적 — CDP Network.setUserAgentOverride (cef.zig). get 은 설정값 추적 반환.
+
+pub fn handleSetUserAgent(window_id: u32, user_agent: []const u8, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setUserAgent(window_id, user_agent)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_user_agent", window_id, ok);
+}
+
+pub fn handleGetUserAgent(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ua = (wm.getUserAgent(window_id) catch null) orelse return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_user_agent\",\"windowId\":{d},\"ok\":true,\"userAgent\":null}}",
+        .{window_id},
+    ) catch null;
+
+    var ua_buf: [4096]u8 = undefined;
+    const n = window.escapeJsonChars(ua, &ua_buf);
+    if (n == 0 and ua.len > 0) return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_user_agent\",\"windowId\":{d},\"ok\":true,\"userAgent\":null}}",
+        .{window_id},
+    ) catch null;
+
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_user_agent\",\"windowId\":{d},\"ok\":true,\"userAgent\":\"{s}\"}}",
+        .{ window_id, ua_buf[0..n] },
+    ) catch null;
+}
+
 pub fn handleIsLoading(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     // isLoading이 NotFound/Destroyed 에러면 ok=false, loading=false. 정상이면 ok=true.

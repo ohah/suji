@@ -526,8 +526,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     B 플랫폼/엣지 (가치 중간):
     - [ ] **Linux PDF 인쇄** — `cef_print_handler_t::GetPdfPaperSize` 구현 필요 (CEF 요구).
           현재 macOS만 검증. (4-D 후속.)
-    - [ ] **`set_user_agent` / `get_user_agent` dynamic** — CEF는 창 settings에 한 번만 노출
-          (per-browser 동적 변경 미지원). Phase 7 보안과 함께 처리.
+    - [x] **`set_user_agent` / `get_user_agent` dynamic** — CEF settings UA 는
+          init 1회뿐이라, 동적은 CDP `Network.setUserAgentOverride`
+          (`send_dev_tools_message`, raw JSON)로 구현. set 값은 BrowserEntry
+          inline 추적(url_cache 패턴)해 get 이 반환(CEF per-browser UA getter
+          미제공). 코어(cef/window/window_ipc/main) + 4 SDK windows.* +
+          BrowserWindow + 단위 테스트(window_manager/JS/Node) 검증.
 
     C 기술 부채 (가치 낮음 / 코드 정리):
     - [~] **`cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화** — 부분 해소·잔여 의도적 보류.

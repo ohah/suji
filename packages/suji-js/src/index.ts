@@ -206,6 +206,11 @@ export interface GetUrlResponse extends WindowOpResponse {
   url: string | null;
 }
 
+export interface GetUserAgentResponse extends WindowOpResponse {
+  cmd: "get_user_agent";
+  userAgent: string | null;
+}
+
 export interface IsLoadingResponse extends WindowOpResponse {
   cmd: "is_loading";
   loading: boolean;
@@ -325,6 +330,19 @@ export const windows = {
   /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
   getURL(windowId: number): Promise<GetUrlResponse> {
     return coreCall<GetUrlResponse>({ cmd: "get_url", windowId });
+  },
+
+  /** UA 동적 변경 (Electron `webContents.setUserAgent`). CDP
+   *  Network.setUserAgentOverride — 이후 네비/요청에 적용. */
+  setUserAgent(windowId: number, userAgent: string): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_user_agent", windowId, userAgent });
+  },
+
+  /** 설정한 UA override 조회 (Electron `webContents.getUserAgent`).
+   *  미설정 시 userAgent=null (브라우저 기본 — CEF 가 per-browser
+   *  기본 UA getter 미제공). */
+  getUserAgent(windowId: number): Promise<GetUserAgentResponse> {
+    return coreCall<GetUserAgentResponse>({ cmd: "get_user_agent", windowId });
   },
 
   /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
@@ -573,6 +591,12 @@ export class BrowserWindow {
   }
   getURL() {
     return windows.getURL(this.#id);
+  }
+  setUserAgent(userAgent: string) {
+    return windows.setUserAgent(this.#id, userAgent);
+  }
+  getUserAgent() {
+    return windows.getUserAgent(this.#id);
   }
   isLoading() {
     return windows.isLoading(this.#id);
