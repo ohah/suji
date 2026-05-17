@@ -1534,17 +1534,33 @@ CEF import 0이라 분리선이 이미 존재했음.
         검증 실패. 해결: iOS Security.framework `SecTrust` 연동 또는 앱 번들
         PEM 주입(Android는 `/system/etc/security/cacerts` 경로 확인 필요).
         위 평문 http 배선의 상위 단계.
-  - [~] **모바일 네이티브 `@suji/api` (`__core__` 와이어, Tauri 동형)** — 데스크톱과
-        *동일* 프론트 API(`suji.clipboard.*` 등 `coreCall→__suji__.core`)가 모바일에서도
-        동작하도록, 호스트(iOS Swift/Android Kotlin)가 `suji_core_register_handler
-        ("__core__", dispatch, free)` 로 cmd 를 네이티브 디스패치. `coreInvoke` 가
-        special_dispatch null(모바일) → `embed_runtimes["__core__"]` 폴백,
-        `extractCmdField` 로 cmd→channel 추출(loader.zig). 응답 JSON 은 데스크톱
-        `src/main.zig cefHandleCore` 와 **키-동형**(프론트 `packages/suji-js`
-        **무수정** — 데스크톱 무회귀). 미지원 cmd 는 `coreError` 동형
+  - [x] **모바일 네이티브 `@suji/api` (`__core__` 와이어, Tauri 동형) — 완료
+        (Slice 1~11)**. 데스크톱과 *동일* 프론트 API(`suji.clipboard.*` 등
+        `coreCall→__suji__.core`)가 모바일에서도 동작하도록, 호스트(iOS Swift/
+        Android Kotlin)가 `suji_core_register_handler("__core__", dispatch,
+        free)` 로 cmd 를 네이티브 디스패치. `coreInvoke` 가 special_dispatch
+        null(모바일) → `embed_runtimes["__core__"]` 폴백, `extractCmdField` 로
+        cmd→channel 추출(loader.zig). 응답 JSON 은 데스크톱 `src/main.zig
+        cefHandleCore` 와 **키-동형**(프론트 `packages/suji-js` **무수정** —
+        데스크톱 무회귀). 미지원 cmd 는 `coreError` 동형
         (`success:false,error:"unknown_cmd"`). bridgeJS `api` 에 `core`(재인코딩
         금지, channel `__core__` 고정) 추가 — iOS `_shared` + Android 4×
         `web/index.html`(동일 변경, 단일출처 없음 → drift 주의).
+
+        **최종 상태**: 모바일 대응 가능한 데스크톱 API **사실상 전부 배선
+        완료**. 총 cmd ≈35 (clipboard 12·fs 6·dialog 4·notification 4·
+        safe_storage 3·app 메타 4·shell open_external+beep). 검증: 호스트
+        하니스 `tests/mobile-backends/run.sh` **52/52** + 실 디바이스
+        `ios-e2e.sh` **iOS 32/32** + `android-e2e.sh` **Android 32/32**
+        (실 UIPasteboard/ClipboardManager/Keychain/Keystore/FileManager/
+        샌드박스 FS 왕복 자가검증). 진짜 디바이스 e2e 가 호스트 하니스·
+        코드리뷰가 놓친 **실 버그 3건 적발·수정**: ① Android `handleInvoke`
+        `when(channel)` 가 추출-cmd 를 못 받던 라우팅 결함(→ `else→
+        coreDispatch`), ② iOS `setValue`↔`setData` HTML/RTF 왕복 실패,
+        ③ iOS `pasteboardTypes`→`types`(iOS14 rename) 컴파일 실패.
+        각 Slice `/simplify` 3-에이전트(reuse/quality/efficiency) 통과,
+        브랜치→커밋→main ff-merge→push. 정직 한계(플랫폼 의미차)는
+        Slice 항목·아래 커버리지표·`CLAUDE.md` 에 일관 명시.
     - [x] **Slice 1: clipboard** — iOS `sujiCoreDispatch`(UIPasteboard,
           JSONSerialization) + Android `coreDispatch`(ClipboardManager,
           JSONObject) — `clipboard_read_text/write_text/clear`. 검증:
