@@ -73,6 +73,7 @@ static char mock_ss[256];
 static char mock_html[512];
 static char mock_rtf[512];
 static char mock_img[1024];
+static char mock_fs[1024];
 
 // "key":"..." 값을 dst 로 추출(escape 미지원 단순 스캐너 — 테스트 입력 통제).
 static void mock_extract(const char *j, const char *quoted_key, char *dst, size_t cap) {
@@ -191,6 +192,19 @@ static const char *core_h(const char *ch, const char *j) {
         // mock — 모바일 한계로 graceful false(데스크톱 키-동형). 라우팅+포맷만.
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false}", ch);
+    } else if (strcmp(ch, "fs_write_file") == 0) {
+        mock_extract(j, "\"text\":\"", mock_fs, sizeof(mock_fs));
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"fs_write_file\",\"success\":true}");
+    } else if (strcmp(ch, "fs_read_file") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"fs_read_file\",\"success\":true,\"text\":\"%s\"}",
+            mock_fs);
+    } else if (strcmp(ch, "fs_readdir") == 0) {
+        // mock — 실 FS 는 iOS FileManager / Android File 몫. 라우팅+키-동형만.
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"fs_readdir\",\"success\":true,"
+            "\"entries\":[{\"name\":\"suji-e2e-fs.txt\",\"type\":\"file\"}]}");
     } else if (strcmp(ch, "app_get_path") == 0) {
         // mock — 실 경로는 iOS FileManager / Android filesDir 몫. 라우팅+포맷만.
         snprintf(buf, sizeof(buf),
@@ -383,6 +397,12 @@ int main(void) {
               "\"cmd\":\"clipboard_write_image\",\"success\":true", "core clipboard write_image");
     roundtrip("__core__", "{\"cmd\":\"clipboard_read_image\"}",
               "\"data\":\"UABNAGc=\"", "core clipboard read_image (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"fs_write_file\",\"path\":\"/x\",\"text\":\"fsdata\"}",
+              "\"cmd\":\"fs_write_file\",\"success\":true", "core fs write_file");
+    roundtrip("__core__", "{\"cmd\":\"fs_read_file\",\"path\":\"/x\"}",
+              "\"success\":true,\"text\":\"fsdata\"", "core fs read_file (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"fs_readdir\",\"path\":\"/x\"}",
+              "\"name\":\"suji-e2e-fs.txt\",\"type\":\"file\"", "core fs readdir");
     roundtrip("__core__", "{\"cmd\":\"shell_beep\"}",
               "\"cmd\":\"shell_beep\",\"success\":true", "core shell beep");
     roundtrip("__core__", "{\"cmd\":\"shell_trash_item\",\"path\":\"/x\"}",

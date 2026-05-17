@@ -1642,6 +1642,16 @@ CEF import 0이라 분리선이 이미 존재했음.
           영구삭제 근사는 위험) — 데스크톱 success:false 와 키-동형(프론트
           무손상). 검증: harness 42/42 + iOS 24/24 + Android 24/24 e2e
           (beep success:true·나머지 graceful false 디바이스 실증).
+    - [x] **Slice 10: fs(read/write/readdir)** — iOS FileManager
+          (String(contentsOfFile)/write/contentsOfDirectory) / Android
+          java.io.File(readText/writeText/listFiles). 데스크톱 키-동형
+          (read=success+text/error, write=success, readdir=success+
+          entries[{name,type}]/error). ⚠️ 데스크톱 fs 는 suji.json
+          allowedRoots 화이트리스트 검증인데 모바일은 OS 앱 샌드박스 자체가
+          경계(컨테이너 밖 path 는 OS 가 거부 → success:false) — app_get_path
+          (documents/temp) 하위 절대경로 사용. 검증: harness 45/45 + iOS
+          26/26 + Android 26/26 e2e(app_get_path documents 하위 실 샌드박스
+          파일 write→read 왕복 + readdir 가 쓴 파일 나열 — 디바이스 실 FS IO).
 
 ### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
 
@@ -1650,8 +1660,8 @@ CEF import 0이라 분리선이 이미 존재했음.
 
 | 분류 | 영역/cmd | 모바일 |
 |---|---|---|
-| ✅ 배선됨 | clipboard(text+html/rtf/image 9) · notification(4) · shell(open_external+**beep**) · dialog(message_box/error/open/save 4) · safe_storage(3) · app 메타(4) | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
-| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
+| ✅ 배선됨 | clipboard(text+html/rtf/image 9) · notification(4) · shell(open_external+beep) · dialog(message_box/error/open/save 4) · safe_storage(3) · app 메타(4) · **fs(read/write/readdir 3)** | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
+| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · fs(stat/mkdir/rm) | 후속 슬라이스 후보 |
 | ❌ 개념 없음/모바일 한계 | shell(open_path/show_item/trash — 샌드박스/탐색기/휴지통 부재, graceful false) · window 제어 · webContents · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd`/graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일

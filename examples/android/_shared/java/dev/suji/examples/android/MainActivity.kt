@@ -24,6 +24,7 @@ import android.util.Base64
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import java.io.File
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -172,6 +173,32 @@ class MainActivity : Activity() {
                     true
                 } catch (e: Exception) { false }
                 resp.put("success", ok)
+            }
+            "fs_read_file" -> {
+                runCatching { File(obj.optString("path")).readText() }.fold(
+                    { resp.put("success", true).put("text", it) },
+                    { resp.put("success", false).put("error", "read_failed") })
+            }
+            "fs_write_file" -> {
+                val ok = runCatching {
+                    File(obj.optString("path")).writeText(obj.optString("text"))
+                }.isSuccess
+                resp.put("success", ok)
+                if (!ok) resp.put("error", "write_failed")
+            }
+            "fs_readdir" -> {
+                // ⚠️ 데스크톱 fs 는 allowedRoots 화이트리스트. 모바일은 OS 앱
+                // 샌드박스 자체가 경계(컨테이너 밖 path 는 OS 거부). 키-동형
+                // (success+entries[{name,type}]/error).
+                val ls = File(obj.optString("path")).listFiles()
+                if (ls != null) {
+                    val arr = org.json.JSONArray()
+                    ls.forEach {
+                        arr.put(JSONObject().put("name", it.name)
+                            .put("type", if (it.isDirectory) "directory" else "file"))
+                    }
+                    resp.put("success", true).put("entries", arr)
+                } else resp.put("success", false).put("error", "readdir_failed")
             }
             "shell_beep" -> {
                 runCatching {

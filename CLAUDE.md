@@ -496,19 +496,20 @@ HTTPS 는 std 만으로 미해결(후속: Security.framework SecTrust/번들 PEM
 (`coreInvoke` → embed_runtimes 폴백 → `extractCmdField`). 응답은 데스크톱
 `src/main.zig cefHandleCore` 와 **키-동형** → `packages/suji-js` **무수정**
 (데스크톱 무회귀). bridgeJS `api.core`(재인코딩 금지) 추가 — iOS `_shared` +
-Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1~9**(⚠️
+Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1~10**(⚠️
 Android rtf/image custom-MIME 앱-내 한정; dialog open/save 보안스코프/
 content URI; shell open_path/show_item/trash 모바일 한계 graceful false
-— beep 만 실 네이티브; 정직 한계 PLAN 참조):
+— beep 만 실 네이티브; fs 는 OS 샌드박스가 경계(allowedRoots 대신);
+정직 한계 PLAN 참조):
 clipboard(text+html/rtf/image 9)·shell(open_external+beep)·notification(4)·
 **dialog(message_box/error/open/save — 호스트-async 가로채기, 사용자
 상호작용이라 자동 e2e 불가·빌드+메커니즘 검증)**·safe_storage(3, iOS
-Keychain / Android Keystore AES-GCM)·app 메타(get_path/locale/name/version).
-검증:
+Keychain / Android Keystore AES-GCM)·app 메타(get_path/locale/name/version)·
+fs(read/write/readdir, 샌드박스 내). 검증:
 `tests/mobile-backends/run.sh`(mock `__core__` 라우팅+키-동형+unknown_cmd
-40/40) + **`ios-e2e.sh`/`android-e2e.sh`**(실 디바이스 e2e: 실 UIPasteboard
-(public.html/rtf/png)/ClipboardManager·Keychain/Keystore·Bundle/Locale 왕복
-자가검증, iOS 20/20 + Android 20/20).
+45/45) + **`ios-e2e.sh`/`android-e2e.sh`**(실 디바이스 e2e: 실 UIPasteboard
+(public.html/rtf/png)/ClipboardManager·Keychain/Keystore·Bundle/Locale·
+샌드박스 FS 왕복 자가검증, iOS 26/26 + Android 26/26).
 ⚠️ **미검증/범위밖**: dialog 탭·실 알림 표시·실 URL open(스모크), 실기기
 (시뮬·에뮬 ≠ 디바이스). 데스크톱↔모바일 cmd 커버리지표·미배선/불가
 분류는 docs/PLAN.md.

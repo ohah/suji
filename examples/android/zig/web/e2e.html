@@ -175,14 +175,29 @@
     check("shell_trash graceful false", tr && tr.success === false);
   }
 
+  async function fsSuite() {
+    // app_get_path(documents) 하위 실 샌드박스 파일 왕복(시뮬/에뮬=실 FS).
+    var base = (await core({ cmd: "app_get_path", name: "documents" })).path;
+    var fp = base + "/suji-e2e-fs.txt";
+    var content = "fs-rt-" + Date.now();
+    var w = await core({ cmd: "fs_write_file", path: fp, text: content });
+    var r = await core({ cmd: "fs_read_file", path: fp });
+    check("fs write/read round-trip",
+          w && w.success === true && r && r.success === true && r.text === content);
+    var rd = await core({ cmd: "fs_readdir", path: base });
+    check("fs readdir lists written file",
+          rd && rd.success === true && Array.isArray(rd.entries) &&
+          rd.entries.some(function (e) { return e.name === "suji-e2e-fs.txt"; }));
+  }
+
   async function run() {
     try {
       await clipboardSuite(); await safeStorageSuite();
       await appMetaSuite(); await clipboardExtSuite();
-      await shellExtSuite();
+      await shellExtSuite(); await fsSuite();
     } catch (e) { check("suite threw: " + e, false); }
     var fail = cases.filter(function (c) { return !c.ok; }).length;
-    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt+shellExt",
+    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt+shellExt+fs",
                     ok: fail === 0, fail: fail, cases: cases };
     document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
     document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";

@@ -119,6 +119,41 @@ private func sujiCoreDispatch(
         } else {
             resp["success"] = false
         }
+    case "fs_read_file", "fs_write_file", "fs_readdir":
+        // ⚠️ 데스크톱 fs 는 suji.json allowedRoots 화이트리스트 검증. 모바일은
+        // OS 앱 샌드박스 자체가 경계(컨테이너 밖 path 는 OS 가 거부 →
+        // success:false). app_get_path(documents/temp) 하위 절대경로 사용 권장.
+        // 응답 데스크톱 키-동형(read=success+text/error, write=success,
+        // readdir=success+entries[{name,type}]/error).
+        let p = (obj["path"] as? String) ?? ""
+        let fm = FileManager.default
+        if cmd == "fs_read_file" {
+            if let s = try? String(contentsOfFile: p, encoding: .utf8) {
+                resp["success"] = true; resp["text"] = s
+            } else { resp["success"] = false; resp["error"] = "read_failed" }
+        } else if cmd == "fs_write_file" {
+            do {
+                try ((obj["text"] as? String) ?? "")
+                    .write(toFile: p, atomically: true, encoding: .utf8)
+                resp["success"] = true
+            } catch { resp["success"] = false; resp["error"] = "write_failed" }
+        } else {
+            // includingPropertiesForKeys 로 isDirectory 를 enumeration 이 함께
+            // prefetch → per-entry stat(N+1) 제거, 데스크톱 std 1패스 동형.
+            // type 은 file/directory 2값(데스크톱 fsKindName 11종의 부분집합 —
+            // symlink/device 등은 모바일 예제서 directory 아니면 file 로 격하).
+            if let urls = try? fm.contentsOfDirectory(
+                at: URL(fileURLWithPath: p),
+                includingPropertiesForKeys: [.isDirectoryKey], options: []) {
+                resp["success"] = true
+                resp["entries"] = urls.map { u -> [String: Any] in
+                    let isDir = (try? u.resourceValues(forKeys: [.isDirectoryKey]))?
+                        .isDirectory ?? false
+                    return ["name": u.lastPathComponent,
+                            "type": isDir ? "directory" : "file"]
+                }
+            } else { resp["success"] = false; resp["error"] = "readdir_failed" }
+        }
     case "shell_beep":
         AudioServicesPlaySystemSound(1057) // SystemSoundID 1057=Tink, 데스크톱 NSBeep 동등
         resp["success"] = true
