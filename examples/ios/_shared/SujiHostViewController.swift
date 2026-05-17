@@ -1,3 +1,4 @@
+import Security
 import UIKit
 import UserNotifications
 import WebKit
@@ -127,6 +128,32 @@ private func sujiCoreDispatch(
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [nid])
         resp["success"] = true
+    case "safe_storage_set", "safe_storage_get", "safe_storage_delete":
+        // 데스크톱 Keychain(safe_storage)의 iOS 대응 — 동일 Security.framework
+        // Keychain(kSecClassGenericPassword, service+account 키). 응답 데스크톱
+        // 키-동형(set/delete=success, get=value, idempotent).
+        let svc = (obj["service"] as? String) ?? ""
+        let acc = (obj["account"] as? String) ?? ""
+        var q: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: svc,
+            kSecAttrAccount as String: acc,
+        ]
+        if cmd == "safe_storage_set" {
+            SecItemDelete(q as CFDictionary) // idempotent update
+            q[kSecValueData as String] = Data(((obj["value"] as? String) ?? "").utf8)
+            resp["success"] = SecItemAdd(q as CFDictionary, nil) == errSecSuccess
+        } else if cmd == "safe_storage_get" {
+            q[kSecReturnData as String] = true
+            q[kSecMatchLimit as String] = kSecMatchLimitOne
+            var out: CFTypeRef?
+            let st = SecItemCopyMatching(q as CFDictionary, &out)
+            resp["value"] = (st == errSecSuccess ? (out as? Data) : nil)
+                .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        } else {
+            let st = SecItemDelete(q as CFDictionary)
+            resp["success"] = st == errSecSuccess || st == errSecItemNotFound
+        }
     default:
         resp["success"] = false
         resp["error"] = "unknown_cmd"

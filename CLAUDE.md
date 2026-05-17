@@ -496,12 +496,15 @@ HTTPS 는 std 만으로 미해결(후속: Security.framework SecTrust/번들 PEM
 (`coreInvoke` → embed_runtimes 폴백 → `extractCmdField`). 응답은 데스크톱
 `src/main.zig cefHandleCore` 와 **키-동형** → `packages/suji-js` **무수정**
 (데스크톱 무회귀). bridgeJS `api.core`(재인코딩 금지) 추가 — iOS `_shared` +
-Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1=clipboard**
-(read/write/clear). 검증: `tests/mobile-backends`(mock `__core__` 라우팅+
-키-동형 응답+unknown_cmd 폴백) + `ios-sim-smoke.sh`(Swift/bridgeJS 컴파일·
-기동). ⚠️ **미검증**: 실기기 UIPasteboard/ClipboardManager, **Android 컴파일**
-(로컬 SDK env 부재 — 코드리뷰+verify.c 메커니즘만, 정직). shell/notification/
-dialog 는 후속 슬라이스(docs/PLAN.md).
+Android 4× `web/index.html`(동일변경, drift 주의). **Slice 1~5**:
+clipboard(text 3)·shell_open_external·notification(4)·dialog_show_message_box
+·**safe_storage(3, iOS Keychain / Android Keystore AES-GCM)**. 검증:
+`tests/mobile-backends/run.sh`(mock `__core__` 라우팅+키-동형+unknown_cmd
+30/30) + **`ios-e2e.sh`/`android-e2e.sh`**(실 디바이스 e2e: 실 UIPasteboard/
+ClipboardManager·Keychain/Keystore 왕복 자가검증, iOS 11/11 + Android 11/11).
+⚠️ **미검증/범위밖**: dialog 탭·실 알림 표시·실 URL open(스모크), 실기기
+(시뮬·에뮬 ≠ 디바이스). 데스크톱↔모바일 cmd 커버리지표·미배선/불가
+분류는 docs/PLAN.md.
 
 **한계**: window/tray/menu/globalShortcut 등 모바일에 개념 없는 데스크톱
 네이티브 API는 호스트가 `unknown_cmd` 동형 반환(프론트 graceful false/빈값).

@@ -69,6 +69,7 @@ static void zig_f(const char *p) { suji_zig_backend_free((char *)p); }
 // 동작은 시뮬레이터/실기기 몫, 정직). coreInvoke 가 cmd 를 추출해 channel 인자로
 // 넘기므로(loader.zig embed_runtimes 폴백) ch == cmd.
 static char mock_clip[256];
+static char mock_ss[256];
 
 static const char *core_h(const char *ch, const char *j) {
     char buf[512];
@@ -111,6 +112,27 @@ static const char *core_h(const char *ch, const char *j) {
     } else if (strcmp(ch, "notification_close") == 0) {
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"notification_close\",\"success\":true}");
+    } else if (strcmp(ch, "safe_storage_set") == 0) {
+        const char *p = j ? strstr(j, "\"value\":\"") : NULL;
+        mock_ss[0] = 0;
+        if (p) {
+            p += 9;
+            const char *e = strchr(p, '"');
+            size_t n = e ? (size_t)(e - p) : 0;
+            if (n >= sizeof(mock_ss)) n = sizeof(mock_ss) - 1;
+            memcpy(mock_ss, p, n);
+            mock_ss[n] = 0;
+        }
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"safe_storage_set\",\"success\":true}");
+    } else if (strcmp(ch, "safe_storage_get") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"safe_storage_get\",\"value\":\"%s\"}",
+            mock_ss);
+    } else if (strcmp(ch, "safe_storage_delete") == 0) {
+        mock_ss[0] = 0;
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"safe_storage_delete\",\"success\":true}");
     } else {
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false,\"error\":\"unknown_cmd\"}",
@@ -271,6 +293,14 @@ int main(void) {
               "\"notificationId\":\"suji-notif-0\",\"success\":true", "core notification show");
     roundtrip("__core__", "{\"cmd\":\"notification_close\",\"notificationId\":\"suji-notif-0\"}",
               "\"cmd\":\"notification_close\",\"success\":true", "core notification close");
+    roundtrip("__core__", "{\"cmd\":\"safe_storage_set\",\"service\":\"s\",\"account\":\"a\",\"value\":\"sekret\"}",
+              "\"cmd\":\"safe_storage_set\",\"success\":true", "core safe_storage set");
+    roundtrip("__core__", "{\"cmd\":\"safe_storage_get\",\"service\":\"s\",\"account\":\"a\"}",
+              "\"value\":\"sekret\"", "core safe_storage get (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"safe_storage_delete\",\"service\":\"s\",\"account\":\"a\"}",
+              "\"cmd\":\"safe_storage_delete\",\"success\":true", "core safe_storage delete");
+    roundtrip("__core__", "{\"cmd\":\"safe_storage_get\",\"service\":\"s\",\"account\":\"a\"}",
+              "\"value\":\"\"", "core safe_storage get after delete");
     roundtrip("__core__", "{\"cmd\":\"window_create\"}",
               "\"error\":\"unknown_cmd\"", "core unsupported cmd → coreError 동형");
 

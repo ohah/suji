@@ -15,9 +15,17 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import java.security.KeyStore
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 import org.json.JSONObject
 
 class MainActivity : Activity() {
@@ -165,9 +173,61 @@ class MainActivity : Activity() {
                 nid.removePrefix("suji-notif-").toIntOrNull()?.let { notifManager().cancel(it) }
                 resp.put("success", true)
             }
+            "safe_storage_set", "safe_storage_get", "safe_storage_delete" ->
+                safeStorage(cmd, obj, resp)
             else -> resp.put("success", false).put("error", "unknown_cmd")
         }
         return resp.toString()
+    }
+
+    /// 데스크톱 Keychain(safe_storage)의 Android 대응 — Android Keystore 의
+    /// 하드웨어-백 AES-GCM 키로 value 를 암호화해 SharedPreferences 에 저장
+    /// (androidx.security 의존 없이 stdlib 만). 응답 데스크톱 키-동형
+    /// (set/delete=success, get=value, idempotent).
+    private fun ssKey(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getEntry("suji_ss", null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        kg.init(
+            KeyGenParameterSpec.Builder(
+                "suji_ss",
+                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+            ).setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .build()
+        )
+        return kg.generateKey()
+    }
+
+    private fun safeStorage(cmd: String, obj: JSONObject, resp: JSONObject) {
+        val prefs = getSharedPreferences("suji_safe_storage", MODE_PRIVATE)
+        val k = obj.optString("service") + " " + obj.optString("account")
+        when (cmd) {
+            "safe_storage_set" -> {
+                val ok = runCatching {
+                    val c = Cipher.getInstance("AES/GCM/NoPadding")
+                    c.init(Cipher.ENCRYPT_MODE, ssKey())
+                    val ct = c.doFinal(obj.optString("value").toByteArray())
+                    val blob = c.iv + ct // GCM 표준 12B nonce(c.iv) prepend → get 에서 분리
+                    prefs.edit().putString(k, Base64.encodeToString(blob, Base64.NO_WRAP)).commit()
+                }.isSuccess
+                resp.put("success", ok)
+            }
+            "safe_storage_get" -> {
+                val v = runCatching {
+                    val blob = Base64.decode(
+                        prefs.getString(k, null) ?: return@runCatching "", Base64.NO_WRAP)
+                    val c = Cipher.getInstance("AES/GCM/NoPadding")
+                    c.init(Cipher.DECRYPT_MODE, ssKey(), GCMParameterSpec(128, blob, 0, 12))
+                    String(c.doFinal(blob, 12, blob.size - 12))
+                }.getOrDefault("")
+                resp.put("value", v)
+            }
+            else -> { // safe_storage_delete — 미존재도 true(idempotent)
+                prefs.edit().remove(k).commit()
+                resp.put("success", true)
+            }
+        }
     }
 
     /// 네이티브 → JS. JSONObject.quote 로 안전한 JS 문자열 리터럴 생성.

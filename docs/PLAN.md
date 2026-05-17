@@ -1594,6 +1594,24 @@ CEF import 0이라 분리선이 이미 존재했음.
         iOS `sujiCoreDispatch` 와 동형 수정 → Android 슬라이스 1-3 이 컴파일을
         넘어 **e2e 실증**으로 격상. ⚠️ 범위 밖(정직): dialog 탭/실 알림 표시/
         실 URL open(=스모크), 실기기(시뮬·에뮬 ≠ 디바이스), CI 통합(후속 backlog).
+    - [x] **Slice 5: safe_storage** — `safe_storage_set/get/delete`. iOS
+          Security.framework Keychain(kSecClassGenericPassword) / Android
+          Android Keystore 하드웨어-백 AES-GCM + SharedPreferences(androidx.
+          security 의존 0, stdlib). 데스크톱 키-동형(set/delete=success,
+          get=value, idempotent). 검증: harness 30/30 + iOS 11/11 + Android
+          11/11 e2e(실 Keychain/Keystore set/get/update/delete/idempotent
+          디바이스 실증).
+
+### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
+
+데스크톱은 ~130 cmd. 모바일은 호스트(`__core__` 디스패치)가 네이티브 대응
+가능한 것만 점진 배선. 동일 `@suji/api`(`packages/suji-js` 무수정).
+
+| 분류 | 영역/cmd | 모바일 |
+|---|---|---|
+| ✅ 배선됨 | clipboard(text 3) · notification(4) · shell_open_external · dialog_show_message_box · **safe_storage(3)** | iOS/Android e2e 실증 |
+| 🟡 미배선·대응가능 | clipboard 확장(html/rtf/image/buffer/has) · dialog(error/open/save) · shell(open_path/show_item/beep/trash) · app 메타(get_path/locale/name/version) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
+| ❌ 개념 없음 | window 제어 · webContents(load_url/zoom/devtools/capture/pdf/UA) · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd` graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).
