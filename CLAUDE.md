@@ -46,6 +46,12 @@ bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive)+Z
 bash tests/mobile-backends/ios-sim-smoke.sh  # iOS 시뮬레이터 변형별 빌드+기동
                                         # 스모크(링크/TLS/심볼충돌 회귀; xcodegen+
                                         # 부팅 시뮬 필요; 기본 zig multi)
+bash tests/mobile-backends/ios-e2e.sh   # iOS 시뮬 *기능* e2e — e2e.html 이 실
+                                        # UIPasteboard clipboard 8케이스 자가검증
+                                        # → 데이터컨테이너 파일 회수·assert
+bash tests/mobile-backends/android-e2e.sh # Android 에뮬 *기능* e2e — 실
+                                        # ClipboardManager 8케이스 → logcat 회수
+                                        # (ANDROID SDK+에뮬+JDK17~21 필요)
 bash tests/zig-consumer/run.sh          # 외부 프로젝트가 b.dependency("suji")
                                         # .module("suji") 로 소비 가능 회귀 가드
 ```

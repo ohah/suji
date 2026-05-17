@@ -1577,6 +1577,23 @@ CEF import 0이라 분리선이 이미 존재했음.
           빌드·기동 + 코드리뷰만 — dialog 는 호스트-async 라 `verify.c`(C 하니스)
           **자동 검증 불가**(슬라이스 1-3 보다 약함, 정직). 실기기 alert 표시·
           Android 컴파일 미검증.
+  - [x] **모바일 *기능* e2e (iOS 시뮬 + Android 에뮬, 진짜 e2e)** —
+        `tests/mobile-backends/ios-e2e.sh`·`android-e2e.sh`. 디바이스 안
+        `e2e.html`(데모 `index.html` 무수정, 호스트가 SUJI_E2E env/intent extra
+        게이트로 분기 — 데모 무회귀) 가 데스크톱과 동일 `__suji__.core` 와이어로
+        clipboard 8케이스(ascii/멀티라인/UTF-8/empty/clear/reuse/20x stress/
+        unknown_cmd) 실 왕복 자가검증 → verdict 를 `e2e:report` 채널로 보고
+        (iOS=앱 데이터컨테이너 파일, Android=logcat 태그) → 스크립트 assert.
+        **시뮬/에뮬 clipboard 는 실 UIPasteboard/ClipboardManager → 진짜 e2e**
+        (호스트 mock 아님). iOS 8/8 + Android 8/8 PASS.
+        🐞 이 e2e 가 **실제 Android 배선 버그 적발**: `coreInvoke` 가
+        embed_runtimes 폴백서 `extractCmdField` 로 추출한 cmd 를 channel 인자로
+        넘기는데 `MainActivity.handleInvoke` 가 `when(channel)` 에서 `"__core__"`
+        만 매칭 → clipboard/shell/notification 이 `else→"{}"` 로 죽고 있었음
+        (호스트 하니스·코드리뷰가 못 잡음). `else -> coreDispatch(json)` 로
+        iOS `sujiCoreDispatch` 와 동형 수정 → Android 슬라이스 1-3 이 컴파일을
+        넘어 **e2e 실증**으로 격상. ⚠️ 범위 밖(정직): dialog 탭/실 알림 표시/
+        실 URL open(=스모크), 실기기(시뮬·에뮬 ≠ 디바이스), CI 통합(후속 backlog).
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).

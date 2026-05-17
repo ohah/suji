@@ -40,6 +40,22 @@ private func sujiHandlerFree(_ ptr: UnsafePointer<CChar>?) {
     free(UnsafeMutableRawPointer(mutating: ptr))
 }
 
+// e2e 검증 채널 — e2e.html 이 디바이스 내에서 clipboard 등 왕복을 실행하고
+// verdict JSON 을 이 채널로 보고. 앱 데이터컨테이너 Documents 에 파일로 써
+// `ios-e2e.sh` 가 simctl get_app_container 로 회수·assert(log stream 보다
+// 결정적 — 프로세스 종료 후에도 남음).
+private func sujiE2EReportHandler(
+    _ channel: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?
+) -> UnsafePointer<CChar>? {
+    let body = json.map { String(cString: $0) } ?? "{}"
+    if let docs = FileManager.default.urls(
+        for: .documentDirectory, in: .userDomainMask).first {
+        try? body.write(to: docs.appendingPathComponent("suji-e2e-report.json"),
+                        atomically: true, encoding: .utf8)
+    }
+    return UnsafePointer(strdup("{\"ok\":true}"))
+}
+
 // 데스크톱 `__core__`(src/main.zig cefHandleCore) 의 모바일 대응 — 같은
 // `@suji/api`(coreCall→`__suji__.core`) 가 iOS 에서도 동작하도록 cmd 를
 // iOS 네이티브로 디스패치. 응답 JSON 은 데스크톱과 키-동형(프론트 무수정).
@@ -138,6 +154,8 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         _ = suji_core_register_handler("counter:inc", sujiCounterHandler, sujiHandlerFree)
         // 데스크톱과 동일한 @suji/api(clipboard 등)용 __core__ 네이티브 디스패치.
         _ = suji_core_register_handler("__core__", sujiCoreDispatch, sujiHandlerFree)
+        // e2e.html verdict 보고 채널 (ios-e2e.sh 가 데이터컨테이너 파일로 회수).
+        _ = suji_core_register_handler("e2e:report", sujiE2EReportHandler, sujiHandlerFree)
         // 정적 링크된 Rust/Go 백엔드 등록 (greet/add/go:ping/go:upper).
         registerStaticBackends()
 
@@ -155,9 +173,12 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         webView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         view.addSubview(webView)
 
-        if let url = Bundle.main.url(forResource: "index", withExtension: "html",
+        // e2e 모드(ios-e2e.sh 가 SIMCTL_CHILD_SUJI_E2E=1 주입)면 e2e.html 로드 —
+        // 데모 무회귀(미설정 시 기존 index.html 경로 byte-동일).
+        let page = ProcessInfo.processInfo.environment["SUJI_E2E"] == "1" ? "e2e" : "index"
+        if let url = Bundle.main.url(forResource: page, withExtension: "html",
                                      subdirectory: "web")
-            ?? Bundle.main.url(forResource: "index", withExtension: "html") {
+            ?? Bundle.main.url(forResource: page, withExtension: "html") {
             webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         } else {
             webView.loadHTMLString(Self.fallbackHTML, baseURL: nil)

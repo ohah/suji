@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import org.json.JSONObject
@@ -48,6 +49,8 @@ class MainActivity : Activity() {
         SujiCore.nativeRegisterHandler("counter:inc")
         // 데스크톱과 동일한 @suji/api(clipboard 등)용 __core__ 네이티브 디스패치.
         SujiCore.nativeRegisterHandler("__core__")
+        // e2e.html verdict 보고 채널 (android-e2e.sh 가 logcat 으로 회수).
+        SujiCore.nativeRegisterHandler("e2e:report")
         // 정적 링크 Rust/Go 백엔드 (greet/add=Rust, go:ping/go:upper=Go)
         SujiCore.nativeRegisterStaticBackends()
 
@@ -56,8 +59,10 @@ class MainActivity : Activity() {
         webView.addJavascriptInterface(Bridge(), "SujiNative")
         setContentView(webView)
         // Gradle assets.srcDirs=["../web"] 가 web/ 내용을 assets 루트로 병합 →
-        // 번들 경로는 assets/index.html (web/ 접두어 아님).
-        webView.loadUrl("file:///android_asset/index.html")
+        // 번들 경로는 assets/index.html (web/ 접두어 아님). e2e 모드
+        // (android-e2e.sh 가 --es suji_e2e 1)면 e2e.html — 데모 무회귀.
+        val page = if (intent?.getStringExtra("suji_e2e") == "1") "e2e" else "index"
+        webView.loadUrl("file:///android_asset/$page.html")
 
         ui.postDelayed(tick, 2000)
     }
@@ -91,8 +96,18 @@ class MainActivity : Activity() {
     fun handleInvoke(channel: String, json: String): String = when (channel) {
         "ping" -> "{\"pong\":true,\"from\":\"android-native\"}"
         "counter:inc" -> { counter++; "{\"n\":$counter}" }
-        "__core__" -> coreDispatch(json)
-        else -> "{}"
+        "e2e:report" -> {
+            // android-e2e.sh 가 logcat 태그 grep 으로 회수(+filesDir 파일 폴백).
+            Log.i("SujiE2E", "SUJI_E2E_RESULT $json")
+            runCatching { openFileOutput("suji-e2e-report.json", MODE_PRIVATE)
+                .use { it.write(json.toByteArray()) } }
+            "{\"ok\":true}"
+        }
+        // __core__ 등록 핸들러는 coreInvoke 가 *추출된 cmd* 를 channel 인자로
+        // 넘긴다(embed_runtimes 폴백, extractCmdField) — 즉 여기 channel 은
+        // "__core__" 가 아니라 "clipboard_write_text" 등. coreDispatch 가 json
+        // 의 cmd 로 재분기(iOS sujiCoreDispatch 와 동형). 미지원은 coreError.
+        else -> coreDispatch(json)
     }
 
     /// 데스크톱 __core__(src/main.zig cefHandleCore) 의 Android 대응 — 같은

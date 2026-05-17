@@ -1,0 +1,121 @@
+<!doctype html>
+<!--
+  모바일 기능 e2e 페이지 (데모 index.html 과 별개 — 호스트가 e2e 모드일 때만
+  로드: iOS SUJI_E2E env / Android intent extra). 디바이스 안에서 데스크톱과
+  동일한 __suji__.core 와이어로 clipboard 실 왕복(시뮬/에뮬=실 UIPasteboard/
+  ClipboardManager → 진짜 e2e)을 자가 검증하고 verdict 를 e2e:report 채널로
+  보고. ios-e2e.sh/android-e2e.sh 가 회수·assert.
+
+  iOS: 브리지(__suji__)는 호스트 WKUserScript 가 documentStart 주입.
+  Android: 브리지는 데모 index.html 인라인 — e2e.html 은 index 를 대체하므로
+  window.SujiNative 가 있으면 동형 인라인 브리지를 자체 정의.
+  ⚠️ 아래 인라인 브리지는 examples/android/*/web/index.html 의 데모 브리지와
+  동형 유지(source-of-truth=index.html). 변경 시 양쪽 + iOS/Android e2e.html
+  쌍을 lockstep 으로(둘은 diff-clean 동일 사본).
+-->
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>suji-e2e-pending</title>
+<body style="font:14px -apple-system,system-ui;padding:1rem">
+<pre id="log">running…</pre>
+<script>
+(function () {
+  // Android: 데모 index.html 의 인라인 브리지와 동형(없을 때만 정의).
+  if (!window.__suji__ && window.SujiNative) {
+    var _id = 0, _pending = {}, _listeners = {};
+    function invoke(channel, payload) {
+      return new Promise(function (res) {
+        var id = ++_id; _pending[id] = res;
+        window.SujiNative.invoke(id, String(channel),
+          JSON.stringify(payload === undefined ? {} : payload));
+      });
+    }
+    function core(json) {
+      return new Promise(function (res) {
+        var id = ++_id; _pending[id] = res;
+        window.SujiNative.invoke(id, "__core__",
+          (typeof json === "string" ? json : JSON.stringify(json)));
+      });
+    }
+    function __resolve__(id, json) {
+      var r = _pending[id]; if (!r) return; delete _pending[id];
+      try { r(json ? JSON.parse(json) : null); } catch (e) { r(json); }
+    }
+    function on(name, cb) { (_listeners[name] = _listeners[name] || []).push(cb); }
+    function __emit__(name, json) {
+      var ls = _listeners[name]; if (!ls) return;
+      var d; try { d = json ? JSON.parse(json) : null; } catch (e) { d = json; }
+      ls.forEach(function (f) { try { f(d); } catch (e) {} });
+    }
+    var api = { invoke: invoke, core: core, on: on,
+                __resolve__: __resolve__, __emit__: __emit__ };
+    window.__suji__ = api; window.suji = api;
+  }
+
+  function core(req) { return window.__suji__.core(JSON.stringify(req)); }
+  var cases = [];
+  function check(name, cond) { cases.push({ name: name, ok: !!cond }); }
+
+  async function clipboardSuite() {
+    // write→read 동일성 (시뮬/에뮬 = 실 네이티브 클립보드).
+    var matrix = [
+      ["plain ascii", "hello-suji"],
+      ["multiline+tab+quote+backslash", 'l1\n\tl2 "q" \\ b'],
+      ["utf8 한글/이모지", "한글-test-🚀"],
+      ["empty", ""],
+    ];
+    for (var i = 0; i < matrix.length; i++) {
+      var nm = matrix[i][0], v = matrix[i][1];
+      var w = await core({ cmd: "clipboard_write_text", text: v });
+      var r = await core({ cmd: "clipboard_read_text" });
+      check("write/read " + nm, w && w.success === true && r && r.text === v);
+    }
+    // clear → read 빈 문자열, 이후 재사용 정상(state corruption 없음).
+    await core({ cmd: "clipboard_write_text", text: "seed" });
+    var cl = await core({ cmd: "clipboard_clear" });
+    var ac = await core({ cmd: "clipboard_read_text" });
+    check("clear→empty", cl && cl.success === true && ac && ac.text === "");
+    await core({ cmd: "clipboard_write_text", text: "after-clear" });
+    var rc = await core({ cmd: "clipboard_read_text" });
+    check("reuse after clear", rc && rc.text === "after-clear");
+    // 20x 안정성(누수/상태오염).
+    var stressOk = true;
+    for (var k = 0; k < 20; k++) {
+      var sv = "s" + k;
+      await core({ cmd: "clipboard_write_text", text: sv });
+      var sr = await core({ cmd: "clipboard_read_text" });
+      if (!sr || sr.text !== sv) { stressOk = false; break; }
+    }
+    check("20x stress", stressOk);
+    // 미지원 cmd → coreError 동형(프론트 graceful).
+    var un = await core({ cmd: "window_create" });
+    check("unsupported→unknown_cmd", un && un.success === false &&
+          un.error === "unknown_cmd");
+  }
+
+  async function run() {
+    try { await clipboardSuite(); }
+    catch (e) { check("suite threw: " + e, false); }
+    var fail = cases.filter(function (c) { return !c.ok; }).length;
+    var verdict = { suite: "clipboard", ok: fail === 0, fail: fail, cases: cases };
+    document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
+    document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";
+    // 로그 폴백 + 호스트 파일 기록(스크립트가 회수·assert).
+    console.log("SUJI_E2E_RESULT " + JSON.stringify(verdict));
+    try { await window.__suji__.invoke("e2e:report", verdict); } catch (e) {}
+  }
+
+  // __suji__ 준비 대기(iOS WKUserScript / Android 위 인라인).
+  (function wait(n) {
+    if (window.__suji__ && window.__suji__.core) { run(); return; }
+    if (n <= 0) {
+      document.title = "suji-e2e-fail";
+      console.log('SUJI_E2E_RESULT {"suite":"clipboard","ok":false,"fail":1,' +
+                  '"cases":[{"name":"bridge unavailable","ok":false}]}');
+      return;
+    }
+    setTimeout(function () { wait(n - 1); }, 100);
+  })(50);
+})();
+</script>
+</body>
+</html>
