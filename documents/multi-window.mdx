@@ -248,9 +248,9 @@ let _ = suji::windows::print_to_pdf(2, "/tmp/report.pdf");
 windows.PrintToPDF(2, "/tmp/report.pdf")
 ```
 
-**capturePage**는 CEF 직접 미노출 → Phase 4 백로그 (CDP `Page.captureScreenshot` 또는 off-screen rendering 우회 필요).
+**capturePage**는 CEF 직접 미노출 → CDP `Page.captureScreenshot` + dev-tools observer 로 구현 완료(file-path 방식, `window:page-captured` 이벤트).
 
-**Linux 주의**: PDF 인쇄는 `cef_print_handler_t::GetPdfPaperSize` 구현이 필요 (CEF 요구). 현재 macOS에서만 검증.
+**Linux 주의**: PDF 인쇄용 `cef_print_handler_t.get_pdf_paper_size`(U.S. Letter) 등록 완료. macOS/Windows 는 네이티브 인쇄라 무영향. 실 PDF 출력 검증은 macOS e2e 러너뿐 — Linux 산출은 CI 빌드까지만(미검증).
 
 ## 어느 창에서 호출됐는지 식별 — `__window` wire 자동 태깅
 

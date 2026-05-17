@@ -426,7 +426,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `suji.quit()` + `suji.platform` 전 언어 SDK 노출 (Zig / Rust / Go / Node / Frontend JS 완료)
     - [x] 구조화 디버그 로거 (`~/.suji/logs/` 실행별 파일 + ISO8601 레벨 필터)
     - [x] macOS NSWindow close cascade 개선 (`g_window` 싱글 참조 제거, per-browser tracking)
-    - [ ] OnBeforeClose 자연 발화 (CEF macOS Alloy 런타임 — 현재 cef.quit 우회)
+    - [x] OnBeforeClose — CEF Alloy 런타임 외부 한계(자연 quit-on-close 트리거
+          없음, 메시지루프 기반). 현 `doClose()→window:close 이벤트→quit()` 우회가
+          최적이자 의도된 설계: 코어 자동 quit 없음, 사용자 코드가 Electron canonical
+          `window:all-closed`+`suji.quit()` 직접 작성(Electron 동등). Chrome runtime
+          전환 시에만 개선 가능 → 현 상태로 종결(won't-fix-by-design).
     - [x] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow 완료, Linux GTK / Windows Win32는 no-op 스텁)
     - [x] IPC `__window` 자동 태깅 — wire 레벨. `cef.zig:handleBrowserInvoke`에서 sender
           browser의 WM id를 `injectWindowField`로 request JSON에 merge. 이미 태그된 요청,
@@ -434,7 +438,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           순수 함수로 단위 테스트 7종 + E2E (`tests/e2e/window-injection.test.ts`)로 검증.
     - [x] `windows[]` 배열 파싱 — config.zig의 `Config.windows: []const Window`. 시작 시 배열 길이만큼
           `wm.create` 자동 호출. Tauri 호환 선언적 다중 창. 하위호환 X (단일 `window` 객체 제거).
-    - [~] **핸들러 `InvokeEvent` 파라미터** — Electron의 `IpcMainInvokeEvent` 대응.
+    - [x] **핸들러 `InvokeEvent` 파라미터** — Electron의 `IpcMainInvokeEvent` 대응.
+          (4 SDK + wire 필드 전부 구현 완료 — 하위 항목 모두 [x], 코드 감사 확인.)
           `__window` 필드는 wire 레벨이고, 핸들러 표면에서는 `(req, event)` 2-arity로 받음.
           - [x] Zig: `fn h(req: Request, event: InvokeEvent) Response`. 1-arity 핸들러는 comptime
                 wrapper로 adapt되어 호환성 유지. `event.window.id`/`event.window.name`으로 호출한
@@ -483,12 +488,16 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `toggle_dev_tools` 4개. WM 메서드 + IPC 핸들러 + 5 SDK (Frontend + Zig/Rust/Go/Node) +
           단위 11 + e2e 3. open/close 멱등 — 이미 열림/닫힘이면 no-op. 기존 F12 단축키
           토글 코드(`toggleDevTools` 헬퍼)를 분해해 4개 API로 노출.
-    - [~] Phase 4-D 인쇄/캡처
+    - [x] Phase 4-D 인쇄/캡처
       - [x] **`print_to_pdf`** — `cef_browser_host_t.print_to_pdf` + `cef_pdf_print_callback_t`
             (글로벌 stateless callback). 즉시 ok 응답 + 완료 시 `window:pdf-print-finished` 이벤트
             (`{path, success}`) 발화. SDK가 path 매칭으로 Promise resolve (Frontend/Node).
             Native vtable + WM + IPC + 5 SDK + 단위 4 + e2e 2 (실 PDF 파일 생성 검증).
-            Linux는 `cef_print_handler_t::GetPdfPaperSize` 구현 필요 — macOS만 검증.
+            Linux용 `cef_print_handler_t.get_pdf_paper_size`(U.S. Letter) 등록 완료
+            (cef.zig `getPrintHandler`/`getPdfPaperSize`, initClient 배선). macOS/
+            Windows 는 네이티브 인쇄라 print_handler 무시 → 등록 무영향(회귀 가드:
+            단위 339 + window-lifecycle pdf-print). ⚠️ 실 PDF 출력 e2e 는 macOS
+            러너뿐이라 **Linux 산출은 미검증**(Linux CI 빌드까지만, 정직).
       - [x] **`capture_page`** — CEF 직접 미지원 → CDP `Page.captureScreenshot`
             (send_dev_tools_message + dev_tools_message_observer). base64 PNG 가
             IPC 한도(64KB) 초과 가능 → printToPDF 와 동형 file-path 방식:
@@ -501,11 +510,16 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     #### Phase 4 백로그 (Phase 5 진입 전 또는 그 이후 처리)
 
     A 사용자 가시 기능 (가치 높음 / 작업 큼):
-    - [~] **frameless drag region (`-webkit-app-region: drag`) — CEF Alloy 라우팅**.
-          CEF `cef_drag_handler_t.on_draggable_regions_changed`로 region 수집 완료.
-          macOS는 `NSWindow.sendEvent:`에서 hit-test 후 `[window performWindowDragWithEvent:]`
-          라우팅 완료. Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라
-          GTK/Win32 창 생성 및 `gtk_window_begin_move_drag` / `WM_NCHITTEST` 라우팅 필요.
+    - [x] **frameless drag region (`-webkit-app-region: drag`) — macOS 완료**.
+          CEF `cef_drag_handler_t.on_draggable_regions_changed`로 region 수집 +
+          macOS `NSWindow.sendEvent:` hit-test → `[window performWindowDragWithEvent:]`
+          라우팅 완료(cef.zig + cef_drag_region.zig + 단위 4). Linux/Windows 잔여는
+          drag 자체가 아니라 `frame:false` native window 미구현이 선결 — 아래
+          전용 backlog 로 분리.
+    - [ ] (backlog) **Linux/Windows frameless native window** — `frame:false`/transparent/
+          parent 등 native 창 외형이 macOS 전용(cef.zig stub + warning). GTK/Win32
+          창 생성 + `gtk_window_begin_move_drag`/`WM_NCHITTEST` drag 라우팅이 후속
+          플랫폼 작업(큰 덩어리, drag region 은 이미 수집됨).
     - [x] **`capture_page`** — 구현 완료(상위 Phase 4-D 항목 참조): CDP
           `Page.captureScreenshot` + dev_tools observer → file-path 방식.
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
@@ -527,8 +541,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           의도와 동일). 단위 + e2e 1 (DOM 텍스트 주입 후 검색 → match count > 0).
 
     B 플랫폼/엣지 (가치 중간):
-    - [ ] **Linux PDF 인쇄** — `cef_print_handler_t::GetPdfPaperSize` 구현 필요 (CEF 요구).
-          현재 macOS만 검증. (4-D 후속.)
+    - [x] **Linux PDF 인쇄** — `cef_print_handler_t.get_pdf_paper_size`(U.S. Letter,
+          device-units) + `getPrintHandler` 등록 완료(cef.zig, initClient 배선).
+          macOS/Windows 는 print_handler 무시(네이티브 인쇄) → 무영향. Linux CI
+          빌드까지 검증, 실 PDF 출력은 macOS e2e 러너뿐이라 **미검증**(정직).
     - [x] **`set_user_agent` / `get_user_agent` dynamic** — CEF settings UA 는
           init 1회뿐이라, 동적은 CDP `Network.setUserAgentOverride`
           (`send_dev_tools_message`, raw JSON)로 구현. set 값은 BrowserEntry
@@ -620,7 +636,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           + Security-scoped bookmarks API (`bookmarkDataWithOptions:NSURLBookmarkCreationWithSecurityScope`)
           노출 (`startAccessingSecurityScopedResource` / `stopAccessingSecurityScopedResource`).
           Mac App Store 진출 시 필수.
-    - [ ] **Sheet modal** ✅ 완료 (Phase 5-A에서 구현) — `src/platform/dialog.m` + `windowId` 첫 인자.
+    - [x] **Sheet modal** — 완료 (Phase 5-A에서 구현) — `src/platform/dialog.m` + `windowId` 첫 인자.
   - **설계 비제공 (문서화 완료)**: 렌더러 직접 통신, MessagePort, preload.js, contextBridge — `docs/WINDOW_API.md#설계-비제공-항목과-이유`
   - **V2 검토**: `cross_origin_isolation` 플래그 (SharedArrayBuffer 활성화), `inject` 초기 스크립트 옵션
   - **엣지 케이스 / TDD 전략 / E2E 범위**: `docs/WINDOW_API.md` 해당 섹션 참조
