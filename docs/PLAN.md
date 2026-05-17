@@ -1202,7 +1202,8 @@ my-app/
 
 ### Suji 프레임워크 배포
 
-**Zig 패키지** (Zig 백엔드 사용자용):
+**Zig 패키지** (Zig 백엔드 사용자용) — ✅ **소비성 검증됨**
+(`tests/zig-consumer` 하니스 + ci.yml embed-lib 잡이 회귀 가드):
 ```zig
 // 사용자 build.zig.zon
 .dependencies = .{
@@ -1217,6 +1218,9 @@ my-app/
 const suji = b.dependency("suji", .{});
 lib.root_module.addImport("suji", suji.module("suji"));
 ```
+`build.zig` 가 `b.addModule("suji", src/core/app.zig)` + 모듈 그래프
+(events→{util,runtime})를 export, `build.zig.zon .paths` 가 `src`
+포함 → 외부 프로젝트에서 위 패턴으로 바로 소비(로컬 실증 + CI 가드).
 
 **Rust crate** (Rust 백엔드 사용자용):
 ```toml

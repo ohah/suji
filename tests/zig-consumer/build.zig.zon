@@ -1,0 +1,13 @@
+.{
+    // 외부 Zig 프로젝트가 suji 를 b.dependency 로 소비 가능한지 회귀 가드.
+    // (PLAN.md "배포 — Zig 패키지" 시나리오 실증)
+    .name = .suji_consumer,
+    .version = "0.0.0",
+    .fingerprint = 0x93b827c308dfd457,
+    .dependencies = .{
+        // 레포 루트(tests/zig-consumer 기준 ../..). 배포 시엔 사용자가
+        // .url + .hash(릴리스 태그 tarball)로 대체.
+        .suji = .{ .path = "../.." },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", "app.zig" },
+}

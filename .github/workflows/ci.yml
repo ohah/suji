@@ -168,6 +168,11 @@ jobs:
       - name: Cross-compile embed lib (Windows x86_64)
         run: zig build lib -Dtarget=x86_64-windows
 
+      # 외부 프로젝트가 b.dependency("suji").module("suji") 로 소비 가능한지
+      # 회귀 가드 (PLAN 배포 — Zig 패키지 시나리오).
+      - name: Zig package consumability
+        run: bash tests/zig-consumer/run.sh
+
   # 모바일 정적 백엔드 메커니즘 회귀 방지 (CEF/NDK/Xcode 불필요 — 호스트
   # 타깃으로 코어+Rust+Go 정적 링크 후 register_handler 왕복 실증).
   mobile-backends:
