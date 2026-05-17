@@ -264,7 +264,7 @@ class MainActivity : Activity() {
 
     private fun safeStorage(cmd: String, obj: JSONObject, resp: JSONObject) {
         val prefs = getSharedPreferences("suji_safe_storage", MODE_PRIVATE)
-        val k = obj.optString("service") + " " + obj.optString("account")
+        val k = obj.optString("service") + "\u0000" + obj.optString("account")
         when (cmd) {
             "safe_storage_set" -> {
                 val ok = runCatching {
