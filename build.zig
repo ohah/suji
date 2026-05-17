@@ -182,7 +182,6 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("user32", .{});
         root_module.linkSystemLibrary("gdi32", .{});
         root_module.linkSystemLibrary("shell32", .{});
-        root_module.linkSystemLibrary("crypt32", .{}); // safeStorage DPAPI
     }
 
     // libnode (Node.js 임베딩) — 선택적

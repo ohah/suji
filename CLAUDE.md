@@ -43,9 +43,6 @@ bash tests/mobile-backends/ios-sim-smoke.sh  # iOS 시뮬레이터 변형별 빌
                                         # 부팅 시뮬 필요; 기본 zig multi)
 bash tests/zig-consumer/run.sh          # 외부 프로젝트가 b.dependency("suji")
                                         # .module("suji") 로 소비 가능 회귀 가드
-bash tests/safe-storage/run.sh          # 비-macOS safeStorage 라운드트립
-                                        # (Linux secret-tool / Windows DPAPI;
-                                        # macOS 는 cef.zig Keychain — 대상 X)
 ```
 
 E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 puppeteer로 붙어
@@ -116,7 +113,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen)
 // suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)   (macOS IOPMAssertion)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
-//                                       (macOS Keychain / Linux secret-tool / Windows DPAPI)
+//                                       (macOS Keychain Services)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
 // suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
 // suji.isPackaged()                              — `.app` 번들 여부 (dev=false, prod=true)
@@ -291,7 +288,7 @@ suji.platform                                                // "macos" | "linux
 // const id = await powerSaveBlocker.start("prevent_display_sleep")
 // await powerSaveBlocker.stop(id)                                         (macOS IOPMAssertion)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
-//                                                                         (macOS Keychain / Linux secret-tool / Windows DPAPI)
+//                                                                         (macOS Keychain Services)
 // await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
