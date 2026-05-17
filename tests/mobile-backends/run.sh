@@ -13,21 +13,27 @@ OUT="$HERE/.build"
 mkdir -p "$OUT"
 trap 'rm -rf "$OUT"' EXIT
 
-echo "[1/4] core (zig build lib, host)"
+echo "[1/5] core (zig build lib, host)"
 ( cd "$REPO" && zig build lib >/dev/null )
 cp "$REPO/zig-out/lib/libsuji_core.a" "$OUT/libsuji_core.a"
 
-echo "[2/4] rust backend (cargo staticlib, host)"
+echo "[2/5] rust backend (cargo staticlib, host)"
 cargo build --release --quiet \
   --manifest-path "$REPO/examples/ios/backends/rust/Cargo.toml"
 cp "$REPO/examples/ios/backends/rust/target/release/libsuji_rs_backend.a" \
    "$OUT/libsuji_rs_backend.a"
 
-echo "[3/4] go backend (c-archive, host)"
+echo "[3/5] go backend (c-archive, host)"
 ( cd "$REPO/examples/ios/backends/go" && \
   CGO_ENABLED=1 go build -buildmode=c-archive -o "$OUT/libsuji_go_backend.a" . )
 
-echo "[4/4] link + run"
+echo "[4/5] zig backend (build-lib, host)"
+zig build-lib -O ReleaseSmall -fPIC -lc \
+  -femit-bin="$OUT/libsuji_zig_backend.a" \
+  --name suji_zig_backend "$REPO/examples/ios/backends/zig/src/backend.zig"
+rm -f "$OUT/libsuji_zig_backend.a.o"
+
+echo "[5/5] link + run"
 EXTRA=()
 case "$(uname -s)" in
   Darwin) EXTRA=(-lresolv -framework CoreFoundation -framework Security) ;;
@@ -36,5 +42,6 @@ case "$(uname -s)" in
 esac
 cc "$HERE/verify.c" \
    "$OUT/libsuji_core.a" "$OUT/libsuji_rs_backend.a" "$OUT/libsuji_go_backend.a" \
+   "$OUT/libsuji_zig_backend.a" \
    -I"$REPO/include" "${EXTRA[@]}" -o "$OUT/verify"
 "$OUT/verify"

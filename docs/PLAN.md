@@ -1519,6 +1519,21 @@ CEF import 0이라 분리선이 이미 존재했음.
         (공용 `suji_reg_backend`). 백엔드 소스(`examples/ios/backends/{rust,
         go,zig}`)·`suji_mobile_bridge.h`·CI(`mobile-backends`) 공유로 중복
         최소화. Node: iOS 불가(V8 JIT), Android 후속.
+  - [x] **모바일 http (`suji.http.fetch` 동등)** — 모바일 백엔드는 코어-독립이라
+        SDK 대신 std 직접: `examples/ios/backends/zig` 의 `zig:http` 가
+        `std.http.Client`(자체 `std.Io.Threaded.init_single_threaded` —
+        embed.zig 코어 패턴 복제, handle_ipc 에 io 인자 없으므로) 로 GET/POST.
+        backend-only(프론트 shim 미노출 — Zig SDK 보안모델 유지, 관례+문서).
+        실증: `tests/mobile-backends` 호스트 하니스 17/17 ALL PASS
+        (register_handler→handle_ipc→std.http→인프로세스 localhost 평문 GET/
+        POST/echo/error). 빌드-only: aarch64-ios/-simulator/android-cross
+        컴파일·정적 링크 성공. **미검증(정직)**: 실기기·실 네트워크·모바일
+        HTTPS/TLS. `process.run` 은 iOS 샌드박스 fork/exec 금지로 제외.
+  - [ ] (backlog) **모바일 HTTPS/TLS** — Zig std `crypto.Certificate.Bundle.
+        rescan` 에 `.ios` 분기 없어 iOS CA 번들 공백 → 실 iOS HTTPS 인증서
+        검증 실패. 해결: iOS Security.framework `SecTrust` 연동 또는 앱 번들
+        PEM 주입(Android는 `/system/etc/security/cacerts` 경로 확인 필요).
+        위 평문 http 배선의 상위 단계.
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).

@@ -39,8 +39,10 @@ bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(nav
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
 
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
-bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive) 정적
-                                        # 링크 → register_handler 왕복 11 케이스
+bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive)+Zig
+                                        # (build-lib) 정적 링크 → register_handler
+                                        # 왕복 17 케이스. zig:http 는 std.http →
+                                        # 인프로세스 localhost 평문 HTTP 실증
 bash tests/mobile-backends/ios-sim-smoke.sh  # iOS 시뮬레이터 변형별 빌드+기동
                                         # 스모크(링크/TLS/심볼충돌 회귀; xcodegen+
                                         # 부팅 시뮬 필요; 기본 zig multi)
@@ -468,6 +470,18 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
     네이티브→JS→DOM). Android 코어는 동적 `.so`(`-Dlib-dynamic`+NDK `--libc`,
     zig LE-TLS↔JNI `-shared` 회피), Go `.so` `-Wl,-soname`, Zig 백엔드 `-fPIC`.
     메커니즘 회귀는 `tests/mobile-backends`(호스트 하니스, CI job) 가드.
+
+**모바일 http (`suji.http.fetch` 동등)**: 모바일 백엔드는 코어-독립이라 SDK
+대신 std 를 직접 — `examples/ios/backends/zig` 의 `zig:http` 핸들러가
+`std.http.Client`(자체 `std.Io.Threaded.init_single_threaded`, embed.zig 패턴
+복제) 로 GET/POST. **backend-only**: 프론트(WebView) shim 에 채널 노출 금지
+(Zig SDK frontend 미노출 보안모델을 모바일에서도 관례+문서로 유지).
+실증=`tests/mobile-backends`(host, register_handler→handle_ipc→std.http→
+localhost 평문 왕복). 빌드-only 검증=aarch64-ios/-simulator/android-cross
+컴파일·정적 링크 성공. **미검증(정직)**: 실기기·실 네트워크·모바일 HTTPS/TLS
+— iOS std `Certificate.Bundle.rescan` 에 `.ios` 분기 없어 CA 공백 → 실 iOS
+HTTPS 는 std 만으로 미해결(후속: Security.framework SecTrust/번들 PEM).
+`process.run` 은 iOS 샌드박스 fork/exec 금지로 모바일 제외.
 
 **한계**: 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 —
 모바일 미동작. **iOS·Android 둘 다 Rust·Go 백엔드 동작**(언어별 고유 심볼
