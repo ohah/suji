@@ -3935,6 +3935,17 @@ test "printToPDF: native에 path 전달" {
     try std.testing.expectEqualStrings("/tmp/out.pdf", native.last_print_path.?);
 }
 
+test "capturePage: native에 path 전달 + destroyed/unknown 가드" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const id = try wm.create(.{});
+    try wm.capturePage(id, "/tmp/shot.png");
+    try std.testing.expectEqual(@as(usize, 1), native.capture_page_calls);
+    try std.testing.expectEqualStrings("/tmp/shot.png", native.last_capture_path.?);
+    try std.testing.expectError(window.Error.WindowNotFound, wm.capturePage(999, "/tmp/x.png"));
+}
+
 test "회귀: cef.zig가 EVENT_PDF_PRINT_FINISHED const 사용 (이벤트 이름 하드코드 차단)" {
     // cef.zig에서 onPdfPrintFinished가 const를 거치지 않고 string literal 직접 쓰면
     // 5 SDK + 문서와 sync 깨질 위험. 한 곳에 const + 사용처에서 const 참조 보장.

@@ -514,6 +514,20 @@ pub mod windows {
         )
     }
 
+    /// 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage`, CDP
+    /// Page.captureScreenshot). 즉시 ack 반환 + 완료는 `window:page-captured`
+    /// 이벤트({path,success}) — caller 가 on 으로 path 매칭(printToPDF 동형).
+    pub fn capture_page(window_id: u32, path: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"capture_page","windowId":{},"path":"{}"}}"#,
+                window_id,
+                escape_json(path),
+            ),
+        )
+    }
+
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,
@@ -672,6 +686,9 @@ pub mod windows {
         }
         pub fn print_to_pdf(&self, path: &str) -> Option<String> {
             print_to_pdf(self.id, path)
+        }
+        pub fn capture_page(&self, path: &str) -> Option<String> {
+            capture_page(self.id, path)
         }
         pub fn set_title(&self, title: &str) -> Option<String> {
             set_title(self.id, title)

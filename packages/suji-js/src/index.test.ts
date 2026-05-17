@@ -443,3 +443,26 @@ describe("windows.setUserAgent/getUserAgent", () => {
     expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "set_user_agent", windowId: 8, userAgent: "UA-X" });
   });
 });
+
+describe("windows.capturePage", () => {
+  beforeEach(() => { mockBridge.core.mockClear(); mockBridge.on.mockClear(); });
+  it("capture_page 라우팅 + page-captured 이벤트로 resolve", async () => {
+    mockBridge.core.mockResolvedValueOnce({ ok: true });
+    const p = windows.capturePage(2, "/tmp/s.png");
+    // on('window:page-captured', wrapper) 등록 확인 + coreCall 라우팅
+    expect(mockBridge.on.mock.calls[0][0]).toBe("window:page-captured");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "capture_page", windowId: 2, path: "/tmp/s.png" });
+    // 코어가 완료 이벤트 발화 시뮬
+    const wrapper = mockBridge.on.mock.calls[0][1] as (d: unknown) => void;
+    wrapper({ path: "/tmp/s.png", success: true });
+    expect(await p).toEqual({ success: true });
+  });
+  it("다른 path 이벤트는 무시(매칭 path 만 resolve)", async () => {
+    mockBridge.core.mockResolvedValueOnce({ ok: true });
+    const p = BrowserWindow.fromId(9).capturePage("/a.png");
+    const wrapper = mockBridge.on.mock.calls[0][1] as (d: unknown) => void;
+    wrapper({ path: "/other.png", success: true }); // 무시
+    wrapper({ path: "/a.png", success: false });
+    expect(await p).toEqual({ success: false });
+  });
+});

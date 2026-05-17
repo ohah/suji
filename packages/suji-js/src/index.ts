@@ -485,6 +485,23 @@ export const windows = {
     });
   },
 
+  /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
+   *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
+   *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
+   *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식. */
+  capturePage(windowId: number, path: string): Promise<{ success: boolean }> {
+    return new Promise((resolve) => {
+      const off = on("window:page-captured", (data) => {
+        const d = data as { path?: string; success?: boolean };
+        if (d.path === path) {
+          off();
+          resolve({ success: d.success === true });
+        }
+      });
+      coreCall({ cmd: "capture_page", windowId, path });
+    });
+  },
+
   // ── Phase 17-A: WebContentsView ──
   // viewId는 windowId와 같은 풀이라 loadURL/executeJavaScript/openDevTools/setZoomFactor
   // 등 모든 webContents API에 viewId를 그대로 넘기면 동작.
@@ -675,6 +692,9 @@ export class BrowserWindow {
   }
   printToPDF(path: string) {
     return windows.printToPDF(this.#id, path);
+  }
+  capturePage(path: string) {
+    return windows.capturePage(this.#id, path);
   }
 }
 

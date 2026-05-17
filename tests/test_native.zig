@@ -76,6 +76,8 @@ pub const TestNative = struct {
     // Phase 4-D: 인쇄
     print_to_pdf_calls: usize = 0,
     last_print_path: ?[]const u8 = null,
+    capture_page_calls: usize = 0,
+    last_capture_path: ?[]const u8 = null,
 
     // Phase 5: 라이프사이클 제어
     minimize_calls: usize = 0,
@@ -152,6 +154,7 @@ pub const TestNative = struct {
         .find_in_page = findInPage,
         .stop_find_in_page = stopFindInPage,
         .print_to_pdf = printToPDF,
+        .capture_page = capturePage,
         .create_view = createView,
         .destroy_view = destroyView,
         .set_view_bounds = setViewBounds,
@@ -339,6 +342,12 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.print_to_pdf_calls += 1;
         self.last_print_path = path;
+    }
+
+    fn capturePage(ctx: ?*anyopaque, _: u64, path: []const u8) void {
+        const self = fromCtx(ctx);
+        self.capture_page_calls += 1;
+        self.last_capture_path = path;
     }
 
     fn createView(ctx: ?*anyopaque, host_handle: u64, opts: *const window.CreateViewOptions) anyerror!u64 {

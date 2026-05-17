@@ -489,8 +489,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
             (`{path, success}`) 발화. SDK가 path 매칭으로 Promise resolve (Frontend/Node).
             Native vtable + WM + IPC + 5 SDK + 단위 4 + e2e 2 (실 PDF 파일 생성 검증).
             Linux는 `cef_print_handler_t::GetPdfPaperSize` 구현 필요 — macOS만 검증.
-      - [ ] **`capture_page`** — CEF 직접 미지원. CDP `Page.captureScreenshot` 또는
-            off-screen rendering으로 우회 필요. Phase 4-D 후속 백로그.
+      - [x] **`capture_page`** — CEF 직접 미지원 → CDP `Page.captureScreenshot`
+            (send_dev_tools_message + dev_tools_message_observer). base64 PNG 가
+            IPC 한도(64KB) 초과 가능 → printToPDF 와 동형 file-path 방식:
+            ack 즉시 + `window:page-captured`{path,success} 이벤트. 코어
+            (cef observer/pending + window/ipc/main) + 4 SDK + 단위 테스트.
     - [x] **Phase 4-E 편집/검색** — `undo/redo/cut/copy/paste/select_all` (frame 위임 6) +
           `find_in_page(text, forward, matchCase, findNext)` + `stop_find_in_page(clearSelection)`.
           5 SDK + 단위 12 + e2e 4. user_agent dynamic은 CEF 미지원(창 settings 한 번만) — Phase 7
@@ -503,8 +506,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           macOS는 `NSWindow.sendEvent:`에서 hit-test 후 `[window performWindowDragWithEvent:]`
           라우팅 완료. Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라
           GTK/Win32 창 생성 및 `gtk_window_begin_move_drag` / `WM_NCHITTEST` 라우팅 필요.
-    - [ ] **`capture_page`** — CEF 직접 미지원. CDP `Page.captureScreenshot` 또는 off-screen
-          rendering 우회 필요. Electron 호환 위해 추후 구현. (4-D 후속.)
+    - [x] **`capture_page`** — 구현 완료(상위 Phase 4-D 항목 참조): CDP
+          `Page.captureScreenshot` + dev_tools observer → file-path 방식.
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
           OnPreKeyEvent의 reload 키(F5/Cmd+R/Cmd+Shift+R) 분기를 `reloadInspecteeOrSelf`
           헬퍼 경유. 멀티 매핑 `devtools_to_inspectee: AutoHashMap(u64, u64)` —

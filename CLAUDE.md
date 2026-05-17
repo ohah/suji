@@ -84,6 +84,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.setBackgroundColor(id, "#ff8800")               — NSWindow.setBackgroundColor (#RRGGBB[AA])
 // suji.windows.setHasShadow(id, false) / hasShadow(id)          — NSWindow.hasShadow round-trip
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
+// suji.windows.capturePage(id, "/tmp/s.png")  — 스크린샷 PNG (CDP, 결과는 window:page-captured)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
 //   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip
 //   / has("public.html") / availableFormats()  — format 검사 (UTI)

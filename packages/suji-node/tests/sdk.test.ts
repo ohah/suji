@@ -128,3 +128,22 @@ describe("windows.setUserAgent/getUserAgent (node)", () => {
     expect(JSON.parse(calls[1][1])).toEqual({ cmd: "get_user_agent", windowId: 8 });
   });
 });
+
+describe("windows.capturePage (node)", () => {
+  test("capture_page 라우팅 + page-captured 이벤트 resolve (path 매칭)", async () => {
+    const calls: string[] = [];
+    let evCb: ((ch: string, raw: string) => void) | null = null;
+    (globalThis as any).suji = {
+      quit: () => {}, platform: () => "macos", handle: () => {},
+      invoke: async (_b: string, j: string) => { calls.push(j); return JSON.stringify({ ok: true }); },
+      invokeSync: () => "", send: () => {},
+      on: (_e: string, cb: (ch: string, raw: string) => void) => { evCb = cb; return () => {}; },
+      off: () => {}, register: () => {},
+    };
+    const p = BrowserWindow.fromId(4).capturePage("/t.png");
+    expect(JSON.parse(calls[0])).toEqual({ cmd: "capture_page", windowId: 4, path: "/t.png" });
+    evCb!("window:page-captured", JSON.stringify({ path: "/other.png", success: true })); // 무시
+    evCb!("window:page-captured", JSON.stringify({ path: "/t.png", success: true }));
+    expect(await p).toEqual({ success: true });
+  });
+});

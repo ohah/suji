@@ -598,6 +598,21 @@ export const windows = {
       invoke<WindowOpResponse>('__core__', { cmd: 'print_to_pdf', windowId, path });
     });
   },
+
+  /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage`, CDP
+   *  Page.captureScreenshot). printToPDF 동형 2단(ack + window:page-captured). */
+  capturePage(windowId: number, path: string): Promise<{ success: boolean }> {
+    return new Promise((resolve) => {
+      const off = on("window:page-captured", (data) => {
+        const d = data as { path?: string; success?: boolean };
+        if (d.path === path) {
+          off();
+          resolve({ success: d.success === true });
+        }
+      });
+      invoke<WindowOpResponse>('__core__', { cmd: 'capture_page', windowId, path });
+    });
+  },
 };
 
 /**
@@ -730,6 +745,9 @@ export class BrowserWindow {
   }
   printToPDF(path: string) {
     return windows.printToPDF(this.#id, path);
+  }
+  capturePage(path: string) {
+    return windows.capturePage(this.#id, path);
   }
 }
 

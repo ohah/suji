@@ -182,6 +182,16 @@ func PrintToPDF(windowID uint32, path string) string {
 	))
 }
 
+// CapturePage — 페이지 스크린샷 PNG 저장 (Electron webContents.capturePage,
+// CDP Page.captureScreenshot). 즉시 ack + 완료는 window:page-captured
+// 이벤트({path,success}) — caller 가 on 으로 path 매칭(PrintToPDF 동형).
+func CapturePage(windowID uint32, path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"capture_page","windowId":%d,"path":"%s"}`,
+		windowID, jsonesc.Full(path),
+	))
+}
+
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,
@@ -277,7 +287,10 @@ func (w *BrowserWindow) StopFindInPage(clear bool) string {
 	return StopFindInPage(w.ID, clear)
 }
 func (w *BrowserWindow) PrintToPDF(path string) string { return PrintToPDF(w.ID, path) }
-func (w *BrowserWindow) SetTitle(title string) string  { return SetTitle(w.ID, title) }
+func (w *BrowserWindow) CapturePage(path string) string {
+	return CapturePage(w.ID, path)
+}
+func (w *BrowserWindow) SetTitle(title string) string { return SetTitle(w.ID, title) }
 func (w *BrowserWindow) SetBounds(b SetBoundsArgs) string {
 	return SetBounds(w.ID, b)
 }

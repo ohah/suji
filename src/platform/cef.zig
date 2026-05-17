@@ -417,6 +417,10 @@ pub const CefNative = struct {
         /// 이후 reload/navigate에서는 발화 X — caller는 `did-finish-load` 패턴이 필요하면
         /// load_url 응답을 직접 사용.
         ready_to_show_fired: bool = false,
+        /// capture_page 용 DevTools observer 등록 핸들. 브라우저별 1회 lazy
+        /// 등록 후 보관(살아있어야 observer 유지 — CEF 가 registration 소멸
+        /// 시 자동 해제). 브라우저 제거 시 release.
+        devtools_reg: ?*c.cef_registration_t = null,
     };
 
     allocator: std.mem.Allocator,
@@ -443,6 +447,7 @@ pub const CefNative = struct {
         var it = self.browsers.valueIterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.drag_regions);
+            releaseDevToolsReg(entry);
         }
         self.browsers.deinit();
     }
@@ -461,6 +466,8 @@ pub const CefNative = struct {
     pub fn purge(self: *CefNative, handle: u64) void {
         if (self.browsers.fetchRemove(handle)) |kv| {
             self.allocator.free(kv.value.drag_regions);
+            var v = kv.value;
+            releaseDevToolsReg(&v);
         }
     }
 
@@ -504,6 +511,7 @@ pub const CefNative = struct {
         .find_in_page = findInPageImpl,
         .stop_find_in_page = stopFindInPageImpl,
         .print_to_pdf = printToPDFImpl,
+        .capture_page = captureePageImpl,
         // Phase 17-A: WebContentsView. 실제 구현은 17-A.3 (NSView + cef_window_info_t.parent_view).
         // 일단 컴파일 통과용 placeholder — 호출되면 not-implemented 또는 no-op.
         .create_view = createView,
@@ -1105,6 +1113,46 @@ pub const CefNative = struct {
         print(host, &cef_path, &settings, &g_pdf_callback);
     }
 
+    /// CDP Page.captureScreenshot — 결과는 observer → window:page-captured.
+    fn captureePageImpl(ctx: ?*anyopaque, handle: u64, path: []const u8) void {
+        assertUiThread();
+        const self = fromCtx(ctx);
+        const entry = self.browsers.getPtr(handle) orelse return;
+        const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return;
+
+        ensureDevToolsObserver();
+        if (entry.devtools_reg == null) {
+            const add = host.add_dev_tools_message_observer orelse return;
+            entry.devtools_reg = asPtr(c.cef_registration_t, add(host, &g_devtools_observer));
+        }
+
+        // pending 슬롯 확보 (가득 차면 가장 오래된 것 재사용 — 저빈도라 충분).
+        const id = g_capture_next_id;
+        g_capture_next_id +%= 1;
+        if (g_capture_next_id == 0) g_capture_next_id = 1;
+        var slot: *CapturePending = &g_capture_pending[0];
+        for (&g_capture_pending) |*s| {
+            if (!s.used) {
+                slot = s;
+                break;
+            }
+        }
+        const n = @min(path.len, slot.path_buf.len);
+        @memcpy(slot.path_buf[0..n], path[0..n]);
+        slot.path_len = n;
+        slot.id = id;
+        slot.used = true;
+
+        var msg: [128]u8 = undefined;
+        const m = std.fmt.bufPrint(
+            &msg,
+            "{{\"id\":{d},\"method\":\"Page.captureScreenshot\",\"params\":{{}}}}",
+            .{id},
+        ) catch return;
+        const send = host.send_dev_tools_message orelse return;
+        _ = send(host, m.ptr, m.len);
+    }
+
     fn nsWindowFor(self: *CefNative, handle: u64) ?*anyopaque {
         const entry = self.browsers.get(handle) orelse return null;
         return entry.ns_window;
@@ -1198,6 +1246,107 @@ const FIND_TEXT_STACK_BUF: usize = 1024;
 /// PDF 인쇄 완료 이벤트 — caller(SDK)가 listener로 path 매칭. 이름 변경 시 5 SDK
 /// + 문서 모두 동시 변경 필요 (SDK_PORTING.md §4.3 cmd 표 참조).
 pub const EVENT_PDF_PRINT_FINISHED: []const u8 = "window:pdf-print-finished";
+
+// ==================== capture_page (CDP Page.captureScreenshot) ====================
+// CEF 직접 미지원 → DevTools 프로토콜. send_dev_tools_message 로 요청, observer
+// 의 on_dev_tools_method_result 로 base64 PNG 수신 → 디코드 후 path 에 기록 →
+// `window:page-captured`{path,success} 이벤트(printToPDF 와 동형 2단). 스크린샷
+// base64 는 IPC payload 한도(64KB) 초과 가능 → 파일 경로 방식(printToPDF 동일).
+pub const EVENT_PAGE_CAPTURED: []const u8 = "window:page-captured";
+
+/// capture 요청-결과 상관용 고정 슬롯(저빈도, CEF UI 스레드 단일 → lock 불필요).
+const CapturePending = struct {
+    id: c_int = 0,
+    used: bool = false,
+    path_buf: [PDF_PATH_STACK_BUF]u8 = undefined,
+    path_len: usize = 0,
+};
+var g_capture_pending = [_]CapturePending{.{}} ** 16;
+var g_capture_next_id: c_int = 1;
+var g_devtools_observer: c.cef_dev_tools_message_observer_t = undefined;
+var g_devtools_observer_initialized: bool = false;
+
+fn releaseDevToolsReg(entry: *CefNative.BrowserEntry) void {
+    const reg = entry.devtools_reg orelse return;
+    if (reg.base.release) |rel| _ = rel(&reg.base);
+    entry.devtools_reg = null;
+}
+
+fn devtoolsObserverNoopMsg(_: [*c]c.cef_dev_tools_message_observer_t, _: [*c]c.cef_browser_t, _: ?*const anyopaque, _: usize) callconv(.c) c_int {
+    return 0; // 0 = 다른 observer 도 메시지 수신(consume 안 함)
+}
+fn devtoolsObserverNoopEvent(_: [*c]c.cef_dev_tools_message_observer_t, _: [*c]c.cef_browser_t, _: [*c]const c.cef_string_t, _: ?*const anyopaque, _: usize) callconv(.c) void {}
+fn devtoolsObserverNoopAttach(_: [*c]c.cef_dev_tools_message_observer_t, _: [*c]c.cef_browser_t) callconv(.c) void {}
+
+/// CDP 메서드 결과 — Page.captureScreenshot 응답({"data":"<base64 png>"}).
+fn onDevToolsMethodResult(
+    _: [*c]c.cef_dev_tools_message_observer_t,
+    _: [*c]c.cef_browser_t,
+    message_id: c_int,
+    success: c_int,
+    result: ?*const anyopaque,
+    result_size: usize,
+) callconv(.c) void {
+    // 우리 capture 요청인지 message_id 로 식별 (아니면 무시).
+    var slot: ?*CapturePending = null;
+    for (&g_capture_pending) |*s| {
+        if (s.used and s.id == message_id) {
+            slot = s;
+            break;
+        }
+    }
+    const p = slot orelse return;
+    defer p.used = false;
+    const path = p.path_buf[0..p.path_len];
+
+    const ok = blk: {
+        if (success == 0) break :blk false;
+        const res_ptr = result orelse break :blk false;
+        const json: []const u8 = @as([*]const u8, @ptrCast(res_ptr))[0..result_size];
+        // base64 는 JSON-special 문자 없음 → "data":" 마커 ~ 다음 " 슬라이스.
+        const marker = "\"data\":\"";
+        const start = std.mem.indexOf(u8, json, marker) orelse break :blk false;
+        const b64_start = start + marker.len;
+        const b64_end = std.mem.indexOfScalarPos(u8, json, b64_start, '"') orelse break :blk false;
+        const b64 = json[b64_start..b64_end];
+        const dec_size = std.base64.standard.Decoder.calcSizeForSlice(b64) catch break :blk false;
+        if (dec_size > 32 * 1024 * 1024) break :blk false; // pathological 가드
+        const alloc = std.heap.page_allocator;
+        const raw = alloc.alloc(u8, dec_size) catch break :blk false;
+        defer alloc.free(raw);
+        std.base64.standard.Decoder.decode(raw, b64) catch break :blk false;
+        var pbuf: [PDF_PATH_STACK_BUF]u8 = undefined;
+        const path_z = nullTerminateOrTruncate(path, &pbuf) orelse break :blk false;
+        const io = runtime.io;
+        var f = std.Io.Dir.cwd().createFile(io, path_z, .{}) catch break :blk false;
+        defer f.close(io);
+        var wbuf: [4096]u8 = undefined;
+        var fw = f.writer(io, &wbuf);
+        fw.interface.writeAll(raw) catch break :blk false;
+        fw.interface.flush() catch break :blk false;
+        break :blk true;
+    };
+
+    const emit = g_emit_callback orelse return;
+    var esc: [PDF_PATH_STACK_BUF]u8 = undefined;
+    const en = window_mod.escapeJsonChars(path, &esc);
+    var payload: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&payload);
+    w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ esc[0..en], ok }) catch return;
+    emit(null, EVENT_PAGE_CAPTURED, w.buffered());
+}
+
+fn ensureDevToolsObserver() void {
+    if (g_devtools_observer_initialized) return;
+    zeroCefStruct(c.cef_dev_tools_message_observer_t, &g_devtools_observer);
+    initBaseRefCounted(&g_devtools_observer.base);
+    g_devtools_observer.on_dev_tools_message = &devtoolsObserverNoopMsg;
+    g_devtools_observer.on_dev_tools_method_result = &onDevToolsMethodResult;
+    g_devtools_observer.on_dev_tools_event = &devtoolsObserverNoopEvent;
+    g_devtools_observer.on_dev_tools_agent_attached = &devtoolsObserverNoopAttach;
+    g_devtools_observer.on_dev_tools_agent_detached = &devtoolsObserverNoopAttach;
+    g_devtools_observer_initialized = true;
+}
 
 /// `[]const u8` → null-terminated `[:0]const u8` 복사. buf 부족 시 null 반환.
 /// CEF API(load_url/execute_java_script)에 전달하기 전에 필요.

@@ -586,6 +586,14 @@ pub fn handlePrintToPDF(req: PrintToPDFReq, response_buf: []u8, wm: *window.Wind
     return respondWindowOp(response_buf, "print_to_pdf", req.window_id, ok);
 }
 
+// capture_page — CDP Page.captureScreenshot. ack 즉시 + 완료 시
+// `window:page-captured`{path,success} 이벤트(printToPDF 와 동형 2단).
+pub fn handleCapturePage(req: PrintToPDFReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.capturePage(req.window_id, req.path)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "capture_page", req.window_id, ok);
+}
+
 pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     const opened = wm.isDevToolsOpened(window_id) catch {

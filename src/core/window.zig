@@ -260,6 +260,7 @@ pub const Native = struct {
         stop_find_in_page: *const fn (ctx: ?*anyopaque, handle: u64, clear_selection: bool) void,
         // Phase 4-D: 인쇄 — fire-and-forget. 결과는 cef.zig가 EventBus로 emit.
         print_to_pdf: *const fn (ctx: ?*anyopaque, handle: u64, path: []const u8) void,
+        capture_page: *const fn (ctx: ?*anyopaque, handle: u64, path: []const u8) void,
         // Phase 17-A: WebContentsView (한 창 multi-content 합성).
         // create_view는 host의 contentView 안에 child NSView+CefBrowser를 부착하고 view handle 반환.
         // destroy_view/set_view_bounds/set_view_visible는 view handle 단위. reorder_view는
@@ -385,6 +386,9 @@ pub const Native = struct {
     }
     pub fn printToPDF(self: Native, handle: u64, path: []const u8) void {
         self.vtable.print_to_pdf(self.ctx, handle, path);
+    }
+    pub fn capturePage(self: Native, handle: u64, path: []const u8) void {
+        self.vtable.capture_page(self.ctx, handle, path);
     }
     pub fn createView(self: Native, host_handle: u64, opts: *const CreateViewOptions) !u64 {
         return self.vtable.create_view(self.ctx, host_handle, opts);
@@ -1335,6 +1339,13 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         self.native.printToPDF(win.native_handle, path);
+    }
+
+    pub fn capturePage(self: *WindowManager, id: u32, path: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.capturePage(win.native_handle, path);
     }
 
     // ==================== Phase 17-A: WebContentsView ====================

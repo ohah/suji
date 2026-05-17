@@ -1410,6 +1410,14 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .path = util.extractJsonString(req_clean, "path") orelse "",
         }, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "capture_page")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleCapturePage(.{
+            .window_id = win_id,
+            .path = util.extractJsonString(req_clean, "path") orelse "",
+        }, response_buf, wm);
+    }
     // Phase 17-A: WebContentsView (createView / addChildView / setTopView / ...)
     if (std.mem.eql(u8, cmd, "create_view")) {
         const wm = window_mod.WindowManager.global orelse return null;
