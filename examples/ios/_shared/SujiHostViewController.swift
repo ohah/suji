@@ -194,6 +194,18 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         else { return }
         let json = (body["json"] as? String) ?? "{}"
 
+        // dialog 는 사용자 응답이 비동기 — 동기 suji_core_invoke 로 블로킹하면
+        // 메인스레드(여기) 데드락(alert 표시·탭도 메인스레드). 호스트에서
+        // 가로채 비동기 alert 표시 후 *같은 id* 로 __resolve__ (코어 프로토콜
+        // 무변경, _pending[id] 는 그때까지 유지). 비-dialog 는 기존 동기 경로.
+        if channel == "__core__",
+           let d = (try? JSONSerialization.jsonObject(with: Data(json.utf8)))
+               as? [String: Any],
+           (d["cmd"] as? String) == "dialog_show_message_box" {
+            presentMessageBox(id: id, opts: d)
+            return
+        }
+
         let result: String = channel.withCString { ch in
             json.withCString { js in
                 guard let p = suji_core_invoke(ch, js) else { return "" }
@@ -203,6 +215,28 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
         }
         let call = "window.__suji__.__resolve__(\(id), \(Self.jsLiteral(result)));"
         webView.evaluateJavaScript(call, completionHandler: nil)
+    }
+
+    // 데스크톱 dialog_show_message_box 와 키-동형 응답
+    // (`{from,cmd,response,checkboxChecked}`). UIAlertController 는 네이티브
+    // 체크박스가 없어 checkboxChecked 는 항상 false(정직한 플랫폼 한계).
+    private func presentMessageBox(id: Int, opts: [String: Any]) {
+        let buttons = (opts["buttons"] as? [String]) ?? ["OK"]
+        let alert = UIAlertController(
+            title: opts["title"] as? String,
+            message: opts["message"] as? String,
+            preferredStyle: .alert
+        )
+        for (i, label) in buttons.enumerated() {
+            alert.addAction(UIAlertAction(title: label, style: .default) { [weak self] _ in
+                let json = "{\"from\":\"zig-core\",\"cmd\":\"dialog_show_message_box\","
+                    + "\"response\":\(i),\"checkboxChecked\":false}"
+                self?.webView.evaluateJavaScript(
+                    "window.__suji__.__resolve__(\(id), \(Self.jsLiteral(json)));",
+                    completionHandler: nil)
+            })
+        }
+        present(alert, animated: true)
     }
 
     // MARK: 네이티브 → JS

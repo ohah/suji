@@ -1564,12 +1564,19 @@ CEF import 0이라 분리선이 이미 존재했음.
           `NotificationChannel`(`areNotificationsEnabled()` 동기값, Builder
           API26+ 전제). 검증: harness 26/26 + iOS 시뮬 빌드·기동. ⚠️ 실기기
           알림 표시·권한 프롬프트·click 이벤트는 미검증(정직).
-    - [ ] (게이트) Slice 4: dialog — **설계 블로커**: `coreCall` 은 단일
-          Promise 를 await 하는데 iOS `userContentController`(WKScriptMessage)는
-          메인스레드라 `UIAlertController` 결과를 동기 블로킹 대기하면 데드락
-          (alert presentation/탭도 메인스레드 필요). 동기 `__core__` 디스패치로
-          불가 → id-상관 deferred-resolve **프로토콜 확장** 필요(별개 설계).
-          open/save dialog 는 모바일 파일모델 차이로 1차 unknown_cmd 폴백.
+    - [x] **Slice 4: dialog** — 데드락 회피를 위해 *blocking 아닌* 호스트-측
+          비동기 가로채기로 구현(원래 계획의 semaphore 방식은 메인스레드
+          데드락이라 폐기). `dialog_show_message_box` 를 iOS
+          `userContentController`/Android `Bridge.invoke` 에서 `suji_core_invoke`
+          *전에* 가로채 네이티브 alert(UIAlertController/AlertDialog.setItems)를
+          비동기 표시 → 사용자 탭 시 *같은 id* 로 `__suji__.__resolve__`
+          (`_pending[id]` 유지, **코어 프로토콜 무변경**). 응답 데스크톱
+          `handleDialogShowMessageBox` 와 키-동형(`{response,checkboxChecked}`).
+          체크박스는 네이티브 부재로 항상 false(정직 한계). open/save dialog 는
+          모바일 파일모델 차이로 sync 경로 → unknown_cmd. ⚠️ **검증**: iOS 시뮬
+          빌드·기동 + 코드리뷰만 — dialog 는 호스트-async 라 `verify.c`(C 하니스)
+          **자동 검증 불가**(슬라이스 1-3 보다 약함, 정직). 실기기 alert 표시·
+          Android 컴파일 미검증.
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일
   미동작 (C ABI 표면은 invoke/emit/on/off/register_handler).

@@ -2,6 +2,7 @@ package dev.suji.examples.android
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.AlertDialog
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -160,11 +161,44 @@ class MainActivity : Activity() {
         ui.post { webView.evaluateJavascript(call, null) }
     }
 
+    /// 데스크톱 dialog_show_message_box 와 키-동형 응답. setItems 로 버튼
+    /// 임의 개수(Electron buttons[]) → response=index. AlertDialog 는 네이티브
+    /// 체크박스가 없어 checkboxChecked 는 항상 false(정직한 플랫폼 한계).
+    /// 취소 시 response=0(프론트 graceful).
+    private fun presentMessageBox(id: Int, opts: JSONObject) {
+        val arr = opts.optJSONArray("buttons")
+        val labels = if (arr != null && arr.length() > 0)
+            Array(arr.length()) { arr.optString(it) } else arrayOf("OK")
+        fun resolve(which: Int) {
+            val r = JSONObject().put("from", "zig-core")
+                .put("cmd", "dialog_show_message_box")
+                .put("response", which).put("checkboxChecked", false)
+            webView.evaluateJavascript(
+                "window.__suji__.__resolve__($id, ${JSONObject.quote(r.toString())});", null)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(opts.optString("title").ifEmpty { null })
+            .setMessage(opts.optString("message"))
+            .setItems(labels) { _, which -> resolve(which) }
+            .setOnCancelListener { resolve(0) }
+            .show()
+    }
+
     private inner class Bridge {
         // JS → 네이티브. WebView JS 스레드에서 호출되므로 UI 스레드로 마샬링.
         @JavascriptInterface
         fun invoke(id: Int, channel: String, json: String) {
             ui.post {
+                // dialog 는 사용자 응답 비동기 — 동기 nativeInvoke 로는 불가.
+                // 호스트에서 가로채 AlertDialog 표시 후 같은 id 로 resolve
+                // (코어 무변경). 비-dialog 는 기존 동기 경로.
+                if (channel == "__core__") {
+                    val o = try { JSONObject(json) } catch (e: Exception) { JSONObject() }
+                    if (o.optString("cmd") == "dialog_show_message_box") {
+                        presentMessageBox(id, o)
+                        return@post
+                    }
+                }
                 val resp = SujiCore.nativeInvoke(channel, json)
                 val call = "window.__suji__.__resolve__($id, ${JSONObject.quote(resp)});"
                 webView.evaluateJavascript(call, null)
