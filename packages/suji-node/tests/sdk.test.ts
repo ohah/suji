@@ -13,6 +13,7 @@ import {
   PLATFORM_MACOS,
   PLATFORM_LINUX,
   PLATFORM_WINDOWS,
+  BrowserWindow,
 } from "../src/index";
 
 beforeEach(() => {
@@ -69,5 +70,40 @@ describe("bridge stubbed", () => {
       register: () => {},
     };
     expect(platform()).toBe("linux");
+  });
+});
+
+describe("BrowserWindow (OO wrapper)", () => {
+  function stub() {
+    const calls: Array<[string, string]> = [];
+    (globalThis as any).suji = {
+      quit: () => {}, platform: () => "macos", handle: () => {},
+      invoke: async (backend: string, json: string) => {
+        calls.push([backend, json]);
+        return JSON.stringify({ windowId: 7, url: "http://x" });
+      },
+      invokeSync: () => "", send: () => {}, on: () => 0, off: () => {}, register: () => {},
+    };
+    return calls;
+  }
+
+  test("create() → 인스턴스 + create_window 라우팅 + windowId", async () => {
+    const calls = stub();
+    const win = await BrowserWindow.create({ title: "X" });
+    expect(win).toBeInstanceOf(BrowserWindow);
+    expect(win.id).toBe(7);
+    expect(calls[0][0]).toBe("__core__");
+    expect(JSON.parse(calls[0][1])).toEqual({ cmd: "create_window", title: "X" });
+  });
+
+  test("fromId() + 메서드가 this.id로 windows.* 위임", async () => {
+    const calls = stub();
+    const win = BrowserWindow.fromId(3);
+    expect(win.id).toBe(3);
+    await win.setTitle("T");
+    expect(JSON.parse(calls[0][1])).toEqual({ cmd: "set_title", windowId: 3, title: "T" });
+    const u = await win.getURL();
+    expect(u.url).toBe("http://x");
+    expect(JSON.parse(calls[1][1])).toEqual({ cmd: "get_url", windowId: 3 });
   });
 });

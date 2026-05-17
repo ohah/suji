@@ -2,7 +2,7 @@
  * Type-only test — Node SDK call/callSync가 SujiHandlers augment를 추론.
  * tsc 컴파일 통과 = pass.
  */
-import { call, callSync, invoke } from "./index";
+import { call, callSync, invoke, BrowserWindow } from "./index";
 
 declare module "./index" {
   interface SujiHandlers {
@@ -46,3 +46,22 @@ async function _compileChecks() {
   void _msg; void _greet; void _smsg; void _sgreet; void _ok; void _wrong;
 }
 void _compileChecks;
+
+async function _bwChecks() {
+  const win = await BrowserWindow.create({ title: "x" }); // Promise<BrowserWindow>
+  const _id: number = win.id;
+  const u = await win.getURL();
+  const _url: string | null = u.url;     // GetUrlResponse.url 추론(nullable)
+  const r = await win.setTitle("t");
+  const _wid: number = r.windowId;       // WindowOpResponse.windowId 추론
+
+  // @ts-expect-error - id 는 readonly getter.
+  win.id = 9;
+  // @ts-expect-error - private 생성자.
+  new BrowserWindow(1);
+  // @ts-expect-error - setTitle 은 string 필수.
+  await win.setTitle(123);
+
+  void _id; void _url; void _wid;
+}
+void _bwChecks;

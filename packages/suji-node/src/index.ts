@@ -587,6 +587,129 @@ export const windows = {
   },
 };
 
+/**
+ * `windows.*`(raw windowId)의 객체지향 facade (Electron `BrowserWindow`
+ * 패리티, @suji/api 와 동형). 각 메서드는 `windows.<fn>(this.id,...)` 위임
+ * — 로직/응답 타입 무중복(반환 타입 위임 추론, windows 변경 자동 동기화).
+ */
+export class BrowserWindow {
+  readonly #id: number;
+  private constructor(id: number) {
+    this.#id = id;
+  }
+  /** 후속 IPC/sendTo 및 view host 인자로 쓰는 창 id. */
+  get id(): number {
+    return this.#id;
+  }
+
+  /** 새 창 생성 후 인스턴스 반환 (Electron `new BrowserWindow(opts)`). */
+  static async create(opts: WindowOptions = {}): Promise<BrowserWindow> {
+    const res = await windows.create(opts);
+    return new BrowserWindow(res.windowId);
+  }
+  /** 기존 windowId(메인 창/이벤트 sender)를 인스턴스로 래핑. */
+  static fromId(id: number): BrowserWindow {
+    return new BrowserWindow(id);
+  }
+
+  loadURL(url: string) {
+    return windows.loadURL(this.#id, url);
+  }
+  reload(ignoreCache = false) {
+    return windows.reload(this.#id, ignoreCache);
+  }
+  executeJavaScript(code: string) {
+    return windows.executeJavaScript(this.#id, code);
+  }
+  getURL() {
+    return windows.getURL(this.#id);
+  }
+  isLoading() {
+    return windows.isLoading(this.#id);
+  }
+  setTitle(title: string) {
+    return windows.setTitle(this.#id, title);
+  }
+  setBounds(bounds: SetBoundsArgs) {
+    return windows.setBounds(this.#id, bounds);
+  }
+  openDevTools() {
+    return windows.openDevTools(this.#id);
+  }
+  closeDevTools() {
+    return windows.closeDevTools(this.#id);
+  }
+  isDevToolsOpened() {
+    return windows.isDevToolsOpened(this.#id);
+  }
+  toggleDevTools() {
+    return windows.toggleDevTools(this.#id);
+  }
+  setZoomLevel(level: number) {
+    return windows.setZoomLevel(this.#id, level);
+  }
+  getZoomLevel() {
+    return windows.getZoomLevel(this.#id);
+  }
+  setZoomFactor(factor: number) {
+    return windows.setZoomFactor(this.#id, factor);
+  }
+  getZoomFactor() {
+    return windows.getZoomFactor(this.#id);
+  }
+  setAudioMuted(muted: boolean) {
+    return windows.setAudioMuted(this.#id, muted);
+  }
+  isAudioMuted() {
+    return windows.isAudioMuted(this.#id);
+  }
+  setOpacity(opacity: number) {
+    return windows.setOpacity(this.#id, opacity);
+  }
+  getOpacity() {
+    return windows.getOpacity(this.#id);
+  }
+  setBackgroundColor(color: string) {
+    return windows.setBackgroundColor(this.#id, color);
+  }
+  setHasShadow(hasShadow: boolean) {
+    return windows.setHasShadow(this.#id, hasShadow);
+  }
+  hasShadow() {
+    return windows.hasShadow(this.#id);
+  }
+  undo() {
+    return windows.undo(this.#id);
+  }
+  redo() {
+    return windows.redo(this.#id);
+  }
+  cut() {
+    return windows.cut(this.#id);
+  }
+  copy() {
+    return windows.copy(this.#id);
+  }
+  paste() {
+    return windows.paste(this.#id);
+  }
+  selectAll() {
+    return windows.selectAll(this.#id);
+  }
+  findInPage(
+    text: string,
+    options?: { forward?: boolean; matchCase?: boolean; findNext?: boolean },
+  ) {
+    return windows.findInPage(this.#id, text, options);
+  }
+  stopFindInPage(clearSelection = false) {
+    return windows.stopFindInPage(this.#id, clearSelection);
+  }
+  printToPDF(path: string) {
+    return windows.printToPDF(this.#id, path);
+  }
+}
+
 // ============================================
 // Clipboard / Shell / Dialog — Electron parity. Frontend `@suji/api`와 동일 cmd.
 // 모두 invoke('__core__', ...) 경유 — IPC가 cef.zig handler로 라우팅.
