@@ -343,7 +343,14 @@ pub fn handleSetUserAgent(window_id: u32, user_agent: []const u8, response_buf: 
 
 pub fn handleGetUserAgent(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ua = (wm.getUserAgent(window_id) catch null) orelse return std.fmt.bufPrint(
+    // 에러(없는/죽은 창)와 미설정 구분: 에러→ok:false, 미설정→ok:true·null
+    // (UA override 미설정은 정상 기본 상태이지 실패가 아님).
+    const ua_opt = wm.getUserAgent(window_id) catch return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_user_agent\",\"windowId\":{d},\"ok\":false,\"userAgent\":null}}",
+        .{window_id},
+    ) catch null;
+    const ua = ua_opt orelse return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"get_user_agent\",\"windowId\":{d},\"ok\":true,\"userAgent\":null}}",
         .{window_id},

@@ -936,13 +936,16 @@ pub const CefNative = struct {
         assertUiThread();
         const self = fromCtx(ctx);
         const entry = self.browsers.getPtr(handle) orelse return;
+        // 2048 초과 UA 는 silent truncate (실 UA <512B — 영향 없음).
         const n = @min(ua.len, entry.ua_buf.len);
         @memcpy(entry.ua_buf[0..n], ua[0..n]);
         entry.ua_len = n;
 
+        // esc=2048×2 (escapeJsonChars 최악 2배), msg=esc + CDP 고정 프레임 여유.
         var esc: [4096]u8 = undefined;
         const en = window_mod.escapeJsonChars(entry.ua_buf[0..n], &esc);
         var msg: [4352]u8 = undefined;
+        // id:1 고정 — 응답을 파싱하지 않는 fire-and-forget 이라 충돌 무해.
         const m = std.fmt.bufPrint(
             &msg,
             "{{\"id\":1,\"method\":\"Network.setUserAgentOverride\",\"params\":{{\"userAgent\":\"{s}\"}}}}",
