@@ -5104,8 +5104,17 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\})();
     ;
 
-    // Platform 문자열을 개별 eval로 주입 (컴파일타임 결정)
-    const platform_js = "window.__suji__.platform = \"" ++ comptime platformLiteral() ++ "\";";
+    // Platform 주입 + contextIsolation 하드닝을 *한* eval 에 합침.
+    // ⚠️ onContextCreated 에서 ctx.eval 을 3회 이상 호출하면 CEF inspector
+    // attach 가 30s(protocolTimeout) 행 — js_code + 이 문자열, 정확히 2회만
+    // 유지해야 함(실측 회귀, e2e set-user-agent 로 확인).
+    // 순서: platform 대입(아직 가변) → Object.freeze(메서드 재할당/추가/삭제
+    // 차단) → window 슬롯 non-writable/non-configurable(통째 교체/삭제 차단).
+    // shallow freeze 라 _pending/_listeners inner 객체는 가변 → invoke/on/off
+    // 정상. 보안 한계는 docs/PLAN Phase 7 (메인 월드 frozen, isolated-world 아님).
+    const bootstrap_js = "window.__suji__.platform = \"" ++ comptime platformLiteral() ++ "\";" ++
+        "Object.freeze(window.__suji__);" ++
+        "try{Object.defineProperty(window,\"__suji__\",{value:window.__suji__,writable:false,configurable:false,enumerable:false});}catch(e){}";
 
     var code_str: c.cef_string_t = .{};
     setCefString(&code_str, js_code);
@@ -5115,10 +5124,10 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
     var exception: ?*c.cef_v8_exception_t = null;
     _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
 
-    // Platform 주입
-    var platform_str: c.cef_string_t = .{};
-    setCefString(&platform_str, platform_js);
-    _ = ctx.eval.?(ctx, &platform_str, &empty_url, 0, &retval, &exception);
+    // 2번째(이자 마지막) eval — platform + freeze + 슬롯 봉인
+    var bootstrap_str: c.cef_string_t = .{};
+    setCefString(&bootstrap_str, bootstrap_js);
+    _ = ctx.eval.?(ctx, &bootstrap_str, &empty_url, 0, &retval, &exception);
 }
 
 /// 컴파일타임 플랫폼 문자열 (V8 바인딩의 window.__suji__.platform 값).

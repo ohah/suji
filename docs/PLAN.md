@@ -599,10 +599,21 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               class, Rust struct, Go struct). windows.<fn>(id,...) 위임으로
               로직/타입 무중복. 단위/타입 테스트 + cargo/go/bun 검증.
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
-    - [ ] `contextIsolation: true` — 별도 V8 world에 `window.__suji__` 생성 + `Object.freeze`된
-          프록시만 메인 월드에 노출. XSS가 bridge를 변조/레퍼런스 캡처 불가.
-          Electron의 contextBridge 대체 (더 간결). 외부 URL 로드 시 권장 기본값 후보.
-          (preload.js / contextBridge 자체는 **비제공** — WINDOW_API.md 설계 참조)
+    - [x] `contextIsolation` — `onContextCreated` 가 멤버 조립/platform 주입 *후*
+          `window.__suji__` 를 `Object.freeze`(메서드 재할당·추가·삭제 차단) + window
+          슬롯 `non-writable`/`non-configurable`(통째 교체·삭제 차단)로 봉인.
+          shallow freeze 라 `_pending`/`_listeners` inner 객체는 가변 → invoke/on/off
+          무손상. **항상 적용**(고정 bridge API freeze 는 정상 사용 안 깸).
+          ⚠️ 구현 불변식: `onContextCreated` 의 `ctx.eval` 호출은 **정확히 2회**
+          (js_code + platform/harden 합본). 3회 이상이면 CEF inspector attach 가
+          30s(protocolTimeout) 행 — 실측 회귀, `e2e set-user-agent` 가드.
+          **보안 한계(정직)**: 우리 바인드보다 *먼저* 실행된 스크립트는 못 막음
+          (메인 월드 frozen — Chrome isolated-world/별도 V8 컨텍스트 아님).
+          진짜 isolated-world 격리는 후속(아래 backlog). e2e 5 케이스
+          (`tests/e2e/context-isolation.test.ts`) 로 frozen/변조차단/슬롯봉인/
+          기능보존 실증. (preload.js / contextBridge 자체는 **비제공**)
+    - [ ] (backlog) 진짜 isolated-world — 별도 V8 컨텍스트에 bridge 두고 메인 월드엔
+          frozen 프록시만 노출(pre-bind XSS 도 차단). 위 frozen 하드닝의 상위 단계.
     - [ ] **macOS App Sandbox 인프라** — `suji build --sandbox` 옵션 + entitlements.plist 자동 부착.
           핵심 작업: **CEF Helper 번들 5개에 entitlements 자동 부착** (`Suji Helper.app`,
           `Suji Helper (GPU/Renderer/Plugin/Alerts).app`) — Electron이 historic하게 풀어낸 패턴.

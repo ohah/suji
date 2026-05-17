@@ -36,6 +36,7 @@ bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
 bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
+bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
 
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
 bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive) 정적
@@ -488,6 +489,18 @@ Android Node 는 NDK로 가능하나 예제 미배선(후속).
 | macOS | `~/Library/Application Support/<app>/Cache` | `$HOME` |
 | Linux | `$XDG_CONFIG_HOME/<app>/Cache` (없으면 `~/.config/<app>/Cache`) | XDG Base Directory Spec |
 | Windows | `%APPDATA%/<app>/Cache` (없으면 `%USERPROFILE%/AppData/Roaming/<app>/Cache`) | Roaming 표준 |
+
+## contextIsolation (window.__suji__ 하드닝)
+
+`onContextCreated` 가 멤버 조립 후 `window.__suji__` 를 `Object.freeze` + window
+슬롯 `non-writable`/`non-configurable` 봉인 — 페이지 스크립트가 bridge 메서드
+재할당/추가/삭제, 객체 통째 교체/삭제 불가. shallow freeze 라 내부
+`_pending`/`_listeners` 는 가변 → invoke/on/off 무손상. **항상 적용**.
+
+**한계(정직)**: 우리 바인드보다 *먼저* 실행된 스크립트는 못 막음(메인 월드
+frozen — Chrome isolated-world 아님). 진짜 별도-world 격리는 backlog
+(docs/PLAN.md Phase 7). ⚠️ `onContextCreated` 의 `ctx.eval` 은 **정확히 2회**
+유지(3회+ 시 CEF inspector attach 30s 행 — `e2e set-user-agent` 가드).
 
 ## fs sandbox (Electron `webPreferences.sandbox` 동등)
 
