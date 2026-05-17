@@ -1790,6 +1790,34 @@ pub fn cancel_user_attention_request(id: u32) -> Option<String> {
     invoke("__core__", &attention_cancel_json(id))
 }
 
+pub(crate) fn scoped_bookmark_create_json(path: &str) -> String {
+    serde_json::json!({ "cmd": "security_scoped_bookmark_create", "path": path }).to_string()
+}
+
+pub(crate) fn scoped_access_start_json(bookmark: &str) -> String {
+    serde_json::json!({ "cmd": "security_scoped_access_start", "bookmark": bookmark }).to_string()
+}
+
+pub(crate) fn scoped_access_stop_json(id: u32) -> String {
+    serde_json::json!({ "cmd": "security_scoped_access_stop", "id": id }).to_string()
+}
+
+/// Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 응답:
+/// `{"success":bool,"bookmark":"<base64>"}`. 비-sandbox 빌드에선 일반 bookmark.
+pub fn create_security_scoped_bookmark(path: &str) -> Option<String> {
+    invoke("__core__", &scoped_bookmark_create_json(path))
+}
+
+/// bookmark 해소 + 접근 시작. 응답: `{"success":bool,"id":N,"path":"...","stale":bool}`.
+pub fn start_accessing_security_scoped_resource(bookmark: &str) -> Option<String> {
+    invoke("__core__", &scoped_access_start_json(bookmark))
+}
+
+/// 응답: `{"success":bool}`. 유효하지 않은 id 는 success:false.
+pub fn stop_accessing_security_scoped_resource(id: u32) -> Option<String> {
+    invoke("__core__", &scoped_access_stop_json(id))
+}
+
 /// 플랫폼 이름 — `"macos"` | `"linux"` | `"windows"` | `"other"`.
 /// Electron `process.platform` 대응 (단 Suji는 `"darwin"` 대신 `"macos"`).
 pub fn platform() -> &'static str {

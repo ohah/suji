@@ -2074,6 +2074,44 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         ) catch null;
     }
 
+    // Security-scoped bookmarks (Electron `app.startAccessingSecurityScopedResource`).
+    if (std.mem.eql(u8, cmd, "security_scoped_bookmark_create")) {
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        var path_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const path = if (util.unescapeJsonStr(raw, &path_buf)) |n| path_buf[0..n] else "";
+        var bm_buf: [8192]u8 = undefined;
+        const bm = cef.securityScopedBookmarkCreate(path, &bm_buf);
+        if (bm.len == 0) return coreError(response_buf, "security_scoped_bookmark_create", "create");
+        // base64 알파벳엔 JSON-special 없음 — escape 불필요.
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"security_scoped_bookmark_create\",\"success\":true,\"bookmark\":\"{s}\"}}",
+            .{bm},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "security_scoped_access_start")) {
+        const bm = util.extractJsonString(req_clean, "bookmark") orelse "";
+        var path_buf: [2048]u8 = undefined;
+        const acc = cef.securityScopedAccessStart(bm, &path_buf);
+        if (acc.id == 0) return coreError(response_buf, "security_scoped_access_start", "resolve");
+        var esc_buf: [4096]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(acc.path, &esc_buf) orelse return coreError(response_buf, "security_scoped_access_start", "encode");
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"security_scoped_access_start\",\"success\":true,\"id\":{d},\"path\":\"{s}\",\"stale\":{}}}",
+            .{ acc.id, esc_buf[0..esc_n], acc.stale },
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "security_scoped_access_stop")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        const ok = if (id_n > 0) cef.securityScopedAccessStop(util.nonNegU32(id_n)) else false;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"security_scoped_access_stop\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
+
     // safeStorage — Keychain Services. service/account/value 셋 다 unescape 필요 (wire JSON).
     if (std.mem.eql(u8, cmd, "safe_storage_set")) {
         const svc_raw = util.extractJsonString(req_clean, "service") orelse "";

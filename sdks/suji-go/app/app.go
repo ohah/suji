@@ -73,3 +73,22 @@ func Focus() string {
 func Hide() string {
 	return suji.Invoke("__core__", `{"cmd":"app_hide"}`)
 }
+
+// CreateSecurityScopedBookmark creates a security-scoped bookmark for App
+// Sandbox persistent file access. Response:
+// `{"success":bool,"bookmark":"<base64>"}` (비-sandbox 빌드에선 일반 bookmark).
+func CreateSecurityScopedBookmark(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"security_scoped_bookmark_create","path":"%s"}`, jsonesc.Full(path)))
+}
+
+// StartAccessingSecurityScopedResource resolves a bookmark and begins access.
+// Response: `{"success":bool,"id":N,"path":"...","stale":bool}`.
+func StartAccessingSecurityScopedResource(bookmark string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"security_scoped_access_start","bookmark":"%s"}`, jsonesc.Full(bookmark)))
+}
+
+// StopAccessingSecurityScopedResource ends access for id. Invalid id → success:false.
+// Response: `{"success":bool}`.
+func StopAccessingSecurityScopedResource(id uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"security_scoped_access_stop","id":%d}`, id))
+}

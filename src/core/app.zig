@@ -1608,6 +1608,33 @@ pub fn cancelUserAttentionRequest(id: u32) ?[]const u8 {
     return coreCmd("app_attention_cancel", fields);
 }
 
+/// Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 응답:
+/// `{"success":bool,"bookmark":"<base64>"}`. 비-sandbox 빌드에선 일반 bookmark.
+pub fn createSecurityScopedBookmark(path: []const u8) ?[]const u8 {
+    var p_buf: [4096]u8 = undefined;
+    const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+    var fields_buf: [4200]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+    return coreCmd("security_scoped_bookmark_create", fields);
+}
+
+/// bookmark 해소 + 접근 시작. 응답: `{"success":bool,"id":N,"path":"...","stale":bool}`.
+/// id 를 `stopAccessingSecurityScopedResource` 에 전달해 종료.
+pub fn startAccessingSecurityScopedResource(bookmark: []const u8) ?[]const u8 {
+    var b_buf: [8192]u8 = undefined;
+    const b_n = util.escapeJsonStrFull(bookmark, &b_buf) orelse return null;
+    var fields_buf: [8300]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"bookmark\":\"{s}\"", .{b_buf[0..b_n]}) catch return null;
+    return coreCmd("security_scoped_access_start", fields);
+}
+
+/// 응답: `{"success":bool}`. 유효하지 않은 id 는 success:false.
+pub fn stopAccessingSecurityScopedResource(id: u32) ?[]const u8 {
+    var fields_buf: [32]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"id\":{d}", .{id}) catch return null;
+    return coreCmd("security_scoped_access_stop", fields);
+}
+
 /// 다른 백엔드 호출 (invoke)
 pub fn callBackend(backend: []const u8, request: []const u8) ?[]const u8 {
     const core = _global_core orelse return null;

@@ -139,6 +139,10 @@ fn onAllClosed(_: suji.Event) void {
 // suji.screen.getCursorScreenPoint() / suji.screen.getDisplayNearestPoint(x, y)
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
 //                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
+// suji.createSecurityScopedBookmark(path) → base64 / startAccessingSecurityScoped
+//   Resource(bm) → {id,path,stale} / stopAccessingSecurityScopedResource(id)
+//                                       — App Sandbox 영속 파일 접근 (NSURL bookmark,
+//                                       비-sandbox=일반 bookmark / MAS 만 실 격상)
 // powerMonitor 이벤트 — 자동 install (NSWorkspace 옵저버), 4 채널 발신:
 //   `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen`
 //   → suji.on("power:suspend", cb) / 다른 SDK도 동일 채널명으로 listen
@@ -310,6 +314,9 @@ suji.platform                                                // "macos" | "linux
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
+// const bm = await app.createSecurityScopedBookmark(path)                 — App Sandbox 영속 파일 접근
+// const acc = await app.startAccessingSecurityScopedResource(bm)          → {id,path,stale}
+// await app.stopAccessingSecurityScopedResource(acc.id)                   (NSURL bookmark; 비-sandbox=일반)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])                     (CEF ResourceRequestHandler)
 //   → suji.on('webRequest:completed', ({url, statusCode, ...}) => ...)
 // await webRequest.onBeforeRequest({urls:["https://*.tracker/*"]}, (details, cb) => cb({cancel:true}))

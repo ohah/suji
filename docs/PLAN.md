@@ -639,10 +639,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           경로 재사용, signing none/adhoc/identity 와 직교. 단위 회귀(루트=app-sandbox
           부재 + Hardened 키, sandbox/=app-sandbox+inherit) + adhoc 로컬 실증
           (non-sandbox app-sandbox=0 / `--sandbox`=1 / `codesign --verify` exit=0).
-          ⚠️ Security-scoped bookmarks API (`NSURLBookmarkCreationWithSecurityScope` /
-          `start/stopAccessingSecurityScopedResource`) 는 별도 네이티브 작업으로 **후속**
-          (이 슬라이스 범위 밖 — entitlements/번들 인프라만). identity 모드 MAS 실제
-          제출은 실 인증서·App Store Connect 필요 = 미검증.
+          ✅ Security-scoped bookmarks API (`NSURLBookmarkCreationWithSecurityScope` /
+          `start/stopAccessingSecurityScopedResource`) 후속 슬라이스로 **완료** —
+          Electron 패리티 표 참조(`app.createSecurityScopedBookmark` 외 2, 4 SDK +
+          e2e 8 + `sandbox/main.plist files.bookmarks.app-scope`). identity 모드 MAS
+          실제 제출은 실 인증서·App Store Connect 필요 = 미검증.
     - [x] **Sheet modal** — 완료 (Phase 5-A에서 구현) — `src/platform/dialog.m` + `windowId` 첫 인자.
   - **설계 비제공 (문서화 완료)**: 렌더러 직접 통신, MessagePort, preload.js, contextBridge — `docs/WINDOW_API.md#설계-비제공-항목과-이유`
   - **V2 검토**: `cross_origin_isolation` 플래그 (SharedArrayBuffer 활성화), `inject` 초기 스크립트 옵션
@@ -1328,8 +1329,8 @@ suji build → 결과물:
 | 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs만 — network/shell/dialog allowlist는 Phase 7+ |
 | CSP (Content Security Policy) | 수동 설정 | 빌트인 | ✅ `suji://` 응답에 default CSP + X-Content-Type-Options + X-Frame-Options. `config.security.csp` override + `"disabled"` escape |
 | IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ✅ payload size 32KB · cmd char allowlist (injection 차단) · missing/invalid/unknown_cmd 표준 에러 |
-| macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ `suji build --sandbox` — helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin). 루트=non-sandbox(Developer ID, Hardened Runtime 기본) / `sandbox/`=App Sandbox+inherit(MAS). signing 모드와 직교. ⚠️ Security-scoped bookmarks API 후속 |
-| Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ❌ (Phase 7+) |
+| macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ `suji build --sandbox` — helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin). 루트=non-sandbox(Developer ID, Hardened Runtime 기본) / `sandbox/`=App Sandbox+inherit(MAS). signing 모드와 직교. Security-scoped bookmarks API ✅ (다음 행) |
+| Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ✅ `app.createSecurityScopedBookmark(path)` + `start/stopAccessingSecurityScopedResource`. NSURL bookmarkDataWithOptions(WithSecurityScope) → base64, URLByResolvingBookmarkData → accessId 풀(32) retain/release. Electron stop 클로저 대신 opaque accessId+stop cmd(IPC 모델). 4 SDK + e2e 8(create round-trip/resolve path/start·stop lifecycle/이중해제 가드/에러 분기) + sandbox/main.plist `files.bookmarks.app-scope` entitlement. ⚠️ 비-sandbox(기본)에선 일반 bookmark — API round-trip은 실증되나 sandbox escapement 실효는 MAS 환경 필요 = 로컬 미검증 |
 | iframe sandbox / origin allowlist | CSP `frame-src` 수동 + `<webview>` partition | `tauri.conf.json` `app.security.csp` | ✅ `security.iframeAllowedOrigins` config — CSP frame-src 자동 합성. default block (`'none'`) + `["*"]` escape |
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |

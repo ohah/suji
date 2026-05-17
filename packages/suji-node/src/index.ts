@@ -1527,6 +1527,32 @@ export const app = {
     return r.success === true;
   },
 
+  /**
+   * Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 실패 시 null.
+   * 비-sandbox 빌드에선 일반 bookmark 로 동작 (sandbox escapement no-op).
+   */
+  async createSecurityScopedBookmark(path: string): Promise<string | null> {
+    const r = await invoke<{ success: boolean; bookmark?: string }>('__core__', { cmd: 'security_scoped_bookmark_create', path });
+    return r.success === true ? r.bookmark ?? null : null;
+  },
+
+  /** bookmark 해소 + 접근 시작. 실패 시 null. id 를 stop 에 전달. */
+  async startAccessingSecurityScopedResource(
+    bookmark: string,
+  ): Promise<{ id: number; path: string; stale: boolean } | null> {
+    const r = await invoke<{ success: boolean; id: number; path: string; stale: boolean }>(
+      '__core__',
+      { cmd: 'security_scoped_access_start', bookmark },
+    );
+    return r.success === true ? { id: r.id, path: r.path, stale: r.stale } : null;
+  },
+
+  /** 접근 종료. 유효하지 않은 id 는 false. */
+  async stopAccessingSecurityScopedResource(id: number): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'security_scoped_access_stop', id });
+    return r.success === true;
+  },
+
   dock: {
     /** dock 배지 텍스트 — 빈 문자열로 제거. macOS만. */
     async setBadge(text: string): Promise<void> {

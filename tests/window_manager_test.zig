@@ -3309,6 +3309,50 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
     }
 }
 
+test "회귀: security-scoped bookmarks — 전 계층 배선 + sandbox bookmark entitlement" {
+    // 네이티브: cef.zig 3종 함수 + 풀 + SecurityScope 상수.
+    const cef_src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/platform/cef.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(cef_src);
+    for ([_][]const u8{
+        "pub fn securityScopedBookmarkCreate",
+        "pub fn securityScopedAccessStart",
+        "pub fn securityScopedAccessStop",
+        "kNSURLBookmarkCreationWithSecurityScope",
+        "kNSURLBookmarkResolutionWithSecurityScope",
+        "g_scoped_urls",
+        "startAccessingSecurityScopedResource",
+        "stopAccessingSecurityScopedResource",
+        "bookmarkDataWithOptions:includingResourceValuesForKeys:relativeToURL:error:",
+        "URLByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:",
+    }) |needle| try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+
+    // IPC dispatch: main.zig 3 cmd arm.
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(main_src);
+    for ([_][]const u8{
+        "security_scoped_bookmark_create",
+        "security_scoped_access_start",
+        "security_scoped_access_stop",
+    }) |needle| try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+
+    // Zig SDK: src/core/app.zig 3 wrapper.
+    const app_src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/core/app.zig", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(app_src);
+    for ([_][]const u8{
+        "pub fn createSecurityScopedBookmark",
+        "pub fn startAccessingSecurityScopedResource",
+        "pub fn stopAccessingSecurityScopedResource",
+    }) |needle| try std.testing.expect(std.mem.indexOf(u8, app_src, needle) != null);
+
+    // MAS sandbox 세트는 bookmark 영속 entitlement 보유, 루트(non-sandbox)는 미보유.
+    const sb = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "assets/entitlements/sandbox/main.plist", std.testing.allocator, .limited(8 * 1024));
+    defer std.testing.allocator.free(sb);
+    try std.testing.expect(std.mem.indexOf(u8, sb, "com.apple.security.files.bookmarks.app-scope") != null);
+    const rt = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "assets/entitlements/main.plist", std.testing.allocator, .limited(8 * 1024));
+    defer std.testing.allocator.free(rt);
+    try std.testing.expect(std.mem.indexOf(u8, rt, "com.apple.security.files.bookmarks") == null);
+}
+
 test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 분기" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

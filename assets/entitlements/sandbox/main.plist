@@ -17,6 +17,9 @@
     <true/>
     <key>com.apple.security.files.user-selected.read-write</key>
     <true/>
+    <!-- security-scoped bookmark 영속화 (재실행 후 사용자 선택 파일 재접근). -->
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
     <key>com.apple.security.application-groups</key>
     <array/>
 </dict>
