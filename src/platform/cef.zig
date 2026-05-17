@@ -2680,6 +2680,25 @@ pub fn resetApplicationMenu() bool {
     return true;
 }
 
+/// Electron `Menu.popup({x?,y?})` 대응 — 임의 위치 컨텍스트 메뉴.
+/// NSMenu `popUpMenuPositioningItem:atLocation:inView:` (item=nil →
+/// 메뉴 좌상단이 location, view=nil → location 을 화면 좌표로 해석).
+/// 메뉴 빌드/click(menu:click emit)은 setApplicationMenu 와 동일 경로
+/// (`createMenuFromItems`). x/y 미지정 시 현재 커서(화면 좌표).
+/// ⚠️ popUp 은 동기 모달 — 항목 선택/dismiss 까지 블록(macOS 표준 동작).
+pub fn popupContextMenu(items: []const ApplicationMenuItem, x: ?f64, y: ?f64) bool {
+    if (!comptime is_macos) return false;
+    const menu = createMenuFromItems("", items) orelse return false;
+    // x·y 둘 다 지정해야 그 좌표 사용 — 한쪽만이면 커서로 폴백(부분 지정 무의미).
+    const loc: NSPoint = if (x != null and y != null)
+        .{ .x = x.?, .y = y.? }
+    else
+        screenGetCursorPoint();
+    const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, NSPoint, ?*anyopaque) callconv(.c) bool =
+        @ptrCast(&objc.objc_msgSend);
+    return f(menu, @ptrCast(objc.sel_registerName("popUpMenuPositioningItem:atLocation:inView:")), null, loc, null);
+}
+
 fn createMenuFromItems(title: []const u8, items: []const ApplicationMenuItem) ?*anyopaque {
     const menu = createMenu(title) orelse return null;
     for (items) |item| addApplicationMenuItem(menu, item);

@@ -119,6 +119,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수)
 // suji.menu.setApplicationMenuRaw("\"items\":[...]") / resetApplicationMenu()
+//   / popup(items, {x?,y?})  — 임의 위치 컨텍스트 메뉴(NSMenu
+//   popUpMenuPositioningItem, x/y 미지정=커서; 동기 모달)
 //                                       (macOS NSMenu, menu:click 이벤트)
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key, globalShortcut:trigger 이벤트)

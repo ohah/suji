@@ -2197,6 +2197,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = cef.resetApplicationMenu();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_reset_application_menu\",\"success\":{}}}", .{ok}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "menu_popup")) {
+        return handleMenuPopup(req_clean, response_buf);
+    }
 
     // Global shortcut API — Carbon Hot Key (macOS only).
     if (std.mem.eql(u8, cmd, "global_shortcut_register")) {
@@ -2949,6 +2952,21 @@ fn handleMenuSetApplicationMenu(req_clean: []const u8, response_buf: []u8) ?[]co
     const items = parseMenuItemsFromRequest(arena, req_clean) catch return coreError(response_buf, "menu_set_application_menu", "parse");
     const ok = cef.setApplicationMenu(items);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+/// Electron `Menu.popup({x?,y?})` — 임의 위치 컨텍스트 메뉴. items 파싱은
+/// menu_set_application_menu 와 동일(parseMenuItemsFromRequest). 선택은
+/// 기존 `menu:click` 이벤트로 수신(setApplicationMenu 와 동일 경로).
+fn handleMenuPopup(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA * 2]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const items = parseMenuItemsFromRequest(arena, req_clean) catch return coreError(response_buf, "menu_popup", "parse");
+    const x = util.extractJsonFloat(req_clean, "x");
+    const y = util.extractJsonFloat(req_clean, "y");
+    const ok = cef.popupContextMenu(items, x, y);
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_popup\",\"success\":{}}}", .{ok}) catch null;
 }
 
 fn parseMenuItemsFromRequest(arena: std.mem.Allocator, req_clean: []const u8) MenuParseError![]cef.ApplicationMenuItem {

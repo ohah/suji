@@ -109,6 +109,18 @@ describe("error 분기", () => {
     expect(r.success).toBe(false);
     expect(r.error).toBe("parse");
   });
+
+  // menu_popup: 정상 호출은 NSMenu 동기 모달이라 e2e 자동 클릭/dismiss
+  // 불가(데스크톱 dialog 와 동일 경계 — 빌드+단위+menu:click 경로 재사용
+  // 입증). parse 실패는 모달 전 즉시 반환이라 자동 검증 가능.
+  test("menu_popup items non-array → parse error (모달 전)", async () => {
+    const r = await core<{ success: boolean; error?: string }>({
+      cmd: "menu_popup",
+      items: "not-array" as any,
+    });
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("parse");
+  });
 });
 
 describe("click 이벤트 라우팅 — RUN_DESTRUCTIVE", () => {

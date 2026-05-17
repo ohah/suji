@@ -945,6 +945,20 @@ export const menu = {
     const r = await coreCall<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
     return r.success === true;
   },
+
+  /** 임의 위치 컨텍스트 메뉴 (Electron `Menu.popup({x?,y?})`). x/y 미지정 시
+   *  현재 커서(화면 좌표, macOS bottom-up). 선택은 `suji.on('menu:click',
+   *  ({click}) => ...)` 로 수신 (setApplicationMenu 와 동일). macOS NSMenu
+   *  `popUpMenuPositioningItem:atLocation:inView:` — 동기 모달. */
+  async popup(items: MenuItem[], opts: { x?: number; y?: number } = {}): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({
+      cmd: "menu_popup",
+      items,
+      ...(opts.x !== undefined ? { x: opts.x } : {}),
+      ...(opts.y !== undefined ? { y: opts.y } : {}),
+    });
+    return r.success === true;
+  },
 };
 
 // ============================================
