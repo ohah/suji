@@ -466,8 +466,7 @@ pub const CefNative = struct {
     pub fn purge(self: *CefNative, handle: u64) void {
         if (self.browsers.fetchRemove(handle)) |kv| {
             self.allocator.free(kv.value.drag_regions);
-            var v = kv.value;
-            releaseDevToolsReg(&v);
+            releaseReg(kv.value.devtools_reg); // 제거된 value — 포인터만 release(복사 X)
         }
     }
 
@@ -1126,22 +1125,27 @@ pub const CefNative = struct {
             entry.devtools_reg = asPtr(c.cef_registration_t, add(host, &g_devtools_observer));
         }
 
-        // pending 슬롯 확보 (가득 차면 가장 오래된 것 재사용 — 저빈도라 충분).
+        // pending 슬롯 확보. 가득(16 동시 미완료 — 저빈도라 비현실적)이면
+        // 진행 중 요청 덮어쓰지 말고 즉시 실패 발화(SDK Promise leak 방지).
         const id = g_capture_next_id;
         g_capture_next_id +%= 1;
         if (g_capture_next_id == 0) g_capture_next_id = 1;
-        var slot: *CapturePending = &g_capture_pending[0];
+        var slot: ?*CapturePending = null;
         for (&g_capture_pending) |*s| {
             if (!s.used) {
                 slot = s;
                 break;
             }
         }
-        const n = @min(path.len, slot.path_buf.len);
-        @memcpy(slot.path_buf[0..n], path[0..n]);
-        slot.path_len = n;
-        slot.id = id;
-        slot.used = true;
+        const sl = slot orelse {
+            emitPageCaptured(path, false);
+            return;
+        };
+        const n = @min(path.len, sl.path_buf.len);
+        @memcpy(sl.path_buf[0..n], path[0..n]);
+        sl.path_len = n;
+        sl.id = id;
+        sl.used = true;
 
         var msg: [128]u8 = undefined;
         const m = std.fmt.bufPrint(
@@ -1254,6 +1258,17 @@ pub const EVENT_PDF_PRINT_FINISHED: []const u8 = "window:pdf-print-finished";
 // base64 는 IPC payload 한도(64KB) 초과 가능 → 파일 경로 방식(printToPDF 동일).
 pub const EVENT_PAGE_CAPTURED: []const u8 = "window:page-captured";
 
+/// `window:page-captured`{path,success} 발화 (결과 도착·요청 드롭 공용).
+fn emitPageCaptured(path: []const u8, ok: bool) void {
+    const emit = g_emit_callback orelse return;
+    var esc: [PDF_PATH_STACK_BUF]u8 = undefined;
+    const en = window_mod.escapeJsonChars(path, &esc);
+    var payload: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&payload);
+    w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ esc[0..en], ok }) catch return;
+    emit(null, EVENT_PAGE_CAPTURED, w.buffered());
+}
+
 /// capture 요청-결과 상관용 고정 슬롯(저빈도, CEF UI 스레드 단일 → lock 불필요).
 const CapturePending = struct {
     id: c_int = 0,
@@ -1266,9 +1281,13 @@ var g_capture_next_id: c_int = 1;
 var g_devtools_observer: c.cef_dev_tools_message_observer_t = undefined;
 var g_devtools_observer_initialized: bool = false;
 
-fn releaseDevToolsReg(entry: *CefNative.BrowserEntry) void {
-    const reg = entry.devtools_reg orelse return;
+fn releaseReg(reg_opt: ?*c.cef_registration_t) void {
+    const reg = reg_opt orelse return;
     if (reg.base.release) |rel| _ = rel(&reg.base);
+}
+
+fn releaseDevToolsReg(entry: *CefNative.BrowserEntry) void {
+    releaseReg(entry.devtools_reg);
     entry.devtools_reg = null;
 }
 
@@ -1303,12 +1322,8 @@ fn onDevToolsMethodResult(
         if (success == 0) break :blk false;
         const res_ptr = result orelse break :blk false;
         const json: []const u8 = @as([*]const u8, @ptrCast(res_ptr))[0..result_size];
-        // base64 는 JSON-special 문자 없음 → "data":" 마커 ~ 다음 " 슬라이스.
-        const marker = "\"data\":\"";
-        const start = std.mem.indexOf(u8, json, marker) orelse break :blk false;
-        const b64_start = start + marker.len;
-        const b64_end = std.mem.indexOfScalarPos(u8, json, b64_start, '"') orelse break :blk false;
-        const b64 = json[b64_start..b64_end];
+        // base64 는 JSON-special/backslash 무함 → extractJsonString 으로 충분.
+        const b64 = util.extractJsonString(json, "data") orelse break :blk false;
         const dec_size = std.base64.standard.Decoder.calcSizeForSlice(b64) catch break :blk false;
         if (dec_size > 32 * 1024 * 1024) break :blk false; // pathological 가드
         const alloc = std.heap.page_allocator;
@@ -1327,13 +1342,7 @@ fn onDevToolsMethodResult(
         break :blk true;
     };
 
-    const emit = g_emit_callback orelse return;
-    var esc: [PDF_PATH_STACK_BUF]u8 = undefined;
-    const en = window_mod.escapeJsonChars(path, &esc);
-    var payload: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
-    var w = std.Io.Writer.fixed(&payload);
-    w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ esc[0..en], ok }) catch return;
-    emit(null, EVENT_PAGE_CAPTURED, w.buffered());
+    emitPageCaptured(path, ok);
 }
 
 fn ensureDevToolsObserver() void {
