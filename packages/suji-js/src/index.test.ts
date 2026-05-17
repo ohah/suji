@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, BrowserWindow } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -384,5 +384,41 @@ describe("app", () => {
   it("dock.getBadge returns text field", async () => {
     mockBridge.core.mockResolvedValueOnce({ text: "9" });
     expect(await app.dock.getBadge()).toBe("9");
+  });
+});
+
+describe("BrowserWindow (OO wrapper)", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("create() → 인스턴스, create_window 라우팅 + windowId 보유", async () => {
+    mockBridge.core.mockResolvedValueOnce({ windowId: 7 });
+    const win = await BrowserWindow.create({ title: "X" });
+    expect(win).toBeInstanceOf(BrowserWindow);
+    expect(win.id).toBe(7);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "create_window", title: "X" });
+  });
+
+  it("fromId() + 인스턴스 메서드가 this.id로 windows.* 위임", async () => {
+    const win = BrowserWindow.fromId(3);
+    expect(win.id).toBe(3);
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    await win.setTitle("T");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "set_title", windowId: 3, title: "T" });
+  });
+
+  it("getter 위임 (getURL)", async () => {
+    const win = BrowserWindow.fromId(5);
+    mockBridge.core.mockResolvedValueOnce({ url: "http://x" });
+    const r = await win.getURL();
+    expect(r.url).toBe("http://x");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "get_url", windowId: 5 });
+  });
+
+  it("findInPage 옵션 패스스루", async () => {
+    const win = BrowserWindow.fromId(2);
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    await win.findInPage("hi", { matchCase: true });
+    const req = JSON.parse(mockBridge.core.mock.calls[0][0]);
+    expect(req).toMatchObject({ cmd: "find_in_page", windowId: 2, text: "hi", matchCase: true });
   });
 });

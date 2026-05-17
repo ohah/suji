@@ -2,7 +2,7 @@
  * Type-only test — `invoke` generic overload가 SujiHandlers augment를 정확히 추론하는지
  * 검증. tsc 컴파일 통과 = pass. 런타임 실행은 없음 (이름이 .test-d.ts라 bun이 skip).
  */
-import { invoke, type InvokeOptions } from "./index";
+import { invoke, type InvokeOptions, BrowserWindow } from "./index";
 
 declare module "./index" {
   interface SujiHandlers {
@@ -47,3 +47,25 @@ async function _compileChecks() {
   void _msg; void _greet; void _sum; void _greet2; void _ok; void _wrong;
 }
 void _compileChecks;
+
+// BrowserWindow OO 래퍼 타입 추론 (위임으로 windows.* 반환 타입 보존).
+async function _bwChecks() {
+  const win = await BrowserWindow.create({ title: "x" }); // Promise<BrowserWindow>
+  const _id: number = win.id;
+  const u = await win.getURL();
+  const _url: string | null = u.url;     // GetUrlResponse.url 추론(nullable)
+  const r = await win.setTitle("t");
+  const _wid: number = r.windowId;       // WindowOpResponse.windowId 추론
+  const fromId = BrowserWindow.fromId(0);
+  const _id2: number = fromId.id;
+
+  // @ts-expect-error - id 는 readonly getter (대입 불가).
+  win.id = 9;
+  // @ts-expect-error - private 생성자 (직접 new 불가).
+  new BrowserWindow(1);
+  // @ts-expect-error - setTitle 은 string 필수.
+  await win.setTitle(123);
+
+  void _id; void _url; void _wid; void _id2;
+}
+void _bwChecks;
