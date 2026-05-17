@@ -493,7 +493,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
             (send_dev_tools_message + dev_tools_message_observer). base64 PNG 가
             IPC 한도(64KB) 초과 가능 → printToPDF 와 동형 file-path 방식:
             ack 즉시 + `window:page-captured`{path,success} 이벤트. 코어
-            (cef observer/pending + window/ipc/main) + 4 SDK + 단위 테스트.
+            (cef observer/pending + window/ipc/main) + 4 SDK + 단위 테스트 + e2e(실 CEF: 실 PNG 파일 매직바이트·window:page-captured 실증).
     - [x] **Phase 4-E 편집/검색** — `undo/redo/cut/copy/paste/select_all` (frame 위임 6) +
           `find_in_page(text, forward, matchCase, findNext)` + `stop_find_in_page(clearSelection)`.
           5 SDK + 단위 12 + e2e 4. user_agent dynamic은 CEF 미지원(창 settings 한 번만) — Phase 7
