@@ -119,6 +119,36 @@ private func sujiCoreDispatch(
         } else {
             resp["success"] = false
         }
+    case "fs_stat":
+        let sp = (obj["path"] as? String) ?? ""
+        if let a = try? FileManager.default.attributesOfItem(atPath: sp) {
+            let isDir = (a[.type] as? FileAttributeType) == .typeDirectory
+            resp["success"] = true
+            resp["type"] = isDir ? "directory" : "file"
+            resp["size"] = (a[.size] as? Int) ?? 0
+            resp["mtime"] = Int(((a[.modificationDate] as? Date)?
+                .timeIntervalSince1970 ?? 0) * 1000)
+        } else { resp["success"] = false; resp["error"] = "stat_failed" }
+    case "fs_mkdir":
+        do {
+            try FileManager.default.createDirectory(
+                atPath: (obj["path"] as? String) ?? "",
+                withIntermediateDirectories: (obj["recursive"] as? Bool) == true)
+            resp["success"] = true
+        } catch { resp["success"] = false; resp["error"] = "mkdir_failed" }
+    case "fs_rm":
+        // operate-and-handle(정상경로 1-syscall, TOCTOU 없음). 실패 시
+        // 미존재면 force=미존재무시(node:fs.rm 동등) — 데스크톱 키-동형.
+        let rp = (obj["path"] as? String) ?? ""
+        do {
+            try FileManager.default.removeItem(atPath: rp)
+            resp["success"] = true
+        } catch {
+            if !FileManager.default.fileExists(atPath: rp) {
+                resp["success"] = (obj["force"] as? Bool) == true
+                if resp["success"] as? Bool != true { resp["error"] = "not_found" }
+            } else { resp["success"] = false; resp["error"] = "rm_failed" }
+        }
     case "fs_read_file", "fs_write_file", "fs_readdir":
         // ⚠️ 데스크톱 fs 는 suji.json allowedRoots 화이트리스트 검증. 모바일은
         // OS 앱 샌드박스 자체가 경계(컨테이너 밖 path 는 OS 가 거부 →
@@ -154,6 +184,22 @@ private func sujiCoreDispatch(
                 }
             } else { resp["success"] = false; resp["error"] = "readdir_failed" }
         }
+    case "clipboard_write_buffer":
+        // 임의 UTI raw bytes (base64) — UIPasteboard.setData(forPasteboardType:).
+        if let d = Data(base64Encoded: (obj["data"] as? String) ?? "") {
+            UIPasteboard.general.setData(
+                d, forPasteboardType: (obj["format"] as? String) ?? "")
+            resp["success"] = true
+        } else { resp["success"] = false }
+    case "clipboard_read_buffer":
+        resp["data"] = UIPasteboard.general
+            .data(forPasteboardType: (obj["format"] as? String) ?? "")?
+            .base64EncodedString() ?? ""
+    case "clipboard_has":
+        resp["present"] = UIPasteboard.general
+            .contains(pasteboardTypes: [(obj["format"] as? String) ?? ""])
+    case "clipboard_available_formats":
+        resp["formats"] = UIPasteboard.general.types // iOS14+ (pasteboardTypes 개명)
     case "shell_beep":
         AudioServicesPlaySystemSound(1057) // SystemSoundID 1057=Tink, 데스크톱 NSBeep 동등
         resp["success"] = true

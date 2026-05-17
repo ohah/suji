@@ -1652,6 +1652,24 @@ CEF import 0이라 분리선이 이미 존재했음.
           (documents/temp) 하위 절대경로 사용. 검증: harness 45/45 + iOS
           26/26 + Android 26/26 e2e(app_get_path documents 하위 실 샌드박스
           파일 write→read 왕복 + readdir 가 쓴 파일 나열 — 디바이스 실 FS IO).
+    - [x] **Slice 11: clipboard(buffer/has/available_formats) + fs(stat/
+          mkdir/rm)** — clipboard: iOS UIPasteboard setData/data(forPaste-
+          boardType:format)·contains(pasteboardTypes:)·types(iOS14, e2e 가
+          pasteboardTypes→types rename 적발·수정) / Android custom-MIME
+          ClipData(clipCustomWrite/Read 재사용)·description.hasMimeType·
+          mimeType 순회. fs: iOS FileManager attributesOfItem/createDirectory/
+          removeItem / Android File length·lastModified·mkdirs·delete
+          Recursively. 데스크톱 키-동형(read_buffer=data, has=present,
+          available_formats=formats[], stat=success+type+size+mtime/error,
+          mkdir/rm=success). fs_rm force=미존재무시(node:fs.rm 동등),
+          mkdir 이미존재=성공. 검증: harness 52/52 + iOS 32/32 + Android
+          32/32 e2e(buffer 왕복·has·formats·stat 파일/디렉토리·mkdir·rm
+          후 stat 실패 — 디바이스 실 네이티브). 모바일 ✅ 배선 사실상 완료.
+          ⚠️ 의미차(정직): fs_stat `type` 은 모바일 file|directory 2종
+          (데스크톱 fsKindName 10종 — symlink/device 등 — 의 부분집합, file 로
+          격하). `available_formats` 는 iOS=시스템 파생 타입 포함 전체 / Android
+          =primaryClip 명시 MIME 만(데스크톱과 셋 다름). buffer 는 iOS=실
+          UIPasteboard 임의 UTI / Android=custom-MIME 앱-내 한정(Slice 7 상속).
 
 ### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
 
@@ -1660,8 +1678,8 @@ CEF import 0이라 분리선이 이미 존재했음.
 
 | 분류 | 영역/cmd | 모바일 |
 |---|---|---|
-| ✅ 배선됨 | clipboard(text+html/rtf/image 9) · notification(4) · shell(open_external+beep) · dialog(message_box/error/open/save 4) · safe_storage(3) · app 메타(4) · **fs(read/write/readdir 3)** | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
-| 🟡 미배선·대응가능 | clipboard(buffer/has/available_formats) · fs(stat/mkdir/rm) | 후속 슬라이스 후보 |
+| ✅ 배선됨 | clipboard(text+html/rtf/image+**buffer/has/formats** 12) · notification(4) · shell(open_external+beep) · dialog(4) · safe_storage(3) · app 메타(4) · **fs(read/write/readdir+stat/mkdir/rm 6)** | iOS/Android e2e 실증(dialog 는 빌드+가로채기 메커니즘) |
+| 🟡 미배선·대응가능 | (없음 — 모바일 대응 가능 데스크톱 API 사실상 전부 배선) | — |
 | ❌ 개념 없음/모바일 한계 | shell(open_path/show_item/trash — 샌드박스/탐색기/휴지통 부재, graceful false) · window 제어 · webContents · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd`/graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일

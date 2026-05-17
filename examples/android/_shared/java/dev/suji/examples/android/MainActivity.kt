@@ -174,6 +174,53 @@ class MainActivity : Activity() {
                 } catch (e: Exception) { false }
                 resp.put("success", ok)
             }
+            "clipboard_write_buffer" -> {
+                // 임의 format=MIME raw bytes(base64 문자열) — custom MIME ClipData.
+                clipCustomWrite(obj.optString("format"), obj.optString("data"))
+                resp.put("success", true)
+            }
+            "clipboard_read_buffer" ->
+                resp.put("data", clipCustomRead(obj.optString("format")))
+            "clipboard_has" -> {
+                val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                resp.put("present",
+                    cb.primaryClip?.description?.hasMimeType(obj.optString("format")) == true)
+            }
+            "clipboard_available_formats" -> {
+                val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val d = cb.primaryClip?.description
+                val arr = org.json.JSONArray()
+                if (d != null) for (i in 0 until d.mimeTypeCount) arr.put(d.getMimeType(i))
+                resp.put("formats", arr)
+            }
+            "fs_stat" -> {
+                val f = File(obj.optString("path"))
+                if (f.exists()) {
+                    resp.put("success", true)
+                        .put("type", if (f.isDirectory) "directory" else "file")
+                        .put("size", f.length())
+                        .put("mtime", f.lastModified())
+                } else resp.put("success", false).put("error", "stat_failed")
+            }
+            "fs_mkdir" -> {
+                val f = File(obj.optString("path"))
+                val ok = if (obj.optBoolean("recursive")) f.mkdirs() else f.mkdir()
+                resp.put("success", ok || f.isDirectory) // 이미 존재도 성공(데스크톱 동형)
+                if (!(ok || f.isDirectory)) resp.put("error", "mkdir_failed")
+            }
+            "fs_rm" -> {
+                val f = File(obj.optString("path"))
+                if (!f.exists()) {
+                    val force = obj.optBoolean("force")
+                    resp.put("success", force)
+                    if (!force) resp.put("error", "not_found")
+                } else {
+                    val ok = if (obj.optBoolean("recursive")) f.deleteRecursively()
+                             else f.delete()
+                    resp.put("success", ok)
+                    if (!ok) resp.put("error", "rm_failed")
+                }
+            }
             "fs_read_file" -> {
                 runCatching { File(obj.optString("path")).readText() }.fold(
                     { resp.put("success", true).put("text", it) },

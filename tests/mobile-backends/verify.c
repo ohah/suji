@@ -74,6 +74,7 @@ static char mock_html[512];
 static char mock_rtf[512];
 static char mock_img[1024];
 static char mock_fs[1024];
+static char mock_buf[1024];
 
 // "key":"..." 값을 dst 로 추출(escape 미지원 단순 스캐너 — 테스트 입력 통제).
 static void mock_extract(const char *j, const char *quoted_key, char *dst, size_t cap) {
@@ -192,6 +193,31 @@ static const char *core_h(const char *ch, const char *j) {
         // mock — 모바일 한계로 graceful false(데스크톱 키-동형). 라우팅+포맷만.
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false}", ch);
+    } else if (strcmp(ch, "clipboard_write_buffer") == 0) {
+        mock_extract(j, "\"data\":\"", mock_buf, sizeof(mock_buf));
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_buffer\",\"success\":true}");
+    } else if (strcmp(ch, "clipboard_read_buffer") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_buffer\",\"data\":\"%s\"}",
+            mock_buf);
+    } else if (strcmp(ch, "clipboard_has") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_has\",\"present\":true}");
+    } else if (strcmp(ch, "clipboard_available_formats") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"clipboard_available_formats\","
+            "\"formats\":[\"application/x-suji-buf\"]}");
+    } else if (strcmp(ch, "fs_stat") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"fs_stat\",\"success\":true,"
+            "\"type\":\"file\",\"size\":6,\"mtime\":1700000000000}");
+    } else if (strcmp(ch, "fs_mkdir") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"fs_mkdir\",\"success\":true}");
+    } else if (strcmp(ch, "fs_rm") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"fs_rm\",\"success\":true}");
     } else if (strcmp(ch, "fs_write_file") == 0) {
         mock_extract(j, "\"text\":\"", mock_fs, sizeof(mock_fs));
         snprintf(buf, sizeof(buf),
@@ -403,6 +429,20 @@ int main(void) {
               "\"success\":true,\"text\":\"fsdata\"", "core fs read_file (round-trip)");
     roundtrip("__core__", "{\"cmd\":\"fs_readdir\",\"path\":\"/x\"}",
               "\"name\":\"suji-e2e-fs.txt\",\"type\":\"file\"", "core fs readdir");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_write_buffer\",\"format\":\"x/y\",\"data\":\"QUJD\"}",
+              "\"cmd\":\"clipboard_write_buffer\",\"success\":true", "core clipboard write_buffer");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_read_buffer\",\"format\":\"x/y\"}",
+              "\"data\":\"QUJD\"", "core clipboard read_buffer (round-trip)");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_has\",\"format\":\"x/y\"}",
+              "\"present\":true", "core clipboard has");
+    roundtrip("__core__", "{\"cmd\":\"clipboard_available_formats\"}",
+              "\"formats\":[", "core clipboard available_formats");
+    roundtrip("__core__", "{\"cmd\":\"fs_stat\",\"path\":\"/x\"}",
+              "\"success\":true,\"type\":\"file\",\"size\":6", "core fs stat");
+    roundtrip("__core__", "{\"cmd\":\"fs_mkdir\",\"path\":\"/x\",\"recursive\":true}",
+              "\"cmd\":\"fs_mkdir\",\"success\":true", "core fs mkdir");
+    roundtrip("__core__", "{\"cmd\":\"fs_rm\",\"path\":\"/x\",\"force\":true}",
+              "\"cmd\":\"fs_rm\",\"success\":true", "core fs rm");
     roundtrip("__core__", "{\"cmd\":\"shell_beep\"}",
               "\"cmd\":\"shell_beep\",\"success\":true", "core shell beep");
     roundtrip("__core__", "{\"cmd\":\"shell_trash_item\",\"path\":\"/x\"}",
