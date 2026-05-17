@@ -9,8 +9,10 @@ cd "$HERE"
 rm -rf .zig-cache zig-out
 
 zig build
-test -e zig-out/lib/libsuji_consumer.* \
-  || test -e zig-out/bin/suji_consumer.* \
+# glob-safe(다중 매치 시 test 인자 폭발/ set -e 중단 회피). lib/(unix
+# .dylib/.so) 또는 bin/(windows .dll) 중 하나라도 있으면 OK.
+compgen -G 'zig-out/lib/libsuji_consumer.*' >/dev/null \
+  || compgen -G 'zig-out/bin/suji_consumer.*' >/dev/null \
   || { echo "소비자 산출물 없음 — 패키지 소비성 깨짐"; ls -R zig-out; exit 1; }
 
 echo "PASS — suji 패키지 소비성 OK (b.dependency.module('suji'))"

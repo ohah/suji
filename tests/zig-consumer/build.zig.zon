@@ -3,6 +3,7 @@
     // (PLAN.md "배포 — Zig 패키지" 시나리오 실증)
     .name = .suji_consumer,
     .version = "0.0.0",
+    // Zig 생성 고정 식별자(이 패키지 자체 정체성 — 경로/포크 무관, 1회 생성 후 커밋).
     .fingerprint = 0x93b827c308dfd457,
     .dependencies = .{
         // 레포 루트(tests/zig-consumer 기준 ../..). 배포 시엔 사용자가
