@@ -605,6 +605,10 @@ export class BrowserWindow {
   /** 새 창 생성 후 인스턴스 반환 (Electron `new BrowserWindow(opts)`). */
   static async create(opts: WindowOptions = {}): Promise<BrowserWindow> {
     const res = await windows.create(opts);
+    // windowId 부재 시 좀비 인스턴스 방지 — Rust None / Go error 와 시맨틱 일치.
+    if (typeof res.windowId !== "number") {
+      throw new Error(`create_window: no windowId in response (${JSON.stringify(res)})`);
+    }
     return new BrowserWindow(res.windowId);
   }
   /** 기존 windowId(메인 창/이벤트 sender)를 인스턴스로 래핑. */

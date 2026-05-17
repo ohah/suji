@@ -35,7 +35,7 @@ func TestParseWindowID(t *testing.T) {
 	}{
 		{`{"windowId":7}`, 7, false},
 		{`{"from":"x","windowId":42,"ok":true}`, 42, false},
-		{`{"no":1}`, 0, false},
+		{`{"no":1}`, 0, true},
 		{`not json`, 0, true},
 	}
 	for _, c := range cases {

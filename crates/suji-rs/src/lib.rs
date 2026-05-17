@@ -534,7 +534,7 @@ pub mod windows {
     }
 
     /// create 응답 JSON 에서 windowId 추출 (순수 — 테스트 가능).
-    pub fn parse_window_id(resp: &str) -> Option<u32> {
+    pub(super) fn parse_window_id(resp: &str) -> Option<u32> {
         let v: crate::serde_json::Value = crate::serde_json::from_str(resp).ok()?;
         Some(v.get("windowId")?.as_u64()? as u32)
     }

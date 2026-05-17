@@ -189,14 +189,19 @@ func SetBounds(windowID uint32, b SetBoundsArgs) string {
 }
 
 // parseWindowID — create 응답 JSON 에서 windowId 추출 (순수 — 테스트 가능).
+// 포인터로 키 *존재* 검사 — 부재 시 error (id 0 정상값과 구별, Rust
+// parse_window_id 의 None 과 시맨틱 일치).
 func parseWindowID(raw string) (uint32, error) {
 	var v struct {
-		WindowID uint32 `json:"windowId"`
+		WindowID *uint32 `json:"windowId"`
 	}
 	if err := json.Unmarshal([]byte(raw), &v); err != nil {
 		return 0, err
 	}
-	return v.WindowID, nil
+	if v.WindowID == nil {
+		return 0, fmt.Errorf("response has no windowId: %s", raw)
+	}
+	return *v.WindowID, nil
 }
 
 // BrowserWindow — windows.*(raw windowID)의 객체지향 facade (Electron
