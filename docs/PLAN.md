@@ -1519,6 +1519,14 @@ CEF import 0이라 분리선이 이미 존재했음.
         (공용 `suji_reg_backend`). 백엔드 소스(`examples/ios/backends/{rust,
         go,zig}`)·`suji_mobile_bridge.h`·CI(`mobile-backends`) 공유로 중복
         최소화. Node: iOS 불가(V8 JIT), Android 후속.
+    - [x] **네이티브 `@suji/api` 인터랙티브 데모** — 8× `examples/{ios,
+          android}/{zig,multi,rust,go}/web/index.html` 에 동일 블록 추가
+          (md5 단일, append-only — 변형별 백엔드 채널 데모 보존): clipboard/
+          safe_storage/fs/app/notification/dialog 버튼 → raw `__suji__.core`
+          (데스크톱 키-동형 cmd) → 결과 표시. e2e.html(SUJI_E2E 자동검증
+          32/32)과 별개 — 데모는 게이트 없을 때 로드, 사람이 탭하는
+          인터랙티브용(검증 경계=ios-sim-smoke 빌드·기동 무결까지). drift 가드:
+          e2e.html lockstep 주석과 동일 원칙(단일출처 index.html).
   - [x] **모바일 http (`suji.http.fetch` 동등)** — 모바일 백엔드는 코어-독립이라
         SDK 대신 std 직접: `examples/ios/backends/zig` 의 `zig:http` 가
         `std.http.Client`(자체 `std.Io.Threaded.init_single_threaded` —

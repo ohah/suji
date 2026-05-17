@@ -63,5 +63,61 @@
         "tick #" + n + "  payload=" + JSON.stringify(d);
     });
   </script>
+  <hr style="margin:1.6rem 0">
+  <h2 style="font-size:1.15rem">네이티브 @suji/api (데스크톱 동일 — <code>__core__</code>)</h2>
+  <p>같은 <code>__suji__.core</code> 와이어로 OS 네이티브 호출(데스크톱 무수정 동형).</p>
+  <div class="row">
+    <button id="n-clip">clipboard write→read</button>
+    <button id="n-ss">safe_storage set→get</button>
+    <button id="n-fs">fs write→read</button>
+    <button id="n-app">app meta</button>
+    <button id="n-notif">notification</button>
+    <button id="n-dlg">dialog</button>
+  </div>
+  <div class="row">네이티브: <strong id="nout">버튼을 눌러보세요…</strong></div>
+  <script>
+  (function () {
+    var nout = document.getElementById("nout");
+    function core(req) { return window.__suji__.core(JSON.stringify(req)); }
+    function show(label, v) { nout.textContent = label + " → " + JSON.stringify(v); }
+    function on(id, fn) {
+      document.getElementById(id).onclick = function () {
+        fn().catch(function (e) { show(id, "error: " + e); });
+      };
+    }
+    on("n-clip", async function () {
+      await core({ cmd: "clipboard_write_text", text: "Suji 📋 " + Date.now() });
+      show("clipboard", await core({ cmd: "clipboard_read_text" }));
+    });
+    on("n-ss", async function () {
+      await core({ cmd: "safe_storage_set", service: "suji-demo",
+                   account: "u", value: "tok-" + Date.now() });
+      show("safe_storage", await core({ cmd: "safe_storage_get",
+                   service: "suji-demo", account: "u" }));
+    });
+    on("n-fs", async function () {
+      var base = (await core({ cmd: "app_get_path", name: "documents" })).path;
+      var fp = base + "/suji-demo.txt";
+      await core({ cmd: "fs_write_file", path: fp, text: "hello fs " + Date.now() });
+      show("fs", await core({ cmd: "fs_read_file", path: fp }));
+    });
+    on("n-app", async function () {
+      var nm = await core({ cmd: "app_get_name" });
+      var ver = await core({ cmd: "app_get_version" });
+      var loc = await core({ cmd: "app_get_locale" });
+      show("app", { name: nm.name, version: ver.version, locale: loc.locale });
+    });
+    on("n-notif", async function () {
+      await core({ cmd: "notification_request_permission" });
+      show("notification", await core({ cmd: "notification_show",
+                   title: "Suji", body: "네이티브 알림 데모" }));
+    });
+    on("n-dlg", async function () {
+      show("dialog", "응답 대기…");
+      show("dialog", await core({ cmd: "dialog_show_message_box",
+                   message: "Suji 네이티브 dialog", buttons: ["OK", "Cancel"] }));
+    });
+  })();
+  </script>
 </body>
 </html>
