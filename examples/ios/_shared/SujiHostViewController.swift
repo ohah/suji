@@ -120,7 +120,7 @@ private func sujiCoreDispatch(
             resp["success"] = false
         }
     case "shell_beep":
-        AudioServicesPlaySystemSound(1057) // 시스템 사운드(데스크톱 beep 동등)
+        AudioServicesPlaySystemSound(1057) // SystemSoundID 1057=Tink, 데스크톱 NSBeep 동등
         resp["success"] = true
     case "shell_open_path", "shell_show_item_in_folder", "shell_trash_item":
         // ⚠️ 모바일 플랫폼 한계: open_path=샌드박스라 file:// 외부앱 열기 불가
