@@ -533,9 +533,144 @@ pub mod windows {
         out
     }
 
+    /// create 응답 JSON 에서 windowId 추출 (순수 — 테스트 가능).
+    pub fn parse_window_id(resp: &str) -> Option<u32> {
+        let v: crate::serde_json::Value = crate::serde_json::from_str(resp).ok()?;
+        Some(v.get("windowId")?.as_u64()? as u32)
+    }
+
+    /// `windows::*`(raw window_id)의 객체지향 facade (Electron `BrowserWindow`
+    /// 패리티, @suji/api 와 동형). 각 메서드는 `<fn>(self.id, ...)` 위임 —
+    /// 로직 무중복, windows 변경에 자동 동기화.
+    pub struct BrowserWindow {
+        id: u32,
+    }
+
+    impl BrowserWindow {
+        /// 새 창 생성 후 인스턴스 반환. 코어 미연결/파싱 실패 시 None.
+        pub fn create(opts_json: &str) -> Option<BrowserWindow> {
+            let resp = create(opts_json)?;
+            Some(BrowserWindow { id: parse_window_id(&resp)? })
+        }
+        /// 기존 window_id(메인 창/이벤트 sender)를 인스턴스로 래핑.
+        pub fn from_id(id: u32) -> BrowserWindow {
+            BrowserWindow { id }
+        }
+        pub fn id(&self) -> u32 {
+            self.id
+        }
+
+        pub fn load_url(&self, url: &str) -> Option<String> {
+            load_url(self.id, url)
+        }
+        pub fn reload(&self, ignore_cache: bool) -> Option<String> {
+            reload(self.id, ignore_cache)
+        }
+        pub fn execute_javascript(&self, code: &str) -> Option<String> {
+            execute_javascript(self.id, code)
+        }
+        pub fn get_url(&self) -> Option<String> {
+            get_url(self.id)
+        }
+        pub fn is_loading(&self) -> Option<String> {
+            is_loading(self.id)
+        }
+        pub fn open_dev_tools(&self) -> Option<String> {
+            open_dev_tools(self.id)
+        }
+        pub fn close_dev_tools(&self) -> Option<String> {
+            close_dev_tools(self.id)
+        }
+        pub fn is_dev_tools_opened(&self) -> Option<String> {
+            is_dev_tools_opened(self.id)
+        }
+        pub fn toggle_dev_tools(&self) -> Option<String> {
+            toggle_dev_tools(self.id)
+        }
+        pub fn set_zoom_level(&self, level: f64) -> Option<String> {
+            set_zoom_level(self.id, level)
+        }
+        pub fn get_zoom_level(&self) -> Option<String> {
+            get_zoom_level(self.id)
+        }
+        pub fn set_zoom_factor(&self, factor: f64) -> Option<String> {
+            set_zoom_factor(self.id, factor)
+        }
+        pub fn get_zoom_factor(&self) -> Option<String> {
+            get_zoom_factor(self.id)
+        }
+        pub fn set_audio_muted(&self, muted: bool) -> Option<String> {
+            set_audio_muted(self.id, muted)
+        }
+        pub fn is_audio_muted(&self) -> Option<String> {
+            is_audio_muted(self.id)
+        }
+        pub fn set_opacity(&self, opacity: f64) -> Option<String> {
+            set_opacity(self.id, opacity)
+        }
+        pub fn get_opacity(&self) -> Option<String> {
+            get_opacity(self.id)
+        }
+        pub fn set_background_color(&self, color: &str) -> Option<String> {
+            set_background_color(self.id, color)
+        }
+        pub fn set_has_shadow(&self, has: bool) -> Option<String> {
+            set_has_shadow(self.id, has)
+        }
+        pub fn has_shadow(&self) -> Option<String> {
+            has_shadow(self.id)
+        }
+        pub fn undo(&self) -> Option<String> {
+            undo(self.id)
+        }
+        pub fn redo(&self) -> Option<String> {
+            redo(self.id)
+        }
+        pub fn cut(&self) -> Option<String> {
+            cut(self.id)
+        }
+        pub fn copy(&self) -> Option<String> {
+            copy(self.id)
+        }
+        pub fn paste(&self) -> Option<String> {
+            paste(self.id)
+        }
+        pub fn select_all(&self) -> Option<String> {
+            select_all(self.id)
+        }
+        pub fn find_in_page(&self, text: &str, opts: FindOptions) -> Option<String> {
+            find_in_page(self.id, text, opts)
+        }
+        pub fn stop_find_in_page(&self, clear_selection: bool) -> Option<String> {
+            stop_find_in_page(self.id, clear_selection)
+        }
+        pub fn print_to_pdf(&self, path: &str) -> Option<String> {
+            print_to_pdf(self.id, path)
+        }
+        pub fn set_title(&self, title: &str) -> Option<String> {
+            set_title(self.id, title)
+        }
+        pub fn set_bounds(&self, b: SetBoundsArgs) -> Option<String> {
+            set_bounds(self.id, b)
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::escape_json;
+        use super::{escape_json, parse_window_id, BrowserWindow};
+
+        #[test]
+        fn parse_window_id_extracts() {
+            assert_eq!(parse_window_id(r#"{"windowId":7}"#), Some(7));
+            assert_eq!(parse_window_id(r#"{"from":"x","windowId":42,"ok":true}"#), Some(42));
+            assert_eq!(parse_window_id(r#"{"no":1}"#), None);
+            assert_eq!(parse_window_id("not json"), None);
+        }
+
+        #[test]
+        fn from_id_roundtrip() {
+            assert_eq!(BrowserWindow::from_id(5).id(), 5);
+        }
 
         #[test]
         fn escape_quote_and_backslash() {

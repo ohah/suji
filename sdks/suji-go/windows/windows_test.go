@@ -26,3 +26,35 @@ func TestJsonescFull(t *testing.T) {
 		})
 	}
 }
+
+func TestParseWindowID(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want uint32
+		err  bool
+	}{
+		{`{"windowId":7}`, 7, false},
+		{`{"from":"x","windowId":42,"ok":true}`, 42, false},
+		{`{"no":1}`, 0, false},
+		{`not json`, 0, true},
+	}
+	for _, c := range cases {
+		got, err := parseWindowID(c.raw)
+		if c.err {
+			if err == nil {
+				t.Errorf("parseWindowID(%q) expected error", c.raw)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("parseWindowID(%q) = %d,%v want %d", c.raw, got, err, c.want)
+		}
+	}
+}
+
+func TestFromID(t *testing.T) {
+	w := FromID(5)
+	if w.ID != 5 {
+		t.Errorf("FromID(5).ID = %d, want 5", w.ID)
+	}
+}

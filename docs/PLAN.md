@@ -584,10 +584,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   - [x] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
         Frontend JS + Zig/Rust/Go/Node SDK wrapper, 단위/회귀/E2E 테스트, 문서 추가.
         프론트는 IPC, 백엔드는 std lib 직접 + 공통 typed wrapper.
-  - [ ] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
+  - [x] Phase 6: SDK (Rust/Go/Node/Frontend JS BrowserWindow)
         - [x] windows.* API 5개 진입점 노출
         - [x] clipboard/shell/dialog 5개 진입점 노출
-        - [ ] BrowserWindow OO wrapper (현재는 raw windowId 기반)
+        - [x] BrowserWindow OO wrapper — 4 SDK 전부(@suji/api·@suji/node
+              class, Rust struct, Go struct). windows.<fn>(id,...) 위임으로
+              로직/타입 무중복. 단위/타입 테스트 + cargo/go/bun 검증.
   - [ ] Phase 7: 보안/플랫폼 전용 (contextIsolation, vibrancy 등)
     - [ ] `contextIsolation: true` — 별도 V8 world에 `window.__suji__` 생성 + `Object.freeze`된
           프록시만 메인 월드에 노출. XSS가 bridge를 변조/레퍼런스 캡처 불가.

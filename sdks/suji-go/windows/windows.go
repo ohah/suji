@@ -5,6 +5,7 @@
 package windows
 
 import (
+	"encoding/json"
 	"fmt"
 
 	suji "github.com/ohah/suji-go"
@@ -187,3 +188,74 @@ func SetBounds(windowID uint32, b SetBoundsArgs) string {
 	))
 }
 
+// parseWindowID — create 응답 JSON 에서 windowId 추출 (순수 — 테스트 가능).
+func parseWindowID(raw string) (uint32, error) {
+	var v struct {
+		WindowID uint32 `json:"windowId"`
+	}
+	if err := json.Unmarshal([]byte(raw), &v); err != nil {
+		return 0, err
+	}
+	return v.WindowID, nil
+}
+
+// BrowserWindow — windows.*(raw windowID)의 객체지향 facade (Electron
+// `BrowserWindow` 패리티, @suji/api 와 동형). 각 메서드는 <Fn>(w.ID, ...)
+// 위임 — 로직 무중복, windows 변경에 자동 동기화.
+type BrowserWindow struct{ ID uint32 }
+
+// NewBrowserWindow 새 창 생성 후 인스턴스 반환 (Electron new BrowserWindow).
+func NewBrowserWindow(optsJSON string) (*BrowserWindow, error) {
+	id, err := parseWindowID(Create(optsJSON))
+	if err != nil {
+		return nil, err
+	}
+	return &BrowserWindow{ID: id}, nil
+}
+
+// FromID 기존 windowID(메인 창/이벤트 sender)를 인스턴스로 래핑.
+func FromID(id uint32) *BrowserWindow { return &BrowserWindow{ID: id} }
+
+func (w *BrowserWindow) LoadURL(url string) string { return LoadURL(w.ID, url) }
+func (w *BrowserWindow) Reload(ignoreCache bool) string {
+	return Reload(w.ID, ignoreCache)
+}
+func (w *BrowserWindow) ExecuteJavaScript(code string) string {
+	return ExecuteJavaScript(w.ID, code)
+}
+func (w *BrowserWindow) GetURL() string                 { return GetURL(w.ID) }
+func (w *BrowserWindow) IsLoading() string              { return IsLoading(w.ID) }
+func (w *BrowserWindow) OpenDevTools() string           { return OpenDevTools(w.ID) }
+func (w *BrowserWindow) CloseDevTools() string          { return CloseDevTools(w.ID) }
+func (w *BrowserWindow) IsDevToolsOpened() string       { return IsDevToolsOpened(w.ID) }
+func (w *BrowserWindow) ToggleDevTools() string         { return ToggleDevTools(w.ID) }
+func (w *BrowserWindow) SetZoomLevel(l float64) string  { return SetZoomLevel(w.ID, l) }
+func (w *BrowserWindow) GetZoomLevel() string           { return GetZoomLevel(w.ID) }
+func (w *BrowserWindow) SetZoomFactor(f float64) string { return SetZoomFactor(w.ID, f) }
+func (w *BrowserWindow) GetZoomFactor() string          { return GetZoomFactor(w.ID) }
+func (w *BrowserWindow) SetAudioMuted(m bool) string    { return SetAudioMuted(w.ID, m) }
+func (w *BrowserWindow) IsAudioMuted() string           { return IsAudioMuted(w.ID) }
+func (w *BrowserWindow) SetOpacity(o float64) string    { return SetOpacity(w.ID, o) }
+func (w *BrowserWindow) GetOpacity() string             { return GetOpacity(w.ID) }
+func (w *BrowserWindow) SetBackgroundColor(c string) string {
+	return SetBackgroundColor(w.ID, c)
+}
+func (w *BrowserWindow) SetHasShadow(h bool) string { return SetHasShadow(w.ID, h) }
+func (w *BrowserWindow) HasShadow() string          { return HasShadow(w.ID) }
+func (w *BrowserWindow) Undo() string               { return Undo(w.ID) }
+func (w *BrowserWindow) Redo() string               { return Redo(w.ID) }
+func (w *BrowserWindow) Cut() string                { return Cut(w.ID) }
+func (w *BrowserWindow) Copy() string               { return Copy(w.ID) }
+func (w *BrowserWindow) Paste() string              { return Paste(w.ID) }
+func (w *BrowserWindow) SelectAll() string          { return SelectAll(w.ID) }
+func (w *BrowserWindow) FindInPage(text string, opts FindOptions) string {
+	return FindInPage(w.ID, text, opts)
+}
+func (w *BrowserWindow) StopFindInPage(clear bool) string {
+	return StopFindInPage(w.ID, clear)
+}
+func (w *BrowserWindow) PrintToPDF(path string) string { return PrintToPDF(w.ID, path) }
+func (w *BrowserWindow) SetTitle(title string) string  { return SetTitle(w.ID, title) }
+func (w *BrowserWindow) SetBounds(b SetBoundsArgs) string {
+	return SetBounds(w.ID, b)
+}
