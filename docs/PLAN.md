@@ -534,7 +534,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           (`send_dev_tools_message`, raw JSON)로 구현. set 값은 BrowserEntry
           inline 추적(url_cache 패턴)해 get 이 반환(CEF per-browser UA getter
           미제공). 코어(cef/window/window_ipc/main) + 4 SDK windows.* +
-          BrowserWindow + 단위 테스트(window_manager/JS/Node) 검증.
+          BrowserWindow + 단위 테스트(window_manager/JS/Node) + e2e(실 CEF:
+          CDP override 가 navigator.userAgent 를 실제 변경함을 실증) 검증.
 
     C 기술 부채 (가치 낮음 / 코드 정리):
     - [~] **`cefInvokeHandler` ↔ `backendSpecialDispatch` 단일화** — 부분 해소·잔여 의도적 보류.

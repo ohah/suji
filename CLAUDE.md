@@ -34,6 +34,8 @@ bash tests/e2e/run-view-lifecycle.sh    # Phase 17-A WebContentsView (createView
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
 bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows.create + isLoading polling)
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
+bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
+bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
 bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive) 정적
