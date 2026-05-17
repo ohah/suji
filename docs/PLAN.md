@@ -1336,7 +1336,7 @@ suji build → 결과물:
 | macOS .app 번들 | electron-builder | `tauri build` | ✅ (`bundle_macos.zig`, Helper 4개, Info.plist) |
 | Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
 | Linux .deb/.AppImage | electron-builder | `tauri build` | ❌ |
-| 코드 서명 & 공증 | electron-notarize | 빌트인 | 🟡 (서명 준비 — 공증 자동화 미구현) |
+| 코드 서명 & 공증 | electron-notarize | 빌트인 | ✅ codesign(none/adhoc/identity)+`notarytool`+stapler+DMG 구현(`bundle_macos.zig`), Win signtool(`package_desktop.zig`). `suji build --sign/--identity/--notarize/--dmg`. **adhoc 로컬 실증**(codesign --verify --deep --strict exit=0·Designated Req 만족·helper entitlements 부착·spctl 은 adhoc 이라 reject=정직 경계). identity/notarize/signtool 은 자격증명·Win 환경 필요로 미검증(CI secret 시) |
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ❌ |
 | Homebrew tap | 사용자 직접 | -- | ❌ (CLAUDE.md "예정") |
