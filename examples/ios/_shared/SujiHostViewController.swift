@@ -154,6 +154,33 @@ private func sujiCoreDispatch(
             let st = SecItemDelete(q as CFDictionary)
             resp["success"] = st == errSecSuccess || st == errSecItemNotFound
         }
+    case "app_get_locale":
+        // BCP 47 (preferredLanguages 는 "en-US" 형식; identifier 는 언더스코어).
+        resp["locale"] = Locale.preferredLanguages.first ?? "en-US"
+    case "app_get_name":
+        let info = Bundle.main.infoDictionary
+        resp["name"] = (info?["CFBundleDisplayName"] as? String)
+            ?? (info?["CFBundleName"] as? String) ?? ""
+    case "app_get_version":
+        resp["version"] =
+            (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? ""
+    case "app_get_path":
+        // iOS 샌드박스 매핑. ⚠️ desktop/downloads 는 데스크톱에선 ~/Desktop·
+        // ~/Downloads(non-empty) 를 주는 *지원* 키지만, iOS 플랫폼 부재로
+        // graceful 빈 문자열로 격하(데스크톱의 진짜 unknown 키와 동일 *형태*
+        // 일 뿐 의미 동형은 아님 — 정직).
+        let fm = FileManager.default
+        func dir(_ d: FileManager.SearchPathDirectory) -> String {
+            fm.urls(for: d, in: .userDomainMask).first?.path ?? ""
+        }
+        switch (obj["name"] as? String) ?? "" {
+        case "home": resp["path"] = NSHomeDirectory()
+        case "temp": resp["path"] = NSTemporaryDirectory()
+        case "appData", "userData": resp["path"] = dir(.applicationSupportDirectory)
+        case "documents": resp["path"] = dir(.documentDirectory)
+        case "downloads": resp["path"] = dir(.downloadsDirectory) // 샌드박스 부재 시 격하 → ""
+        default: resp["path"] = "" // desktop(데스크톱 지원)/진짜 unknown → 빈값 격하
+        }
     default:
         resp["success"] = false
         resp["error"] = "unknown_cmd"

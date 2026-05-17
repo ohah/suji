@@ -133,6 +133,19 @@ static const char *core_h(const char *ch, const char *j) {
         mock_ss[0] = 0;
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"safe_storage_delete\",\"success\":true}");
+    } else if (strcmp(ch, "app_get_locale") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"app_get_locale\",\"locale\":\"en-US\"}");
+    } else if (strcmp(ch, "app_get_name") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"app_get_name\",\"name\":\"SujiMock\"}");
+    } else if (strcmp(ch, "app_get_version") == 0) {
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"app_get_version\",\"version\":\"1.0.0\"}");
+    } else if (strcmp(ch, "app_get_path") == 0) {
+        // mock — 실 경로는 iOS FileManager / Android filesDir 몫. 라우팅+포맷만.
+        snprintf(buf, sizeof(buf),
+            "{\"from\":\"zig-core\",\"cmd\":\"app_get_path\",\"path\":\"/mock/docs\"}");
     } else {
         snprintf(buf, sizeof(buf),
             "{\"from\":\"zig-core\",\"cmd\":\"%s\",\"success\":false,\"error\":\"unknown_cmd\"}",
@@ -301,6 +314,14 @@ int main(void) {
               "\"cmd\":\"safe_storage_delete\",\"success\":true", "core safe_storage delete");
     roundtrip("__core__", "{\"cmd\":\"safe_storage_get\",\"service\":\"s\",\"account\":\"a\"}",
               "\"value\":\"\"", "core safe_storage get after delete");
+    roundtrip("__core__", "{\"cmd\":\"app_get_locale\"}",
+              "\"locale\":\"en-US\"", "core app_get_locale");
+    roundtrip("__core__", "{\"cmd\":\"app_get_name\"}",
+              "\"name\":\"SujiMock\"", "core app_get_name");
+    roundtrip("__core__", "{\"cmd\":\"app_get_version\"}",
+              "\"version\":\"1.0.0\"", "core app_get_version");
+    roundtrip("__core__", "{\"cmd\":\"app_get_path\",\"name\":\"documents\"}",
+              "\"cmd\":\"app_get_path\",\"path\":\"/mock/docs\"", "core app_get_path");
     roundtrip("__core__", "{\"cmd\":\"window_create\"}",
               "\"error\":\"unknown_cmd\"", "core unsupported cmd → coreError 동형");
 

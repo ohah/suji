@@ -175,6 +175,31 @@ class MainActivity : Activity() {
             }
             "safe_storage_set", "safe_storage_get", "safe_storage_delete" ->
                 safeStorage(cmd, obj, resp)
+            "app_get_locale" ->
+                resp.put("locale", java.util.Locale.getDefault().toLanguageTag())
+            "app_get_name" -> resp.put("name",
+                runCatching { packageManager.getApplicationLabel(applicationInfo).toString() }
+                    .getOrDefault(packageName))
+            "app_get_version" -> resp.put("version",
+                runCatching {
+                    packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+                }.getOrDefault(""))
+            "app_get_path" -> {
+                // Android 매핑. ⚠️ desktop 은 데스크톱에선 ~/Desktop(non-empty)
+                // 지원 키지만 Android 플랫폼 부재로 graceful 빈 문자열 격하
+                // (데스크톱 진짜 unknown 키와 동일 *형태*일 뿐 의미 동형 아님).
+                val p = when (obj.optString("name")) {
+                    "home" -> filesDir.parent ?: filesDir.path
+                    "temp" -> cacheDir.path
+                    "appData", "userData" -> filesDir.path
+                    "documents" ->
+                        (getExternalFilesDir("Documents")?.path ?: filesDir.path)
+                    "downloads" ->
+                        (getExternalFilesDir("Download")?.path ?: "")
+                    else -> "" // desktop(데스크톱 지원)/진짜 unknown → 빈값 격하
+                }
+                resp.put("path", p)
+            }
             else -> resp.put("success", false).put("error", "unknown_cmd")
         }
         return resp.toString()

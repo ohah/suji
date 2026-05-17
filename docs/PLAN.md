@@ -1601,6 +1601,15 @@ CEF import 0이라 분리선이 이미 존재했음.
           get=value, idempotent). 검증: harness 30/30 + iOS 11/11 + Android
           11/11 e2e(실 Keychain/Keystore set/get/update/delete/idempotent
           디바이스 실증).
+    - [x] **Slice 6: app 메타** — `app_get_locale/name/version/path`. iOS
+          Locale.preferredLanguages(BCP47)/Bundle infoDictionary/FileManager
+          / Android Locale.toLanguageTag/PackageManager/filesDir·cacheDir.
+          ⚠️ app_get_path 의 desktop/downloads 는 데스크톱에선 ~/Desktop·
+          ~/Downloads(non-empty) 를 주는 *지원* 키지만 모바일 플랫폼 부재로
+          graceful 빈값 격하(데스크톱 진짜 unknown 키와 동일 *형태*일 뿐
+          의미 동형 아님 — 정직). 검증: harness
+          34/34 + iOS 17/17 + Android 17/17 e2e(locale BCP47·name·version
+          non-empty·documents/temp 절대경로·desktop graceful "").
 
 ### 데스크톱(지그 네이티브 `cefHandleCore`) ↔ 모바일 cmd 커버리지
 
@@ -1609,8 +1618,8 @@ CEF import 0이라 분리선이 이미 존재했음.
 
 | 분류 | 영역/cmd | 모바일 |
 |---|---|---|
-| ✅ 배선됨 | clipboard(text 3) · notification(4) · shell_open_external · dialog_show_message_box · **safe_storage(3)** | iOS/Android e2e 실증 |
-| 🟡 미배선·대응가능 | clipboard 확장(html/rtf/image/buffer/has) · dialog(error/open/save) · shell(open_path/show_item/beep/trash) · app 메타(get_path/locale/name/version) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
+| ✅ 배선됨 | clipboard(text 3) · notification(4) · shell_open_external · dialog_show_message_box · safe_storage(3) · **app 메타(get_path/locale/name/version)** | iOS/Android e2e 실증 |
+| 🟡 미배선·대응가능 | clipboard 확장(html/rtf/image/buffer/has) · dialog(error/open/save) · shell(open_path/show_item/beep/trash) · fs(read/write/readdir/…) | 후속 슬라이스 후보 |
 | ❌ 개념 없음 | window 제어 · webContents(load_url/zoom/devtools/capture/pdf/UA) · WebContentsView · tray/menu/global_shortcut/dock/power_*/native_theme/native_image/screen · session(cookies)/web_request | Tauri 도 모바일 미제공 — `unknown_cmd` graceful 폴백 |
 
 - 윈도우/clipboard/dialog 등 데스크톱 네이티브 API는 CEF 호스트 전용 — 모바일

@@ -118,11 +118,33 @@
           d2 && d2.success === true);
   }
 
+  async function appMetaSuite() {
+    // 실값은 디바이스/번들 의존이라 형태(non-empty/BCP47/절대경로)만 검사.
+    var loc = await core({ cmd: "app_get_locale" });
+    check("app_get_locale BCP47", loc && typeof loc.locale === "string" &&
+          /^[a-z]{2}(-|$)/i.test(loc.locale));
+    var nm = await core({ cmd: "app_get_name" });
+    check("app_get_name non-empty", nm && typeof nm.name === "string" &&
+          nm.name.length > 0);
+    var ver = await core({ cmd: "app_get_version" });
+    check("app_get_version non-empty", ver && typeof ver.version === "string" &&
+          ver.version.length > 0);
+    var doc = await core({ cmd: "app_get_path", name: "documents" });
+    check("app_get_path documents abs", doc && typeof doc.path === "string" &&
+          doc.path.charAt(0) === "/" && doc.path.length > 1);
+    var tmp = await core({ cmd: "app_get_path", name: "temp" });
+    check("app_get_path temp abs", tmp && tmp.path.charAt(0) === "/");
+    // desktop 은 데스크톱에선 ~/Desktop 지원 키 — 모바일은 플랫폼 부재로
+    // graceful 빈값 격하(의미 동형 아님, 형태만 동일).
+    var dsk = await core({ cmd: "app_get_path", name: "desktop" });
+    check("app_get_path desktop → graceful '' (모바일 부재)", dsk && dsk.path === "");
+  }
+
   async function run() {
-    try { await clipboardSuite(); await safeStorageSuite(); }
+    try { await clipboardSuite(); await safeStorageSuite(); await appMetaSuite(); }
     catch (e) { check("suite threw: " + e, false); }
     var fail = cases.filter(function (c) { return !c.ok; }).length;
-    var verdict = { suite: "clipboard+safeStorage", ok: fail === 0,
+    var verdict = { suite: "clipboard+safeStorage+appMeta", ok: fail === 0,
                     fail: fail, cases: cases };
     document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
     document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";
