@@ -5501,30 +5501,32 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\})();
     ;
 
-    // Platform 주입 + contextIsolation 하드닝을 *한* eval 에 합침.
-    // ⚠️ onContextCreated 에서 ctx.eval 을 3회 이상 호출하면 CEF inspector
-    // attach 가 30s(protocolTimeout) 행 — js_code + 이 문자열, 정확히 2회만
-    // 유지해야 함(실측 회귀, e2e set-user-agent 로 확인).
-    // 순서: platform 대입(아직 가변) → Object.freeze(메서드 재할당/추가/삭제
-    // 차단) → window 슬롯 non-writable/non-configurable(통째 교체/삭제 차단).
+    // Platform 주입 + contextIsolation 하드닝을 js_code 와 *하나의* eval 로 합침.
+    // 순서: IIFE(메서드 구성) → platform 대입(아직 가변) → Object.freeze(메서드
+    // 재할당/추가/삭제 차단) → window 슬롯 non-writable/non-configurable(통째
+    // 교체/삭제 차단). 단일 문자열·동일 컨텍스트·동일 순서라 2-eval 과 의미 동일
+    // (IIFE 가 먼저 s.* 구성 → 이후 bootstrap 문이 그 위에서 freeze).
     // shallow freeze 라 _pending/_listeners inner 객체는 가변 → invoke/on/off
     // 정상. 보안 한계는 docs/PLAN Phase 7 (메인 월드 frozen, isolated-world 아님).
+    //
+    // ⚠️ 하드 불변식: onContextCreated 경로의 ctx.eval 은 **정확히 1회**.
+    // ctx.eval 을 추가로 호출(여기 분리 복원 / 별도 eval 추가)하면 CEF inspector
+    // attach 가 30s(protocolTimeout) 행 — 실측 회귀. 단일 eval 로 합쳐 "정확히 N회"
+    // 인지 함정을 제거(분리하지 말 것). 가드: e2e set-user-agent (protocolTimeout
+    // 30000 — 회귀 시 즉시 행으로 실패). 추가 JS 는 별도 eval 이 아니라 이
+    // combined_js 문자열에 이어붙일 것.
     const bootstrap_js = "window.__suji__.platform = \"" ++ comptime platformLiteral() ++ "\";" ++
         "Object.freeze(window.__suji__);" ++
         "try{Object.defineProperty(window,\"__suji__\",{value:window.__suji__,writable:false,configurable:false,enumerable:false});}catch(e){}";
+    const combined_js = js_code ++ bootstrap_js;
 
     var code_str: c.cef_string_t = .{};
-    setCefString(&code_str, js_code);
+    setCefString(&code_str, combined_js);
     var empty_url: c.cef_string_t = .{};
     setCefString(&empty_url, "");
     var retval: ?*c.cef_v8_value_t = null;
     var exception: ?*c.cef_v8_exception_t = null;
     _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
-
-    // 2번째(이자 마지막) eval — platform + freeze + 슬롯 봉인
-    var bootstrap_str: c.cef_string_t = .{};
-    setCefString(&bootstrap_str, bootstrap_js);
-    _ = ctx.eval.?(ctx, &bootstrap_str, &empty_url, 0, &retval, &exception);
 }
 
 /// 컴파일타임 플랫폼 문자열 (V8 바인딩의 window.__suji__.platform 값).

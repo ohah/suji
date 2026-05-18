@@ -659,9 +659,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           슬롯 `non-writable`/`non-configurable`(통째 교체·삭제 차단)로 봉인.
           shallow freeze 라 `_pending`/`_listeners` inner 객체는 가변 → invoke/on/off
           무손상. **항상 적용**(고정 bridge API freeze 는 정상 사용 안 깸).
-          ⚠️ 구현 불변식: `onContextCreated` 의 `ctx.eval` 호출은 **정확히 2회**
-          (js_code + platform/harden 합본). 3회 이상이면 CEF inspector attach 가
-          30s(protocolTimeout) 행 — 실측 회귀, `e2e set-user-agent` 가드.
+          ⚠️ 구현 불변식: `onContextCreated` 의 `ctx.eval` 호출은 **정확히 1회**
+          (js_code + platform/harden 을 단일 `combined_js` 로 합침). 늘리면 CEF
+          inspector attach 가 30s(protocolTimeout) 행 — 실측 회귀, `e2e
+          set-user-agent` 가드. 새 JS 는 별도 eval 아니라 combined_js 에 이어붙일 것.
           **보안 한계(정직)**: 우리 바인드보다 *먼저* 실행된 스크립트는 못 막음
           (메인 월드 frozen — Chrome isolated-world/별도 V8 컨텍스트 아님).
           진짜 isolated-world 격리는 후속(아래 backlog). e2e 5 케이스

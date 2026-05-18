@@ -582,8 +582,10 @@ Android Node 는 NDK로 가능하나 예제 미배선(후속).
 
 **한계(정직)**: 우리 바인드보다 *먼저* 실행된 스크립트는 못 막음(메인 월드
 frozen — Chrome isolated-world 아님). 진짜 별도-world 격리는 backlog
-(docs/PLAN.md Phase 7). ⚠️ `onContextCreated` 의 `ctx.eval` 은 **정확히 2회**
-유지(3회+ 시 CEF inspector attach 30s 행 — `e2e set-user-agent` 가드).
+(docs/PLAN.md Phase 7). ⚠️ `onContextCreated` 의 `ctx.eval` 은 **정확히 1회**
+(js_code+bootstrap 단일 `combined_js`. 추가 eval 금지 — 늘리면 CEF inspector
+attach 30s 행, `e2e set-user-agent` 가드. 새 JS 는 별도 eval 아니라
+combined_js 에 이어붙일 것).
 
 ## fs sandbox (Electron `webPreferences.sandbox` 동등)
 
