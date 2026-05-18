@@ -1444,7 +1444,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
-| TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`). `suji types` CLI 자동 추출은 후속 |
+| TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`). **`suji types` CLI ✅(Zig)** — `.schema(ch,Req,Res)` 체인 → `exportApp.backend_dump_schema` C ABI → CLI 가 백엔드 빌드→dlopen→`emitSchemaTs` → `declare module '@suji/api'{interface SujiHandlers{…}}` 를 stdout/`--out`. 검증: app_test 골든(emitSchemaTs 결정론) + 실 CLI 통합(examples/zig-backend, stdout==--out, types.test-d 계약 일치). Rust=specta 수동 / Go·Node=수동 augment 는 후속(정직 — runtime 타입메타 부재) |
 | 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | 🟡 (`suji init` 존재, 제한적) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |

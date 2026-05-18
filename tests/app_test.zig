@@ -1632,3 +1632,38 @@ test "requestUserAttention / cancelUserAttentionRequest: critical bool + id 전�
         }
     }.run);
 }
+
+// `suji types` 핵심 — `.schema()` 체인 → emitSchemaTs 골든 출력(결정론적).
+// CLI 빌드/dlopen 경로는 통합 검증(examples/zig-backend)으로 별도.
+const schema_app = app_mod.app()
+    .handle("ping", pingHandler)
+    .handle("greet", greetHandler)
+    .handle("add", addHandler)
+    .schema("ping", void, struct { msg: []const u8 })
+    .schema("greet", struct { name: []const u8 }, struct { msg: []const u8, greeting: []const u8 })
+    .schema("add", struct { a: i64, b: i64 }, struct { result: i64 });
+
+test "emitSchemaTs: .schema() 체인 → SujiHandlers .d.ts 골든" {
+    var buf: [4096]u8 = undefined;
+    const n = app_mod.emitSchemaTs(&schema_app, &buf);
+    try std.testing.expect(n > 0);
+    const expected =
+        "// auto-generated — do not edit\n" ++
+        "declare module '@suji/api' {\n" ++
+        "  interface SujiHandlers {\n" ++
+        "    ping: { req: void; res: { msg: string } };\n" ++
+        "    greet: { req: { name: string }; res: { msg: string; greeting: string } };\n" ++
+        "    add: { req: { a: number; b: number }; res: { result: number } };\n" ++
+        "  }\n}\n";
+    try std.testing.expectEqualStrings(expected, buf[0..n]);
+}
+
+// App 빌더는 comptime — 컨테이너 스코프 const 여야(test_app/schema_app 동일).
+const no_schema_app = app_mod.app().handle("ping", pingHandler);
+
+test "emitSchemaTs: schema 미등록이면 빈 interface(라인 0)" {
+    var buf: [1024]u8 = undefined;
+    const n = app_mod.emitSchemaTs(&no_schema_app, &buf);
+    // wrapper 는 나오되 interface 본문 0줄.
+    try std.testing.expect(std.mem.indexOf(u8, buf[0..n], "interface SujiHandlers {\n  }") != null);
+}

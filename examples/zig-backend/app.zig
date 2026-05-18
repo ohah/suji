@@ -5,6 +5,11 @@ pub const app = suji.app()
     .handle("ping", ping)
     .handle("greet", greet)
     .handle("add", add)
+    // `.schema(channel, Req, Res)` — `suji types` 가 SujiHandlers `.d.ts` 자동
+    // 생성(수동 augment 불요). frontend `invoke('greet', {name})` 타입 추론.
+    .schema("ping", void, struct { msg: []const u8 })
+    .schema("greet", struct { name: []const u8 }, struct { msg: []const u8, greeting: []const u8 })
+    .schema("add", struct { a: i64, b: i64 }, struct { result: i64 })
     // Electron 스타일: `app.on('window-all-closed', ...)` 대응.
     // macOS는 창 닫혀도 앱 유지(dock), 그 외는 종료 — 전형적인 Electron 패턴.
     .on("window:all-closed", onWindowAllClosed);

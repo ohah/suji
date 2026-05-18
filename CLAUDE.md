@@ -72,7 +72,14 @@ suji init <name> --backend=zig|rust|go|multi
 suji dev
 suji build
 suji run
+suji types [--out <path>]   # zig 백엔드 .schema() → SujiHandlers .d.ts (stdout/파일)
 ```
+
+`suji types`: zig 백엔드의 `.schema("ch", Req, Res)` 체인을 frontend
+`declare module '@suji/api' { interface SujiHandlers {…} }` 로 자동 생성(수동
+augment 불요). 백엔드 빌드→dlopen→`backend_dump_schema`(comptime `typeToTs`).
+미지정 시 stdout(`suji types > src/suji.d.ts`), `--out`이면 파일. Rust=specta
+수동 / Go·Node=수동 augment(runtime 타입메타 부재 — 정직 한계).
 
 ## API (Electron 스타일)
 

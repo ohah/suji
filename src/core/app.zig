@@ -1729,6 +1729,19 @@ pub fn exportApp(comptime application: App) type {
             std.debug.print("[{s}] ready\n", .{application.name});
         }
 
+        /// `suji types` CLI 가 dlopen→호출 → `.schema()` 체인을 SujiHandlers
+        /// `.d.ts` 로 emit. schema 미등록이면 null. 단발 CLI 경로라 page_allocator
+        /// 1회 누수 허용(프로세스 즉시 종료).
+        export fn backend_dump_schema() callconv(.c) ?[*:0]u8 {
+            var buf: [16 * 1024]u8 = undefined;
+            const a = application;
+            const n = emitSchemaTs(&a, &buf);
+            if (n == 0) return null;
+            const out = std.heap.page_allocator.allocSentinel(u8, n, 0) catch return null;
+            @memcpy(out[0..n], buf[0..n]);
+            return out;
+        }
+
         export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 {
             const req_slice = std.mem.span(request);
             var req_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
