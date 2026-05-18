@@ -1316,6 +1316,10 @@ test "clipboard HTML + powerMonitor idle IPC + cef.zig 함수" {
         "cef.clipboardReadHtml",
         "cef.clipboardWriteHtml",
         "cef.powerMonitorIdleSeconds",
+        // 화면 잠금 → idle-state "locked" 배선(Electron 동등).
+        "cef.powerMonitorSetScreenLocked",
+        "cef.powerMonitorScreenLocked",
+        "\"locked\"",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
@@ -1326,6 +1330,8 @@ test "clipboard HTML + powerMonitor idle IPC + cef.zig 함수" {
         "pub fn clipboardReadHtml",
         "pub fn clipboardWriteHtml",
         "pub fn powerMonitorIdleSeconds",
+        "pub fn powerMonitorSetScreenLocked",
+        "pub fn powerMonitorScreenLocked",
         "PASTEBOARD_TYPE_HTML",
         "CGEventSourceSecondsSinceLastEventType",
     }) |needle| {

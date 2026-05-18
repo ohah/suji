@@ -2262,6 +2262,19 @@ pub fn powerMonitorUninstall() void {
     suji_power_monitor_uninstall();
 }
 
+/// 화면 잠금 상태 — lock-screen/unlock-screen 이벤트로 갱신(main.zig power
+/// 콜백). getSystemIdleState 가 "locked" 판정에 사용(Electron 동등 상태값).
+/// 이벤트 콜백(임의 스레드)과 idle-state IPC(다른 스레드) 간 atomic.
+var g_screen_locked: std.atomic.Value(bool) = .init(false);
+
+pub fn powerMonitorSetScreenLocked(v: bool) void {
+    g_screen_locked.store(v, .monotonic);
+}
+
+pub fn powerMonitorScreenLocked() bool {
+    return g_screen_locked.load(.monotonic);
+}
+
 // nativeTheme — NSApp.effectiveAppearance KVO 옵저버 (Electron `nativeTheme.on('updated')` 동등).
 extern "c" fn suji_native_theme_install(cb: *const fn () callconv(.c) void) void;
 extern "c" fn suji_native_theme_uninstall() void;

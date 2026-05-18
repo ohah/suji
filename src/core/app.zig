@@ -906,7 +906,8 @@ pub const powerMonitor = struct {
         return coreCmd("power_monitor_get_idle_time", "");
     }
 
-    /// 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". 응답: `{"state":"active"|"idle"}`.
+    /// 화면 잠금 시 "locked"(Electron 동등), 유휴 ≥ threshold(초)면 "idle",
+    /// 아니면 "active". 응답: `{"state":"active"|"idle"|"locked"}`.
     pub fn getSystemIdleState(threshold: i64) ?[]const u8 {
         var buf: [64]u8 = undefined;
         const fields = std.fmt.bufPrint(&buf, "\"threshold\":{d}", .{threshold}) catch return null;

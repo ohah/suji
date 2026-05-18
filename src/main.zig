@@ -1652,8 +1652,14 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "power_monitor_get_idle_state")) {
         const threshold = util.extractJsonInt(req_clean, "threshold") orelse 0;
         const seconds = cef.powerMonitorIdleSeconds();
-        // f64 직접 비교 — seconds가 NaN/Inf여도 panic 없이 false → "active" (safe default).
-        const state: []const u8 = if (seconds >= @as(f64, @floatFromInt(threshold))) "idle" else "active";
+        // 화면 잠금 시 "locked" 우선(Electron 동등). 아니면 idle 임계 비교 —
+        // f64 직접 비교(seconds NaN/Inf여도 panic 없이 false → "active" safe).
+        const state: []const u8 = if (cef.powerMonitorScreenLocked())
+            "locked"
+        else if (seconds >= @as(f64, @floatFromInt(threshold)))
+            "idle"
+        else
+            "active";
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_get_idle_state\",\"state\":\"{s}\"}}",
@@ -3150,6 +3156,12 @@ fn menuEmitHandler(click: []const u8) void {
 /// 를 `power:<event>` 채널로 emit. event는 "suspend"|"resume"|"lock-screen"|"unlock-screen".
 fn powerMonitorEmitHandler(event: [*:0]const u8) callconv(.c) void {
     const event_slice = std.mem.span(event);
+    // 화면 잠금 상태 추적 — getSystemIdleState "locked" 판정용(Electron 동등).
+    if (std.mem.eql(u8, event_slice, "lock-screen")) {
+        cef.powerMonitorSetScreenLocked(true);
+    } else if (std.mem.eql(u8, event_slice, "unlock-screen")) {
+        cef.powerMonitorSetScreenLocked(false);
+    }
     var ch_buf: [64]u8 = undefined;
     const channel = std.fmt.bufPrint(&ch_buf, "power:{s}", .{event_slice}) catch return;
     emitBusRaw(channel, "{}");
