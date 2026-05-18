@@ -820,6 +820,36 @@ test "desktopCapturer.getSources IPC — main.zig dispatch + cef.zig 함수" {
     }
 }
 
+test "desktopCapturer.captureThumbnail IPC + cef CG/ImageIO 인코딩 경로" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"desktop_capturer_capture_thumbnail\"",
+        "cef.desktopCapturerCaptureThumbnail",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn desktopCapturerCaptureThumbnail",
+        "CGDisplayCreateImage",
+        "CGWindowListCreateImage",
+        "CGImageDestinationCreateWithURL",
+        "CGImageDestinationFinalize",
+        "CFURLCreateFromFileSystemRepresentation",
+        "fn parseSourceId",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    // ImageIO 프레임워크 링크(빌드 회귀 가드).
+    const build_src = try std.Io.Dir.cwd().readFileAlloc(std_io, "build.zig", std.testing.allocator, .limited(1 << 20));
+    defer std.testing.allocator.free(build_src);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "linkFramework(\"ImageIO\"") != null);
+}
+
 test "dock badge IPC — set/get round-trip 등록" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

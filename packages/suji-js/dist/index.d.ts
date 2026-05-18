@@ -796,6 +796,12 @@ export declare const desktopCapturer: {
     getSources(opts?: {
         types?: Array<"screen" | "window">;
     }): Promise<DesktopCapturerSource[]>;
+    /**
+     * 소스(`getSources()` 의 `id` — "screen:N:0"/"window:N:0") 썸네일을 PNG 로
+     * `path` 에 캡처(파일경로 — base64 IPC 한도 우회, capture_page 동형).
+     * ⚠️ Screen Recording TCC 권한 필요 — 미부여 시 `false`(정직 경계).
+     */
+    captureThumbnail(sourceId: string, path: string): Promise<boolean>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {

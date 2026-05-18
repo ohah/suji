@@ -136,7 +136,11 @@ fn onAllClosed(_: suji.Event) void {
 // suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen)
 // suji.desktopCapturer.getSources("screen,window")  — 화면/창 소스
 //   {id,name,type,x,y,width,height,displayId?} (CGGetActiveDisplayList +
-//   CGWindowListCopyWindowInfo). ⚠️ thumbnail 미포함(TCC 권한+IPC 한도, 후속)
+//   CGWindowListCopyWindowInfo)
+//   / captureThumbnail(sourceId, path)  — 소스 PNG 를 파일경로로 캡처
+//   (CG capture + ImageIO 인코딩, base64 IPC 한도 우회). ⚠️ Screen Recording
+//   TCC 권한 필요 — 미부여 시 success:false. 인코딩 경로는 권한 실기기에서만
+//   실행(헤드리스=컴파일/링크+graceful-fail 만 검증, 정직 경계)
 // suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)   (macOS IOPMAssertion)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain Services)

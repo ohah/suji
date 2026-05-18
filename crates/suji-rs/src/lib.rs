@@ -1559,6 +1559,17 @@ pub mod desktop_capturer {
             "types": types,
         }).to_string())
     }
+
+    /// 소스 썸네일을 PNG 로 `path` 에 캡처(파일경로 — base64 IPC 한도 우회).
+    /// raw JSON `{"success":bool}`. ⚠️ Screen Recording TCC 권한 필요 —
+    /// 미부여 시 success:false(정직 경계).
+    pub fn capture_thumbnail(source_id: &str, path: &str) -> Option<String> {
+        invoke("__core__", &crate::serde_json::json!({
+            "cmd": "desktop_capturer_capture_thumbnail",
+            "sourceId": source_id,
+            "path": path,
+        }).to_string())
+    }
 }
 
 pub mod web_request {

@@ -1035,6 +1035,17 @@ export const desktopCapturer = {
         });
         return r.sources;
     },
+    /**
+     * 소스(`getSources()` 의 `id` — "screen:N:0"/"window:N:0") 썸네일을 PNG 로
+     * `path` 에 캡처(파일경로 — base64 IPC 한도 우회, capture_page 동형).
+     * ⚠️ Screen Recording TCC 권한 필요 — 미부여 시 `false`(정직 경계).
+     */
+    async captureThumbnail(sourceId, path) {
+        const r = await coreCall({
+            cmd: "desktop_capturer_capture_thumbnail", sourceId, path,
+        });
+        return r.success === true;
+    },
 };
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */

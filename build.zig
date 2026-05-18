@@ -152,6 +152,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkFramework("IOKit", .{});
         // Security — Keychain Services (safeStorage).
         root_module.linkFramework("Security", .{});
+        // ImageIO — CGImageDestination* (desktopCapturer 썸네일 PNG 인코딩).
+        root_module.linkFramework("ImageIO", .{});
         // window_lifecycle.m — NSWindowDelegate (resize/focus/blur/move) → C callback.
         root_module.addCSourceFile(.{
             .file = b.path("src/platform/window_lifecycle.m"),

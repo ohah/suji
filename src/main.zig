@@ -1808,6 +1808,17 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{sources},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "desktop_capturer_capture_thumbnail")) {
+        const source_id = util.extractJsonString(req_clean, "sourceId") orelse "";
+        const path = util.extractJsonString(req_clean, "path") orelse "";
+        const ok = source_id.len > 0 and path.len > 0 and
+            cef.desktopCapturerCaptureThumbnail(source_id, path);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"desktop_capturer_capture_thumbnail\",\"success\":{}}}",
+            .{ok},
+        ) catch null;
+    }
 
     // Dock badge API. extractJsonString은 wire escape를 안 풀어주므로 unescape 후 NSDockTile에.
     // unescape 실패(text 한도 초과)면 graceful false — clipboard_write_text 패턴과 일관.

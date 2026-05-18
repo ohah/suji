@@ -1338,6 +1338,19 @@ pub const desktopCapturer = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"types\":\"{s}\"", .{types}) catch return null;
         return coreCmd("desktop_capturer_get_sources", fields);
     }
+
+    /// 소스("screen:N:0"/"window:N:0") 썸네일을 PNG 로 `path` 에 캡처(파일경로
+    /// — base64 IPC 한도 우회). 응답 `{"success":bool}`.
+    /// ⚠️ Screen Recording TCC 권한 필요 — 미부여 시 success:false(정직 경계).
+    pub fn captureThumbnail(source_id: []const u8, path: []const u8) ?[]const u8 {
+        var sb: [256]u8 = undefined;
+        var pb: [2048]u8 = undefined;
+        const sn = util.escapeJsonStrFull(source_id, &sb) orelse return null;
+        const pn = util.escapeJsonStrFull(path, &pb) orelse return null;
+        var fb: [2400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fb, "\"sourceId\":\"{s}\",\"path\":\"{s}\"", .{ sb[0..sn], pb[0..pn] }) catch return null;
+        return coreCmd("desktop_capturer_capture_thumbnail", fields);
+    }
 };
 
 pub const powerSaveBlocker = struct {

@@ -2006,6 +2006,67 @@ pub fn desktopCapturerGetSources(out_buf: []u8, want_screen: bool, want_window: 
 }
 
 // ============================================
+// desktopCapturer thumbnail — 소스 PNG 캡처 → 파일경로 (Electron NativeImage 대응)
+// ============================================
+// getSources 가 썸네일을 못 주는 이유(base64 IPC 한도)를 capture_page 와 동일한
+// "파일경로 전달" 로 우회. 동기 CoreGraphics 캡처(CGDisplayCreateImage /
+// CGWindowListCreateImage) → ImageIO(CGImageDestination) 로 PNG 인코딩.
+//
+// ⚠️ 정직 경계(미검증): 실제 캡처는 Screen Recording TCC 권한 필요 — 미부여
+// 환경(헤드리스/CI)에선 CG*CreateImage 가 null 반환 → graceful false (crash 없음).
+// 그래서 PNG 인코딩(ImageIO) 경로는 권한 있는 실기기에서만 실행 — 이 환경에선
+// 컴파일/링크 + graceful-fail 만 검증, 인코딩 경로 미실행(commit/PLAN 명시).
+extern "c" fn CGDisplayCreateImage(display: u32) ?*anyopaque;
+extern "c" fn CGWindowListCreateImage(bounds: NSRect, list_option: u32, window_id: u32, image_option: u32) ?*anyopaque;
+extern "c" fn CGImageRelease(image: ?*anyopaque) void;
+extern "c" const CGRectNull: NSRect;
+extern "c" fn CFStringCreateWithCString(alloc: ?*anyopaque, cstr: [*:0]const u8, encoding: u32) ?*anyopaque;
+extern "c" fn CFURLCreateFromFileSystemRepresentation(alloc: ?*anyopaque, path: [*]const u8, len: c_long, is_dir: u8) ?*anyopaque;
+extern "c" fn CGImageDestinationCreateWithURL(url: ?*anyopaque, ty: ?*anyopaque, count: usize, options: ?*anyopaque) ?*anyopaque;
+extern "c" fn CGImageDestinationAddImage(dest: ?*anyopaque, image: ?*anyopaque, props: ?*anyopaque) void;
+extern "c" fn CGImageDestinationFinalize(dest: ?*anyopaque) u8;
+
+const kCGWindowListOptionIncludingWindow: u32 = 8;
+const kCGWindowImageDefault: u32 = 0;
+
+/// "screen:<displayId>:0" / "window:<windowNumber>:0" → (is_screen, numeric id).
+fn parseSourceId(source_id: []const u8) ?struct { screen: bool, id: u32 } {
+    const c1 = std.mem.indexOfScalar(u8, source_id, ':') orelse return null;
+    const kind = source_id[0..c1];
+    const rest = source_id[c1 + 1 ..];
+    const c2 = std.mem.indexOfScalar(u8, rest, ':') orelse rest.len;
+    const num = std.fmt.parseInt(u32, rest[0..c2], 10) catch return null;
+    if (std.mem.eql(u8, kind, "screen")) return .{ .screen = true, .id = num };
+    if (std.mem.eql(u8, kind, "window")) return .{ .screen = false, .id = num };
+    return null;
+}
+
+/// desktopCapturer source(screen/window)를 PNG 로 캡처해 `path` 에 기록. 동기.
+/// TCC 미부여/무효 id/인코딩 실패 시 false (graceful — crash 없음).
+pub fn desktopCapturerCaptureThumbnail(source_id: []const u8, path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const src = parseSourceId(source_id) orelse return false;
+
+    const img = if (src.screen)
+        CGDisplayCreateImage(src.id)
+    else
+        CGWindowListCreateImage(CGRectNull, kCGWindowListOptionIncludingWindow, src.id, kCGWindowImageDefault);
+    // TCC(Screen Recording) 미부여 또는 무효 id → null. graceful false.
+    const image = img orelse return false;
+    defer CGImageRelease(image);
+
+    const url = CFURLCreateFromFileSystemRepresentation(null, path.ptr, @intCast(path.len), 0) orelse return false;
+    defer CFRelease(url);
+    const png_type = CFStringCreateWithCString(null, "public.png", kCFStringEncodingUTF8) orelse return false;
+    defer CFRelease(png_type);
+    const dest = CGImageDestinationCreateWithURL(url, png_type, 1, null) orelse return false;
+    defer CFRelease(dest);
+
+    CGImageDestinationAddImage(dest, image, null);
+    return CGImageDestinationFinalize(dest) != 0;
+}
+
+// ============================================
 // Dock badge API — NSDockTile (Electron `app.dock.setBadge`)
 // ============================================
 
