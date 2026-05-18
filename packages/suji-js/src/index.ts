@@ -1594,6 +1594,35 @@ export const screen = {
   },
 };
 
+/** Electron `desktopCapturer.getSources` 소스. ⚠️ thumbnail/appIcon 미포함. */
+export interface DesktopCapturerSource {
+  id: string;
+  name: string;
+  type: "screen" | "window";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  displayId?: number;
+}
+
+export const desktopCapturer = {
+  /**
+   * 화면/창 소스 열거 (Electron `desktopCapturer.getSources`). types 기본
+   * 둘 다. ⚠️ Electron 과 달리 thumbnail/appIcon 미포함 — Screen Recording
+   * TCC 권한 + base64 IPC 한도 때문(소스 열거만, 썸네일은 후속).
+   */
+  async getSources(
+    opts: { types?: Array<"screen" | "window"> } = {},
+  ): Promise<DesktopCapturerSource[]> {
+    const types = (opts.types ?? ["screen", "window"]).join(",");
+    const r = await coreCall<{ sources: DesktopCapturerSource[] }>({
+      cmd: "desktop_capturer_get_sources", types,
+    });
+    return r.sources;
+  },
+};
+
 // ============================================
 // powerSaveBlocker — 화면/시스템 sleep 차단 (Electron `powerSaveBlocker`)
 // ============================================

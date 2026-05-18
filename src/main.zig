@@ -1767,6 +1767,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         ) catch return null;
         return result;
     }
+    if (std.mem.eql(u8, cmd, "desktop_capturer_get_sources")) {
+        // types 미지정 시 screen+window 둘 다 (Electron 은 필수지만 친화 기본).
+        const types = util.extractJsonString(req_clean, "types");
+        const want_screen = types == null or std.mem.indexOf(u8, types.?, "screen") != null;
+        const want_window = types == null or std.mem.indexOf(u8, types.?, "window") != null;
+        var sources_buf: [12288]u8 = undefined;
+        const sources = cef.desktopCapturerGetSources(&sources_buf, want_screen, want_window);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"desktop_capturer_get_sources\",\"sources\":{s}}}",
+            .{sources},
+        ) catch null;
+    }
 
     // Dock badge API. extractJsonString은 wire escape를 안 풀어주므로 unescape 후 NSDockTile에.
     // unescape 실패(text 한도 초과)면 graceful false — clipboard_write_text 패턴과 일관.

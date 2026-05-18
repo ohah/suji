@@ -1413,7 +1413,7 @@ suji build → 결과물:
 | 디스플레이 정보 | `screen.getAllDisplays` / `getPrimaryDisplay` | -- | ✅ macOS NSScreen — `screen_get_all_displays` IPC, frame/visibleFrame/scaleFactor + isPrimary 3 e2e |
 | 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | 🟡 macOS만 — `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen` 4 채널 자동 발신 (NSWorkspace 옵저버). Linux/Windows 후속 |
 | 슬립 차단 | `powerSaveBlocker.start` | -- | ✅ macOS IOPMAssertion — `power_save_blocker_start/stop` IPC, prevent_app_suspension / prevent_display_sleep + idempotent guard 4 e2e |
-| 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | ❌ (분량 중 — CGWindowListCopyWindowInfo + ScreenCaptureKit) |
+| 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | 🟡 `desktopCapturer.getSources({types})` ✅ — macOS CGGetActiveDisplayList(screen) + CGWindowListCopyWindowInfo(window, layer 0 + ExcludeDesktopElements). `{id,name,type,x,y,width,height,displayId?}`. 5 SDK + e2e 4(screen/window/types 필터/SDK round-trip) + 단위 회귀. CG 심볼 Cocoa/Carbon transitive(linkFramework 불요). ⚠️ thumbnail/appIcon 미포함 — Screen Recording TCC 권한 + base64 IPC 한도(capture_page 파일경로 이유와 동일)라 ScreenCaptureKit 기반 썸네일은 후속 |
 | 크래시 리포터 | `crashReporter.start` | -- | ❌ (분량 중 — Apple Crashpad/Breakpad 연동) |
 | 인앱 결제 | `inAppPurchase` (Mac App Store) | -- | ❌ (분량 대 — App Store 의존) |
 | Mac dock badge | `app.dock.setBadge` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape/멀티바이트(이모지+한글) round-trip 4 e2e |

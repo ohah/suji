@@ -131,6 +131,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key, globalShortcut:trigger 이벤트)
 // suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen)
+// suji.desktopCapturer.getSources("screen,window")  — 화면/창 소스
+//   {id,name,type,x,y,width,height,displayId?} (CGGetActiveDisplayList +
+//   CGWindowListCopyWindowInfo). ⚠️ thumbnail 미포함(TCC 권한+IPC 한도, 후속)
 // suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)   (macOS IOPMAssertion)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain Services)

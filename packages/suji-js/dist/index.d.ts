@@ -142,6 +142,10 @@ export interface GetUrlResponse extends WindowOpResponse {
     cmd: "get_url";
     url: string | null;
 }
+export interface GetUserAgentResponse extends WindowOpResponse {
+    cmd: "get_user_agent";
+    userAgent: string | null;
+}
 export interface IsLoadingResponse extends WindowOpResponse {
     cmd: "is_loading";
     loading: boolean;
@@ -220,6 +224,13 @@ export declare const windows: {
     executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse>;
     /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
     getURL(windowId: number): Promise<GetUrlResponse>;
+    /** UA 동적 변경 (Electron `webContents.setUserAgent`). CDP
+     *  Network.setUserAgentOverride — 이후 네비/요청에 적용. */
+    setUserAgent(windowId: number, userAgent: string): Promise<WindowOpResponse>;
+    /** 설정한 UA override 조회 (Electron `webContents.getUserAgent`).
+     *  미설정 시 userAgent=null (브라우저 기본 — CEF 가 per-browser
+     *  기본 UA getter 미제공). */
+    getUserAgent(windowId: number): Promise<GetUserAgentResponse>;
     /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
     isLoading(windowId: number): Promise<IsLoadingResponse>;
     /** DevTools 열기 — 이미 열려있으면 멱등 no-op */
@@ -275,6 +286,13 @@ export declare const windows: {
     printToPDF(windowId: number, path: string): Promise<{
         success: boolean;
     }>;
+    /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
+     *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
+     *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
+     *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식. */
+    capturePage(windowId: number, path: string): Promise<{
+        success: boolean;
+    }>;
     /** host 창 contentView 안에 새 view 합성 (Electron `WebContentsView`). 자동으로 host의
      *  view_children top에 추가됨 — 이후 addChildView로 z-order 변경 가능. bounds 미지정 시
      *  800x600 @ 0,0 (코어의 parseBoundsFromJson은 누락 키를 0으로 채워 SDK가 default 적용). */
@@ -296,6 +314,65 @@ export declare const windows: {
     /** host의 child view id들을 z-order 순서로 조회 (0=bottom, 마지막=top) */
     getChildViews(hostId: number): Promise<GetChildViewsResponse>;
 };
+/**
+ * `windows.*`(raw windowId)의 객체지향 facade (Electron `BrowserWindow` 패리티).
+ * 각 메서드는 `windows.<fn>(this.id, ...)` 로 위임 — 로직/응답 타입 무중복,
+ * `windows` 변경에 자동 동기화(반환 타입은 위임으로 추론). view 합성
+ * (createView/addChildView 등)은 host/view-id 다중 대상이라 `windows`
+ * 네임스페이스에 유지(Electron 도 WebContentsView 별도).
+ */
+export declare class BrowserWindow {
+    #private;
+    private constructor();
+    /** 후속 IPC/`send(_, { to })` 및 view host 인자로 쓰는 창 id. */
+    get id(): number;
+    /** 새 창 생성 후 인스턴스 반환 (Electron `new BrowserWindow(opts)`). */
+    static create(opts?: WindowOptions): Promise<BrowserWindow>;
+    /** 기존 windowId(예: 메인 창, 이벤트의 windowId)를 인스턴스로 래핑. */
+    static fromId(id: number): BrowserWindow;
+    setTitle(title: string): Promise<WindowOpResponse>;
+    setBounds(bounds: SetBoundsArgs): Promise<WindowOpResponse>;
+    loadURL(url: string): Promise<WindowOpResponse>;
+    reload(ignoreCache?: boolean): Promise<WindowOpResponse>;
+    executeJavaScript(code: string): Promise<WindowOpResponse>;
+    getURL(): Promise<GetUrlResponse>;
+    setUserAgent(userAgent: string): Promise<WindowOpResponse>;
+    getUserAgent(): Promise<GetUserAgentResponse>;
+    isLoading(): Promise<IsLoadingResponse>;
+    openDevTools(): Promise<WindowOpResponse>;
+    closeDevTools(): Promise<WindowOpResponse>;
+    isDevToolsOpened(): Promise<IsDevToolsOpenedResponse>;
+    toggleDevTools(): Promise<WindowOpResponse>;
+    setZoomLevel(level: number): Promise<WindowOpResponse>;
+    getZoomLevel(): Promise<ZoomLevelResponse>;
+    setZoomFactor(factor: number): Promise<WindowOpResponse>;
+    getZoomFactor(): Promise<ZoomFactorResponse>;
+    setAudioMuted(muted: boolean): Promise<WindowOpResponse>;
+    isAudioMuted(): Promise<IsAudioMutedResponse>;
+    setOpacity(opacity: number): Promise<WindowOpResponse>;
+    getOpacity(): Promise<OpacityResponse>;
+    setBackgroundColor(color: string): Promise<WindowOpResponse>;
+    setHasShadow(hasShadow: boolean): Promise<WindowOpResponse>;
+    hasShadow(): Promise<HasShadowResponse>;
+    undo(): Promise<WindowOpResponse>;
+    redo(): Promise<WindowOpResponse>;
+    cut(): Promise<WindowOpResponse>;
+    copy(): Promise<WindowOpResponse>;
+    paste(): Promise<WindowOpResponse>;
+    selectAll(): Promise<WindowOpResponse>;
+    findInPage(text: string, options?: {
+        forward?: boolean;
+        matchCase?: boolean;
+        findNext?: boolean;
+    }): Promise<WindowOpResponse>;
+    stopFindInPage(clearSelection?: boolean): Promise<WindowOpResponse>;
+    printToPDF(path: string): Promise<{
+        success: boolean;
+    }>;
+    capturePage(path: string): Promise<{
+        success: boolean;
+    }>;
+}
 export declare const powerMonitor: {
     /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋 (CGEventSource).
      *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
@@ -406,6 +483,14 @@ export type MenuItem = MenuCommandItem | MenuCheckboxItem | MenuSeparator | Menu
 export declare const menu: {
     setApplicationMenu(items: MenuItem[]): Promise<boolean>;
     resetApplicationMenu(): Promise<boolean>;
+    /** 임의 위치 컨텍스트 메뉴 (Electron `Menu.popup({x?,y?})`). x/y 미지정 시
+     *  현재 커서(화면 좌표, macOS bottom-up). 선택은 `suji.on('menu:click',
+     *  ({click}) => ...)` 로 수신 (setApplicationMenu 와 동일). macOS NSMenu
+     *  `popUpMenuPositioningItem:atLocation:inView:` — 동기 모달. */
+    popup(items: MenuItem[], opts?: {
+        x?: number;
+        y?: number;
+    }): Promise<boolean>;
 };
 export declare const globalShortcut: {
     register(accelerator: string, click: string): Promise<boolean>;
@@ -562,6 +647,13 @@ export declare const session: {
     clearCookies(): Promise<boolean>;
     /** disk store flush (Electron `session.cookies.flushStore`). */
     flushStore(): Promise<boolean>;
+    /**
+     * IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
+     * origin 미지정 → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
+     * 삭제 불가 — 호출부가 자기 앱 origin 전달 시 그 origin storage 삭제).
+     * storageTypes 기본 "all" (CDP 콤마구분: local_storage,indexeddb,...).
+     */
+    clearStorageData(origin?: string, storageTypes?: string): Promise<boolean>;
     /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
     setCookie(cookie: CookieDescriptor): Promise<boolean>;
     /** Electron `session.cookies.remove`. url+name 매칭. */
@@ -659,6 +751,27 @@ export declare const screen: {
     /** Primary display 객체 반환 (없으면 null) — getAllDisplays.find(isPrimary) wrapper. */
     getPrimaryDisplay(): Promise<Display | null>;
 };
+/** Electron `desktopCapturer.getSources` 소스. ⚠️ thumbnail/appIcon 미포함. */
+export interface DesktopCapturerSource {
+    id: string;
+    name: string;
+    type: "screen" | "window";
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    displayId?: number;
+}
+export declare const desktopCapturer: {
+    /**
+     * 화면/창 소스 열거 (Electron `desktopCapturer.getSources`). types 기본
+     * 둘 다. ⚠️ Electron 과 달리 thumbnail/appIcon 미포함 — Screen Recording
+     * TCC 권한 + base64 IPC 한도 때문(소스 열거만, 썸네일은 후속).
+     */
+    getSources(opts?: {
+        types?: Array<"screen" | "window">;
+    }): Promise<DesktopCapturerSource[]>;
+};
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
@@ -703,6 +816,19 @@ export declare const app: {
     requestUserAttention(critical?: boolean): Promise<number>;
     /** requestUserAttention으로 받은 id 취소. id == 0은 false (guard). */
     cancelUserAttentionRequest(id: number): Promise<boolean>;
+    /**
+     * Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 실패 시 null.
+     * 비-sandbox 빌드에선 일반 bookmark 로 동작 (sandbox escapement no-op).
+     */
+    createSecurityScopedBookmark(path: string): Promise<string | null>;
+    /** bookmark 해소 + 접근 시작. 실패 시 null. id 를 stop 에 전달. */
+    startAccessingSecurityScopedResource(bookmark: string): Promise<{
+        id: number;
+        path: string;
+        stale: boolean;
+    } | null>;
+    /** 접근 종료. 유효하지 않은 id 는 false. */
+    stopAccessingSecurityScopedResource(id: number): Promise<boolean>;
     dock: {
         /** dock 배지 텍스트 — 빈 문자열로 제거. macOS만. */
         setBadge(text: string): Promise<void>;

@@ -795,6 +795,29 @@ test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
     }
 }
 
+test "desktopCapturer.getSources IPC — main.zig dispatch + cef.zig 함수" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"desktop_capturer_get_sources\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.desktopCapturerGetSources") != null);
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn desktopCapturerGetSources") != null);
+    // CG/CF 열거 경로 + JSON shape 정적 검증.
+    inline for (.{
+        "CGGetActiveDisplayList",
+        "CGWindowListCopyWindowInfo",
+        "CGRectMakeWithDictionaryRepresentation",
+        "kCGWindowLayer",
+        "\"type\":\"screen\"",
+        "\"type\":\"window\"",
+        "displayId",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "dock badge IPC — set/get round-trip 등록" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

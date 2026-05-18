@@ -1507,6 +1507,20 @@ pub mod screen {
     }
 }
 
+/// Electron `desktopCapturer`. 화면/창 소스 열거(썸네일 미포함 — 정직 경계).
+pub mod desktop_capturer {
+    use crate::invoke;
+
+    /// 소스 목록 raw JSON. types: "screen" | "window" | "screen,window".
+    /// `{"sources":[{id,name,type,x,y,width,height,displayId?}]}`.
+    pub fn get_sources(types: &str) -> Option<String> {
+        invoke("__core__", &crate::serde_json::json!({
+            "cmd": "desktop_capturer_get_sources",
+            "types": types,
+        }).to_string())
+    }
+}
+
 pub mod web_request {
     use crate::{invoke, serde_json};
 

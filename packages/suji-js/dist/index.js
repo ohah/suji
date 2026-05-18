@@ -15,6 +15,18 @@
  * cancel(); // remove listener
  * ```
  */
+var __classPrivateFieldSet = (this && this.__classPrivateFieldSet) || function (receiver, state, value, kind, f) {
+    if (kind === "m") throw new TypeError("Private method is not writable");
+    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+    return (kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value)), value;
+};
+var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (receiver, state, kind, f) {
+    if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+    if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+    return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+};
+var _BrowserWindow_id;
 function getBridge() {
     const bridge = window.__suji__;
     if (!bridge)
@@ -106,6 +118,17 @@ export const windows = {
     /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
     getURL(windowId) {
         return coreCall({ cmd: "get_url", windowId });
+    },
+    /** UA 동적 변경 (Electron `webContents.setUserAgent`). CDP
+     *  Network.setUserAgentOverride — 이후 네비/요청에 적용. */
+    setUserAgent(windowId, userAgent) {
+        return coreCall({ cmd: "set_user_agent", windowId, userAgent });
+    },
+    /** 설정한 UA override 조회 (Electron `webContents.getUserAgent`).
+     *  미설정 시 userAgent=null (브라우저 기본 — CEF 가 per-browser
+     *  기본 UA getter 미제공). */
+    getUserAgent(windowId) {
+        return coreCall({ cmd: "get_user_agent", windowId });
     },
     /** 현재 로딩 중인지 조회 (Electron `webContents.isLoading`) */
     isLoading(windowId) {
@@ -223,6 +246,22 @@ export const windows = {
             coreCall({ cmd: "print_to_pdf", windowId, path });
         });
     },
+    /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
+     *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
+     *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
+     *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식. */
+    capturePage(windowId, path) {
+        return new Promise((resolve) => {
+            const off = on("window:page-captured", (data) => {
+                const d = data;
+                if (d.path === path) {
+                    off();
+                    resolve({ success: d.success === true });
+                }
+            });
+            coreCall({ cmd: "capture_page", windowId, path });
+        });
+    },
     // ── Phase 17-A: WebContentsView ──
     // viewId는 windowId와 같은 풀이라 loadURL/executeJavaScript/openDevTools/setZoomFactor
     // 등 모든 webContents API에 viewId를 그대로 넘기면 동작.
@@ -272,6 +311,139 @@ export const windows = {
         return coreCall({ cmd: "get_child_views", hostId });
     },
 };
+/**
+ * `windows.*`(raw windowId)의 객체지향 facade (Electron `BrowserWindow` 패리티).
+ * 각 메서드는 `windows.<fn>(this.id, ...)` 로 위임 — 로직/응답 타입 무중복,
+ * `windows` 변경에 자동 동기화(반환 타입은 위임으로 추론). view 합성
+ * (createView/addChildView 등)은 host/view-id 다중 대상이라 `windows`
+ * 네임스페이스에 유지(Electron 도 WebContentsView 별도).
+ */
+export class BrowserWindow {
+    constructor(id) {
+        _BrowserWindow_id.set(this, void 0);
+        __classPrivateFieldSet(this, _BrowserWindow_id, id, "f");
+    }
+    /** 후속 IPC/`send(_, { to })` 및 view host 인자로 쓰는 창 id. */
+    get id() {
+        return __classPrivateFieldGet(this, _BrowserWindow_id, "f");
+    }
+    /** 새 창 생성 후 인스턴스 반환 (Electron `new BrowserWindow(opts)`). */
+    static async create(opts = {}) {
+        const res = await windows.create(opts);
+        // windowId 부재 시 좀비 인스턴스 방지 — Rust None / Go error 와 시맨틱 일치.
+        if (typeof res.windowId !== "number") {
+            throw new Error(`create_window: no windowId in response (${JSON.stringify(res)})`);
+        }
+        return new BrowserWindow(res.windowId);
+    }
+    /** 기존 windowId(예: 메인 창, 이벤트의 windowId)를 인스턴스로 래핑. */
+    static fromId(id) {
+        return new BrowserWindow(id);
+    }
+    setTitle(title) {
+        return windows.setTitle(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), title);
+    }
+    setBounds(bounds) {
+        return windows.setBounds(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), bounds);
+    }
+    loadURL(url) {
+        return windows.loadURL(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), url);
+    }
+    reload(ignoreCache = false) {
+        return windows.reload(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), ignoreCache);
+    }
+    executeJavaScript(code) {
+        return windows.executeJavaScript(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), code);
+    }
+    getURL() {
+        return windows.getURL(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setUserAgent(userAgent) {
+        return windows.setUserAgent(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), userAgent);
+    }
+    getUserAgent() {
+        return windows.getUserAgent(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isLoading() {
+        return windows.isLoading(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    openDevTools() {
+        return windows.openDevTools(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    closeDevTools() {
+        return windows.closeDevTools(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isDevToolsOpened() {
+        return windows.isDevToolsOpened(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    toggleDevTools() {
+        return windows.toggleDevTools(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setZoomLevel(level) {
+        return windows.setZoomLevel(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), level);
+    }
+    getZoomLevel() {
+        return windows.getZoomLevel(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setZoomFactor(factor) {
+        return windows.setZoomFactor(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), factor);
+    }
+    getZoomFactor() {
+        return windows.getZoomFactor(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setAudioMuted(muted) {
+        return windows.setAudioMuted(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), muted);
+    }
+    isAudioMuted() {
+        return windows.isAudioMuted(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setOpacity(opacity) {
+        return windows.setOpacity(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), opacity);
+    }
+    getOpacity() {
+        return windows.getOpacity(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setBackgroundColor(color) {
+        return windows.setBackgroundColor(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), color);
+    }
+    setHasShadow(hasShadow) {
+        return windows.setHasShadow(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), hasShadow);
+    }
+    hasShadow() {
+        return windows.hasShadow(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    undo() {
+        return windows.undo(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    redo() {
+        return windows.redo(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    cut() {
+        return windows.cut(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    copy() {
+        return windows.copy(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    paste() {
+        return windows.paste(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    selectAll() {
+        return windows.selectAll(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    findInPage(text, options) {
+        return windows.findInPage(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), text, options);
+    }
+    stopFindInPage(clearSelection = false) {
+        return windows.stopFindInPage(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), clearSelection);
+    }
+    printToPDF(path) {
+        return windows.printToPDF(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), path);
+    }
+    capturePage(path) {
+        return windows.capturePage(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), path);
+    }
+}
+_BrowserWindow_id = new WeakMap();
 // ============================================
 // clipboard — 시스템 클립보드 (Electron `clipboard.readText/writeText`)
 // ============================================
@@ -416,6 +588,19 @@ export const menu = {
     },
     async resetApplicationMenu() {
         const r = await coreCall({ cmd: "menu_reset_application_menu" });
+        return r.success === true;
+    },
+    /** 임의 위치 컨텍스트 메뉴 (Electron `Menu.popup({x?,y?})`). x/y 미지정 시
+     *  현재 커서(화면 좌표, macOS bottom-up). 선택은 `suji.on('menu:click',
+     *  ({click}) => ...)` 로 수신 (setApplicationMenu 와 동일). macOS NSMenu
+     *  `popUpMenuPositioningItem:atLocation:inView:` — 동기 모달. */
+    async popup(items, opts = {}) {
+        const r = await coreCall({
+            cmd: "menu_popup",
+            items,
+            ...(opts.x !== undefined ? { x: opts.x } : {}),
+            ...(opts.y !== undefined ? { y: opts.y } : {}),
+        });
         return r.success === true;
     },
 };
@@ -567,6 +752,18 @@ export const session = {
     /** disk store flush (Electron `session.cookies.flushStore`). */
     async flushStore() {
         const r = await coreCall({ cmd: "session_flush_store" });
+        return r.success === true;
+    },
+    /**
+     * IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
+     * origin 미지정 → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
+     * 삭제 불가 — 호출부가 자기 앱 origin 전달 시 그 origin storage 삭제).
+     * storageTypes 기본 "all" (CDP 콤마구분: local_storage,indexeddb,...).
+     */
+    async clearStorageData(origin = "", storageTypes = "all") {
+        const r = await coreCall({
+            cmd: "session_clear_storage_data", origin, storageTypes,
+        });
         return r.success === true;
     },
     /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
@@ -786,6 +983,20 @@ export const screen = {
         return all.find((d) => d.isPrimary) ?? all[0] ?? null;
     },
 };
+export const desktopCapturer = {
+    /**
+     * 화면/창 소스 열거 (Electron `desktopCapturer.getSources`). types 기본
+     * 둘 다. ⚠️ Electron 과 달리 thumbnail/appIcon 미포함 — Screen Recording
+     * TCC 권한 + base64 IPC 한도 때문(소스 열거만, 썸네일은 후속).
+     */
+    async getSources(opts = {}) {
+        const types = (opts.types ?? ["screen", "window"]).join(",");
+        const r = await coreCall({
+            cmd: "desktop_capturer_get_sources", types,
+        });
+        return r.sources;
+    },
+};
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
     async start(type) {
@@ -898,6 +1109,27 @@ export const app = {
     /** requestUserAttention으로 받은 id 취소. id == 0은 false (guard). */
     async cancelUserAttentionRequest(id) {
         const r = await coreCall({ cmd: "app_attention_cancel", id });
+        return r.success === true;
+    },
+    /**
+     * Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 실패 시 null.
+     * 비-sandbox 빌드에선 일반 bookmark 로 동작 (sandbox escapement no-op).
+     */
+    async createSecurityScopedBookmark(path) {
+        const r = await coreCall({ cmd: "security_scoped_bookmark_create", path });
+        return r.success === true ? r.bookmark ?? null : null;
+    },
+    /** bookmark 해소 + 접근 시작. 실패 시 null. id 를 stop 에 전달. */
+    async startAccessingSecurityScopedResource(bookmark) {
+        const r = await coreCall({
+            cmd: "security_scoped_access_start",
+            bookmark,
+        });
+        return r.success === true ? { id: r.id, path: r.path, stale: r.stale } : null;
+    },
+    /** 접근 종료. 유효하지 않은 id 는 false. */
+    async stopAccessingSecurityScopedResource(id) {
+        const r = await coreCall({ cmd: "security_scoped_access_stop", id });
         return r.success === true;
     },
     dock: {

@@ -1314,6 +1314,17 @@ pub const screen = struct {
     }
 };
 
+/// Electron `desktopCapturer`. 화면/창 소스 열거 (썸네일 미포함 — 정직 경계).
+pub const desktopCapturer = struct {
+    /// 소스 목록. types: "screen" | "window" | "screen,window"(기본 둘 다).
+    /// 응답: `{"sources":[{id,name,type,x,y,width,height,displayId?}]}`.
+    pub fn getSources(types: []const u8) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"types\":\"{s}\"", .{types}) catch return null;
+        return coreCmd("desktop_capturer_get_sources", fields);
+    }
+};
+
 pub const powerSaveBlocker = struct {
     /// `"prevent_app_suspension"` 또는 `"prevent_display_sleep"`. 응답: `{"id":N}` (0이면 실패).
     pub fn start(t: []const u8) ?[]const u8 {

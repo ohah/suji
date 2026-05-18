@@ -82,6 +82,45 @@ describe("screen.getAllDisplays", () => {
   });
 });
 
+describe("desktopCapturer.getSources", () => {
+  test("screen 소스 ≥1 + 필수 필드 + id 포맷", async () => {
+    const r = await core<{ sources: any[] }>({
+      cmd: "desktop_capturer_get_sources", types: "screen",
+    });
+    expect(Array.isArray(r.sources)).toBe(true);
+    const screens = r.sources.filter((s) => s.type === "screen");
+    expect(screens.length).toBeGreaterThan(0);
+    for (const s of screens) {
+      for (const k of ["id", "name", "type", "x", "y", "width", "height", "displayId"]) {
+        expect(s).toHaveProperty(k);
+      }
+      expect(s.id).toMatch(/^screen:\d+:0$/);
+      expect(s.width).toBeGreaterThan(0);
+      expect(s.height).toBeGreaterThan(0);
+    }
+    // types:"screen" 이면 window 소스 없음.
+    expect(r.sources.some((s) => s.type === "window")).toBe(false);
+  });
+
+  test("types 미지정 → screen+window 둘 다, window id 포맷", async () => {
+    const r = await core<{ sources: any[] }>({ cmd: "desktop_capturer_get_sources" });
+    expect(r.sources.some((s) => s.type === "screen")).toBe(true);
+    // window 는 환경에 따라 0개일 수 있으나, 있으면 포맷/필드 검증(JSON 유효성 = name escape 정상).
+    for (const w of r.sources.filter((s) => s.type === "window")) {
+      expect(w.id).toMatch(/^window:\d+:0$/);
+      expect(typeof w.name).toBe("string");
+      expect(w).not.toHaveProperty("displayId");
+    }
+  });
+
+  test("types:'window' → screen 소스 없음", async () => {
+    const r = await core<{ sources: any[] }>({
+      cmd: "desktop_capturer_get_sources", types: "window",
+    });
+    expect(r.sources.some((s) => s.type === "screen")).toBe(false);
+  });
+});
+
 describe("app.dock.setBadge", () => {
   test("set → get round-trip", async () => {
     await core({ cmd: "dock_set_badge", text: "42" });
@@ -1003,6 +1042,13 @@ describe("@suji/api SDK — round-trip", () => {
     expect(Array.isArray(r)).toBe(true);
     expect(r.length).toBeGreaterThan(0);
     expect(r[0]).toHaveProperty("scaleFactor");
+  });
+
+  test("desktopCapturer.getSources returns screen sources", async () => {
+    const r = await sdk<any[]>("desktopCapturer.getSources", { types: ["screen"] });
+    expect(Array.isArray(r)).toBe(true);
+    expect(r.some((s) => s.type === "screen")).toBe(true);
+    expect(r[0].id).toMatch(/^screen:\d+:0$/);
   });
 
   test("app.dock setBadge → getBadge round-trip", async () => {
