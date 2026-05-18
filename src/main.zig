@@ -258,6 +258,12 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                 for (config.app.locales, 0..) |s, i| buf[i] = s;
                 break :blk buf;
             };
+            const deep_link_slice: []const []const u8 = blk: {
+                if (config.app.deep_link_schemes.len == 0) break :blk &.{};
+                var buf = allocator.alloc([]const u8, config.app.deep_link_schemes.len) catch break :blk &.{};
+                for (config.app.deep_link_schemes, 0..) |s, i| buf[i] = s;
+                break :blk buf;
+            };
             try bundle_macos.createBundle(
                 allocator,
                 config.app.name,
@@ -272,6 +278,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     .signing = signing,
                     .identity = identity,
                     .sandbox = want_sandbox,
+                    .deep_link_schemes = deep_link_slice,
                 },
             );
             if (want_notarize) {

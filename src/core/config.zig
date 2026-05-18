@@ -41,6 +41,10 @@ pub const Config = struct {
         /// 코드가 platform 분기 후 quit 호출). true로 설정 시 모든 플랫폼에서 자동 종료.
         /// 두 경로(user code + 코어)가 동시에 발화해도 cef.quit()이 idempotent라 안전.
         quit_on_all_windows_closed: bool = false,
+        /// 딥링크 URL scheme (Electron `protocol.registerSchemesAsPrivileged` +
+        /// macOS `CFBundleURLTypes`). 비어있으면 미주입. 예: `["myapp"]` →
+        /// `myapp://...` 가 OS 레벨에서 이 앱으로 라우팅(.app 번들 한정).
+        deep_link_schemes: []const [:0]const u8 = &.{},
     };
 
     pub const Protocol = enum { suji, file };
@@ -208,6 +212,16 @@ pub const Config = struct {
                             list.append(a, dupeStr(a, item.string)) catch continue;
                         }
                         config.app.locales = list.toOwnedSlice(a) catch &.{};
+                    }
+                }
+                if (app.get("deepLinkSchemes")) |dl_val| {
+                    if (dl_val == .array) {
+                        var list = std.ArrayList([:0]const u8).empty;
+                        for (dl_val.array.items) |item| {
+                            if (item != .string) continue;
+                            list.append(a, dupeStr(a, item.string)) catch continue;
+                        }
+                        config.app.deep_link_schemes = list.toOwnedSlice(a) catch &.{};
                     }
                 }
             }

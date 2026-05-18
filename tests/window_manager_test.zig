@@ -3309,6 +3309,27 @@ test "회귀: macOS App Sandbox 자동화 — helper별 entitlements 자동 부�
     }
 }
 
+test "회귀: 딥링크 Info.plist URL Types 자동화 — config→BundleOptions→buildInfoPlist 배선" {
+    const cfg = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/core/config.zig", std.testing.allocator, .limited(256 * 1024));
+    defer std.testing.allocator.free(cfg);
+    try std.testing.expect(std.mem.indexOf(u8, cfg, "deep_link_schemes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cfg, "deepLinkSchemes") != null);
+
+    const b = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/bundle_macos.zig", std.testing.allocator, .limited(64 * 1024));
+    defer std.testing.allocator.free(b);
+    inline for (.{
+        "pub fn buildInfoPlist",
+        "pub fn isValidUrlScheme",
+        "CFBundleURLTypes",
+        "CFBundleURLSchemes",
+        "deep_link_schemes: []const []const u8",
+    }) |needle| try std.testing.expect(std.mem.indexOf(u8, b, needle) != null);
+
+    const m = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(m);
+    try std.testing.expect(std.mem.indexOf(u8, m, ".deep_link_schemes = deep_link_slice") != null);
+}
+
 test "회귀: security-scoped bookmarks — 전 계층 배선 + sandbox bookmark entitlement" {
     // 네이티브: cef.zig 3종 함수 + 풀 + SecurityScope 상수.
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/platform/cef.zig", std.testing.allocator, .limited(2 * 1024 * 1024));

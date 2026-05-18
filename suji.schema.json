@@ -41,6 +41,11 @@
           "type": "boolean",
           "default": false,
           "description": "마지막 창 close 시 코어가 자동 cef.quit(). false면 사용자 코드가 'window:all-closed' 구독 후 직접 quit (Electron canonical 패턴)."
+        },
+        "deepLinkSchemes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "딥링크 URL scheme. macOS .app 번들 Info.plist CFBundleURLTypes 자동 주입 → `myapp://...` 가 OS 레벨에서 이 앱으로 라우팅. 유효 scheme(ALPHA 시작, [A-Za-z0-9+.-])만, 무효는 skip."
         }
       },
       "additionalProperties": false

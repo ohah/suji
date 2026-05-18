@@ -58,6 +58,9 @@ pub const BundleOptions = struct {
     /// Store(App Sandbox + inherit — `assets/entitlements/sandbox/*.plist`).
     /// `suji build --sandbox` / `SUJI_SANDBOX`.
     sandbox: bool = false,
+    /// 딥링크 URL scheme — Info.plist `CFBundleURLTypes` 자동 주입.
+    /// 비어있으면 미주입(기존 Info.plist 무변). `config.app.deep_link_schemes`.
+    deep_link_schemes: []const []const u8 = &.{},
 };
 
 pub fn createBundle(
@@ -89,7 +92,7 @@ pub fn createBundle(
     }
 
     // 1. Info.plist 생성
-    try writeInfoPlist(allocator, app_name, name, version, identifier);
+    try writeInfoPlist(allocator, app_name, name, version, identifier, opts.deep_link_schemes);
 
     // 2. 메인 바이너리 복사
     try copyFile(allocator, exe_path, try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name }));
@@ -118,9 +121,80 @@ pub fn createBundle(
     std.debug.print("[suji] bundle created: {s}\n", .{app_name});
 }
 
-fn writeInfoPlist(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, version: []const u8, identifier: []const u8) !void {
+/// 유효 URL scheme 문자만 (RFC 3986: ALPHA / DIGIT / "+" / "-" / ".").
+/// 첫 글자는 ALPHA. 위반/빈 문자열이면 false → 해당 scheme skip(XML 주입·
+/// 잘못된 plist 방지). 사용자 config 값을 plist 에 그대로 넣기 전 게이트.
+pub fn isValidUrlScheme(s: []const u8) bool {
+    if (s.len == 0) return false;
+    if (!std.ascii.isAlphabetic(s[0])) return false;
+    for (s) |ch| {
+        if (!std.ascii.isAlphanumeric(ch) and ch != '+' and ch != '-' and ch != '.') return false;
+    }
+    return true;
+}
+
+fn writeInfoPlist(
+    allocator: std.mem.Allocator,
+    app_name: []const u8,
+    name: []const u8,
+    version: []const u8,
+    identifier: []const u8,
+    deep_link_schemes: []const []const u8,
+) !void {
     const path = try std.fmt.allocPrint(allocator, "{s}/Contents/Info.plist", .{app_name});
     defer allocator.free(path);
+    const plist = try buildInfoPlist(allocator, name, version, identifier, deep_link_schemes);
+    defer allocator.free(plist);
+
+    const io = runtime.io;
+    var file = try Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
+    var buf: [4096]u8 = undefined;
+    var fw = file.writer(io, &buf);
+    try fw.interface.writeAll(plist);
+    try fw.interface.flush();
+}
+
+/// 메인 앱 Info.plist 문자열 생성(파일쓰기 분리 — 순수·단위 검증 가능).
+/// caller 가 반환 슬라이스 free. deep_link_schemes 비어있거나 전부 무효면
+/// CFBundleURLTypes 미포함(기존 plist 와 바이트 동일 = 무회귀).
+pub fn buildInfoPlist(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    version: []const u8,
+    identifier: []const u8,
+    deep_link_schemes: []const []const u8,
+) ![]u8 {
+    // CFBundleURLTypes — scheme 당 dict 1개. 유효 scheme 만(isValidUrlScheme).
+    // 빈 블록(스킴 없음/전부 무효)이면 Info.plist 무변(기존 동작).
+    var url_types = std.ArrayList(u8).empty;
+    defer url_types.deinit(allocator);
+    for (deep_link_schemes) |scheme| {
+        if (!isValidUrlScheme(scheme)) {
+            std.debug.print("[suji] warning: invalid deep-link scheme '{s}' — skipped\n", .{scheme});
+            continue;
+        }
+        // CFBundleURLName = 검증된 scheme 만(isValidUrlScheme 통과 →
+        // XML-safe 보장). identifier(=config.app.name)는 미검증이라 새
+        // 주입 sink 를 안 만들려고 URLName 에 넣지 않음(라벨이라 무영향).
+        try url_types.print(allocator,
+            \\
+            \\    <dict>
+            \\      <key>CFBundleURLName</key>
+            \\      <string>{s}</string>
+            \\      <key>CFBundleURLSchemes</key>
+            \\      <array><string>{s}</string></array>
+            \\    </dict>
+        , .{ scheme, scheme });
+    }
+    const url_block: []const u8 = if (url_types.items.len == 0) "" else try std.fmt.allocPrint(
+        allocator,
+        \\
+        \\  <key>CFBundleURLTypes</key>
+        \\  <array>{s}
+        \\  </array>
+    , .{url_types.items});
+    defer if (url_block.len > 0) allocator.free(url_block);
 
     const plist = try std.fmt.allocPrint(allocator,
         \\<?xml version="1.0" encoding="UTF-8"?>
@@ -144,21 +218,11 @@ fn writeInfoPlist(allocator: std.mem.Allocator, app_name: []const u8, name: []co
         \\  <key>NSHighResolutionCapable</key>
         \\  <true/>
         \\  <key>NSSupportsAutomaticGraphicsSwitching</key>
-        \\  <true/>
+        \\  <true/>{s}
         \\</dict>
         \\</plist>
-    , .{ name, name, identifier, version, version });
-    defer allocator.free(plist);
-
-    {
-        const io = runtime.io;
-        var file = try Dir.cwd().createFile(io, path, .{});
-        defer file.close(io);
-        var buf: [4096]u8 = undefined;
-        var fw = file.writer(io, &buf);
-        try fw.interface.writeAll(plist);
-        try fw.interface.flush();
-    }
+    , .{ name, name, identifier, version, version, url_block });
+    return plist;
 }
 
 fn copyCefFramework(allocator: std.mem.Allocator, app_name: []const u8, opts: BundleOptions) !void {
