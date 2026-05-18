@@ -12,6 +12,7 @@
 #define SUJI_CORE_H
 
 #include <stdint.h>
+#include <stddef.h> /* size_t — suji_core_set_permissions */
 
 #ifdef __cplusplus
 extern "C" {
@@ -77,6 +78,24 @@ uint64_t suji_core_on(const char *event_name, suji_core_event_cb callback, void 
 
 /* 리스너 해제. */
 void suji_core_off(uint64_t listener_id);
+
+/* 권한 정책 JSON 설정(Tauri 패리티 — 모바일 호스트가 init 후 1회/변경 시).
+ * 형식: {"shell":{"allowedPaths":[...],"allowedExternalUrls":[...]},
+ *        "dialog":{"allowedPaths":[...]},"fs":{"allowedRoots":[...]}}
+ * json_ptr: JSON 바이트(호스트 소유 — 코어가 복사하므로 호출 후 free 가능),
+ * len: 바이트 수(널종단 제외). NULL/len=0 → 정책 해제(전체 opt-in 허용).
+ * uniform opt-in: 정책/패밀리 키 부재 → 허용(비파괴), 키 존재 → enforce
+ * ([]=deny-all / ["*"]=allow / 특정=제한). 반환: 0=성공, -1=parse 오류. */
+int suji_core_set_permissions(const char *json_ptr, size_t len);
+
+/* 리소스 접근 허용 여부 질의(호스트가 네이티브 액션 전 호출).
+ * family: IPC cmd 명 — "shell_open_external"(value=url),
+ *   "shell_open_path"/"shell_show_item_in_folder"/"shell_trash_item"(path),
+ *   "dialog_show_open_dialog"/"dialog_show_save_dialog"(defaultPath),
+ *   "fs_*"(path). value: 검사할 path 또는 url.
+ * is_backend: 1=backend SDK 호출(전부 우회), 0=프론트/네이티브(enforce).
+ * 반환: 1=허용, 0=거부. (정책/패밀리 미설정 시 1=허용 — opt-in.) */
+int suji_core_permission_check(const char *family, const char *value, int is_backend);
 
 #ifdef __cplusplus
 }

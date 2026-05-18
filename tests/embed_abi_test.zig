@@ -192,3 +192,68 @@ test "embed: suji_core_last_error 가 실패 사유를 노출" {
     try std.testing.expectEqual(@as(c_int, -1), c.suji_core_init());
     try std.testing.expect(has("already initialized"));
 }
+
+test "embed: suji_core_set_permissions + permission_check (opt-in/enforce/backend 우회)" {
+    const c = struct {
+        extern fn suji_core_init() c_int;
+        extern fn suji_core_destroy() void;
+        extern fn suji_core_set_permissions(json_ptr: [*c]const u8, len: usize) c_int;
+        extern fn suji_core_permission_check(family: [*c]const u8, value: [*c]const u8, is_backend: c_int) c_int;
+    };
+    c.suji_core_destroy();
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_init());
+    defer c.suji_core_destroy();
+
+    const chk = c.suji_core_permission_check;
+
+    // 1) 정책 미설정 → 전부 허용(opt-in 비파괴).
+    try std.testing.expectEqual(@as(c_int, 1), chk("shell_open_external", "https://evil.com/", 0));
+    try std.testing.expectEqual(@as(c_int, 1), chk("fs_read_file", "/etc/passwd", 0));
+
+    // 2) 정책 설정 — shell url glob + dialog path, fs/shell_path 키는 부재.
+    const pol = "{\"shell\":{\"allowedExternalUrls\":[\"https://*.ok.com/*\"]},\"dialog\":{\"allowedPaths\":[\"/data/app\"]}}";
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_set_permissions(@ptrCast(pol.ptr), pol.len));
+
+    // shell_open_external: 매치 허용 / 비매치 거부.
+    try std.testing.expectEqual(@as(c_int, 1), chk("shell_open_external", "https://a.ok.com/x", 0));
+    try std.testing.expectEqual(@as(c_int, 0), chk("shell_open_external", "https://evil.com/", 0));
+    // backend 우회 — 거부 대상도 1.
+    try std.testing.expectEqual(@as(c_int, 1), chk("shell_open_external", "https://evil.com/", 1));
+    // dialog path: 매치/비매치/빈 defaultPath 무제약/`..` 거부.
+    try std.testing.expectEqual(@as(c_int, 1), chk("dialog_show_open_dialog", "/data/app/f", 0));
+    try std.testing.expectEqual(@as(c_int, 0), chk("dialog_show_save_dialog", "/etc/x", 0));
+    try std.testing.expectEqual(@as(c_int, 1), chk("dialog_show_open_dialog", "", 0));
+    try std.testing.expectEqual(@as(c_int, 0), chk("dialog_show_open_dialog", "/data/app/../etc", 0));
+    // fs/shell_path 키 부재 → opt-in 허용 유지.
+    try std.testing.expectEqual(@as(c_int, 1), chk("fs_read_file", "/etc/passwd", 0));
+    try std.testing.expectEqual(@as(c_int, 1), chk("shell_open_path", "/anything", 0));
+    // 게이트 대상 아닌 family → 허용.
+    try std.testing.expectEqual(@as(c_int, 1), chk("clipboard_read_text", "x", 0));
+
+    // 3) 키 존재 빈 배열 → enforce deny-all.
+    const denyp = "{\"fs\":{\"allowedRoots\":[]}}";
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_set_permissions(@ptrCast(denyp.ptr), denyp.len));
+    try std.testing.expectEqual(@as(c_int, 0), chk("fs_read_file", "/data/app/ok", 0));
+    try std.testing.expectEqual(@as(c_int, 1), chk("fs_read_file", "/data/app/ok", 1)); // backend 우회
+
+    // 4) ["*"] → allow-all.
+    const starp = "{\"fs\":{\"allowedRoots\":[\"*\"]}}";
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_set_permissions(@ptrCast(starp.ptr), starp.len));
+    try std.testing.expectEqual(@as(c_int, 1), chk("fs_read_file", "/anywhere", 0));
+    try std.testing.expectEqual(@as(c_int, 0), chk("fs_read_file", "/a/../b", 0)); // `..` 는 `*` 라도 거부
+
+    // 5) 정책 해제(null) → 전부 허용 복귀.
+    try std.testing.expectEqual(@as(c_int, 0), c.suji_core_set_permissions(null, 0));
+    try std.testing.expectEqual(@as(c_int, 1), chk("fs_read_file", "/etc/passwd", 0));
+
+    // 6) 잘못된 JSON → -1, 정책 미변경(직전 해제 상태 유지=허용).
+    const badp = "{not json";
+    try std.testing.expectEqual(@as(c_int, -1), c.suji_core_set_permissions(@ptrCast(badp.ptr), badp.len));
+    try std.testing.expectEqual(@as(c_int, 1), chk("fs_read_file", "/etc/passwd", 0));
+
+    // 7) null family/value → fail-closed(0), crash 없음.
+    try std.testing.expectEqual(@as(c_int, 0), chk(null, "x", 0));
+    try std.testing.expectEqual(@as(c_int, 0), chk("fs_read_file", null, 0));
+    // backend 우회는 null 검사보다 우선(is_backend!=0 → 1).
+    try std.testing.expectEqual(@as(c_int, 1), chk(null, null, 1));
+}

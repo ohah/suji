@@ -2584,82 +2584,17 @@ pub fn setGlobalConfig(c: *const suji.Config) void {
 /// BackendRegistry __core__ 채널 핸들러가 set, frontend IPC origin은 false 유지.
 threadlocal var g_in_backend_invoke: bool = false;
 
-/// path를 separator 단위로 split해 단일 ".." segment가 있는지 검사.
-/// substring 검사 (`my..file.txt`도 reject되는 false positive)와 달리 정확한 component 단위.
-fn hasParentTraversalSegment(path: []const u8) bool {
-    var iter = std.mem.tokenizeAny(u8, path, "/\\");
-    while (iter.next()) |seg| {
-        if (std.mem.eql(u8, seg, "..")) return true;
-    }
-    return false;
-}
-
-/// `prefix` 다음 위치가 separator 또는 string 끝인지 — boundary check로
-/// `/foo/barX` vs root `/foo/bar` prefix-extension attack 차단.
-fn pathHasRootBoundary(path: []const u8, prefix: []const u8) bool {
-    if (!std.mem.startsWith(u8, path, prefix)) return false;
-    if (path.len == prefix.len) return true;
-    // root가 separator로 끝나면 startsWith만으로 boundary OK.
-    if (prefix.len > 0 and (prefix[prefix.len - 1] == '/' or prefix[prefix.len - 1] == '\\')) return true;
-    const next = path[prefix.len];
-    return next == '/' or next == '\\';
-}
-
-/// path 가 roots 중 하나에 prefix+boundary 매치하는지. `..` component 는 항상 거부,
-/// `*` element 는 무제한 escape hatch. (cfg/empty 정책은 호출부가 결정 — fs 는
-/// default-deny, shell/dialog 는 opt-in.)
-fn pathAllowedInRoots(path: []const u8, roots: []const [:0]const u8) bool {
-    if (hasParentTraversalSegment(path)) return false;
-    for (roots) |root| {
-        if (std.mem.eql(u8, root, "*")) return true;
-        if (pathHasRootBoundary(path, root)) return true;
-    }
-    return false;
-}
-
-/// url 이 patterns(glob, util.matchGlob 재사용 — D-1) 중 하나에 매치하는지.
-/// `*` element 는 무제한 escape hatch.
-fn urlAllowedInList(url: []const u8, patterns: []const [:0]const u8) bool {
-    for (patterns) |p| {
-        if (std.mem.eql(u8, p, "*")) return true;
-        if (util.matchGlob(p, url)) return true;
-    }
-    return false;
-}
-
+/// fs frontend sandbox — fs 는 **default-deny** (cfg null/roots empty → 차단).
+/// 공통 매처는 util.* (CEF-free, 모바일 embed 와 공용).
 fn isPathAllowedForFrontend(path: []const u8) bool {
     const cfg = g_config orelse return false;
     const roots = cfg.fs.allowed_roots;
-    if (roots.len == 0) return false; // fs: default-deny (고위험 직접 FS)
-    return pathAllowedInRoots(path, roots);
+    if (roots.len == 0) return false;
+    return util.pathAllowedInRoots(path, roots);
 }
 
-test "hasParentTraversalSegment: component vs substring" {
-    try std.testing.expect(hasParentTraversalSegment("../etc/passwd"));
-    try std.testing.expect(hasParentTraversalSegment("/foo/../bar"));
-    try std.testing.expect(hasParentTraversalSegment("foo/bar/.."));
-    try std.testing.expect(hasParentTraversalSegment("foo\\..\\bar"));
-    // false positive 방지 — `..`이 component가 아닌 filename 일부면 통과.
-    try std.testing.expect(!hasParentTraversalSegment("/foo/my..file.txt"));
-    try std.testing.expect(!hasParentTraversalSegment("/foo/..hidden"));
-    try std.testing.expect(!hasParentTraversalSegment("/foo/archive..bak"));
-    try std.testing.expect(!hasParentTraversalSegment("/normal/path"));
-}
-
-test "pathHasRootBoundary: separator boundary 가드 (prefix-extension 차단)" {
-    // 정상 — root 정확 매치 또는 separator로 끝나면 허용.
-    try std.testing.expect(pathHasRootBoundary("/foo/bar", "/foo/bar"));
-    try std.testing.expect(pathHasRootBoundary("/foo/bar/baz", "/foo/bar"));
-    try std.testing.expect(pathHasRootBoundary("/foo/bar/", "/foo/bar"));
-    try std.testing.expect(pathHasRootBoundary("/foo/bar/baz", "/foo/bar/"));
-    // 차단 — prefix-extension attack.
-    try std.testing.expect(!pathHasRootBoundary("/foo/barX", "/foo/bar"));
-    try std.testing.expect(!pathHasRootBoundary("/foo/bar_secret", "/foo/bar"));
-    try std.testing.expect(!pathHasRootBoundary("/other", "/foo/bar"));
-    // Windows 경로 separator.
-    try std.testing.expect(pathHasRootBoundary("C:\\foo\\bar\\baz", "C:\\foo\\bar"));
-    try std.testing.expect(!pathHasRootBoundary("C:\\foo\\barX", "C:\\foo\\bar"));
-}
+// hasParentTraversalSegment / pathHasRootBoundary / urlAllowedInList 단위 테스트는
+// util.zig 로 이동(공통 매처와 함께 — 데스크톱/모바일 embed 공용).
 
 test "isPathAllowedForFrontend: 종합 시나리오" {
     // g_config은 process global이라 test 사이 reset 필요.
@@ -2736,17 +2671,6 @@ test "fsSandboxCheck: g_in_backend_invoke 마커는 sandbox 우회" {
     try std.testing.expect(be == null);
 }
 
-test "urlAllowedInList: glob + escape hatch" {
-    const allow = [_][:0]const u8{ "https://*.example.com/*", "https://exact.test/" };
-    try std.testing.expect(urlAllowedInList("https://api.example.com/v1", &allow));
-    try std.testing.expect(urlAllowedInList("https://exact.test/", &allow));
-    try std.testing.expect(!urlAllowedInList("https://evil.com/", &allow));
-    try std.testing.expect(!urlAllowedInList("http://api.example.com/", &allow)); // scheme 불일치
-    const star = [_][:0]const u8{"*"};
-    try std.testing.expect(urlAllowedInList("anything://x", &star));
-    try std.testing.expect(!urlAllowedInList("x", &[_][:0]const u8{})); // 빈 = deny
-}
-
 test "shell/dialog 게이트: opt-in (키 부재=레거시 허용, 존재=enforce) + backend 우회" {
     const saved_cfg = g_config;
     const saved_marker = g_in_backend_invoke;
@@ -2819,14 +2743,14 @@ fn shellPathGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const
     if (g_in_backend_invoke) return null;
     const cfg = g_config orelse return null;
     const list = cfg.shell.allowed_paths orelse return null;
-    if (pathAllowedInRoots(path, list)) return null;
+    if (util.pathAllowedInRoots(path, list)) return null;
     return coreError(response_buf, cmd, "forbidden");
 }
 fn shellUrlGate(response_buf: []u8, cmd: []const u8, url: []const u8) ?[]const u8 {
     if (g_in_backend_invoke) return null;
     const cfg = g_config orelse return null;
     const list = cfg.shell.allowed_external_urls orelse return null;
-    if (urlAllowedInList(url, list)) return null;
+    if (util.urlAllowedInList(url, list)) return null;
     return coreError(response_buf, cmd, "forbidden");
 }
 /// dialog defaultPath 게이트 — 빈 defaultPath 는 무제약(다이얼로그 자체가 사용자 중재).
@@ -2835,7 +2759,7 @@ fn dialogPathGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]cons
     if (path.len == 0) return null;
     const cfg = g_config orelse return null;
     const list = cfg.dialog.allowed_paths orelse return null;
-    if (pathAllowedInRoots(path, list)) return null;
+    if (util.pathAllowedInRoots(path, list)) return null;
     return coreError(response_buf, cmd, "forbidden");
 }
 

@@ -65,6 +65,7 @@ pub fn init(allocator: std.mem.Allocator, io: std.Io) Error!void {
 }
 
 pub fn deinit() void {
+    freePerm();
     const state = g_state orelse return;
     state.event_bus.deinit();
     state.registry.deinit();
@@ -211,4 +212,120 @@ export fn suji_core_on(
 export fn suji_core_off(listener_id: u64) void {
     const state = g_state orelse return;
     state.event_bus.off(listener_id);
+}
+
+// ============================================================
+// 권한 정책 — 모바일 호스트가 set, 네이티브 액션 전 check (Tauri 패리티).
+// 게이트 로직은 util.* 단일 출처 재사용 → Swift/Kotlin glob 재구현 0.
+// 모바일은 **uniform opt-in**: 정책/패밀리 키 부재 → 허용(비파괴 — 기존
+// 모바일 fs/shell 동작 불변). 키 존재 → enforce(`[]`=deny-all/`["*"]`=allow/
+// 특정=제한). 데스크톱 fs default-deny 와 다름(모바일은 OS 샌드박스가 하드
+// 경계 + 기존 동작 보존 — 의도적, 문서 명시).
+// ============================================================
+
+const PermPolicy = struct {
+    parsed: std.json.Parsed(std.json.Value),
+    shell_paths: ?[]const [:0]const u8 = null,
+    shell_urls: ?[]const [:0]const u8 = null,
+    dialog_paths: ?[]const [:0]const u8 = null,
+    fs_roots: ?[]const [:0]const u8 = null,
+};
+var g_perm: ?PermPolicy = null;
+
+fn freePerm() void {
+    if (g_perm) |p| {
+        p.parsed.deinit();
+        g_perm = null;
+    }
+}
+
+/// obj[key] 가 string 배열이면 arena 로 dupZ 한 슬라이스, 키 부재면 null,
+/// 키 존재하나 비배열이면 빈(non-null) 슬라이스 = enforce deny-all.
+/// config.zig parseAllowList 와 형태 유사하나 공유 불가 — embed 는 CEF-free
+/// 경계라 config(@import("window") 경유) 미import + 모바일은 `~` expand 금지
+/// (호스트가 이미 해석된 샌드박스 컨테이너 경로 전달, HOME env 무의미).
+fn permList(a: std.mem.Allocator, obj: std.json.ObjectMap, key: []const u8) ?[]const [:0]const u8 {
+    const v = obj.get(key) orelse return null;
+    if (v != .array) return &.{};
+    var list = std.ArrayList([:0]const u8).empty;
+    for (v.array.items) |item| {
+        if (item != .string) continue;
+        const s = a.dupeZ(u8, item.string) catch continue;
+        list.append(a, s) catch continue;
+    }
+    return list.toOwnedSlice(a) catch &.{};
+}
+
+/// 권한 정책 JSON 설정(호스트가 init 후 1회 / 변경 시 호출). null/len=0 →
+/// 정책 해제(전체 opt-in 허용). 0=성공, -1=parse 오류. 호스트는 호출 후
+/// json_ptr 를 free 해도 됨(코어가 복사 소유).
+export fn suji_core_set_permissions(json_ptr: [*c]const u8, len: usize) c_int {
+    freePerm();
+    if (json_ptr == null or len == 0) return 0;
+    const bytes = @as([*]const u8, @ptrCast(json_ptr))[0..len];
+
+    const parsed = std.json.parseFromSlice(std.json.Value, std.heap.c_allocator, bytes, .{}) catch {
+        setErr("permissions json parse error");
+        return -1;
+    };
+    if (parsed.value != .object) {
+        parsed.deinit();
+        setErr("permissions json not object");
+        return -1;
+    }
+    const a = parsed.arena.allocator();
+    const root = parsed.value.object;
+    var pol = PermPolicy{ .parsed = parsed };
+    if (root.get("shell")) |sh| if (sh == .object) {
+        pol.shell_paths = permList(a, sh.object, "allowedPaths");
+        pol.shell_urls = permList(a, sh.object, "allowedExternalUrls");
+    };
+    if (root.get("dialog")) |dl| if (dl == .object) {
+        pol.dialog_paths = permList(a, dl.object, "allowedPaths");
+    };
+    if (root.get("fs")) |fsv| if (fsv == .object) {
+        pol.fs_roots = permList(a, fsv.object, "allowedRoots");
+    };
+    g_perm = pol;
+    return 0;
+}
+
+/// family(IPC cmd 명)·value(path 또는 url)가 정책 허용인지. is_backend!=0 →
+/// 무조건 허용(backend SDK 우회, desktop g_in_backend_invoke 동형).
+/// 1=허용, 0=거부. (정책/패밀리 키 미설정 → 1=허용, opt-in.)
+export fn suji_core_permission_check(
+    family: [*c]const u8,
+    value: [*c]const u8,
+    is_backend: c_int,
+) c_int {
+    if (is_backend != 0) return 1;
+    // 보안 C ABI — null 입력은 fail-closed(거부). cSpan(null) 크래시 회피.
+    if (family == null or value == null) return 0;
+    const fam = util.cSpan(family);
+    const val = util.cSpan(value);
+    const pol = g_perm orelse return 1;
+
+    if (std.mem.eql(u8, fam, "shell_open_external")) {
+        const list = pol.shell_urls orelse return 1;
+        return if (util.urlAllowedInList(val, list)) 1 else 0;
+    }
+    if (std.mem.eql(u8, fam, "shell_open_path") or
+        std.mem.eql(u8, fam, "shell_show_item_in_folder") or
+        std.mem.eql(u8, fam, "shell_trash_item"))
+    {
+        const list = pol.shell_paths orelse return 1;
+        return if (util.pathAllowedInRoots(val, list)) 1 else 0;
+    }
+    if (std.mem.eql(u8, fam, "dialog_show_open_dialog") or
+        std.mem.eql(u8, fam, "dialog_show_save_dialog"))
+    {
+        if (val.len == 0) return 1; // 빈 defaultPath 무제약(사용자 중재)
+        const list = pol.dialog_paths orelse return 1;
+        return if (util.pathAllowedInRoots(val, list)) 1 else 0;
+    }
+    if (std.mem.startsWith(u8, fam, "fs_")) {
+        const list = pol.fs_roots orelse return 1;
+        return if (util.pathAllowedInRoots(val, list)) 1 else 0;
+    }
+    return 1; // 게이트 대상 아닌 family → 허용
 }

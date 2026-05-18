@@ -696,3 +696,83 @@ test "matchGlob: backtracking 정확성" {
     try std.testing.expect(matchGlob("foo*bar*baz", "foobarbaz"));
     try std.testing.expect(!matchGlob("foo*bar*baz", "foobarbax"));
 }
+
+// ============================================
+// 권한 allowlist 매처 — CEF-free (데스크톱 main.zig + 모바일 embed.zig 공용).
+// cfg/empty 정책(fs default-deny vs shell/dialog opt-in)은 호출부가 결정.
+// ============================================
+
+/// path를 separator 단위로 split해 단일 ".." segment가 있는지 검사.
+/// substring 검사(`my..file.txt` false positive)와 달리 정확한 component 단위.
+pub fn hasParentTraversalSegment(path: []const u8) bool {
+    var iter = std.mem.tokenizeAny(u8, path, "/\\");
+    while (iter.next()) |seg| {
+        if (std.mem.eql(u8, seg, "..")) return true;
+    }
+    return false;
+}
+
+/// `prefix` 다음 위치가 separator 또는 string 끝인지 — boundary check로
+/// `/foo/barX` vs root `/foo/bar` prefix-extension attack 차단.
+pub fn pathHasRootBoundary(path: []const u8, prefix: []const u8) bool {
+    if (!std.mem.startsWith(u8, path, prefix)) return false;
+    if (path.len == prefix.len) return true;
+    if (prefix.len > 0 and (prefix[prefix.len - 1] == '/' or prefix[prefix.len - 1] == '\\')) return true;
+    const next = path[prefix.len];
+    return next == '/' or next == '\\';
+}
+
+/// path 가 roots 중 하나에 prefix+boundary 매치하는지. `..` component 는 항상 거부,
+/// `*` element 는 무제한 escape hatch.
+pub fn pathAllowedInRoots(path: []const u8, roots: []const [:0]const u8) bool {
+    if (hasParentTraversalSegment(path)) return false;
+    for (roots) |root| {
+        if (std.mem.eql(u8, root, "*")) return true;
+        if (pathHasRootBoundary(path, root)) return true;
+    }
+    return false;
+}
+
+/// url 이 patterns(glob, matchGlob — D-1) 중 하나에 매치하는지.
+/// `*` element 는 무제한 escape hatch.
+pub fn urlAllowedInList(url: []const u8, patterns: []const [:0]const u8) bool {
+    for (patterns) |p| {
+        if (std.mem.eql(u8, p, "*")) return true;
+        if (matchGlob(p, url)) return true;
+    }
+    return false;
+}
+
+test "hasParentTraversalSegment: component vs substring" {
+    try std.testing.expect(hasParentTraversalSegment("../etc/passwd"));
+    try std.testing.expect(hasParentTraversalSegment("/foo/../bar"));
+    try std.testing.expect(hasParentTraversalSegment("foo/bar/.."));
+    try std.testing.expect(hasParentTraversalSegment("foo\\..\\bar"));
+    try std.testing.expect(!hasParentTraversalSegment("/foo/my..file.txt"));
+    try std.testing.expect(!hasParentTraversalSegment("/foo/..hidden"));
+    try std.testing.expect(!hasParentTraversalSegment("/foo/archive..bak"));
+    try std.testing.expect(!hasParentTraversalSegment("/normal/path"));
+}
+
+test "pathHasRootBoundary: separator boundary 가드 (prefix-extension 차단)" {
+    try std.testing.expect(pathHasRootBoundary("/foo/bar", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("/foo/bar/baz", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("/foo/bar/", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("/foo/bar/baz", "/foo/bar/"));
+    try std.testing.expect(!pathHasRootBoundary("/foo/barX", "/foo/bar"));
+    try std.testing.expect(!pathHasRootBoundary("/foo/bar_secret", "/foo/bar"));
+    try std.testing.expect(!pathHasRootBoundary("/other", "/foo/bar"));
+    try std.testing.expect(pathHasRootBoundary("C:\\foo\\bar\\baz", "C:\\foo\\bar"));
+    try std.testing.expect(!pathHasRootBoundary("C:\\foo\\barX", "C:\\foo\\bar"));
+}
+
+test "urlAllowedInList: glob + escape hatch" {
+    const allow = [_][:0]const u8{ "https://*.example.com/*", "https://exact.test/" };
+    try std.testing.expect(urlAllowedInList("https://api.example.com/v1", &allow));
+    try std.testing.expect(urlAllowedInList("https://exact.test/", &allow));
+    try std.testing.expect(!urlAllowedInList("https://evil.com/", &allow));
+    try std.testing.expect(!urlAllowedInList("http://api.example.com/", &allow));
+    const star = [_][:0]const u8{"*"};
+    try std.testing.expect(urlAllowedInList("anything://x", &star));
+    try std.testing.expect(!urlAllowedInList("x", &[_][:0]const u8{}));
+}

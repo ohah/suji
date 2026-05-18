@@ -3059,12 +3059,23 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "pub const Fs = struct") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "allowed_roots") != null);
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "allowedRoots") != null);
+
+    // 공통 매처는 util.zig 로 이동(CEF-free — 데스크톱 main + 모바일 embed 공용).
+    const util_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/util.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(util_src);
+    // main 은 util.* 로 위임.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "util.pathAllowedInRoots") != null);
     // Path traversal은 component 단위로 검사 (substring 아님 — false positive 방지).
-    try std.testing.expect(std.mem.indexOf(u8, main_src, "hasParentTraversalSegment") != null);
+    try std.testing.expect(std.mem.indexOf(u8, util_src, "pub fn hasParentTraversalSegment") != null);
     // root prefix는 separator boundary 가드 — /foo/barX vs /foo/bar 차단.
-    try std.testing.expect(std.mem.indexOf(u8, main_src, "pathHasRootBoundary") != null);
+    try std.testing.expect(std.mem.indexOf(u8, util_src, "pub fn pathHasRootBoundary") != null);
     // wildcard "*"는 element 순회 — ["*","..."] 같은 mixed config도 escape.
-    try std.testing.expect(std.mem.indexOf(u8, main_src, "if (std.mem.eql(u8, root, \"*\")) return true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, util_src, "if (std.mem.eql(u8, root, \"*\")) return true") != null);
     // ~ 확장은 config load 시 사전 처리 — 핫 패스 expandHome 제거.
     try std.testing.expect(std.mem.indexOf(u8, cfg_src, "expandHomeAtLoad") != null);
 
