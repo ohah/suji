@@ -46,6 +46,9 @@ export const sqlite = {
    */
   async open(path: string): Promise<number> {
     const r = await call("sql:open", { path });
+    if (typeof r?.dbId !== "number") {
+      throw new Error("sqlite: malformed open response (no dbId)");
+    }
     return r.dbId as number;
   },
 
@@ -61,7 +64,7 @@ export const sqlite = {
     params: SqlParam[] = [],
   ): Promise<T[]> {
     const r = await call("sql:query", { dbId: db, sql, params });
-    return (r.rows ?? []) as T[];
+    return (r?.rows ?? []) as T[];
   },
 
   /** Close a database handle. */
