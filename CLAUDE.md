@@ -491,11 +491,13 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
   경로 재사용) + `suji_core_last_error`(단일 -1 보강, 사람이 읽는 사유 — 정적,
   free 금지; zero-native `last_error_name` 차용)
   + `suji_core_set_permissions(json,len)` / `suji_core_permission_check(family,
-  value,is_backend)` — **모바일 권한 게이트(Tauri 패리티) Stage 1**: 게이트
-  로직은 `util.*`(CEF-free) 단일 출처 재사용, 호스트가 init 후 정책 JSON
-  set → 네이티브 shell/dialog/fs 액션 전 check. 모바일 uniform opt-in(키
-  부재=허용/비파괴, 존재=enforce). null fail-closed. Stage 2(Swift/Kotlin
-  호스트 글루)는 후속
+  value,is_backend)` — **모바일 권한 게이트(Tauri 패리티) 완료**: 게이트
+  로직은 `util.*`(CEF-free) 단일 출처 재사용(Swift/Kotlin 보안 로직 0).
+  호스트(iOS `_shared` Swift / Android `_shared` Kotlin·JNI)가 init 후 앱
+  컨테이너 정책 set → 네이티브 shell/fs 액션 직전 check. 모바일 uniform
+  opt-in(키 부재=허용/비파괴, 존재=enforce). null fail-closed. dialog 는
+  OS 문서 피커(사용자 중재)라 미게이트. **iOS 실 시뮬 + Android 실 에뮬
+  기능 e2e 양쪽 37/37 검증**(ios-e2e.sh/android-e2e.sh 권한 5케이스)
   ([`include/suji_core.h`](./include/suji_core.h), 수기 동기화).
 - `main.zig`(CEF 호스트)도 `embed.init/registry()/eventBus()` 경유 — 호스트는
   embed 경계로만 코어 접근, 경계가 CEF 의존을 컴파일 단계에서 차단.

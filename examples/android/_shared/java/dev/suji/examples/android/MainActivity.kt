@@ -55,6 +55,21 @@ class MainActivity : Activity() {
         active = this
 
         check(SujiCore.nativeInit() == 0) { "suji_core_init failed" }
+
+        // 권한 정책(Stage 2, Tauri 패리티) — 앱 자신의 외부 Documents 컨테이너로
+        // 제한. app_get_path("documents") 와 동일 경로(설치마다 달라 동적 구성).
+        // uniform opt-in: 키 있는 family 만 enforce. 정책 JSON 도 응답과 동일하게
+        // JSONObject 로 직렬화 — 경로 escape 안전(수동 조립 금지 규칙 일관).
+        // dialog 는 OS SAF 피커(사용자 중재)라 미게이트 → 생략(데드 config 회피).
+        val permDocs = getExternalFilesDir("Documents")?.path ?: filesDir.path
+        val policyJson = JSONObject().apply {
+            put("shell", JSONObject().put(
+                "allowedExternalUrls", org.json.JSONArray().put("https://example.com/*")))
+            put("fs", JSONObject().put(
+                "allowedRoots", org.json.JSONArray().put(permDocs)))
+        }.toString()
+        SujiCore.nativeSetPermissions(policyJson)
+
         tickListenerId = SujiCore.nativeRegisterEvents("demo:tick")
         // 백엔드 없는 모바일에서 invoke 를 네이티브로 응답.
         SujiCore.nativeRegisterHandler("ping")
@@ -130,6 +145,19 @@ class MainActivity : Activity() {
         val obj = try { JSONObject(json) } catch (e: Exception) { JSONObject() }
         val cmd = obj.optString("cmd", "")
         val resp = JSONObject().put("from", "zig-core").put("cmd", cmd)
+
+        // 권한 게이트(Stage 2) — 게이트 대상이면 네이티브 액션 *전* 코어 질의.
+        // 데스크톱/iOS 와 동형(코어 util.* 단일 출처). non-gated cmd 는 통과.
+        val gateVal = when (cmd) {
+            "shell_open_external" -> obj.optString("url", "")
+            "fs_read_file", "fs_write_file", "fs_readdir",
+            "fs_stat", "fs_mkdir", "fs_rm" -> obj.optString("path", "")
+            else -> null
+        }
+        if (gateVal != null && SujiCore.nativePermissionCheck(cmd, gateVal, 0) != 1) {
+            return resp.put("success", false).put("error", "forbidden").toString()
+        }
+
         val cb = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         when (cmd) {
             "clipboard_read_text" ->

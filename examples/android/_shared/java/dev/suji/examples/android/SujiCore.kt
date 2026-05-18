@@ -12,6 +12,10 @@ object SujiCore {
     external fun nativeOff(id: Long)
     external fun nativeRegisterHandler(channel: String): Int
 
+    /// 권한 게이트(Stage 2) — 코어 suji_core_set_permissions/permission_check.
+    external fun nativeSetPermissions(json: String): Int
+    external fun nativePermissionCheck(family: String, value: String, isBackend: Int): Int
+
     /// 정적 링크된 Rust(.a)/Go(.so) 백엔드를 채널에 등록 (iOS 와 동형).
     external fun nativeRegisterStaticBackends()
 

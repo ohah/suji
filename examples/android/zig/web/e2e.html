@@ -217,14 +217,45 @@
     await core({ cmd: "fs_rm", path: dir, recursive: true }); // cleanup
   }
 
+  // Stage 2 권한 게이트 — 호스트 정책(fs.allowedRoots=[Documents],
+  // shell.allowedExternalUrls=["https://example.com/*"])이 네이티브 액션 전
+  // 실제로 enforce 되는지 실 에뮬에서 자가검증(iOS e2e 와 동일).
+  async function permissionsSuite() {
+    var docs = (await core({ cmd: "app_get_path", name: "documents" })).path;
+    var temp = (await core({ cmd: "app_get_path", name: "temp" })).path;
+
+    var okp = docs + "/perm-allowed.txt";
+    var w = await core({ cmd: "fs_write_file", path: okp, text: "ok" });
+    var r = await core({ cmd: "fs_read_file", path: okp });
+    check("perm: allowed fs path → success",
+          w && w.success === true && r && r.success === true && r.text === "ok");
+    await core({ cmd: "fs_rm", path: okp });
+
+    var dp = temp + "/perm-denied.txt";
+    var dr = await core({ cmd: "fs_read_file", path: dp });
+    check("perm: denied fs path → forbidden",
+          dr && dr.success === false && dr.error === "forbidden");
+    var dw = await core({ cmd: "fs_write_file", path: dp, text: "x" });
+    check("perm: denied fs write → forbidden",
+          dw && dw.success === false && dw.error === "forbidden");
+
+    var eu = await core({ cmd: "shell_open_external", url: "https://evil.com/" });
+    check("perm: denied url → forbidden",
+          eu && eu.success === false && eu.error === "forbidden");
+    var au = await core({ cmd: "shell_open_external", url: "https://example.com/x" });
+    check("perm: allowed url → not forbidden",
+          au && au.error !== "forbidden" && typeof au.success === "boolean");
+  }
+
   async function run() {
     try {
       await clipboardSuite(); await safeStorageSuite();
       await appMetaSuite(); await clipboardExtSuite();
       await shellExtSuite(); await fsSuite();
+      await permissionsSuite();
     } catch (e) { check("suite threw: " + e, false); }
     var fail = cases.filter(function (c) { return !c.ok; }).length;
-    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt+shellExt+fs+ext2",
+    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt+shellExt+fs+permissions+ext2",
                     ok: fail === 0, fail: fail, cases: cases };
     document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
     document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";

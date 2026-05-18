@@ -65,6 +65,24 @@ private func sujiE2EReportHandler(
 // JSONSerialization 으로 직렬화해 text 이스케이프 drift 방지(수동 조립 금지).
 // WKScriptMessageHandler(메인 스레드)+single-thread 코어 경로라 UIPasteboard
 // 접근 안전. 미지원 cmd 는 데스크톱 coreError 와 동형(unknown_cmd).
+// 권한 게이트(Stage 2) — 게이트 대상 family 의 검사값(url/path) 추출, 그 외 nil.
+// 데스크톱 main.zig 의 shell/dialog/fs 게이트와 동형(코어 util.* 단일 출처를
+// suji_core_permission_check C ABI 로 호출 — Swift 보안 로직 0).
+private func sujiGateValue(_ cmd: String, _ obj: [String: Any]) -> String? {
+    switch cmd {
+    case "shell_open_external": return (obj["url"] as? String) ?? ""
+    case "fs_read_file", "fs_write_file", "fs_readdir",
+         "fs_stat", "fs_mkdir", "fs_rm":
+        return (obj["path"] as? String) ?? ""
+    default: return nil
+    }
+}
+private func sujiPermitted(_ family: String, _ value: String) -> Bool {
+    return family.withCString { f in
+        value.withCString { v in suji_core_permission_check(f, v, 0) == 1 }
+    }
+}
+
 private func sujiCoreDispatch(
     _ channel: UnsafePointer<CChar>?, _ json: UnsafePointer<CChar>?
 ) -> UnsafePointer<CChar>? {
@@ -74,6 +92,17 @@ private func sujiCoreDispatch(
     let cmd = (obj["cmd"] as? String) ?? ""
 
     var resp: [String: Any] = ["from": "zig-core", "cmd": cmd]
+
+    // 게이트 대상이면 네이티브 액션 *전* 코어에 질의 — 거부 시 forbidden
+    // (데스크톱 coreError 와 키-동형). non-gated cmd 는 sujiGateValue=nil 로 통과.
+    if let gv = sujiGateValue(cmd, obj), !sujiPermitted(cmd, gv) {
+        resp["success"] = false
+        resp["error"] = "forbidden"
+        let d = (try? JSONSerialization.data(withJSONObject: resp))
+            ?? Data(#"{"from":"zig-core","success":false,"error":"serialize"}"#.utf8)
+        return UnsafePointer(strdup(String(decoding: d, as: UTF8.self)))
+    }
+
     switch cmd {
     case "clipboard_read_text":
         resp["text"] = UIPasteboard.general.string ?? ""
@@ -319,6 +348,24 @@ final class SujiHostViewController: UIViewController, WKScriptMessageHandler {
 
         guard suji_core_init() == 0 else {
             fatalError("suji_core_init failed")
+        }
+
+        // 권한 정책(Stage 2, Tauri 패리티) — 앱 자신의 컨테이너로 제한.
+        // 호스트가 실 Documents 경로로 동적 구성(컨테이너 path 는 설치마다 달라
+        // 하드코딩 불가). uniform opt-in: 키 있는 family 만 enforce. 정책 JSON 도
+        // 응답과 동일하게 JSONSerialization 으로 직렬화 — 경로에 " / \ 가 있어도
+        // escape 안전(수동 조립 금지 규칙 일관). dialog 는 모바일에서 OS 문서
+        // 피커(사용자 중재)라 미게이트 → dialog.allowedPaths 생략(데드 config 회피).
+        let docs = NSHomeDirectory() + "/Documents"
+        let policyObj: [String: Any] = [
+            "shell": ["allowedExternalUrls": ["https://example.com/*"]],
+            "fs": ["allowedRoots": [docs]],
+        ]
+        if let pdata = try? JSONSerialization.data(withJSONObject: policyObj) {
+            _ = pdata.withUnsafeBytes { raw in
+                suji_core_set_permissions(
+                    raw.bindMemory(to: CChar.self).baseAddress, pdata.count)
+            }
         }
 
         // 순수 Swift 핸들러 데모.

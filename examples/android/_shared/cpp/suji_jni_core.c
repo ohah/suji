@@ -60,6 +60,30 @@ Java_dev_suji_examples_android_SujiCore_nativeInvoke(
     return out;
 }
 
+// 권한 게이트(Stage 2) — 코어 util.* 단일 출처를 JNI 로 노출.
+JNIEXPORT jint JNICALL
+Java_dev_suji_examples_android_SujiCore_nativeSetPermissions(
+    JNIEnv *env, jclass clazz, jstring json) {
+    (void)clazz;
+    const char *pj = (*env)->GetStringUTFChars(env, json, NULL);
+    jsize len = (*env)->GetStringUTFLength(env, json);
+    jint rc = suji_core_set_permissions(pj, (size_t)len);
+    (*env)->ReleaseStringUTFChars(env, json, pj);
+    return rc;
+}
+
+JNIEXPORT jint JNICALL
+Java_dev_suji_examples_android_SujiCore_nativePermissionCheck(
+    JNIEnv *env, jclass clazz, jstring family, jstring value, jint is_backend) {
+    (void)clazz;
+    const char *f = (*env)->GetStringUTFChars(env, family, NULL);
+    const char *v = (*env)->GetStringUTFChars(env, value, NULL);
+    jint rc = suji_core_permission_check(f, v, is_backend);
+    (*env)->ReleaseStringUTFChars(env, family, f);
+    (*env)->ReleaseStringUTFChars(env, value, v);
+    return rc;
+}
+
 JNIEXPORT void JNICALL
 Java_dev_suji_examples_android_SujiCore_nativeEmit(
     JNIEnv *env, jclass clazz, jstring event, jstring json) {
