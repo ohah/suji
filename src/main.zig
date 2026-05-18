@@ -1497,10 +1497,10 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "get_child_views")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);
-        // viewIds 임시 u32 슬라이스용 stack arena. 4 byte * 1024 = 4KB → 최대 ~1024 view 지원.
-        var arena_buf: [4096]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
-        return window_ipc.handleGetChildViews(host_id, response_buf, wm, fba.allocator());
+        // viewIds 임시 u32 슬라이스 — registry.allocator(힙). 고정 스택 arena는 view 수
+        // 상한(4KB→~1024)을 만들고 초과 시 getChildViews OOM→오인 `ok:false,viewIds:[]`로
+        // 절단됐다. handleGetChildViews가 직후 `defer allocator.free(ids)`로 즉시 반납.
+        return window_ipc.handleGetChildViews(host_id, response_buf, wm, registry.allocator);
     }
     // Phase 5: 라이프사이클 제어 — minimize/maximize/restore_window/unmaximize 4 voidFn
     // + is_minimized/is_maximized/is_fullscreen 3 게터. 모두 (windowId, buf, wm) 시그니처라

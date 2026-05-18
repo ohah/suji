@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
     });
     loader_module.addImport("events", events_module);
     loader_module.addImport("runtime", runtime_module);
+    loader_module.addImport("util", util_module);
 
     // 외부 패키지용 모듈 export (사용자가 @import("suji")로 가져감)
     const suji_module = b.addModule("suji", .{
@@ -320,6 +321,7 @@ pub fn build(b: *std.Build) void {
     });
     test_loader.addImport("events", events_module);
     test_loader.addImport("runtime", runtime_module);
+    test_loader.addImport("util", util_module);
     loader_test_mod.addImport("loader", test_loader);
     const loader_test = b.addTest(.{ .root_module = loader_test_mod });
     dependOnTestWithProjectCwd(b, test_step, loader_test);
@@ -423,6 +425,7 @@ pub fn build(b: *std.Build) void {
     });
     routing_loader.addImport("events", events_module);
     routing_loader.addImport("runtime", runtime_module);
+    routing_loader.addImport("util", util_module);
     routing_test_mod.addImport("loader", routing_loader);
     const routing_test = b.addTest(.{ .root_module = routing_test_mod });
     test_step.dependOn(&b.addRunArtifact(routing_test).step);
@@ -525,6 +528,7 @@ pub fn build(b: *std.Build) void {
     });
     state_loader.addImport("events", events_module);
     state_loader.addImport("runtime", runtime_module);
+    state_loader.addImport("util", util_module);
     state_test_mod.addImport("loader", state_loader);
     state_test_mod.addImport("events", events_module);
     const state_test = b.addTest(.{ .root_module = state_test_mod });
@@ -548,6 +552,7 @@ pub fn build(b: *std.Build) void {
     });
     sqlite_loader.addImport("events", events_module);
     sqlite_loader.addImport("runtime", runtime_module);
+    sqlite_loader.addImport("util", util_module);
     sqlite_test_mod.addImport("loader", sqlite_loader);
     const sqlite_test = b.addTest(.{ .root_module = sqlite_test_mod });
     const sqlite_test_run = b.addRunArtifact(sqlite_test);
@@ -627,6 +632,7 @@ pub fn build(b: *std.Build) void {
     });
     watcher_loader.addImport("events", events_module);
     watcher_loader.addImport("runtime", runtime_module);
+    watcher_loader.addImport("util", util_module);
     watcher_test_mod.addImport("watcher", watcher_module);
     watcher_test_mod.addImport("loader", watcher_loader);
     const watcher_test = b.addTest(.{ .root_module = watcher_test_mod });

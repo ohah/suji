@@ -485,9 +485,64 @@ test "extractJsonFloat basic + negative" {
     try std.testing.expectApproxEqAbs(@as(f64, -2.25), extractJsonFloat("{\"v\":-2.25}", "v").?, 1e-9);
 }
 
-/// glob pattern 매칭 — `*` wildcard만 지원 (any chars). `?` / 문자 클래스는 미지원.
+/// 패턴의 pi 위치에 있는 단일-문자 토큰(`?` / `[...]` / `\x` 이스케이프 / 리터럴)을
+/// 텍스트 문자 `c`와 매칭. pi를 토큰 길이만큼 전진시키고 매칭 여부 반환.
+/// 닫히지 않은 `[`는 리터럴 `[`로 처리(표준 glob 관용).
+fn matchGlobToken(pattern: []const u8, pi: *usize, c: u8) bool {
+    const p = pattern;
+    const k = pi.*;
+    switch (p[k]) {
+        '?' => {
+            pi.* = k + 1;
+            return true;
+        },
+        '\\' => {
+            // 트레일링 `\`는 리터럴 백슬래시.
+            if (k + 1 >= p.len) {
+                pi.* = k + 1;
+                return c == '\\';
+            }
+            pi.* = k + 2;
+            return c == p[k + 1];
+        },
+        '[' => {
+            var j = k + 1;
+            var negate = false;
+            if (j < p.len and (p[j] == '!' or p[j] == '^')) {
+                negate = true;
+                j += 1;
+            }
+            // `]`가 클래스 첫 멤버면 리터럴(표준): set_start에서만 허용.
+            const set_start = j;
+            var matched = false;
+            while (j < p.len and (p[j] != ']' or j == set_start)) {
+                if (j + 2 < p.len and p[j + 1] == '-' and p[j + 2] != ']') {
+                    if (c >= p[j] and c <= p[j + 2]) matched = true;
+                    j += 3;
+                } else {
+                    if (c == p[j]) matched = true;
+                    j += 1;
+                }
+            }
+            if (j >= p.len) {
+                // 닫는 `]` 없음 → `[`를 리터럴로.
+                pi.* = k + 1;
+                return c == '[';
+            }
+            pi.* = j + 1; // `]` 다음으로
+            return matched != negate;
+        },
+        else => {
+            pi.* = k + 1;
+            return c == p[k];
+        },
+    }
+}
+
+/// glob pattern 매칭 — `*`(0+ any), `?`(정확히 1자), `[abc]`/`[a-z]` 문자 클래스
+/// (`!`/`^` 부정, 첫 `]`는 리터럴), `\` 메타문자 이스케이프 지원.
 /// 사용처: webRequest URL filter (Electron `urls: ['https://*.example.com/*']`).
-/// 단순 backtracking — 패턴은 짧고 (≤256자) URL은 길어야 ~2KB. O(N*M) acceptable.
+/// 반복 backtracking — 패턴은 짧고 (≤256자) URL은 길어야 ~2KB. O(N*M) acceptable.
 pub fn matchGlob(pattern: []const u8, text: []const u8) bool {
     var pi: usize = 0;
     var ti: usize = 0;
@@ -498,8 +553,12 @@ pub fn matchGlob(pattern: []const u8, text: []const u8) bool {
             star_pi = pi;
             star_ti = ti;
             pi += 1;
-        } else if (pi < pattern.len and pattern[pi] == text[ti]) {
-            pi += 1;
+        } else if (pi < pattern.len and blk: {
+            var probe = pi;
+            const ok = matchGlobToken(pattern, &probe, text[ti]);
+            if (ok) pi = probe;
+            break :blk ok;
+        }) {
             ti += 1;
         } else if (star_pi) |sp| {
             pi = sp + 1;
@@ -540,6 +599,58 @@ test "matchGlob: 빈 텍스트 + 빈 패턴" {
     try std.testing.expect(matchGlob("", ""));
     try std.testing.expect(!matchGlob("a", ""));
     try std.testing.expect(!matchGlob("", "a"));
+}
+
+test "matchGlob: ? 정확히 1자" {
+    try std.testing.expect(matchGlob("a?c", "abc"));
+    try std.testing.expect(matchGlob("a?c", "axc"));
+    try std.testing.expect(!matchGlob("a?c", "ac")); // 0자 불가
+    try std.testing.expect(!matchGlob("a?c", "abbc")); // 2자 불가
+    try std.testing.expect(matchGlob("https://?.example.com/*", "https://a.example.com/x"));
+    try std.testing.expect(!matchGlob("https://?.example.com/*", "https://ab.example.com/x"));
+}
+
+test "matchGlob: 문자 클래스 [abc] / 범위 [a-z]" {
+    try std.testing.expect(matchGlob("[abc]x", "ax"));
+    try std.testing.expect(matchGlob("[abc]x", "cx"));
+    try std.testing.expect(!matchGlob("[abc]x", "dx"));
+    try std.testing.expect(matchGlob("v[0-9].zip", "v3.zip"));
+    try std.testing.expect(!matchGlob("v[0-9].zip", "vx.zip"));
+    try std.testing.expect(matchGlob("https://*.[a-z][a-z][a-z]/*", "https://x.com/p"));
+}
+
+test "matchGlob: 클래스 부정 [!..] / [^..]" {
+    try std.testing.expect(matchGlob("[!0-9]bc", "abc"));
+    try std.testing.expect(!matchGlob("[!0-9]bc", "1bc"));
+    try std.testing.expect(matchGlob("[^/]*", "noslash"));
+    try std.testing.expect(!matchGlob("[^/]*x", "/x")); // 첫 글자 '/' 거부
+}
+
+test "matchGlob: 메타문자 이스케이프 \\* \\? \\[" {
+    try std.testing.expect(matchGlob("a\\*b", "a*b"));
+    try std.testing.expect(!matchGlob("a\\*b", "axb")); // 리터럴 '*'
+    try std.testing.expect(matchGlob("a\\?b", "a?b"));
+    try std.testing.expect(!matchGlob("a\\?b", "axb"));
+    try std.testing.expect(matchGlob("a\\[b", "a[b"));
+}
+
+test "matchGlob: 닫히지 않은 [ 는 리터럴" {
+    try std.testing.expect(matchGlob("a[bc", "a[bc"));
+    try std.testing.expect(!matchGlob("a[bc", "abc"));
+}
+
+test "matchGlob: 클래스 첫 ] 는 리터럴 멤버" {
+    try std.testing.expect(matchGlob("[]a]x", "]x"));
+    try std.testing.expect(matchGlob("[]a]x", "ax"));
+    try std.testing.expect(!matchGlob("[]a]x", "bx"));
+}
+
+test "matchGlob: * 와 ?/클래스 조합 + backtracking 무회귀" {
+    try std.testing.expect(matchGlob("*.[pj][pn]g", "photo.png"));
+    try std.testing.expect(matchGlob("*.[pj][pn]g", "a.b.jpg"));
+    try std.testing.expect(!matchGlob("*.[pj][pn]g", "photo.gif"));
+    try std.testing.expect(matchGlob("https://*/v?/*", "https://api.x.com/v2/users"));
+    try std.testing.expect(!matchGlob("https://*/v?/*", "https://api.x.com/v/users"));
 }
 
 test "matchGlob: 패턴이 텍스트보다 짧지 않음" {

@@ -1,5 +1,6 @@
 const std = @import("std");
 const events = @import("events");
+const util = @import("util");
 
 
 /// Zig 코어가 백엔드에게 제공하는 API
@@ -430,13 +431,12 @@ pub const BackendRegistry = struct {
         return @ptrCast(@constCast("{}"));
     }
 
-    /// JSON 요청에서 "cmd" 문자열 필드 추출 (단순 스캐너, 이스케이프 미지원).
+    /// JSON 요청에서 "cmd" 문자열 필드 추출.
+    /// 라우팅 폴백 경로 — 검증된 escape/whitespace-aware 추출기(`util.extractJsonString`)
+    /// 재사용: `"cmd": "x"`(콜론 뒤 공백) / `"cmd":"a\"b"`(값 내 escape된 따옴표)에서
+    /// 조기 종단·오인 라우팅을 막는다(기존 단순 스캐너는 둘 다 미처리).
     fn extractCmdField(json: []const u8) ?[]const u8 {
-        const key = "\"cmd\":\"";
-        const i = std.mem.indexOf(u8, json, key) orelse return null;
-        const start = i + key.len;
-        const end_rel = std.mem.indexOfScalar(u8, json[start..], '"') orelse return null;
-        return json[start .. start + end_rel];
+        return util.extractJsonString(json, "cmd");
     }
 
     // C ABI 콜백: 이벤트 발행

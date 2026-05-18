@@ -47,16 +47,18 @@ pub const EventBus = struct {
         };
     }
 
-    /// 이벤트 구독 — 리스너 ID 반환 (해제용)
-    /// 이벤트 구독 — 성공 시 리스너 id 반환.
-    /// OOM은 데스크톱 앱 환경에서 실질적 복구 불가 → `@panic`. 호출자는 항상 유효한 id를 가정.
+    /// 이벤트 구독 — 성공 시 리스너 id(≥1) 반환.
+    /// OOM 시 0 반환(등록 실패). 0은 EventBus "invalid id" sentinel — `next_id`는 1부터,
+    /// `coreOn`도 콜백 없을 때 0 반환, `off(0)`은 안전한 no-op이라 C ABI u64 시그니처
+    /// 불변. 데스크톱은 사실상 도달 불가하나 임베드(libsuji_core) 환경에서 프로세스를
+    /// 죽이지 않고 graceful degrade.
     pub fn on(self: *EventBus, event_name: []const u8, callback: EventCallback) u64 {
         self.mutex.lockUncancelable(self.io);
         defer self.mutex.unlock(self.io);
 
         const id = self.next_id;
         const listener = Listener{ .id = id, .callback = .{ .zig = callback } };
-        self.addListener(event_name, listener) catch |e| panicOom("on", e);
+        self.addListener(event_name, listener) catch return 0;
         self.next_id += 1;
         return id;
     }
@@ -68,7 +70,7 @@ pub const EventBus = struct {
 
         const id = self.next_id;
         const listener = Listener{ .id = id, .callback = .{ .c_abi = .{ .func = callback, .arg = arg } } };
-        self.addListener(event_name, listener) catch |e| panicOom("onC", e);
+        self.addListener(event_name, listener) catch return 0;
         self.next_id += 1;
         return id;
     }
@@ -80,13 +82,9 @@ pub const EventBus = struct {
 
         const id = self.next_id;
         const listener = Listener{ .id = id, .callback = .{ .zig = callback }, .once = true };
-        self.addListener(event_name, listener) catch |e| panicOom("once", e);
+        self.addListener(event_name, listener) catch return 0;
         self.next_id += 1;
         return id;
-    }
-
-    fn panicOom(site: []const u8, err: anyerror) noreturn {
-        std.debug.panic("EventBus.{s}: OOM ({s}) — 시스템 메모리 고갈", .{ site, @errorName(err) });
     }
 
     /// 이벤트 발행 — 모든 윈도우로 브로드캐스트.
