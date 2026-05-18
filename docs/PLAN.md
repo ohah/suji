@@ -159,6 +159,22 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
         + Rust/Go/JS 래퍼(state parity, js dist+lock 커밋). `zig build
         test-sqlite` 10 테스트(round-trip/파라미터 주입안전/타입/격리/에러).
         ⚠️ Node 래퍼는 state 와 동일하게 Phase 5 이후 후속.
+  - [x] **모바일 SQLite 백엔드** — `examples/ios/backends/sqlite/`
+        (데스크탑 plugins/sqlite 모바일 대응; 데스크탑=동적 dylib/BackendRegistry,
+        모바일=정적 링크라 코어/SDK 독립 재구현, 고유 심볼 `suji_sqlite_backend_*`).
+        벤더 sqlite3.c 데스크탑과 단일 출처. std.json 요청 파싱(escape 안전),
+        SQLITE_STATIC(arena 가 handler 끝까지 생존). 응답이 데스크탑
+        plugins/sqlite 와 **바이트 동형**(`{"from":"zig","result"/"error":..}`)
+        → 동일 Rust/Go/JS 래퍼 무수정 동작(Tauri 동형). 검증: 호스트 하니스
+        `tests/mobile-backends/run.sh` 62/62(실 sqlite3 CRUD 10 — open/
+        create/insert(params,UTF-8)/query/injection-safe/close/use-after-close/
+        상대경로거부, register_handler→bridge→handle_ipc, rust/go/zig 와 정적
+        링크 공존=심볼 무충돌) + 크로스 컴파일 aarch64-ios/-simulator/
+        -linux-android 빌드 성공(Xcode SDK / NDK sysroot). ⚠️ 정직 경계:
+        실기기·시뮬/에뮬 런타임 미검증(build-only + 호스트 하니스 — 기존
+        모바일 백엔드와 동일 CI 게이트). 경로는 `:memory:`/절대만(상대는
+        호스트 책임). iOS/Android 예제 *앱* 변형(xcodegen/gradle) 배선은
+        후속(메커니즘은 하니스로 실증).
 - [x] ~~바이너리 데이터 채널~~ — CEF `suji://` 커스텀 프로토콜로 대체 (fetch + 로컬 파일 접근 가능, 별도 HTTP 서버 불필요)
 
 **결과물**:
@@ -1369,7 +1385,7 @@ suji build → 결과물:
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
-| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS 래퍼(state 동형). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). ⚠️ Node 래퍼 후속(state 동일) |
+| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS 래퍼(state 동형). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계). ⚠️ Node 래퍼 후속(state 동일) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | 🟡 `suji://` 커스텀 프로토콜 동작. OS 레벨 등록(Info.plist URL Types)은 미자동화 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
 | 클립보드 — 이미지/HTML/format 검사 | `clipboard.readImage` / `writeImage` / `readHTML` / `has` / `availableFormats` | -- | ✅ HTML (`readHTML`/`writeHTML`) + format 검사 (`has`/`availableFormats`) + PNG image (`writeImage(base64)` / `readImage()` — NSPasteboard `public.png`, raw 한도 ~8KB 1차). TIFF/RTF는 후속 |

@@ -34,6 +34,9 @@ extern void suji_go_backend_init(const void *core);
 extern char *suji_zig_backend_handle_ipc(const char *req);
 extern void suji_zig_backend_free(char *p);
 extern void suji_zig_backend_init(const void *core);
+extern char *suji_sqlite_backend_handle_ipc(const char *req);
+extern void suji_sqlite_backend_free(char *p);
+extern void suji_sqlite_backend_init(const void *core);
 
 static const char *rust_h(const char *ch, const char *j) {
     char *q = suji_mobile_bridge(ch, j);
@@ -61,6 +64,15 @@ static const char *zig_h(const char *ch, const char *j) {
     return r;
 }
 static void zig_f(const char *p) { suji_zig_backend_free((char *)p); }
+
+static const char *sqlite_h(const char *ch, const char *j) {
+    char *q = suji_mobile_bridge(ch, j);
+    if (!q) return NULL;
+    char *r = suji_sqlite_backend_handle_ipc(q);
+    free(q);
+    return r;
+}
+static void sqlite_f(const char *p) { suji_sqlite_backend_free((char *)p); }
 
 // __core__ 모바일 디스패처 mock. iOS sujiCoreDispatch / Android coreDispatch 와
 // 동일 계약을 C 로 흉내 — register_handler("__core__") 라우팅과 데스크톱
@@ -326,6 +338,7 @@ int main(void) {
     suji_rs_backend_init(NULL);
     suji_go_backend_init(NULL);
     suji_zig_backend_init(NULL);
+    suji_sqlite_backend_init(NULL);
 
     if (suji_core_register_handler("greet", rust_h, rust_f) != 0 ||
         suji_core_register_handler("add", rust_h, rust_f) != 0 ||
@@ -334,6 +347,10 @@ int main(void) {
         suji_core_register_handler("zig:ping", zig_h, zig_f) != 0 ||
         suji_core_register_handler("zig:rev", zig_h, zig_f) != 0 ||
         suji_core_register_handler("zig:http", zig_h, zig_f) != 0 ||
+        suji_core_register_handler("sql:open", sqlite_h, sqlite_f) != 0 ||
+        suji_core_register_handler("sql:execute", sqlite_h, sqlite_f) != 0 ||
+        suji_core_register_handler("sql:query", sqlite_h, sqlite_f) != 0 ||
+        suji_core_register_handler("sql:close", sqlite_h, sqlite_f) != 0 ||
         suji_core_register_handler("__core__", core_h, core_f) != 0) {
         printf("FAIL: register_handler\n");
         suji_core_destroy(); // init 후 실패 — LSan 클린 유지
@@ -358,6 +375,48 @@ int main(void) {
     printf("== Zig 정적 백엔드 ==\n");
     roundtrip("zig:ping", "{}", "zig-native", "zig ping");
     roundtrip("zig:rev", "{\"s\":\"abc\"}", "\"rev\":\"cba\"", "zig rev");
+
+    // SQLite 정적 백엔드 — 데스크탑 plugins/sqlite 모바일 대응(suji_sqlite_*).
+    // 실 SQLite CRUD 를 모바일 경로(register_handler→bridge→handle_ipc)로 왕복.
+    printf("== SQLite 정적 백엔드 (실 sqlite3, 모바일 경로) ==\n");
+    {
+        const char *o = suji_core_invoke("sql:open", "{\"path\":\":memory:\"}");
+        int db = -1;
+        const char *idp = o ? strstr(o, "\"dbId\":") : NULL;
+        if (idp) db = atoi(idp + 7);
+        expect("sqlite open :memory:", o, "\"dbId\":");
+        suji_core_free(o);
+
+        char req[256];
+        snprintf(req, sizeof(req),
+            "{\"dbId\":%d,\"sql\":\"CREATE TABLE t(id INTEGER PRIMARY KEY, name TEXT)\"}", db);
+        roundtrip("sql:execute", req, "\"changes\":0", "sqlite create table");
+
+        snprintf(req, sizeof(req),
+            "{\"dbId\":%d,\"sql\":\"INSERT INTO t(name) VALUES (?)\",\"params\":[\"한글yoon\"]}", db);
+        roundtrip("sql:execute", req, "\"lastInsertRowid\":1", "sqlite insert(params)");
+
+        snprintf(req, sizeof(req),
+            "{\"dbId\":%d,\"sql\":\"SELECT id, name FROM t WHERE name = ?\",\"params\":[\"한글yoon\"]}", db);
+        roundtrip("sql:query", req, "\"name\":\"한글yoon\"", "sqlite query(params, utf8)");
+        snprintf(req, sizeof(req),
+            "{\"dbId\":%d,\"sql\":\"SELECT id, name FROM t WHERE name = ?\",\"params\":[\"한글yoon\"]}", db);
+        roundtrip("sql:query", req, "\"id\":1", "sqlite query rowid");
+
+        // injection-safe: 악성 입력은 리터럴 저장(테이블 안 드랍).
+        snprintf(req, sizeof(req),
+            "{\"dbId\":%d,\"sql\":\"INSERT INTO t(name) VALUES (?)\",\"params\":[\"x'); DROP TABLE t;--\"]}", db);
+        roundtrip("sql:execute", req, "\"changes\":1", "sqlite injection-safe insert");
+        snprintf(req, sizeof(req), "{\"dbId\":%d,\"sql\":\"SELECT COUNT(*) c FROM t\"}", db);
+        roundtrip("sql:query", req, "\"c\":2", "sqlite table survived injection");
+
+        snprintf(req, sizeof(req), "{\"dbId\":%d}", db);
+        roundtrip("sql:close", req, "\"ok\":true", "sqlite close");
+        snprintf(req, sizeof(req), "{\"dbId\":%d,\"sql\":\"SELECT 1\"}", db);
+        roundtrip("sql:query", req, "invalid dbId", "sqlite use-after-close → error");
+        roundtrip("sql:open", "{\"path\":\"rel/path.db\"}", "invalid path",
+                  "sqlite relative path rejected (mobile boundary)");
+    }
 
     printf("== Zig http (std.http → localhost 평문) ==\n");
     if (start_http_server() != 0) {
