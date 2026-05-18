@@ -117,3 +117,105 @@ describe("sqlite.close", () => {
     });
   });
 });
+
+// ============================================
+// 복잡 경계 — 파라미터 타입 보존 / 전 메서드 에러 전파 /
+//             malformed 응답 sharp edge / 브릿지 부재
+// ============================================
+
+describe("param type fidelity (positional ? binding)", () => {
+  it("preserves mixed string/number/boolean/null params verbatim", async () => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { changes: 1, lastInsertRowid: 9 } }));
+    const params = ["s", 42, true, null];
+    await sqlite.execute(3, "INSERT INTO t(a,b,c,d) VALUES (?,?,?,?)", params);
+    expect(lastReq()).toEqual({
+      backend: "sqlite",
+      body: { cmd: "sql:execute", dbId: 3, sql: "INSERT INTO t(a,b,c,d) VALUES (?,?,?,?)", params },
+    });
+  });
+
+  it("query forwards typed params and returns multi-row result", async () => {
+    const rows = [
+      { id: 1, n: "a", ok: 1 },
+      { id: 2, n: "b", ok: 0 },
+    ];
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { rows } }));
+    const out = await sqlite.query(7, "SELECT * FROM t WHERE id > ? AND ok = ?", [0, true]);
+    expect(lastReq().body.params).toEqual([0, true]);
+    expect(out).toEqual(rows);
+  });
+});
+
+describe("error envelope propagates on every method", () => {
+  it.each([
+    ["open", () => sqlite.open("/x")],
+    ["execute", () => sqlite.execute(1, "X")],
+    ["query", () => sqlite.query(1, "X")],
+    ["close", () => sqlite.close(1)],
+  ])("%s rejects on {error}", async (_label, op) => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ error: "locked" }));
+    await expect(op()).rejects.toThrow(/sqlite: locked/);
+  });
+});
+
+describe("execute result passthrough", () => {
+  it("returns zero changes/rowid for DDL verbatim", async () => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { changes: 0, lastInsertRowid: 0 } }));
+    expect(await sqlite.execute(1, "CREATE TABLE t(id INTEGER)")).toEqual({
+      changes: 0,
+      lastInsertRowid: 0,
+    });
+  });
+});
+
+describe("malformed / empty response (non-error, no result)", () => {
+  // A response that is neither a valid {result} nor {error} envelope is a
+  // protocol violation. `open` needs a dbId it cannot fabricate → explicit
+  // throw. `query`/`close` degrade gracefully ([] / no-op) for internal
+  // consistency with state.keys' `r?.keys ?? []` (and Rust's graceful None).
+  it("open rejects with an explicit malformed error (not a bare TypeError)", async () => {
+    mockBridge.invoke.mockReturnValueOnce(Promise.resolve("garbage"));
+    await expect(sqlite.open(":memory:")).rejects.toThrow(/sqlite: malformed open response/);
+  });
+
+  it("query degrades to [] when response carries neither result nor error", async () => {
+    mockBridge.invoke.mockReturnValueOnce(Promise.resolve(""));
+    expect(await sqlite.query(1, "SELECT 1")).toEqual([]);
+  });
+
+  it("close tolerates an empty response (no result access)", async () => {
+    mockBridge.invoke.mockReturnValueOnce(Promise.resolve(""));
+    await expect(sqlite.close(1)).resolves.toBeUndefined();
+  });
+});
+
+describe("bridge absent", () => {
+  it("throws a sqlite-node-scoped error", async () => {
+    const saved = (globalThis as any).suji;
+    (globalThis as any).suji = undefined;
+    try {
+      await expect(sqlite.open(":memory:")).rejects.toThrow(
+        /@suji\/plugin-sqlite-node: bridge not available/,
+      );
+    } finally {
+      (globalThis as any).suji = saved;
+    }
+  });
+});
+
+describe("sequential ops on one handle issue independent invokes", () => {
+  it("open → execute → query → close = 4 distinct backend calls", async () => {
+    mockBridge.invoke
+      .mockReturnValueOnce(reply({ result: { dbId: 5 } }))
+      .mockReturnValueOnce(reply({ result: { changes: 1, lastInsertRowid: 1 } }))
+      .mockReturnValueOnce(reply({ result: { rows: [{ id: 1 }] } }))
+      .mockReturnValueOnce(reply({ result: { ok: true } }));
+    const db = await sqlite.open(":memory:");
+    await sqlite.execute(db, "INSERT INTO t(id) VALUES (?)", [1]);
+    const rows = await sqlite.query(db, "SELECT id FROM t");
+    await sqlite.close(db);
+    expect(mockBridge.invoke).toHaveBeenCalledTimes(4);
+    expect(rows).toEqual([{ id: 1 }]);
+    expect(mockBridge.invoke.mock.calls.every(([b]) => b === "sqlite")).toBe(true);
+  });
+});

@@ -50,6 +50,9 @@ exports.sqlite = {
      */
     async open(path) {
         const r = await call("sql:open", { path });
+        if (typeof r?.dbId !== "number") {
+            throw new Error("sqlite: malformed open response (no dbId)");
+        }
         return r.dbId;
     },
     /** Run a non-SELECT statement (INSERT/UPDATE/DELETE/DDL). */
@@ -59,7 +62,7 @@ exports.sqlite = {
     /** Run a SELECT; resolves to an array of row objects (column → value). */
     async query(db, sql, params = []) {
         const r = await call("sql:query", { dbId: db, sql, params });
-        return (r.rows ?? []);
+        return (r?.rows ?? []);
     },
     /** Close a database handle. */
     async close(db) {

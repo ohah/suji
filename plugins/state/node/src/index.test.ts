@@ -179,4 +179,117 @@ describe("state.watch", () => {
     handler("state:user", JSON.stringify({ name: "yoon" }));
     expect(received).toEqual({ name: "yoon" });
   });
+
+  it("scope=session:* uses state:<scope>:<key>", () => {
+    state.watch("step", () => {}, { scope: "session:onboard" });
+    expect(mockBridge.on.mock.calls[0][0]).toBe("state:session:onboard:step");
+  });
+
+  it("cancel() passes the exact subId returned by bridge.on to off", () => {
+    mockBridge.on.mockReturnValueOnce(42);
+    const cancel = state.watch("user", () => {});
+    cancel();
+    expect(mockBridge.off).toHaveBeenCalledWith(42);
+  });
+
+  it("delivers raw string when payload is not JSON", () => {
+    let received: unknown;
+    state.watch("user", (v) => {
+      received = v;
+    });
+    const handler = mockBridge.on.mock.calls[0][1] as (c: string, d: string) => void;
+    handler("state:user", "not-json");
+    expect(received).toBe("not-json");
+  });
+});
+
+// ============================================
+// 복잡 경계 — 값 타입 다양성 / 에러 전파 / malformed / 브릿지 부재
+// ============================================
+
+describe("state.set value type fidelity", () => {
+  it.each([
+    ["number", 42],
+    ["boolean", true],
+    ["null", null],
+    ["array", [1, "a", { k: 2 }]],
+    ["nested object", { a: { b: [true, null] } }],
+    ["empty string", ""],
+  ])("preserves %s value verbatim in wire body", async (_label, value) => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { ok: true } }));
+    await state.set("k", value as unknown);
+    expect(lastReq()).toEqual({ backend: "state", body: { cmd: "state:set", key: "k", value } });
+  });
+});
+
+describe("state.get type passthrough", () => {
+  it("returns nested object as-is (generic T)", async () => {
+    const obj = { profile: { name: "yoon", tags: ["a", "b"] } };
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { value: obj } }));
+    expect(await state.get<typeof obj>("u")).toEqual(obj);
+  });
+
+  it.each([
+    ["zero", 0],
+    ["false", false],
+    ["empty string", ""],
+  ])("returns falsy-but-present %s verbatim (not coerced to null)", async (_label, v) => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { value: v } }));
+    expect(await state.get("k")).toBe(v);
+  });
+});
+
+describe("error envelope propagates on every mutator", () => {
+  it.each([
+    ["set", () => state.set("k", 1)],
+    ["delete", () => state.delete("k")],
+    ["keys", () => state.keys()],
+    ["clear", () => state.clear()],
+  ])("%s rejects on {error}", async (_label, op) => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ error: "denied" }));
+    await expect(op()).rejects.toThrow(/state: denied/);
+  });
+});
+
+describe("scope='global' is forwarded verbatim (Rust get_in/set_in parity)", () => {
+  it("get forwards scope:'global' (not stripped)", async () => {
+    mockBridge.invoke.mockReturnValueOnce(reply({ result: { value: 1 } }));
+    await state.get("k", { scope: "global" });
+    expect(lastReq()).toEqual({
+      backend: "state",
+      body: { cmd: "state:get", key: "k", scope: "global" },
+    });
+  });
+});
+
+describe("malformed / empty bridge response (js-sibling parity: graceful, no throw)", () => {
+  it.each(["not-json", "", "null"])("get → null when response is %p", async (raw) => {
+    mockBridge.invoke.mockReturnValueOnce(Promise.resolve(raw));
+    expect(await state.get("k")).toBeNull();
+  });
+
+  it("keys → [] when response has no parseable result", async () => {
+    mockBridge.invoke.mockReturnValueOnce(Promise.resolve("garbage"));
+    expect(await state.keys()).toEqual([]);
+  });
+
+  it("set does not throw when response is empty", async () => {
+    mockBridge.invoke.mockReturnValueOnce(Promise.resolve(""));
+    await expect(state.set("k", 1)).resolves.toBeUndefined();
+  });
+});
+
+describe("bridge absent", () => {
+  it("throws a state-node-scoped error (not a generic one)", async () => {
+    const saved = (globalThis as any).suji;
+    (globalThis as any).suji = undefined;
+    try {
+      await expect(state.get("k")).rejects.toThrow(/@suji\/plugin-state-node: bridge not available/);
+      expect(() => state.watch("k", () => {})).toThrow(
+        /@suji\/plugin-state-node: bridge not available/,
+      );
+    } finally {
+      (globalThis as any).suji = saved;
+    }
+  });
 });
