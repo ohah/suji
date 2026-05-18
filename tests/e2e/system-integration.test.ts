@@ -430,6 +430,34 @@ describe("session.clearCookies / flushStore", () => {
     const r = await core<{ success: boolean }>({ cmd: "session_flush_store" });
     expect(r.success).toBe(true);
   });
+
+  // clearStorageData — clearCookies 와 동일 fire-and-forget(CDP Storage.
+  // clearDataForOrigin + Network.clearBrowserCache). 실 삭제는 비동기 CDP라
+  // 기능 검증 대신 IPC 계약(success:true)만 — clearCookies e2e 와 동일 경계.
+  test("clearStorageData (origin 없음) → success:true (전역 캐시)", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "session_clear_storage_data" });
+    expect(r.success).toBe(true);
+  });
+
+  test("clearStorageData (origin+storageTypes) → success:true", async () => {
+    const origin = await page.evaluate(() => location.origin);
+    const r = await core<{ success: boolean }>({
+      cmd: "session_clear_storage_data",
+      origin,
+      storageTypes: "local_storage,indexeddb,service_workers,cache_storage",
+    });
+    expect(r.success).toBe(true);
+  });
+
+  test("clearStorageData escape 안전 (origin 에 따옴표/역슬래시)", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "session_clear_storage_data",
+      origin: 'https://x"y\\z',
+      storageTypes: "all",
+    });
+    // 잘못된 origin 이어도 CDP fire-and-forget → IPC 는 success:true(주입 안전).
+    expect(r.success).toBe(true);
+  });
 });
 
 // `session.cookies.set/get/remove` — visit_url_cookies가 비동기라 결과는

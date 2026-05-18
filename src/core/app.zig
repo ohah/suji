@@ -1513,6 +1513,13 @@ pub const session = struct {
         return coreCmd("session_flush_store", "");
     }
 
+    /// IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
+    /// raw JSON args: `{"origin":"https://app","storageTypes":"all"}` (둘 다
+    /// 옵션 — origin 빈값이면 전역 HTTP 캐시만; storageTypes 기본 "all").
+    pub fn clearStorageDataRaw(args_json: []const u8) ?[]const u8 {
+        return coreCmd("session_clear_storage_data", args_json);
+    }
+
     /// cookie set (Electron `session.cookies.set`). url+name 필수, 나머지 옵션.
     /// expires 0 → 세션 쿠키. raw JSON args 그대로 전달.
     pub fn setCookieRaw(args_json: []const u8) ?[]const u8 {

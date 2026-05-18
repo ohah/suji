@@ -1895,6 +1895,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = cef.sessionFlushStore();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_flush_store\",\"success\":{}}}", .{ok}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "session_clear_storage_data")) {
+        var origin_buf: [2048]u8 = undefined;
+        var types_buf: [256]u8 = undefined;
+        const origin = util.extractJsonString(req_clean, "origin") orelse "";
+        const types_raw = util.extractJsonString(req_clean, "storageTypes") orelse "all";
+        const origin_n = util.unescapeJsonStr(origin, &origin_buf) orelse 0;
+        const types_n = util.unescapeJsonStr(types_raw, &types_buf) orelse 0;
+        const ok = cef.sessionClearStorageData(origin_buf[0..origin_n], types_buf[0..types_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_clear_storage_data\",\"success\":{}}}", .{ok}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "session_set_cookie")) {
         var url_buf: [2048]u8 = undefined;
         var name_buf: [256]u8 = undefined;

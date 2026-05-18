@@ -18,6 +18,22 @@ func FlushStore() string {
 	return suji.Invoke("__core__", `{"cmd":"session_flush_store"}`)
 }
 
+// ClearStorageData removes IndexedDB/localStorage/cache (Electron
+// `session.clearStorageData`). origin "" → 전역 HTTP 캐시만(웹 플랫폼상
+// origin 없이 storage 일괄 삭제 불가). storageTypes "" → "all".
+// Response: `{"success":bool}`.
+func ClearStorageData(origin, storageTypes string) string {
+	if storageTypes == "" {
+		storageTypes = "all"
+	}
+	req, _ := json.Marshal(map[string]any{
+		"cmd":          "session_clear_storage_data",
+		"origin":       origin,
+		"storageTypes": storageTypes,
+	})
+	return suji.Invoke("__core__", string(req))
+}
+
 // CookieDescriptor mirrors Electron's `Cookie` for `session.cookies.set`.
 // Expires is unix epoch second (0 → session cookie).
 type CookieDescriptor struct {

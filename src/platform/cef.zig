@@ -2421,6 +2421,42 @@ pub fn sessionFlushStore() bool {
     return true;
 }
 
+/// IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
+/// CEF 는 직접 미제공 → CDP `Storage.clearDataForOrigin`(+ 캐시는
+/// `Network.clearBrowserCache`)를 send_dev_tools_message 로. setUserAgent
+/// 와 동일한 fire-and-forget(id:1, 응답 미파싱) — clearCookies 와 동형 정책.
+///
+/// ⚠️ 정직 경계(웹 플랫폼 제약): IndexedDB/localStorage 는 origin-scoped 라
+/// origin 없이 "전 origin 일괄 삭제"는 단일 CDP 호출로 불가. origin 지정 시
+/// 그 origin 의 storageTypes 삭제, origin 빈 문자열이면 전역 HTTP 캐시만
+/// (Network.clearBrowserCache) — 호출부가 자기 앱 origin 을 전달해야 storage
+/// 가 비워진다(Electron 의 프로필-전역 삭제와 다른 한계, 문서 명시).
+/// storage_types: CDP 콤마구분("all" | "local_storage,indexeddb,..." 등).
+pub fn sessionClearStorageData(origin: []const u8, storage_types: []const u8) bool {
+    const br = g_browser orelse return false;
+    const host = devtoolsHost(br) orelse return false;
+    const send = host.send_dev_tools_message orelse return false;
+
+    if (origin.len > 0) {
+        // origin/types escape (origin 은 URL 이라 escape 필수, types 도 방어적).
+        var o_esc: [2048]u8 = undefined;
+        var t_esc: [512]u8 = undefined;
+        const on = window_mod.escapeJsonChars(origin[0..@min(origin.len, 1024)], &o_esc);
+        const tn = window_mod.escapeJsonChars(storage_types[0..@min(storage_types.len, 256)], &t_esc);
+        var msg: [3072]u8 = undefined;
+        const m = std.fmt.bufPrint(
+            &msg,
+            "{{\"id\":1,\"method\":\"Storage.clearDataForOrigin\",\"params\":{{\"origin\":\"{s}\",\"storageTypes\":\"{s}\"}}}}",
+            .{ o_esc[0..on], t_esc[0..tn] },
+        ) catch return false;
+        _ = send(host, m.ptr, m.len);
+    }
+    // HTTP/서비스워커 캐시는 origin 무관 전역 — 항상 best-effort.
+    const cache_msg = "{\"id\":1,\"method\":\"Network.clearBrowserCache\",\"params\":{}}";
+    _ = send(host, cache_msg.ptr, cache_msg.len);
+    return true;
+}
+
 // ============================================
 // Session Cookies — set / get / remove (Electron `session.cookies.*`)
 // ============================================

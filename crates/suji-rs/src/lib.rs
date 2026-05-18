@@ -1669,6 +1669,19 @@ pub mod session {
         invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
     }
 
+    /// IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
+    /// origin "" → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
+    /// 삭제 불가). storage_types None → "all".
+    pub fn clear_storage_data(origin: &str, storage_types: Option<&str>) -> Option<String> {
+        let req = json!({
+            "cmd": "session_clear_storage_data",
+            "origin": origin,
+            "storageTypes": storage_types.unwrap_or("all"),
+        })
+        .to_string();
+        invoke("__core__", &req)
+    }
+
     /// cookie set (Electron `session.cookies.set`).
     pub fn set_cookie(c: CookieDescriptor) -> Option<String> {
         let req = json!({

@@ -1404,7 +1404,7 @@ suji build → 결과물:
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
 | Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ✅ `menu_popup`(cef.zig `popupContextMenu` — NSMenu `popUpMenuPositioningItem:atLocation:inView:`, item/view=nil→화면좌표; x/y 미지정 시 커서). items 파싱·`menu:click` emit 은 `setApplicationMenu` 와 동일 경로 재사용. 프론트 `menu.popup(items,{x?,y?})`. ⚠️ 동기 모달이라 정상 popup e2e 자동 클릭 불가(데스크톱 dialog 동일 경계) — zig build+단위 339+menu e2e parse-error+menu:click 경로 재사용으로 검증 |
 | 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |
-| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ✅ `session.clearCookies` / `flushStore` / `setCookie` / `getCookies` / `removeCookies` — CEF cookie_manager + visitor 패턴 (`session:cookies-result` 이벤트 + requestId 매칭, race-safe pending buffer + 1초 timeout). 5 SDK 노출 + e2e 8 케이스 (set/get round-trip, httponly 필터, removeCookies, includeHttpOnly:false, URL 검증, SDK wrapper). cookies 0개 case는 visit fn 호출 안 돼 SDK timeout으로 빈 결과 (Electron 동등 동작). `clearStorageData` (IndexedDB/localStorage) 후속 |
+| Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ✅ `session.clearCookies` / `flushStore` / `setCookie` / `getCookies` / `removeCookies` — CEF cookie_manager + visitor 패턴 (`session:cookies-result` 이벤트 + requestId 매칭, race-safe pending buffer + 1초 timeout). 5 SDK 노출 + e2e 8 케이스 (set/get round-trip, httponly 필터, removeCookies, includeHttpOnly:false, URL 검증, SDK wrapper). cookies 0개 case는 visit fn 호출 안 돼 SDK timeout으로 빈 결과 (Electron 동등 동작). ✅ `clearStorageData(origin?, storageTypes?)` — CDP `Storage.clearDataForOrigin` + `Network.clearBrowserCache` fire-and-forget(clearCookies 동형, g_browser send_dev_tools_message 재사용). 5 SDK 노출 + e2e 3(무-origin/origin+types/escape-safe). ⚠️ 웹 플랫폼 제약: IndexedDB/localStorage 는 origin-scoped 라 origin 없이 전 origin 일괄 삭제 불가 — origin 빈값이면 전역 HTTP 캐시만(호출부가 자기 앱 origin 전달 시 그 origin storage 삭제). |
 
 ### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
 
@@ -1502,7 +1502,9 @@ suji build → 결과물:
     (`session:cookies-result` 이벤트 + visitor 패턴 + race-safe pending buffer + 1초
     timeout). CEF refcount 모델이 표준 RefPtr scope과 안 맞아 visit fn count==total-1
     시점 emit 채택. cookies 0개 case는 SDK timeout으로 빈 결과 (Electron 동등). 5 SDK
-    노출 + e2e 8 케이스. `clearStorageData` (IndexedDB/localStorage)는 후속.
+    노출 + e2e 8 케이스. `clearStorageData(origin?, storageTypes?)` ✅ — CDP
+    `Storage.clearDataForOrigin`+`Network.clearBrowserCache` fire-and-forget
+    (clearCookies 동형). ⚠️ origin-scoped 제약: origin 빈값=전역 캐시만.
 24. ✅ **임베드 코어 분리 + 모바일 (zero-native 벤치마킹)** — 아래 전용 섹션.
 25. ✅ **Windows dlopen 백엔드 복구** — Zig 0.16 std.DynLib Windows 제거(의도된 설계)에
     대응해 kernel32 `LoadLibraryExW`/`GetProcAddress`/`FreeLibrary` 직접 래핑

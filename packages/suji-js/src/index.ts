@@ -1275,6 +1275,19 @@ export const session = {
     return r.success === true;
   },
 
+  /**
+   * IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
+   * origin 미지정 → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
+   * 삭제 불가 — 호출부가 자기 앱 origin 전달 시 그 origin storage 삭제).
+   * storageTypes 기본 "all" (CDP 콤마구분: local_storage,indexeddb,...).
+   */
+  async clearStorageData(origin = "", storageTypes = "all"): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({
+      cmd: "session_clear_storage_data", origin, storageTypes,
+    });
+    return r.success === true;
+  },
+
   /** Electron `session.cookies.set`. expires는 unix epoch second (0 → 세션 쿠키). */
   async setCookie(cookie: CookieDescriptor): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({

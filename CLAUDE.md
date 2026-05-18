@@ -164,6 +164,9 @@ fn onAllClosed(_: suji.Event) void {
 //   / setCookieRaw(args) / getCookiesRaw(args) / removeCookiesRaw(args)
 //                                       — Electron session.cookies.set/get/remove
 //                                       (visitor 패턴, `session:cookies-result` 이벤트 응답)
+//   / clearStorageDataRaw(args)  — Electron session.clearStorageData. CDP
+//     Storage.clearDataForOrigin + Network.clearBrowserCache fire-and-forget.
+//     origin-scoped: origin 빈값이면 전역 HTTP 캐시만(웹 플랫폼 제약)
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
 

@@ -1237,8 +1237,10 @@ test "app.exit + session.clearCookies/flushStore IPC" {
         "\"app_exit\"",
         "\"session_clear_cookies\"",
         "\"session_flush_store\"",
+        "\"session_clear_storage_data\"",
         "cef.sessionClearCookies",
         "cef.sessionFlushStore",
+        "cef.sessionClearStorageData",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
@@ -1248,6 +1250,9 @@ test "app.exit + session.clearCookies/flushStore IPC" {
     inline for (.{
         "pub fn sessionClearCookies",
         "pub fn sessionFlushStore",
+        "pub fn sessionClearStorageData",
+        "Storage.clearDataForOrigin",
+        "Network.clearBrowserCache",
         "cef_cookie_manager_get_global_manager",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
