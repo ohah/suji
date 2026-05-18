@@ -14,6 +14,10 @@ zig build          # 빌드
 zig build test     # 단위 테스트 (339개)
 zig build run      # CLI 도움말
 
+# 공식 플러그인 테스트 (dylib 선빌드 필요 — cd plugins/<p>/zig && zig build)
+zig build test-state    # state 플러그인 (KV 스토어)
+zig build test-sqlite   # sqlite 플러그인 (벤더 SQLite 3.51, sql:open/execute/query/close)
+
 # 임베드 코어 라이브러리 (CEF 무관 — 모바일/임베드용)
 zig build lib                                  # libsuji_core.a (host)
 zig build lib -Dtarget=aarch64-ios             # iOS

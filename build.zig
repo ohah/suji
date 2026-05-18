@@ -534,6 +534,27 @@ pub fn build(b: *std.Build) void {
     const state_test_step = b.step("test-state", "Run state plugin tests (requires built dylib)");
     state_test_step.dependOn(&state_test_run.step);
 
+    // SQLite plugin tests (state 와 동형 — 별도 스텝, dylib 빌드 필요)
+    const sqlite_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/sqlite_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const sqlite_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    sqlite_loader.addImport("events", events_module);
+    sqlite_loader.addImport("runtime", runtime_module);
+    sqlite_test_mod.addImport("loader", sqlite_loader);
+    const sqlite_test = b.addTest(.{ .root_module = sqlite_test_mod });
+    const sqlite_test_run = b.addRunArtifact(sqlite_test);
+    sqlite_test_run.setCwd(b.path("."));
+    const sqlite_test_step = b.step("test-sqlite", "Run SQLite plugin tests (requires built dylib)");
+    sqlite_test_step.dependOn(&sqlite_test_run.step);
+
     // State plugin Rust 래퍼 통합 테스트
     // Rust bridge dylib를 cargo로 빌드한 뒤 Zig 테스트에서 로드.
     const rust_wrapper_mod = b.createModule(.{
