@@ -528,6 +528,30 @@ pub mod windows {
         )
     }
 
+    /// 부분 영역 스크린샷 (Electron `webContents.capturePage(rect)`). CSS px.
+    /// Rust 는 기본인자 없음 → capture_page 와 별도 fn(무회귀).
+    pub fn capture_page_rect(
+        window_id: u32,
+        path: &str,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"capture_page","windowId":{},"path":"{}","clipX":{},"clipY":{},"clipWidth":{},"clipHeight":{}}}"#,
+                window_id,
+                escape_json(path),
+                x as i64,
+                y as i64,
+                width as i64,
+                height as i64,
+            ),
+        )
+    }
+
     pub fn set_title(window_id: u32, title: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"set_title","windowId":{},"title":"{}"}}"#,
@@ -689,6 +713,9 @@ pub mod windows {
         }
         pub fn capture_page(&self, path: &str) -> Option<String> {
             capture_page(self.id, path)
+        }
+        pub fn capture_page_rect(&self, path: &str, x: f64, y: f64, width: f64, height: f64) -> Option<String> {
+            capture_page_rect(self.id, path, x, y, width, height)
         }
         pub fn set_title(&self, title: &str) -> Option<String> {
             set_title(self.id, title)

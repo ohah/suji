@@ -289,8 +289,14 @@ export declare const windows: {
     /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
      *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
      *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
-     *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식. */
-    capturePage(windowId: number, path: string): Promise<{
+     *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
+     *  rect 지정 시 부분 영역만 (Electron `capturePage(rect)`); 미지정=전체. */
+    capturePage(windowId: number, path: string, rect?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }): Promise<{
         success: boolean;
     }>;
     /** host 창 contentView 안에 새 view 합성 (Electron `WebContentsView`). 자동으로 host의
@@ -369,7 +375,12 @@ export declare class BrowserWindow {
     printToPDF(path: string): Promise<{
         success: boolean;
     }>;
-    capturePage(path: string): Promise<{
+    capturePage(path: string, rect?: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }): Promise<{
         success: boolean;
     }>;
 }

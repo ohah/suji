@@ -804,14 +804,16 @@ test "desktopCapturer.getSources IPC — main.zig dispatch + cef.zig 함수" {
     const cef_src = try readCefSource();
     defer std.testing.allocator.free(cef_src);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn desktopCapturerGetSources") != null);
-    // CG/CF 열거 경로 + JSON shape 정적 검증.
+    // CG/CF 열거 경로 + JSON shape 정적 검증. needle 은 zig source 에 verbatim
+    // 등장하는 식별자/부분문자열만 (fmt 내 \" escape 형태 매칭 회피 — screen
+    // GetAllDisplays 테스트와 동일 정책).
     inline for (.{
         "CGGetActiveDisplayList",
         "CGWindowListCopyWindowInfo",
         "CGRectMakeWithDictionaryRepresentation",
         "kCGWindowLayer",
-        "\"type\":\"screen\"",
-        "\"type\":\"window\"",
+        "screen:{d}:0",
+        "window:{d}:0",
         "displayId",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);

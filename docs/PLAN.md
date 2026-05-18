@@ -1426,7 +1426,7 @@ suji build → 결과물:
 | 마우스 위치 / 모니터 | `screen.getCursorScreenPoint` / `getDisplayNearestPoint` | -- | ✅ `screen.getCursorScreenPoint()` (NSEvent.mouseLocation, bottom-up) + `getDisplayNearestPoint({x,y})` (frame contains check, none이면 -1) |
 | 시스템 유휴 시간 | `powerMonitor.getSystemIdleState/Time` | -- | 🟡 `getSystemIdleTime()` ✅ + `getSystemIdleState(threshold)` ✅ (`"active"\|"idle"`, idle_seconds ≥ threshold 비교). `"locked"` 상태는 lock-screen 이벤트 트래킹 후속 |
 | Linux/Windows tray 배지 | `BrowserWindow.setBadgeCount(n)` | -- | ❌ (Linux libunity / Win taskbar `ITaskbarList3::SetOverlayIcon`) |
-| 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ❌ (CEF `cef_browser_host_t.print_to_pdf` 있으나 raster 캡처는 후속 — `OnPaint` 또는 `cef_image_t`) |
+| 페이지 영역 캡처 | `BrowserWindow.capturePage(rect?)` | -- | ✅ `capturePage(rect?)` — CDP `Page.captureScreenshot` `params.clip{x,y,width,height,scale:1}`. rect 미지정=전체(기존 동작 무변). window.zig CaptureClip vtable 확장(test_native 포함). 4 SDK(JS/Node rect 옵션, Rust/Go 무회귀 별도 fn capture_page_rect/CapturePageRect) + 단위(clip native 전달) + e2e(clip PNG IHDR width < 전체, DPR 무관 실증) |
 | nativeImage (아이콘 decode/encode) | `nativeImage.createFromPath` / `toPNG` | -- | ✅ `nativeImage.getSize(path)` + `toPng(path)` + `toJpeg(path, quality)` (NSImage → NSBitmapImageRep `representationUsingType:properties:`). raw bytes ~8KB 한도 (16KB IPC response). 5 SDK + e2e 3 케이스 (PNG/JPEG signature 검증) |
 | 앱 강제 종료 | `app.exit(code)` | `process::exit` | ✅ `app.exit()` (Electron app.exit code 무시 — cef.quit 경유 process 종료). 5 SDK + e2e (IPC handler grep만 — 실제 호출은 process 종료라 e2e 불가) |
 

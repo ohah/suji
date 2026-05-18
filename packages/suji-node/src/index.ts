@@ -601,7 +601,11 @@ export const windows = {
 
   /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage`, CDP
    *  Page.captureScreenshot). printToPDF 동형 2단(ack + window:page-captured). */
-  capturePage(windowId: number, path: string): Promise<{ success: boolean }> {
+  capturePage(
+    windowId: number,
+    path: string,
+    rect?: { x: number; y: number; width: number; height: number },
+  ): Promise<{ success: boolean }> {
     return new Promise((resolve) => {
       const off = on("window:page-captured", (data) => {
         const d = data as { path?: string; success?: boolean };
@@ -610,7 +614,10 @@ export const windows = {
           resolve({ success: d.success === true });
         }
       });
-      invoke<WindowOpResponse>('__core__', { cmd: 'capture_page', windowId, path });
+      invoke<WindowOpResponse>('__core__', {
+        cmd: 'capture_page', windowId, path,
+        ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
+      });
     });
   },
 };
@@ -746,8 +753,8 @@ export class BrowserWindow {
   printToPDF(path: string) {
     return windows.printToPDF(this.#id, path);
   }
-  capturePage(path: string) {
-    return windows.capturePage(this.#id, path);
+  capturePage(path: string, rect?: { x: number; y: number; width: number; height: number }) {
+    return windows.capturePage(this.#id, path, rect);
   }
 }
 

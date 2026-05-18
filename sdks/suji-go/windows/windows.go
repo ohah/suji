@@ -192,6 +192,15 @@ func CapturePage(windowID uint32, path string) string {
 	))
 }
 
+// CapturePageRect — 부분 영역 스크린샷 (Electron webContents.capturePage(rect)).
+// CSS px. Go 는 기본인자 없음 → CapturePage 와 별도 fn(무회귀).
+func CapturePageRect(windowID uint32, path string, x, y, width, height int) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"capture_page","windowId":%d,"path":"%s","clipX":%d,"clipY":%d,"clipWidth":%d,"clipHeight":%d}`,
+		windowID, jsonesc.Full(path), x, y, width, height,
+	))
+}
+
 func SetTitle(windowID uint32, title string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"set_title","windowId":%d,"title":"%s"}`,
@@ -289,6 +298,9 @@ func (w *BrowserWindow) StopFindInPage(clear bool) string {
 func (w *BrowserWindow) PrintToPDF(path string) string { return PrintToPDF(w.ID, path) }
 func (w *BrowserWindow) CapturePage(path string) string {
 	return CapturePage(w.ID, path)
+}
+func (w *BrowserWindow) CapturePageRect(path string, x, y, width, height int) string {
+	return CapturePageRect(w.ID, path, x, y, width, height)
 }
 func (w *BrowserWindow) SetTitle(title string) string { return SetTitle(w.ID, title) }
 func (w *BrowserWindow) SetBounds(b SetBoundsArgs) string {

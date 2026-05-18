@@ -78,6 +78,7 @@ pub const TestNative = struct {
     last_print_path: ?[]const u8 = null,
     capture_page_calls: usize = 0,
     last_capture_path: ?[]const u8 = null,
+    last_capture_clipped: bool = false,
 
     // Phase 5: 라이프사이클 제어
     minimize_calls: usize = 0,
@@ -344,10 +345,11 @@ pub const TestNative = struct {
         self.last_print_path = path;
     }
 
-    fn capturePage(ctx: ?*anyopaque, _: u64, path: []const u8) void {
+    fn capturePage(ctx: ?*anyopaque, _: u64, path: []const u8, clip: ?window.CaptureClip) void {
         const self = fromCtx(ctx);
         self.capture_page_calls += 1;
         self.last_capture_path = path;
+        self.last_capture_clipped = clip != null;
     }
 
     fn createView(ctx: ?*anyopaque, host_handle: u64, opts: *const window.CreateViewOptions) anyerror!u64 {

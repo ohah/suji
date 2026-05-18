@@ -249,8 +249,9 @@ export const windows = {
     /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
      *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
      *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
-     *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식. */
-    capturePage(windowId, path) {
+     *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
+     *  rect 지정 시 부분 영역만 (Electron `capturePage(rect)`); 미지정=전체. */
+    capturePage(windowId, path, rect) {
         return new Promise((resolve) => {
             const off = on("window:page-captured", (data) => {
                 const d = data;
@@ -259,7 +260,10 @@ export const windows = {
                     resolve({ success: d.success === true });
                 }
             });
-            coreCall({ cmd: "capture_page", windowId, path });
+            coreCall({
+                cmd: "capture_page", windowId, path,
+                ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
+            });
         });
     },
     // ── Phase 17-A: WebContentsView ──
@@ -439,8 +443,8 @@ export class BrowserWindow {
     printToPDF(path) {
         return windows.printToPDF(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), path);
     }
-    capturePage(path) {
-        return windows.capturePage(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), path);
+    capturePage(path, rect) {
+        return windows.capturePage(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), path, rect);
     }
 }
 _BrowserWindow_id = new WeakMap();

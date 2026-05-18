@@ -588,9 +588,16 @@ pub fn handlePrintToPDF(req: PrintToPDFReq, response_buf: []u8, wm: *window.Wind
 
 // capture_page — CDP Page.captureScreenshot. ack 즉시 + 완료 시
 // `window:page-captured`{path,success} 이벤트(printToPDF 와 동형 2단).
-pub fn handleCapturePage(req: PrintToPDFReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+// clip 지정 시 부분 영역(Electron `capturePage(rect)`), null=전체(기존 동작).
+pub const CapturePageReq = struct {
+    window_id: u32,
+    path: []const u8,
+    clip: ?window.CaptureClip = null,
+};
+
+pub fn handleCapturePage(req: CapturePageReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
-    const ok = if (wm.capturePage(req.window_id, req.path)) |_| true else |_| false;
+    const ok = if (wm.capturePage(req.window_id, req.path, req.clip)) |_| true else |_| false;
     return respondWindowOp(response_buf, "capture_page", req.window_id, ok);
 }
 

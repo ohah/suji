@@ -488,8 +488,13 @@ export const windows = {
   /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
    *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
    *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
-   *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식. */
-  capturePage(windowId: number, path: string): Promise<{ success: boolean }> {
+   *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
+   *  rect 지정 시 부분 영역만 (Electron `capturePage(rect)`); 미지정=전체. */
+  capturePage(
+    windowId: number,
+    path: string,
+    rect?: { x: number; y: number; width: number; height: number },
+  ): Promise<{ success: boolean }> {
     return new Promise((resolve) => {
       const off = on("window:page-captured", (data) => {
         const d = data as { path?: string; success?: boolean };
@@ -498,7 +503,10 @@ export const windows = {
           resolve({ success: d.success === true });
         }
       });
-      coreCall({ cmd: "capture_page", windowId, path });
+      coreCall({
+        cmd: "capture_page", windowId, path,
+        ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
+      });
     });
   },
 
@@ -693,8 +701,8 @@ export class BrowserWindow {
   printToPDF(path: string) {
     return windows.printToPDF(this.#id, path);
   }
-  capturePage(path: string) {
-    return windows.capturePage(this.#id, path);
+  capturePage(path: string, rect?: { x: number; y: number; width: number; height: number }) {
+    return windows.capturePage(this.#id, path, rect);
   }
 }
 

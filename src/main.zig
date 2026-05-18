@@ -1417,9 +1417,24 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "capture_page")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        // clipWidth/clipHeight 둘 다 양수일 때만 부분 캡처(Electron rect). 아니면
+        // 전체. CaptureClip 은 f64 (CDP clip 은 fractional CSS px 허용) →
+        // extractJsonFloat 재사용(JS/Node rect 소수 정밀도 보존).
+        const cw = util.extractJsonFloat(req_clean, "clipWidth");
+        const ch = util.extractJsonFloat(req_clean, "clipHeight");
+        const clip: ?window_mod.CaptureClip = if (cw != null and ch != null and cw.? > 0 and ch.? > 0)
+            .{
+                .x = util.extractJsonFloat(req_clean, "clipX") orelse 0,
+                .y = util.extractJsonFloat(req_clean, "clipY") orelse 0,
+                .width = cw.?,
+                .height = ch.?,
+            }
+        else
+            null;
         return window_ipc.handleCapturePage(.{
             .window_id = win_id,
             .path = util.extractJsonString(req_clean, "path") orelse "",
+            .clip = clip,
         }, response_buf, wm);
     }
     // Phase 17-A: WebContentsView (createView / addChildView / setTopView / ...)

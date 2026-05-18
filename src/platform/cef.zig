@@ -1114,7 +1114,8 @@ pub const CefNative = struct {
     }
 
     /// CDP Page.captureScreenshot — 결과는 observer → window:page-captured.
-    fn captureePageImpl(ctx: ?*anyopaque, handle: u64, path: []const u8) void {
+    /// clip 지정 시 CDP `params.clip`{x,y,width,height,scale:1} 로 부분 영역만.
+    fn captureePageImpl(ctx: ?*anyopaque, handle: u64, path: []const u8, clip: ?window_mod.CaptureClip) void {
         assertUiThread();
         const self = fromCtx(ctx);
         const entry = self.browsers.getPtr(handle) orelse return;
@@ -1148,8 +1149,12 @@ pub const CefNative = struct {
         sl.id = id;
         sl.used = true;
 
-        var msg: [128]u8 = undefined;
-        const m = std.fmt.bufPrint(
+        var msg: [256]u8 = undefined;
+        const m = if (clip) |cl| std.fmt.bufPrint(
+            &msg,
+            "{{\"id\":{d},\"method\":\"Page.captureScreenshot\",\"params\":{{\"clip\":{{\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"scale\":1}}}}}}",
+            .{ id, cl.x, cl.y, cl.width, cl.height },
+        ) catch return else std.fmt.bufPrint(
             &msg,
             "{{\"id\":{d},\"method\":\"Page.captureScreenshot\",\"params\":{{}}}}",
             .{id},

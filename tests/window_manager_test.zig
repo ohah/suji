@@ -4014,10 +4014,15 @@ test "capturePage: native에 path 전달 + destroyed/unknown 가드" {
     var wm = newManager(&native);
     defer wm.deinit();
     const id = try wm.create(.{});
-    try wm.capturePage(id, "/tmp/shot.png");
+    try wm.capturePage(id, "/tmp/shot.png", null);
     try std.testing.expectEqual(@as(usize, 1), native.capture_page_calls);
     try std.testing.expectEqualStrings("/tmp/shot.png", native.last_capture_path.?);
-    try std.testing.expectError(window.Error.WindowNotFound, wm.capturePage(999, "/tmp/x.png"));
+    try std.testing.expect(!native.last_capture_clipped);
+    // 부분 영역(rect) 캡처 — clip 이 native 까지 전달.
+    try wm.capturePage(id, "/tmp/clip.png", .{ .x = 10, .y = 20, .width = 100, .height = 80 });
+    try std.testing.expectEqual(@as(usize, 2), native.capture_page_calls);
+    try std.testing.expect(native.last_capture_clipped);
+    try std.testing.expectError(window.Error.WindowNotFound, wm.capturePage(999, "/tmp/x.png", null));
 }
 
 test "회귀: cef.zig가 EVENT_PDF_PRINT_FINISHED const 사용 (이벤트 이름 하드코드 차단)" {
