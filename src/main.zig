@@ -1678,30 +1678,32 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "shell_open_external")) {
         const raw = util.extractJsonString(req_clean, "url") orelse "";
         var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
-            cef.shellOpenExternal(unesc_buf[0..unesc_len])
-        else
-            false;
-        const result = std.fmt.bufPrint(
+        const ok = blk: {
+            const n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk false;
+            const url = unesc_buf[0..n];
+            if (shellUrlGate(response_buf, "shell_open_external", url)) |e| return e;
+            break :blk cef.shellOpenExternal(url);
+        };
+        return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"shell_open_external\",\"success\":{}}}",
             .{ok},
         ) catch return null;
-        return result;
     }
     if (std.mem.eql(u8, cmd, "shell_show_item_in_folder")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
         var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
-            cef.shellShowItemInFolder(unesc_buf[0..unesc_len])
-        else
-            false;
-        const result = std.fmt.bufPrint(
+        const ok = blk: {
+            const n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk false;
+            const path = unesc_buf[0..n];
+            if (shellPathGate(response_buf, "shell_show_item_in_folder", path)) |e| return e;
+            break :blk cef.shellShowItemInFolder(path);
+        };
+        return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"shell_show_item_in_folder\",\"success\":{}}}",
             .{ok},
         ) catch return null;
-        return result;
     }
     if (std.mem.eql(u8, cmd, "shell_beep")) {
         cef.shellBeep();
@@ -1711,10 +1713,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "shell_trash_item")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
         var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
-            cef.shellTrashItem(unesc_buf[0..unesc_len])
-        else
-            false;
+        const ok = blk: {
+            const n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk false;
+            const path = unesc_buf[0..n];
+            if (shellPathGate(response_buf, "shell_trash_item", path)) |e| return e;
+            break :blk cef.shellTrashItem(path);
+        };
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"shell_trash_item\",\"success\":{}}}",
@@ -1724,10 +1728,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "shell_open_path")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
         var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_len|
-            cef.shellOpenPath(unesc_buf[0..unesc_len])
-        else
-            false;
+        const ok = blk: {
+            const n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk false;
+            const path = unesc_buf[0..n];
+            if (shellPathGate(response_buf, "shell_open_path", path)) |e| return e;
+            break :blk cef.shellOpenPath(path);
+        };
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"shell_open_path\",\"success\":{}}}",
@@ -2599,23 +2605,33 @@ fn pathHasRootBoundary(path: []const u8, prefix: []const u8) bool {
     return next == '/' or next == '\\';
 }
 
-/// frontend가 호출한 fs.* path가 sandbox 통과하는지 검증.
-/// (1) `..` path component 거부 — security-critical, 모든 mode에 항상 적용,
-/// (2) config 미설정/roots 비어있음 → 차단,
-/// (3) `*` element 포함 시 무제한 escape hatch (`..` 가드는 여전히),
-/// (4) 그 외 — root prefix + boundary 매치 (config load 시 ~ 사전 expand됨).
-fn isPathAllowedForFrontend(path: []const u8) bool {
+/// path 가 roots 중 하나에 prefix+boundary 매치하는지. `..` component 는 항상 거부,
+/// `*` element 는 무제한 escape hatch. (cfg/empty 정책은 호출부가 결정 — fs 는
+/// default-deny, shell/dialog 는 opt-in.)
+fn pathAllowedInRoots(path: []const u8, roots: []const [:0]const u8) bool {
     if (hasParentTraversalSegment(path)) return false;
-
-    const cfg = g_config orelse return false;
-    const roots = cfg.fs.allowed_roots;
-    if (roots.len == 0) return false;
-
     for (roots) |root| {
         if (std.mem.eql(u8, root, "*")) return true;
         if (pathHasRootBoundary(path, root)) return true;
     }
     return false;
+}
+
+/// url 이 patterns(glob, util.matchGlob 재사용 — D-1) 중 하나에 매치하는지.
+/// `*` element 는 무제한 escape hatch.
+fn urlAllowedInList(url: []const u8, patterns: []const [:0]const u8) bool {
+    for (patterns) |p| {
+        if (std.mem.eql(u8, p, "*")) return true;
+        if (util.matchGlob(p, url)) return true;
+    }
+    return false;
+}
+
+fn isPathAllowedForFrontend(path: []const u8) bool {
+    const cfg = g_config orelse return false;
+    const roots = cfg.fs.allowed_roots;
+    if (roots.len == 0) return false; // fs: default-deny (고위험 직접 FS)
+    return pathAllowedInRoots(path, roots);
 }
 
 test "hasParentTraversalSegment: component vs substring" {
@@ -2720,9 +2736,106 @@ test "fsSandboxCheck: g_in_backend_invoke 마커는 sandbox 우회" {
     try std.testing.expect(be == null);
 }
 
+test "urlAllowedInList: glob + escape hatch" {
+    const allow = [_][:0]const u8{ "https://*.example.com/*", "https://exact.test/" };
+    try std.testing.expect(urlAllowedInList("https://api.example.com/v1", &allow));
+    try std.testing.expect(urlAllowedInList("https://exact.test/", &allow));
+    try std.testing.expect(!urlAllowedInList("https://evil.com/", &allow));
+    try std.testing.expect(!urlAllowedInList("http://api.example.com/", &allow)); // scheme 불일치
+    const star = [_][:0]const u8{"*"};
+    try std.testing.expect(urlAllowedInList("anything://x", &star));
+    try std.testing.expect(!urlAllowedInList("x", &[_][:0]const u8{})); // 빈 = deny
+}
+
+test "shell/dialog 게이트: opt-in (키 부재=레거시 허용, 존재=enforce) + backend 우회" {
+    const saved_cfg = g_config;
+    const saved_marker = g_in_backend_invoke;
+    defer {
+        g_config = saved_cfg;
+        g_in_backend_invoke = saved_marker;
+    }
+    g_in_backend_invoke = false;
+    var resp: [256]u8 = undefined;
+
+    // g_config null → 레거시 허용 (null 반환).
+    g_config = null;
+    try std.testing.expect(shellPathGate(&resp, "shell_open_path", "/x") == null);
+    try std.testing.expect(shellUrlGate(&resp, "shell_open_external", "https://x") == null);
+    try std.testing.expect(dialogPathGate(&resp, "dialog_show_open_dialog", "/x") == null);
+
+    // 키 부재 (optional null) → 레거시 허용.
+    var cfg_absent = suji.Config{};
+    g_config = &cfg_absent;
+    try std.testing.expect(shellPathGate(&resp, "shell_open_path", "/etc/passwd") == null);
+    try std.testing.expect(shellUrlGate(&resp, "shell_open_external", "https://evil.com") == null);
+
+    // 키 존재하지만 빈 슬라이스 → enforce deny-all (forbidden).
+    var cfg_deny = suji.Config{};
+    cfg_deny.shell.allowed_paths = &.{};
+    cfg_deny.shell.allowed_external_urls = &.{};
+    cfg_deny.dialog.allowed_paths = &.{};
+    g_config = &cfg_deny;
+    const d1 = shellPathGate(&resp, "shell_open_path", "/x");
+    try std.testing.expect(d1 != null and std.mem.indexOf(u8, d1.?, "\"error\":\"forbidden\"") != null);
+    try std.testing.expect(shellUrlGate(&resp, "shell_open_external", "https://x") != null);
+    try std.testing.expect(dialogPathGate(&resp, "dialog_show_open_dialog", "/x") != null);
+    // 빈 defaultPath 는 dialog 무제약 (deny config 라도 null).
+    try std.testing.expect(dialogPathGate(&resp, "dialog_show_open_dialog", "") == null);
+
+    // 특정 allowlist → boundary/glob enforce.
+    var cfg_spec = suji.Config{};
+    const sp = [_][:0]const u8{"/Users/x/app"};
+    const su = [_][:0]const u8{"https://*.ok.com/*"};
+    cfg_spec.shell.allowed_paths = &sp;
+    cfg_spec.shell.allowed_external_urls = &su;
+    cfg_spec.dialog.allowed_paths = &sp;
+    g_config = &cfg_spec;
+    try std.testing.expect(shellPathGate(&resp, "shell_open_path", "/Users/x/app/f") == null);
+    try std.testing.expect(shellPathGate(&resp, "shell_open_path", "/Users/x/app_secret") != null); // prefix-ext
+    try std.testing.expect(shellPathGate(&resp, "shell_open_path", "/Users/x/app/../etc") != null); // ..
+    try std.testing.expect(shellUrlGate(&resp, "shell_open_external", "https://a.ok.com/p") == null);
+    try std.testing.expect(shellUrlGate(&resp, "shell_open_external", "https://evil.com/") != null);
+    try std.testing.expect(dialogPathGate(&resp, "dialog_show_save_dialog", "/Users/x/app/s.txt") == null);
+    try std.testing.expect(dialogPathGate(&resp, "dialog_show_save_dialog", "/etc/x") != null);
+
+    // backend invoke 마커 → 전 게이트 우회 (deny config 라도 null).
+    g_config = &cfg_deny;
+    g_in_backend_invoke = true;
+    try std.testing.expect(shellPathGate(&resp, "shell_open_path", "/x") == null);
+    try std.testing.expect(shellUrlGate(&resp, "shell_open_external", "https://x") == null);
+    try std.testing.expect(dialogPathGate(&resp, "dialog_show_open_dialog", "/x") == null);
+}
+
 fn fsSandboxCheck(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
     if (g_in_backend_invoke) return null;
     if (isPathAllowedForFrontend(path)) return null;
+    return coreError(response_buf, cmd, "forbidden");
+}
+
+/// shell/dialog allowlist 게이트 (opt-in). backend invoke 우회. config 키 부재
+/// (optional null) → null 반환 = 레거시 무제한(비파괴). 키 존재 시 enforce:
+/// 빈 슬라이스 → 매치 0 → forbidden(deny-all), `["*"]` → 허용, 특정 → 제한.
+fn shellPathGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
+    if (g_in_backend_invoke) return null;
+    const cfg = g_config orelse return null;
+    const list = cfg.shell.allowed_paths orelse return null;
+    if (pathAllowedInRoots(path, list)) return null;
+    return coreError(response_buf, cmd, "forbidden");
+}
+fn shellUrlGate(response_buf: []u8, cmd: []const u8, url: []const u8) ?[]const u8 {
+    if (g_in_backend_invoke) return null;
+    const cfg = g_config orelse return null;
+    const list = cfg.shell.allowed_external_urls orelse return null;
+    if (urlAllowedInList(url, list)) return null;
+    return coreError(response_buf, cmd, "forbidden");
+}
+/// dialog defaultPath 게이트 — 빈 defaultPath 는 무제약(다이얼로그 자체가 사용자 중재).
+fn dialogPathGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
+    if (g_in_backend_invoke) return null;
+    if (path.len == 0) return null;
+    const cfg = g_config orelse return null;
+    const list = cfg.dialog.allowed_paths orelse return null;
+    if (pathAllowedInRoots(path, list)) return null;
     return coreError(response_buf, cmd, "forbidden");
 }
 
@@ -2898,6 +3011,8 @@ fn handleDialogShowOpenDialog(req_clean: []const u8, response_buf: []u8) ?[]cons
     };
     defer parsed.deinit();
     const opts = parsed.value;
+
+    if (dialogPathGate(response_buf, "dialog_show_open_dialog", opts.defaultPath)) |e| return e;
 
     const filters = convertFilters(arena, opts.filters) catch &[_]cef.FileFilter{};
     var dialog_buf: [util.MAX_RESPONSE]u8 = undefined;
@@ -3359,6 +3474,8 @@ fn handleDialogShowSaveDialog(req_clean: []const u8, response_buf: []u8) ?[]cons
     };
     defer parsed.deinit();
     const opts = parsed.value;
+
+    if (dialogPathGate(response_buf, "dialog_show_save_dialog", opts.defaultPath)) |e| return e;
 
     const filters = convertFilters(arena, opts.filters) catch &[_]cef.FileFilter{};
     var dialog_buf: [util.MAX_RESPONSE]u8 = undefined;

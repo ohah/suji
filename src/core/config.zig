@@ -16,6 +16,8 @@ pub const Config = struct {
     asset_dir: [:0]const u8 = "assets",
     frontend: Frontend = .{},
     fs: Fs = .{},
+    shell: Shell = .{},
+    dialog: Dialog = .{},
     security: Security = .{},
 
     // _arena는 포인터로 보관. 값으로 담으면 `Config { ._arena = arena }` 시점에 arena의
@@ -107,6 +109,23 @@ pub const Config = struct {
         allowed_roots: []const [:0]const u8 = &.{},
     };
 
+    /// renderer shell.* allowlist. **opt-in** — fs(default-deny)와 달리 shell 은
+    /// 그동안 무제한 출하라 키 부재 시 동작 불변(레거시 무제한)으로 비파괴.
+    /// 키 존재 시 enforce: `[]`=전부 차단, `["*"]`=전부 허용, 특정=제한.
+    /// null = suji.json 에 키 없음(레거시 허용), non-null = enforce.
+    pub const Shell = struct {
+        /// shell_open_path / show_item_in_folder / trash_item 의 path (fs 동일 prefix+boundary).
+        allowed_paths: ?[]const [:0]const u8 = null,
+        /// shell_open_external 의 url (glob — util.matchGlob, `~` expand 안 함).
+        allowed_external_urls: ?[]const [:0]const u8 = null,
+    };
+
+    /// renderer dialog.* allowlist (opt-in, Shell 과 동일 semantics). open/save
+    /// 의 defaultPath 만 제약 — 다이얼로그 자체는 사용자 중재라 빈 defaultPath 는 무제약.
+    pub const Dialog = struct {
+        allowed_paths: ?[]const [:0]const u8 = null,
+    };
+
     /// 보안 정책 — `suji://` custom protocol 응답에 적용되는 헤더.
     /// csp 비어있으면 cef.zig의 default CSP 적용 (iframe_allowed_origins로 frame-src 합성).
     /// CSP 비활성화는 csp `"disabled"` 명시. iframe_allowed_origins 빈 배열이면 모든 iframe 차단,
@@ -154,6 +173,20 @@ pub const Config = struct {
         @memcpy(buf[home.len..total], rest);
         buf[total] = 0;
         return buf[0..total :0];
+    }
+
+    /// JSON string 배열 → `[:0]const u8` 슬라이스. expand_home=true 면 path 로 보고
+    /// `~` 사전 확장(fs allowedRoots 동일), false 면 raw(URL glob). non-array →
+    /// 빈(non-null) 슬라이스 = enforce-deny-all (opt-in: 호출부가 키 존재 시에만 호출).
+    fn parseAllowList(a: std.mem.Allocator, v: std.json.Value, expand_home: bool) []const [:0]const u8 {
+        if (v != .array) return &.{};
+        var list = std.ArrayList([:0]const u8).empty;
+        for (v.array.items) |item| {
+            if (item != .string) continue;
+            const s = if (expand_home) expandHomeAtLoad(a, item.string) else dupeStr(a, item.string);
+            list.append(a, s) catch continue;
+        }
+        return list.toOwnedSlice(a) catch &.{};
     }
 
     // ============================================
@@ -335,20 +368,24 @@ pub const Config = struct {
 
         if (root.get("fs")) |fs_val| {
             if (fs_val == .object) {
-                const fs_obj = fs_val.object;
-                if (fs_obj.get("allowedRoots")) |roots_val| {
-                    if (roots_val == .array) {
-                        var list = std.ArrayList([:0]const u8).empty;
-                        for (roots_val.array.items) |item| {
-                            if (item != .string) continue;
-                            // "*"는 escape hatch sentinel — expand 없이 그대로 보존.
-                            // 그 외는 ~ 사전 확장해 핫 패스에서 다시 resolve 안 하게.
-                            const expanded = expandHomeAtLoad(a, item.string);
-                            list.append(a, expanded) catch continue;
-                        }
-                        config.fs.allowed_roots = list.toOwnedSlice(a) catch &.{};
-                    }
-                }
+                // "*"는 expandHomeAtLoad 가 그대로 보존(escape hatch), 그 외 ~ 사전 확장.
+                if (fs_val.object.get("allowedRoots")) |v| config.fs.allowed_roots = parseAllowList(a, v, true);
+            }
+        }
+
+        // shell/dialog allowlist (opt-in — 키 존재 시에만 optional 을 non-null 로
+        // 설정해 enforce; 부재 시 null 유지 = 레거시 무제한). paths 는 ~ expand,
+        // urls 는 raw(glob).
+        if (root.get("shell")) |sh_val| {
+            if (sh_val == .object) {
+                const sh = sh_val.object;
+                if (sh.get("allowedPaths")) |v| config.shell.allowed_paths = parseAllowList(a, v, true);
+                if (sh.get("allowedExternalUrls")) |v| config.shell.allowed_external_urls = parseAllowList(a, v, false);
+            }
+        }
+        if (root.get("dialog")) |dl_val| {
+            if (dl_val == .object) {
+                if (dl_val.object.get("allowedPaths")) |v| config.dialog.allowed_paths = parseAllowList(a, v, true);
             }
         }
 

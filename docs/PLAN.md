@@ -143,7 +143,9 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
   - [x] main.zig에서 플러그인 빌드 + dlopen + BackendRegistry 등록
   - [x] 채널 접두사 컨벤션 (`state:get`, `fs:read` 등)
   - [x] `suji-plugin.json` 스펙 (플러그인 메타데이터)
-  - [ ] 권한 시스템 (나중에)
+  - [~] 권한 시스템 — fs(default-deny) + shell/dialog allowlist(opt-in,
+        비파괴) 완료. network(webRequest setter)는 sink 아니라 범위 제외,
+        모바일은 OS 샌드박스 경계(후속 결정)
 - [x] State 플러그인 (첫 번째 공식 플러그인)
   - [x] Zig 구현 — `plugins/state/zig/` (HashMap + Mutex + JSON 파일 영속성)
   - [x] 경합 테스트 (`tests/state_plugin_test.zig` — 10 threads + rapid fire 100)
@@ -1366,7 +1368,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | **fs sandbox (frontend path 화이트리스트)** | `webPreferences.sandbox` + nodeIntegration:false | allowlist | ✅ `fs.allowedRoots` config + `..` traversal 가드 + boundary check + backend bypass |
 | **앱별 cache 격리** | `app.getPath('userData')` | 자동 | ✅ OS 표준 (macOS Application Support / Linux XDG / Windows APPDATA) — 앱 이름별 자동 격리 |
-| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs만 — network/shell/dialog allowlist는 Phase 7+ |
+| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs(default-deny) + **shell/dialog allowlist**(opt-in — `shell.allowedPaths`/`allowedExternalUrls`(glob, util.matchGlob 재사용)/`dialog.allowedPaths`. 키 부재=레거시 무제한 비파괴, 존재=enforce(`[]`=deny-all/`["*"]`=allow/특정=제한). backend SDK 우회·`..`/boundary 가드 fs 동형. 단위 포괄(opt-in/deny-all/glob/boundary/traversal/backend-bypass)). network(webRequest setter)는 그 자체가 선언적 net-control이라 데이터 유출 sink 아님 → 범위 제외(정직). 모바일은 OS 샌드박스가 경계(fs 동일, 후속 결정) |
 | CSP (Content Security Policy) | 수동 설정 | 빌트인 | ✅ `suji://` 응답에 default CSP + X-Content-Type-Options + X-Frame-Options. `config.security.csp` override + `"disabled"` escape |
 | IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ✅ payload size 32KB · cmd char allowlist (injection 차단) · missing/invalid/unknown_cmd 표준 에러 |
 | macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ `suji build --sandbox` — helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin). 루트=non-sandbox(Developer ID, Hardened Runtime 기본) / `sandbox/`=App Sandbox+inherit(MAS). signing 모드와 직교. Security-scoped bookmarks API ✅ (다음 행) |
