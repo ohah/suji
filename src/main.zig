@@ -2052,6 +2052,29 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const png_bytes = cef.clipboardReadImagePng(&raw_buf);
         return respondBase64Data(response_buf, cmd, png_bytes);
     }
+    if (std.mem.eql(u8, cmd, "clipboard_write_tiff")) {
+        const b64_raw = util.extractJsonString(req_clean, "data") orelse "";
+        var b64_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const b64_n = util.unescapeJsonStr(b64_raw, &b64_buf) orelse return null;
+
+        var raw_buf: [8 * 1024]u8 = undefined;
+        const decoded_size = std.base64.standard.Decoder.calcSizeForSlice(b64_buf[0..b64_n]) catch {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_tiff\",\"success\":false,\"error\":\"decode\"}}", .{}) catch null;
+        };
+        if (decoded_size > raw_buf.len) {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_tiff\",\"success\":false,\"error\":\"too_large\"}}", .{}) catch null;
+        }
+        std.base64.standard.Decoder.decode(raw_buf[0..decoded_size], b64_buf[0..b64_n]) catch {
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_tiff\",\"success\":false,\"error\":\"decode\"}}", .{}) catch null;
+        };
+        const ok = cef.clipboardWriteTiff(raw_buf[0..decoded_size]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_tiff\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_read_tiff")) {
+        var raw_buf: [8 * 1024]u8 = undefined;
+        const tiff_bytes = cef.clipboardReadTiff(&raw_buf);
+        return respondBase64Data(response_buf, cmd, tiff_bytes);
+    }
     if (std.mem.eql(u8, cmd, "clipboard_has")) {
         const fmt_str = util.extractJsonString(req_clean, "format") orelse "";
         var unesc_buf: [256]u8 = undefined;

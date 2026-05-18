@@ -1481,6 +1481,17 @@ pub fn clipboardReadImagePng(out_buf: []u8) []const u8 {
     return clipboardReadBuffer(out_buf, "public.png");
 }
 
+/// 클립보드에 TIFF 바이트 쓰기 (NSPasteboard `public.tiff`). PNG 와 동형 — TIFF 는
+/// 바이너리라 텍스트 RTF 가 아니라 CFData 기반 clipboardWriteBuffer wrapper.
+pub fn clipboardWriteTiff(tiff_bytes: []const u8) bool {
+    return clipboardWriteBuffer(tiff_bytes, "public.tiff");
+}
+
+/// 클립보드에서 TIFF 바이트 읽기 (`public.tiff`). out_buf 부족 시 빈 slice.
+pub fn clipboardReadTiff(out_buf: []u8) []const u8 {
+    return clipboardReadBuffer(out_buf, "public.tiff");
+}
+
 /// 클립보드에 주어진 type이 있는지 (Electron `clipboard.has(format)`).
 /// type_cstr는 NSPasteboard UTI ("public.utf8-plain-text" / "public.html" 등).
 pub fn clipboardHas(type_cstr: [*:0]const u8) bool {

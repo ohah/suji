@@ -62,6 +62,18 @@ func ReadImage() string {
 	return suji.Invoke("__core__", `{"cmd":"clipboard_read_image"}`)
 }
 
+// WriteTIFF writes a TIFF image (base64-encoded) — NSPasteboard `public.tiff`.
+// WriteImage 동형. Response: `{"success":bool}`.
+func WriteTIFF(tiffBase64 string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_tiff","data":"%s"}`, jsonesc.Full(tiffBase64)))
+}
+
+// ReadTIFF reads TIFF bytes from clipboard as base64. Empty string if missing.
+// Response: `{"data":"..."}`.
+func ReadTIFF() string {
+	return suji.Invoke("__core__", `{"cmd":"clipboard_read_tiff"}`)
+}
+
 // ReadRTF reads RTF text from clipboard (Electron `clipboard.readRTF`).
 // Response: `{"rtf":"..."}`.
 func ReadRTF() string {

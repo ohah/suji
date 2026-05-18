@@ -898,6 +898,20 @@ pub const clipboard = struct {
     pub fn readImage() ?[]const u8 {
         return coreCmd("clipboard_read_image", "");
     }
+
+    /// TIFF 이미지 쓰기 — base64 string (NSPasteboard `public.tiff`). writeImage 동형.
+    pub fn writeTiff(tiff_base64: []const u8) ?[]const u8 {
+        var d_buf: [12 * 1024]u8 = undefined;
+        const d_n = util.escapeJsonStrFull(tiff_base64, &d_buf) orelse return null;
+        var fields_buf: [12 * 1024 + 32]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"data\":\"{s}\"", .{d_buf[0..d_n]}) catch return null;
+        return coreCmd("clipboard_write_tiff", fields);
+    }
+
+    /// TIFF 이미지 읽기 (base64). 응답: `{"data":"..."}` (없으면 빈 문자열).
+    pub fn readTiff() ?[]const u8 {
+        return coreCmd("clipboard_read_tiff", "");
+    }
 };
 
 pub const powerMonitor = struct {

@@ -1444,6 +1444,29 @@ test "clipboard RTF + Buffer IPC + cef pasteboard" {
     }
 }
 
+test "clipboard TIFF IPC + cef pasteboard (public.tiff)" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"clipboard_write_tiff\"",
+        "\"clipboard_read_tiff\"",
+        "cef.clipboardWriteTiff",
+        "cef.clipboardReadTiff",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn clipboardWriteTiff",
+        "pub fn clipboardReadTiff",
+        "public.tiff",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "app.isPackaged + getAppPath IPC + cef NSBundle" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

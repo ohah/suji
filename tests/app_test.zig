@@ -926,6 +926,19 @@ test "clipboard.writeImage / readImage IPC" {
     }.run);
 }
 
+test "clipboard.writeTiff / readTiff IPC" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.clipboard.writeTiff("SUkqAAgAAAA=");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_write_tiff\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "SUkqAAgAAAA=") != null);
+
+            _ = app_mod.clipboard.readTiff();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"clipboard_read_tiff\"") != null);
+        }
+    }.run);
+}
+
 test "clipboard.has / availableFormats IPC" {
     try withInvokeCore(struct {
         fn run() !void {

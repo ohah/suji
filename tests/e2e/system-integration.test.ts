@@ -374,6 +374,39 @@ describe("clipboard.writeImage / readImage", () => {
   });
 });
 
+describe("clipboard.writeTiff / readTiff", () => {
+  // little-endian TIFF magic: 49 49 2A 00 + IFD offset. NSPasteboard public.tiff는
+  // 임의 typed bytes 저장 — readImage(PNG)와 동형 round-trip(서명+길이).
+  const TIFF_MAGIC_BASE64 = "SUkqAAgAAAA=";
+
+  test("TIFF write → read round-trip (II* 서명 매칭)", async () => {
+    const w = await core<{ success: boolean }>({ cmd: "clipboard_write_tiff", data: TIFF_MAGIC_BASE64 });
+    expect(w.success).toBe(true);
+
+    const r = await core<{ data: string }>({ cmd: "clipboard_read_tiff" });
+    expect(r.data.length).toBeGreaterThan(0);
+    const decoded = Buffer.from(r.data, "base64");
+    expect(decoded[0]).toBe(0x49);
+    expect(decoded[1]).toBe(0x49);
+    expect(decoded[2]).toBe(0x2a);
+    expect(decoded[3]).toBe(0x00);
+
+    await core({ cmd: "clipboard_clear" });
+  });
+
+  test("TIFF 없으면 readTiff는 빈 문자열", async () => {
+    await core({ cmd: "clipboard_write_text", text: "no-tiff-here" });
+    const r = await core<{ data: string }>({ cmd: "clipboard_read_tiff" });
+    expect(r.data).toBe("");
+    await core({ cmd: "clipboard_clear" });
+  });
+
+  test("invalid base64는 success:false", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "clipboard_write_tiff", data: "!!!not-base64!!!" });
+    expect(r.success).toBe(false);
+  });
+});
+
 describe("clipboard.has / availableFormats", () => {
   test("HTML write 후 has('public.html') = true + 포맷 list 포함", async () => {
     await core({ cmd: "clipboard_write_html", html: "<i>x</i>" });

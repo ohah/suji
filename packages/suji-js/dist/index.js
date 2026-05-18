@@ -537,6 +537,16 @@ export const clipboard = {
         const r = await coreCall({ cmd: "clipboard_read_image" });
         return r.data ?? "";
     },
+    /** TIFF 이미지 쓰기 — base64 문자열 (NSPasteboard `public.tiff`). writeImage 동형. */
+    async writeTiff(tiffBase64) {
+        const r = await coreCall({ cmd: "clipboard_write_tiff", data: tiffBase64 });
+        return r.success === true;
+    },
+    /** TIFF 이미지 읽기 — base64 반환. TIFF 아니면 빈 문자열. */
+    async readTiff() {
+        const r = await coreCall({ cmd: "clipboard_read_tiff" });
+        return r.data ?? "";
+    },
 };
 export const notification = {
     /** 플랫폼 지원 여부 — 현재 macOS만 true. */

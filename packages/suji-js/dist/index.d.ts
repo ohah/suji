@@ -421,6 +421,10 @@ export declare const clipboard: {
     writeImage(pngBase64: string): Promise<boolean>;
     /** PNG 이미지 읽기 — base64 반환. PNG 아니면 빈 문자열. */
     readImage(): Promise<string>;
+    /** TIFF 이미지 쓰기 — base64 문자열 (NSPasteboard `public.tiff`). writeImage 동형. */
+    writeTiff(tiffBase64: string): Promise<boolean>;
+    /** TIFF 이미지 읽기 — base64 반환. TIFF 아니면 빈 문자열. */
+    readTiff(): Promise<string>;
 };
 export interface NotificationOptions {
     title: string;

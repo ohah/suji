@@ -891,6 +891,19 @@ pub mod clipboard {
     pub fn read_image() -> Option<String> {
         invoke("__core__", r#"{"cmd":"clipboard_read_image"}"#)
     }
+
+    /// TIFF 이미지 쓰기 — base64 (NSPasteboard `public.tiff`). write_image 동형.
+    pub fn write_tiff(tiff_base64: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &crate::serde_json::json!({ "cmd": "clipboard_write_tiff", "data": tiff_base64 }).to_string(),
+        )
+    }
+
+    /// TIFF 이미지 읽기 (base64). raw JSON: `{"data":"..."}`.
+    pub fn read_tiff() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_read_tiff"}"#)
+    }
 }
 
 pub mod power_monitor {

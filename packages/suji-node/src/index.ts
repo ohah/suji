@@ -840,6 +840,18 @@ export const clipboard = {
     const r = await invoke<{ data: string }>('__core__', { cmd: 'clipboard_read_image' });
     return r.data ?? '';
   },
+
+  /** TIFF 이미지 쓰기 (base64) — NSPasteboard `public.tiff`. writeImage 동형. */
+  async writeTiff(tiffBase64: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_tiff', data: tiffBase64 });
+    return r.success === true;
+  },
+
+  /** TIFF 이미지 읽기 (base64). 없으면 빈 문자열. */
+  async readTiff(): Promise<string> {
+    const r = await invoke<{ data: string }>('__core__', { cmd: 'clipboard_read_tiff' });
+    return r.data ?? '';
+  },
 };
 
 export const powerMonitor = {
