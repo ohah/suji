@@ -653,6 +653,38 @@ test "matchGlob: * 와 ?/클래스 조합 + backtracking 무회귀" {
     try std.testing.expect(!matchGlob("https://*/v?/*", "https://api.x.com/v/users"));
 }
 
+/// URL에서 origin(`scheme://authority`)만 추출. path/query/fragment 제거.
+/// 예: `https://x.com:5173/a?b#c` → `https://x.com:5173`,
+///     `file:///Users/x/i.html` → `file://`(authority 없음),
+///     `suji://app/index.html` → `suji://app`.
+/// `://` 없거나 scheme 비면(불투명/about: 등) null — 호출자가 폴백 결정.
+pub fn originFromUrl(url: []const u8) ?[]const u8 {
+    const sep = std.mem.indexOf(u8, url, "://") orelse return null;
+    if (sep == 0) return null; // scheme 비어있음
+    const auth_start = sep + 3;
+    var i = auth_start;
+    while (i < url.len and url[i] != '/' and url[i] != '?' and url[i] != '#') : (i += 1) {}
+    return url[0..i];
+}
+
+test "originFromUrl: scheme://host[:port] 추출" {
+    try std.testing.expectEqualStrings("https://x.com:5173", originFromUrl("https://x.com:5173/a/b?q=1#h").?);
+    try std.testing.expectEqualStrings("http://localhost:5173", originFromUrl("http://localhost:5173/").?);
+    try std.testing.expectEqualStrings("https://api.example.com", originFromUrl("https://api.example.com").?);
+    try std.testing.expectEqualStrings("suji://app", originFromUrl("suji://app/index.html").?);
+}
+
+test "originFromUrl: file:// 은 authority 없음" {
+    try std.testing.expectEqualStrings("file://", originFromUrl("file:///Users/x/index.html").?);
+}
+
+test "originFromUrl: :// 없음/scheme 빈값 → null" {
+    try std.testing.expect(originFromUrl("about:blank") == null);
+    try std.testing.expect(originFromUrl("") == null);
+    try std.testing.expect(originFromUrl("://nohost/") == null);
+    try std.testing.expect(originFromUrl("data:text/html,x") == null);
+}
+
 test "matchGlob: 패턴이 텍스트보다 짧지 않음" {
     try std.testing.expect(!matchGlob("hello", "hi"));
     try std.testing.expect(!matchGlob("foo*bar", "foo"));

@@ -171,7 +171,8 @@ fn onAllClosed(_: suji.Event) void {
 //                                       (visitor 패턴, `session:cookies-result` 이벤트 응답)
 //   / clearStorageDataRaw(args)  — Electron session.clearStorageData. CDP
 //     Storage.clearDataForOrigin + Network.clearBrowserCache fire-and-forget.
-//     origin-scoped: origin 빈값이면 전역 HTTP 캐시만(웹 플랫폼 제약)
+//     origin 미지정 시 현재 문서 origin 자동 해석(앱 자기 storage 삭제) +
+//     전역 HTTP 캐시. 전 origin 프로필-전역 wipe 는 CDP 구조상 불가(진짜 제약)
 // suji.platform()              — "macos" | "linux" | "windows" | "other"
 ```
 

@@ -2586,22 +2586,33 @@ pub fn sessionFlushStore() bool {
 /// `Network.clearBrowserCache`)를 send_dev_tools_message 로. setUserAgent
 /// 와 동일한 fire-and-forget(id:1, 응답 미파싱) — clearCookies 와 동형 정책.
 ///
-/// ⚠️ 정직 경계(웹 플랫폼 제약): IndexedDB/localStorage 는 origin-scoped 라
-/// origin 없이 "전 origin 일괄 삭제"는 단일 CDP 호출로 불가. origin 지정 시
-/// 그 origin 의 storageTypes 삭제, origin 빈 문자열이면 전역 HTTP 캐시만
-/// (Network.clearBrowserCache) — 호출부가 자기 앱 origin 을 전달해야 storage
-/// 가 비워진다(Electron 의 프로필-전역 삭제와 다른 한계, 문서 명시).
+/// ⚠️ 정직 경계: IndexedDB/localStorage 는 origin-scoped 라 origin 없이
+/// "전 origin 일괄 삭제"는 단일 CDP 호출로 불가(Electron 프로필-전역 wipe
+/// 정확 복제는 CDP 구조상 불가 — 진짜 제약). 대신 origin 미지정 시 **현재
+/// 문서 origin 을 자동 주입**(getMainFrameUrl→util.originFromUrl) — 무인자
+/// 호출이 "내 앱 스토리지를 비운다"는 직관대로 동작. file:// 는 authority
+/// 가 없어 origin="file://" best-effort(불투명 origin, fire-and-forget이라
+/// 허용). 자동 해석 실패(about:/data: 등) 시엔 전역 HTTP 캐시만.
 /// storage_types: CDP 콤마구분("all" | "local_storage,indexeddb,..." 등).
 pub fn sessionClearStorageData(origin: []const u8, storage_types: []const u8) bool {
     const br = g_browser orelse return false;
     const host = devtoolsHost(br) orelse return false;
     const send = host.send_dev_tools_message orelse return false;
 
-    if (origin.len > 0) {
+    // origin 미지정 → 현재 문서 origin 자동 해석(앱 자기 스토리지 대상).
+    var url_buf: [2048]u8 = undefined;
+    const eff_origin: []const u8 = if (origin.len > 0)
+        origin
+    else if (getMainFrameUrl(br, &url_buf)) |u|
+        util.originFromUrl(u) orelse ""
+    else
+        "";
+
+    if (eff_origin.len > 0) {
         // origin/types escape (origin 은 URL 이라 escape 필수, types 도 방어적).
         var o_esc: [2048]u8 = undefined;
         var t_esc: [512]u8 = undefined;
-        const on = window_mod.escapeJsonChars(origin[0..@min(origin.len, 1024)], &o_esc);
+        const on = window_mod.escapeJsonChars(eff_origin[0..@min(eff_origin.len, 1024)], &o_esc);
         const tn = window_mod.escapeJsonChars(storage_types[0..@min(storage_types.len, 256)], &t_esc);
         var msg: [3072]u8 = undefined;
         const m = std.fmt.bufPrint(
