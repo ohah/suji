@@ -409,6 +409,14 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await webRequest.setBlockedUrls(["https://*.ad/*"])
 // await session.clearCookies() / session.flushStore()                    — CEF cookie_manager
 
+// 공식 플러그인 backend 래퍼 (renderer @suji/plugin-* 의 Node 백엔드 변형)
+// const { state } = require('@suji/plugin-state-node')
+//   await state.set("user", { name:"yoon" }, { scope:"window:1" }) / get / delete / keys / clear
+//   const cancel = state.watch("user", (v) => ...)                       — EventBus
+// const { sqlite } = require('@suji/plugin-sqlite-node')
+//   const db = await sqlite.open(":memory:"); await sqlite.execute(db, "INSERT...VALUES(?)", ["x"])
+//   const rows = await sqlite.query(db, "SELECT * FROM t WHERE n=?", ["x"]); await sqlite.close(db)
+
 // TypeScript type-safe — `@suji/node`도 SujiHandlers augment 지원.
 //   await call('zig', 'greet', { name: 'x' })   // res: string 추론
 //   const v = callSync('zig', 'ping')           // sync 변형, res: { msg: string } 추론
