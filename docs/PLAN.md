@@ -1403,7 +1403,7 @@ suji build → 결과물:
 | 클립보드 — 이미지/HTML/format 검사 | `clipboard.readImage` / `writeImage` / `readHTML` / `has` / `availableFormats` | -- | ✅ HTML (`readHTML`/`writeHTML`) + format 검사 (`has`/`availableFormats`) + PNG image (`writeImage(base64)` / `readImage()` — NSPasteboard `public.png`, raw 한도 ~8KB 1차). TIFF/RTF는 후속 |
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
 | Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ✅ `menu_popup`(cef.zig `popupContextMenu` — NSMenu `popUpMenuPositioningItem:atLocation:inView:`, item/view=nil→화면좌표; x/y 미지정 시 커서). items 파싱·`menu:click` emit 은 `setApplicationMenu` 와 동일 경로 재사용. 프론트 `menu.popup(items,{x?,y?})`. ⚠️ 동기 모달이라 정상 popup e2e 자동 클릭 불가(데스크톱 dialog 동일 경계) — zig build+단위 339+menu e2e parse-error+menu:click 경로 재사용으로 검증 |
-| 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 `suji://`만 — 사용자 임의 scheme 등록 API는 없음 (CEF `cef_register_scheme_handler_factory` 추가 노출 가능) |
+| 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 same-origin 정적 서빙은 `protocol:"suji"` 가 이미 충족(앱이 `suji://app/` 에서 로드 + dist factory 서빙, 프로덕션 검증). **임의 cross-origin 동적 핸들러는 보류** — 아래 "protocol.handle 보류 사유" 참조 |
 | Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ✅ `session.clearCookies` / `flushStore` / `setCookie` / `getCookies` / `removeCookies` — CEF cookie_manager + visitor 패턴 (`session:cookies-result` 이벤트 + requestId 매칭, race-safe pending buffer + 1초 timeout). 5 SDK 노출 + e2e 8 케이스 (set/get round-trip, httponly 필터, removeCookies, includeHttpOnly:false, URL 검증, SDK wrapper). cookies 0개 case는 visit fn 호출 안 돼 SDK timeout으로 빈 결과 (Electron 동등 동작). ✅ `clearStorageData(origin?, storageTypes?)` — CDP `Storage.clearDataForOrigin` + `Network.clearBrowserCache` fire-and-forget(clearCookies 동형, g_browser send_dev_tools_message 재사용). 5 SDK 노출 + e2e 3(무-origin/origin+types/escape-safe). ⚠️ 웹 플랫폼 제약: IndexedDB/localStorage 는 origin-scoped 라 origin 없이 전 origin 일괄 삭제 불가 — origin 빈값이면 전역 HTTP 캐시만(호출부가 자기 앱 origin 전달 시 그 origin storage 삭제). |
 
 ### 시스템 통합 (Electron `app` / `power*` / `screen` / `desktopCapturer` 등)
@@ -1447,6 +1447,45 @@ suji build → 결과물:
 |------|----------|-------|------|
 | 바이너리 IPC | Buffer 직접 전송 | `asset://` 커스텀 프로토콜 | ✅ `suji://` 커스텀 프로토콜 |
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`) |
+
+### protocol.handle 보류 사유 (CEF cross-origin scheme-handler 결함)
+
+Electron `protocol.handle(scheme, handler)`(임의 scheme 의 동적 백엔드
+응답)는 **보류**. 시도 → 루트커즈 규명 후 코드 미커밋(revert)했다.
+
+**실사용 매핑(언제 쓰나)**:
+- ① 깨끗한 origin 에서 앱 로드(CORS/fetch/Cookie/SW/SPA 라우팅 정상) —
+  **`protocol:"suji"` 가 이미 충족**(프로덕션 검증, same-origin).
+- ② 번들 정적 자산 서빙 — `suji://` dist factory 가 이미 충족.
+- ③ 동적 응답(요청마다 백엔드가 계산 — API/미디어 스트리밍/권한 게이팅) —
+  **미제공.** 이게 진짜 `protocol.handle` 의 핵심이자 아래 결함 대상.
+
+**루트커즈(확정, 이분탐색 + macOS .ips 네이티브 스택)**:
+`cef_register_scheme_handler_factory` 로 등록한 커스텀 standard-scheme 에
+대한 **cross-origin 요청**(예: dev 문서 `http://localhost:5173` →
+`myscheme://...`)이면 **CEF IO 스레드(Chrome_IOThread) 내부에서
+SIGSEGV**. 우리 Zig 0 프레임(Debug 빌드 Zig 패닉 0, faulting thread
+전 프레임 `Chromium Embedded Framework`). 이분탐색으로 배제 확정:
+async 무죄(sync 모드도 크래시)·서브프로세스 scheme-consistency
+무죄(전 프로세스 하드코딩 등록도 크래시)·`LOCAL` 옵션 무죄(제거해도
+크래시)·CDP vs 인페이지 네비 무관·fetch(서브리소스)도 동일 크래시.
+핸들러 코드는 프로덕션 동작하는 `suji://` factory 와 byte-identical —
+차이는 오직 **요청 origin ≠ scheme**(suji:// 는 문서 origin 자체가
+suji:// 라 same-origin 이라 무사). ⟹ CEF 빌드 레벨 결함, 우리
+Zig/SDK 레이어에서 수정 불가.
+
+**대안 A(config scheme 이름 일반화) 도 보류한 이유**: same-origin
+서빙 가치(①②)는 `protocol:"suji"` 가 이미 제공. A 가 더하는 건
+"scheme 이름 커스터마이즈" 뿐인데, 비용이 (1) 서브프로세스 cmdline
+전파(`cef_command_line_create_global` 바인딩 미검증) (2) **보안
+민감 `DEFAULT_CSP_TEMPLATE` 의 `suji:` 5곳 런타임 동적 치환** (3)
+리터럴/테스트 파라미터화 — 중간 규모·보안 민감 표면. 자율 유지보수
+관점에서 가치 대비 비용·리스크 초과로 보류.
+
+**재개 조건(후속)**: CEF 디버그 심볼 빌드로 cross-origin
+scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 확인)
++ `cef_command_line` C 바인딩 확인. 그 전까지 same-origin 용도는
+`protocol:"suji"` 로 충족, 임의 동적 핸들러는 미지원으로 명문화.
 
 ### 우선순위 제안 (현재)
 
