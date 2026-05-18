@@ -4594,8 +4594,10 @@ pub fn webRequestSetBlockedUrls(patterns: []const []const u8) usize {
 // → callback->cont/cancel을 외부에서 호출할 때까지 요청 hold. listener 응답 IPC가
 // resolve(id, cancel)로 callback 결정.
 //
-// 주의: listener가 응답하지 않으면 요청 영원히 hold. timeout fallback은 후속 (caller
-// 측에서 책임).
+// 주의: 네이티브는 listener 응답까지 hold (단일스레드·무 CEF-task 라 설계상 유지).
+// timeout fallback 은 caller(=JS SDK `webRequest.onBeforeRequest`)가 이행 —
+// listener 미응답/throw 시 timeoutMs 후 web_request_resolve(allow) 자동 송신해
+// 이 hold 를 해제(cookie SDK 타임아웃 선례 동형).
 
 var g_listener_url_pool: UrlGlobPool = .{};
 

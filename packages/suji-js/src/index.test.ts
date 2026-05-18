@@ -466,3 +466,76 @@ describe("windows.capturePage", () => {
     expect(await p).toEqual({ success: false });
   });
 });
+
+describe("webRequest.onBeforeRequest timeout fallback", () => {
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  // onBeforeRequest 등록 후 will-request 핸들러를 회수 + resolve(core) 호출 캡처.
+  const setup = async (
+    listener: (d: { url: string; id: number }, cb: (x: { cancel?: boolean }) => void) => void,
+    opts?: { timeoutMs?: number },
+  ) => {
+    mockBridge.on.mockClear();
+    mockBridge.core.mockClear();
+    mockBridge.core.mockResolvedValue({ success: true });
+    await webRequest.onBeforeRequest({ urls: ["*"] }, listener, opts);
+    const call = mockBridge.on.mock.calls.find((c) => c[0] === "webRequest:will-request");
+    const handler = call![1] as (payload: unknown) => void;
+    return handler;
+  };
+  // bridge.core 로 간 web_request_resolve 호출만 추출 (filter set 호출 제외).
+  const resolveCalls = () =>
+    mockBridge.core.mock.calls
+      .map((c) => JSON.parse(c[0] as string))
+      .filter((r: any) => r.cmd === "web_request_resolve");
+
+  it("decision callback → resolve 1회 + timer clear (이후 중복 없음)", async () => {
+    const h = await setup((_d, cb) => cb({ cancel: true }), { timeoutMs: 20 });
+    h(JSON.stringify({ url: "u", id: 7 }));
+    await delay(60);
+    const rs = resolveCalls();
+    expect(rs).toEqual([{ cmd: "web_request_resolve", id: 7, cancel: true }]);
+  });
+
+  it("listener가 callback 미호출 → timeout 후 자동 통과(cancel:false) 1회", async () => {
+    const h = await setup(() => {}, { timeoutMs: 20 });
+    h(JSON.stringify({ url: "u", id: 9 }));
+    expect(resolveCalls()).toEqual([]); // 즉시는 미해결
+    await delay(60);
+    expect(resolveCalls()).toEqual([{ cmd: "web_request_resolve", id: 9, cancel: false }]);
+  });
+
+  it("listener 동기 throw → 즉시 fail-open(cancel:false) 1회", async () => {
+    const h = await setup(() => {
+      throw new Error("boom");
+    }, { timeoutMs: 20 });
+    h(JSON.stringify({ url: "u", id: 11 }));
+    expect(resolveCalls()).toEqual([{ cmd: "web_request_resolve", id: 11, cancel: false }]);
+    await delay(60);
+    expect(resolveCalls().length).toBe(1); // timer 가 중복 안 냄
+  });
+
+  it("decision 중복 호출 → settled 가드로 resolve 1회", async () => {
+    const h = await setup((_d, cb) => {
+      cb({ cancel: true });
+      cb({});
+    }, { timeoutMs: 20 });
+    h(JSON.stringify({ url: "u", id: 13 }));
+    await delay(40);
+    expect(resolveCalls()).toEqual([{ cmd: "web_request_resolve", id: 13, cancel: true }]);
+  });
+
+  it("timeoutMs<=0 → 무제한(opt-out): 미응답이면 resolve 없음", async () => {
+    const h = await setup(() => {}, { timeoutMs: 0 });
+    h(JSON.stringify({ url: "u", id: 15 }));
+    await delay(60);
+    expect(resolveCalls()).toEqual([]);
+  });
+
+  it("malformed payload → throw 없이 무시(resolve 없음)", async () => {
+    const h = await setup(() => {}, { timeoutMs: 20 });
+    expect(() => h("{not-json")).not.toThrow();
+    await delay(40);
+    expect(resolveCalls()).toEqual([]);
+  });
+});

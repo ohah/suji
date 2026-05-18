@@ -940,12 +940,20 @@ export const webRequest = {
     /**
      * Electron `session.webRequest.onBeforeRequest({urls}, listener)` 동등.
      * filter.urls glob 매칭 시 listener가 비동기 결정 — `callback({ cancel: true })`로 차단,
-     * `callback({})`로 통과. callback 호출 안 하면 요청 영원히 hold (timeout fallback 미구현).
+     * `callback({})`로 통과.
+     *
+     * **timeout fallback**: listener 가 decision callback 을 `options.timeoutMs`(기본
+     * 5000ms) 내 호출 안 하거나 동기 throw 하면 자동으로 통과(fail-open, Electron 도
+     * listener 오작동으로 요청을 막지 않음)시켜 네이티브 RV_CONTINUE_ASYNC hold 를
+     * 해제 — 요청 영구 hang 방지(cookie SDK 타임아웃 선례 동형). `timeoutMs <= 0`
+     * 이면 무제한(opt-out, 기존 동작). double-resolve 는 will-request 발화마다
+     * 새 클로저의 per-event `settled` 가드. 유일 예외: payload 파싱 실패 시 resolve
+     * 할 id 가 없어 그 1건은 무시(네이티브 hold 유지) — 정상 경로 외 core 버그 신호.
      *
      * 한 번에 1 listener만 active — 새로 등록 시 이전 listener detach.
      * filter null 또는 빈 listener는 detach.
      */
-    async onBeforeRequest(filter, listener) {
+    async onBeforeRequest(filter, listener, options) {
         if (activeListenerOff) {
             activeListenerOff();
             activeListenerOff = null;
@@ -954,19 +962,36 @@ export const webRequest = {
         await coreCall({ cmd: "web_request_set_listener_filter", patterns });
         if (!listener || patterns.length === 0)
             return;
+        const timeoutMs = options?.timeoutMs ?? 5000;
         activeListenerOff = on("webRequest:will-request", (payload) => {
+            let ev;
             try {
-                const ev = typeof payload === "string" ? JSON.parse(payload) : payload;
-                listener({ url: ev.url, id: ev.id }, async (decision) => {
-                    await coreCall({
-                        cmd: "web_request_resolve",
-                        id: ev.id,
-                        cancel: !!decision?.cancel,
-                    });
-                });
+                ev = typeof payload === "string" ? JSON.parse(payload) : payload;
             }
             catch {
-                // malformed payload는 무시 — listener 깨지지 않게.
+                // malformed payload: resolve할 id가 없음 — 무시 (listener 안 깨지게).
+                return;
+            }
+            let settled = false;
+            let timer = null;
+            const resolveOnce = (cancel) => {
+                if (settled)
+                    return;
+                settled = true;
+                if (timer)
+                    clearTimeout(timer);
+                void coreCall({ cmd: "web_request_resolve", id: ev.id, cancel });
+            };
+            if (timeoutMs > 0) {
+                // 미응답 → 자동 통과(fail-open). 네이티브 hold 해제.
+                timer = setTimeout(() => resolveOnce(false), timeoutMs);
+            }
+            try {
+                listener({ url: ev.url, id: ev.id }, (decision) => resolveOnce(!!decision?.cancel));
+            }
+            catch {
+                // listener 동기 throw → fail-open(통과). hang 방지.
+                resolveOnce(false);
             }
         });
     },

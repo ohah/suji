@@ -1374,7 +1374,7 @@ suji build → 결과물:
 | iframe sandbox / origin allowlist | CSP `frame-src` 수동 + `<webview>` partition | `tauri.conf.json` `app.security.csp` | ✅ `security.iframeAllowedOrigins` config — CSP frame-src 자동 합성. default block (`'none'`) + `["*"]` escape |
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창에 여러 webview 합성은 미구현 (CEF는 가능 — Phase 6+ 멀티탭 브라우저 앱 use case에 필요) |
-| webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ✅ declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max) + dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) — `webRequest.onBeforeRequest({urls}, listener)`로 cancel/allow round-trip. 5 SDK 노출 + e2e 13 케이스 (cancel/allow round-trip 포함). timeout fallback은 미구현 |
+| webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ✅ declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max) + dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) — `webRequest.onBeforeRequest({urls}, listener)`로 cancel/allow round-trip. 5 SDK 노출 + e2e 13 케이스 (cancel/allow round-trip 포함). **timeout fallback**: JS SDK `webRequest.onBeforeRequest` 가 listener 미응답/동기 throw 시 `options.timeoutMs`(기본 5000, ≤0=opt-out) 후 자동 통과(fail-open) — 네이티브 RV_CONTINUE_ASYNC hold 해제, 영구 hang 방지(cookie SDK 타임아웃 선례 동형, mock-bridge 단위 6 케이스). 네이티브측은 단일스레드·무 CEF-task 라 설계상 hold 유지(SDK 가 caller 책임 이행) |
 | safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | 🟡 macOS만 (`safe_storage_set/get/delete` — Keychain Services). Win DPAPI / Linux libsecret 미구현 |
 
 ### 앱 배포 & 패키징
@@ -1535,7 +1535,9 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 18. ✅ **`webRequest` 인터셉트** — declarative URL glob blocklist + dynamic listener
     (RV_CONTINUE_ASYNC + pending callback storage, 256개) cancel/allow round-trip.
     `webRequest:before-request` / `webRequest:will-request` / `webRequest:completed` 3 채널.
-    5 SDK + e2e 13. timeout fallback은 후속.
+    5 SDK + e2e 13. timeout fallback: JS SDK onBeforeRequest 가 미응답/throw
+    시 timeoutMs(기본 5s, ≤0 opt-out) 후 fail-open 자동 통과(네이티브 hold
+    해제). mock-bridge 단위 6.
 19. ✅ **스플래시 패턴** — 별도 API 없이 `windows.create` + `is_loading` polling + `destroy_window`
     조합. e2e (`tests/e2e/run-splash.sh`).
 20. 🟡 **TypeScript 타입 자동 생성 (옵션 A 1차 + B 부분)** — frontend(`@suji/api`) /
