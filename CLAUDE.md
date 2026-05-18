@@ -474,14 +474,17 @@ CEF 의존이 0이라 별도 정적 라이브러리로 분리된다.
 - 모바일 호스트 예제 — **언어별 변형**(PC `examples/*-backend` 대응). 모바일은
   호스트에 정적 링크라 "언어별"=링크/등록 백엔드 차이. 호스트 스캐폴딩은
   `_shared/`에 두고 변형은 thin:
-  - `examples/ios/{_shared, multi, rust, go, zig}` — XcodeGen `project.yml`
-    (`sources: ../_shared`) + Swift `WKWebView`. `_shared/BackendBridge.swift`
-    공용. multi=Rust+Go, 단일=해당 언어.
-  - `examples/android/{_shared, multi, rust, go, zig}` — Gradle(`sourceSets`로
-    `_shared` 공유) + JNI. `_shared/cpp/suji_jni_core.c`(코어 JNI+공용
-    `suji_reg_backend`) + 변형 `cpp/backends.c`. Rust/Zig=`.a` 정적,
-    Go=`.so` c-shared(Android는 Go c-archive 미지원).
-  - 백엔드 소스 `examples/ios/backends/{rust,go,zig}` iOS·Android 공유.
+  - `examples/ios/{_shared, multi, rust, go, zig, sqlite}` — XcodeGen
+    `project.yml` (`sources: ../_shared`) + Swift `WKWebView`.
+    `_shared/BackendBridge.swift` 공용. multi=Rust+Go, 단일=해당 언어,
+    sqlite=`plugins/sqlite` 모바일(벤더 sqlite3.c, `suji_sqlite_backend_*`,
+    todo 데모; iOS xcodebuild BUILD SUCCEEDED 실증).
+  - `examples/android/{_shared, multi, rust, go, zig, sqlite}` —
+    Gradle(`sourceSets`로 `_shared` 공유) + JNI. `_shared/cpp/
+    suji_jni_core.c`(코어 JNI+공용 `suji_reg_backend`) + 변형
+    `cpp/backends.c`. Rust/Zig/SQLite=`.a` 정적, Go=`.so` c-shared
+    (Android는 Go c-archive 미지원).
+  - 백엔드 소스 `examples/ios/backends/{rust,go,zig,sqlite}` iOS·Android 공유.
     언어 고유 심볼(`export_handlers_static!`→`suji_rs_*`/cgo `suji_go_*`/
     `suji_zig_*`)로 단일 바이너리 무충돌. 각 `build-lib.sh`로 `.a`/`.so`
     스테이징, `suji_core_register_handler` 등록 + `(channel,json)→{"cmd":..}`

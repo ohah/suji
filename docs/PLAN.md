@@ -170,11 +170,23 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
         create/insert(params,UTF-8)/query/injection-safe/close/use-after-close/
         상대경로거부, register_handler→bridge→handle_ipc, rust/go/zig 와 정적
         링크 공존=심볼 무충돌) + 크로스 컴파일 aarch64-ios/-simulator/
-        -linux-android 빌드 성공(Xcode SDK / NDK sysroot). ⚠️ 정직 경계:
-        실기기·시뮬/에뮬 런타임 미검증(build-only + 호스트 하니스 — 기존
-        모바일 백엔드와 동일 CI 게이트). 경로는 `:memory:`/절대만(상대는
-        호스트 책임). iOS/Android 예제 *앱* 변형(xcodegen/gradle) 배선은
-        후속(메커니즘은 하니스로 실증).
+        -linux-android 빌드 성공(Xcode SDK / NDK sysroot). 경로는
+        `:memory:`/절대만(상대는 호스트 책임).
+  - [x] **iOS/Android 예제 앱 변형** — `examples/ios/sqlite/` +
+        `examples/android/sqlite/` (zig 변형 동형, sql:open/execute/query/
+        close 등록). iOS=`project.yml`/`Backends.swift`(`suji_sqlite_backend_*`
+        @convention(c) + `sujiReg`)/`build-lib.sh`(공용 backends/sqlite
+        build-lib.sh 재사용 — sysroot/cflags 단일 출처). Android=Gradle
+        +`cpp/backends.c`(JNI `suji_reg_backend`)+CMake. `_shared/Suji-
+        Bridging-Header.h` 에 extern 추가. web/index.html=실 SQLite todo
+        데모, e2e.html=zig 와 lockstep(`__core__` 스위트, 변형 무관).
+        검증: **iOS xcodebuild BUILD SUCCEEDED**(xcodegen→링크: Swift+
+        브리징+정적 core/sqlite .a+web 번들) + Android backends.c
+        aarch64-android NDK clang 컴파일 + build-lib.sh(core .so + sqlite
+        .a 스테이징). ⚠️ 정직 경계: 실기기·시뮬/에뮬 *런타임* 미검증
+        (iOS=빌드+링크까지, Android APK 어셈블은 JDK/SDK 필요=기존
+        android-e2e.sh 와 동일 CI 게이트). 백엔드 동작 자체는 호스트
+        하니스 62/62(실 sqlite3 CRUD)로 실증.
 - [x] ~~바이너리 데이터 채널~~ — CEF `suji://` 커스텀 프로토콜로 대체 (fetch + 로컬 파일 접근 가능, 별도 HTTP 서버 불필요)
 
 **결과물**:

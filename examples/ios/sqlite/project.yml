@@ -1,0 +1,33 @@
+name: SujiIOSSQLite
+
+options:
+  bundleIdPrefix: dev.suji.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  SujiIOSSQLite:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../_shared
+        excludes: [Info.plist]
+      - path: Backends.swift
+      - path: web
+    settings:
+      base:
+        # 배포 서명 — env SUJI_IOS_TEAM_ID 주입 시 자동 서명(미설정이면 빈
+        # 값 → 미서명 로컬은 archive-ios.sh 의 CODE_SIGNING_ALLOWED=NO).
+        DEVELOPMENT_TEAM: ${SUJI_IOS_TEAM_ID}
+        CODE_SIGN_STYLE: Automatic
+        # xcodegen 이 공유 Info.plist 를 덮어쓰지 않도록 생성 대신 참조
+        INFOPLIST_FILE: $(SRCROOT)/../_shared/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/../../../include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/Vendor
+        OTHER_LDFLAGS:
+          - -lsuji_core
+          - -lsuji_sqlite_backend
+    # 벤더 SQLite(C) → libc 만 필요(build-lib.sh 가 iOS SDK sysroot 공급).

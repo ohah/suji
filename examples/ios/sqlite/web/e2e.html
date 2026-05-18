@@ -1,0 +1,250 @@
+<!doctype html>
+<!--
+  모바일 기능 e2e 페이지 (데모 index.html 과 별개 — 호스트가 e2e 모드일 때만
+  로드: iOS SUJI_E2E env / Android intent extra). 디바이스 안에서 데스크톱과
+  동일한 __suji__.core 와이어로 clipboard 실 왕복(시뮬/에뮬=실 UIPasteboard/
+  ClipboardManager → 진짜 e2e)을 자가 검증하고 verdict 를 e2e:report 채널로
+  보고. ios-e2e.sh/android-e2e.sh 가 회수·assert.
+
+  iOS: 브리지(__suji__)는 호스트 WKUserScript 가 documentStart 주입.
+  Android: 브리지는 데모 index.html 인라인 — e2e.html 은 index 를 대체하므로
+  window.SujiNative 가 있으면 동형 인라인 브리지를 자체 정의.
+  ⚠️ 아래 인라인 브리지는 examples/android/*/web/index.html 의 데모 브리지와
+  동형 유지(source-of-truth=index.html). 변경 시 양쪽 + iOS/Android e2e.html
+  쌍을 lockstep 으로(둘은 diff-clean 동일 사본).
+-->
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>suji-e2e-pending</title>
+<body style="font:14px -apple-system,system-ui;padding:1rem">
+<pre id="log">running…</pre>
+<script>
+(function () {
+  // Android: 데모 index.html 의 인라인 브리지와 동형(없을 때만 정의).
+  if (!window.__suji__ && window.SujiNative) {
+    var _id = 0, _pending = {}, _listeners = {};
+    function invoke(channel, payload) {
+      return new Promise(function (res) {
+        var id = ++_id; _pending[id] = res;
+        window.SujiNative.invoke(id, String(channel),
+          JSON.stringify(payload === undefined ? {} : payload));
+      });
+    }
+    function core(json) {
+      return new Promise(function (res) {
+        var id = ++_id; _pending[id] = res;
+        window.SujiNative.invoke(id, "__core__",
+          (typeof json === "string" ? json : JSON.stringify(json)));
+      });
+    }
+    function __resolve__(id, json) {
+      var r = _pending[id]; if (!r) return; delete _pending[id];
+      try { r(json ? JSON.parse(json) : null); } catch (e) { r(json); }
+    }
+    function on(name, cb) { (_listeners[name] = _listeners[name] || []).push(cb); }
+    function __emit__(name, json) {
+      var ls = _listeners[name]; if (!ls) return;
+      var d; try { d = json ? JSON.parse(json) : null; } catch (e) { d = json; }
+      ls.forEach(function (f) { try { f(d); } catch (e) {} });
+    }
+    var api = { invoke: invoke, core: core, on: on,
+                __resolve__: __resolve__, __emit__: __emit__ };
+    window.__suji__ = api; window.suji = api;
+  }
+
+  function core(req) { return window.__suji__.core(JSON.stringify(req)); }
+  var cases = [];
+  function check(name, cond) { cases.push({ name: name, ok: !!cond }); }
+
+  async function clipboardSuite() {
+    // write→read 동일성 (시뮬/에뮬 = 실 네이티브 클립보드).
+    var matrix = [
+      ["plain ascii", "hello-suji"],
+      ["multiline+tab+quote+backslash", 'l1\n\tl2 "q" \\ b'],
+      ["utf8 한글/이모지", "한글-test-🚀"],
+      ["empty", ""],
+    ];
+    for (var i = 0; i < matrix.length; i++) {
+      var nm = matrix[i][0], v = matrix[i][1];
+      var w = await core({ cmd: "clipboard_write_text", text: v });
+      var r = await core({ cmd: "clipboard_read_text" });
+      check("write/read " + nm, w && w.success === true && r && r.text === v);
+    }
+    // clear → read 빈 문자열, 이후 재사용 정상(state corruption 없음).
+    await core({ cmd: "clipboard_write_text", text: "seed" });
+    var cl = await core({ cmd: "clipboard_clear" });
+    var ac = await core({ cmd: "clipboard_read_text" });
+    check("clear→empty", cl && cl.success === true && ac && ac.text === "");
+    await core({ cmd: "clipboard_write_text", text: "after-clear" });
+    var rc = await core({ cmd: "clipboard_read_text" });
+    check("reuse after clear", rc && rc.text === "after-clear");
+    // 20x 안정성(누수/상태오염).
+    var stressOk = true;
+    for (var k = 0; k < 20; k++) {
+      var sv = "s" + k;
+      await core({ cmd: "clipboard_write_text", text: sv });
+      var sr = await core({ cmd: "clipboard_read_text" });
+      if (!sr || sr.text !== sv) { stressOk = false; break; }
+    }
+    check("20x stress", stressOk);
+    // 미지원 cmd → coreError 동형(프론트 graceful).
+    var un = await core({ cmd: "window_create" });
+    check("unsupported→unknown_cmd", un && un.success === false &&
+          un.error === "unknown_cmd");
+  }
+
+  async function safeStorageSuite() {
+    // set→get 라운드트립 (시뮬/에뮬 = 실 Keychain/Keystore).
+    var sv = "tok-" + Date.now();
+    var s1 = await core({ cmd: "safe_storage_set",
+                          service: "suji-e2e", account: "u1", value: sv });
+    var g1 = await core({ cmd: "safe_storage_get",
+                          service: "suji-e2e", account: "u1" });
+    check("safe_storage set/get", s1 && s1.success === true && g1 && g1.value === sv);
+    // update(idempotent) → 새 값.
+    await core({ cmd: "safe_storage_set",
+                 service: "suji-e2e", account: "u1", value: "v2" });
+    var g2 = await core({ cmd: "safe_storage_get",
+                          service: "suji-e2e", account: "u1" });
+    check("safe_storage update", g2 && g2.value === "v2");
+    // delete → get 빈 문자열, 재삭제 idempotent.
+    var d = await core({ cmd: "safe_storage_delete",
+                         service: "suji-e2e", account: "u1" });
+    var g3 = await core({ cmd: "safe_storage_get",
+                          service: "suji-e2e", account: "u1" });
+    var d2 = await core({ cmd: "safe_storage_delete",
+                          service: "suji-e2e", account: "u1" });
+    check("safe_storage delete→empty + idempotent",
+          d && d.success === true && g3 && g3.value === "" &&
+          d2 && d2.success === true);
+  }
+
+  async function appMetaSuite() {
+    // 실값은 디바이스/번들 의존이라 형태(non-empty/BCP47/절대경로)만 검사.
+    var loc = await core({ cmd: "app_get_locale" });
+    check("app_get_locale BCP47", loc && typeof loc.locale === "string" &&
+          /^[a-z]{2}(-|$)/i.test(loc.locale));
+    var nm = await core({ cmd: "app_get_name" });
+    check("app_get_name non-empty", nm && typeof nm.name === "string" &&
+          nm.name.length > 0);
+    var ver = await core({ cmd: "app_get_version" });
+    check("app_get_version non-empty", ver && typeof ver.version === "string" &&
+          ver.version.length > 0);
+    var doc = await core({ cmd: "app_get_path", name: "documents" });
+    check("app_get_path documents abs", doc && typeof doc.path === "string" &&
+          doc.path.charAt(0) === "/" && doc.path.length > 1);
+    var tmp = await core({ cmd: "app_get_path", name: "temp" });
+    check("app_get_path temp abs", tmp && tmp.path.charAt(0) === "/");
+    // desktop 은 데스크톱에선 ~/Desktop 지원 키 — 모바일은 플랫폼 부재로
+    // graceful 빈값 격하(의미 동형 아님, 형태만 동일).
+    var dsk = await core({ cmd: "app_get_path", name: "desktop" });
+    check("app_get_path desktop → graceful '' (모바일 부재)", dsk && dsk.path === "");
+  }
+
+  async function clipboardExtSuite() {
+    // html/rtf 실 왕복(iOS UIPasteboard public.html/rtf · Android
+    // ClipData.newHtmlText/custom-MIME).
+    var html = '<b>안녕</b> & "q" <i>x</i>';
+    await core({ cmd: "clipboard_write_html", html: html });
+    var rh = await core({ cmd: "clipboard_read_html" });
+    check("clipboard html round-trip", rh && rh.html === html);
+    var rtf = "{\\rtf1\\ansi suji-rtf}";
+    await core({ cmd: "clipboard_write_rtf", rtf: rtf });
+    var rr = await core({ cmd: "clipboard_read_rtf" });
+    check("clipboard rtf round-trip", rr && rr.rtf === rtf);
+    // 1x1 PNG base64 — iOS public.png raw Data 왕복 / Android custom MIME.
+    var png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lE" +
+              "QVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    var wi = await core({ cmd: "clipboard_write_image", data: png });
+    var ri = await core({ cmd: "clipboard_read_image" });
+    check("clipboard image round-trip",
+          wi && wi.success === true && ri && ri.data === png);
+    // 임의 format buffer 왕복 + has + available_formats.
+    var fmt = "application/x-suji-buf";
+    var b64 = "U3VqaUJ1Zg=="; // "SujiBuf"
+    var wb = await core({ cmd: "clipboard_write_buffer", format: fmt, data: b64 });
+    var rbf = await core({ cmd: "clipboard_read_buffer", format: fmt });
+    check("clipboard buffer round-trip",
+          wb && wb.success === true && rbf && rbf.data === b64);
+    var hs = await core({ cmd: "clipboard_has", format: fmt });
+    check("clipboard has(format) true", hs && hs.present === true);
+    var af = await core({ cmd: "clipboard_available_formats" });
+    check("clipboard available_formats lists fmt",
+          af && Array.isArray(af.formats) && af.formats.indexOf(fmt) >= 0);
+  }
+
+  async function shellExtSuite() {
+    // beep 는 실 네이티브(iOS AudioServices / Android ToneGenerator) →
+    // success:true(실 사운드는 자동검증 불가, 호출 성공만). open_path/
+    // show_item/trash 는 모바일 플랫폼 한계로 graceful success:false
+    // (데스크톱 키-동형 — 프론트 안 깨짐).
+    var b = await core({ cmd: "shell_beep" });
+    check("shell_beep success", b && b.success === true);
+    var op = await core({ cmd: "shell_open_path", path: "/x" });
+    check("shell_open_path graceful false", op && op.success === false);
+    var si = await core({ cmd: "shell_show_item_in_folder", path: "/x" });
+    check("shell_show_item graceful false", si && si.success === false);
+    var tr = await core({ cmd: "shell_trash_item", path: "/x" });
+    check("shell_trash graceful false", tr && tr.success === false);
+  }
+
+  async function fsSuite() {
+    // app_get_path(documents) 하위 실 샌드박스 파일 왕복(시뮬/에뮬=실 FS).
+    var base = (await core({ cmd: "app_get_path", name: "documents" })).path;
+    var fp = base + "/suji-e2e-fs.txt";
+    var content = "fs-rt-" + Date.now();
+    var w = await core({ cmd: "fs_write_file", path: fp, text: content });
+    var r = await core({ cmd: "fs_read_file", path: fp });
+    check("fs write/read round-trip",
+          w && w.success === true && r && r.success === true && r.text === content);
+    var rd = await core({ cmd: "fs_readdir", path: base });
+    check("fs readdir lists written file",
+          rd && rd.success === true && Array.isArray(rd.entries) &&
+          rd.entries.some(function (e) { return e.name === "suji-e2e-fs.txt"; }));
+    // stat(파일) → type/size/mtime. mkdir → stat(디렉토리). rm → stat 실패.
+    var st = await core({ cmd: "fs_stat", path: fp });
+    check("fs stat file",
+          st && st.success === true && st.type === "file" &&
+          st.size > 0 && typeof st.mtime === "number");
+    var dir = base + "/suji-e2e-dir";
+    var mk = await core({ cmd: "fs_mkdir", path: dir });
+    var sd = await core({ cmd: "fs_stat", path: dir });
+    check("fs mkdir + stat dir",
+          mk && mk.success === true && sd && sd.type === "directory");
+    var rm = await core({ cmd: "fs_rm", path: fp });
+    var st2 = await core({ cmd: "fs_stat", path: fp });
+    check("fs rm then stat fails",
+          rm && rm.success === true && st2 && st2.success === false);
+    await core({ cmd: "fs_rm", path: dir, recursive: true }); // cleanup
+  }
+
+  async function run() {
+    try {
+      await clipboardSuite(); await safeStorageSuite();
+      await appMetaSuite(); await clipboardExtSuite();
+      await shellExtSuite(); await fsSuite();
+    } catch (e) { check("suite threw: " + e, false); }
+    var fail = cases.filter(function (c) { return !c.ok; }).length;
+    var verdict = { suite: "clipboard+safeStorage+appMeta+clipboardExt+shellExt+fs+ext2",
+                    ok: fail === 0, fail: fail, cases: cases };
+    document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
+    document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";
+    // 로그 폴백 + 호스트 파일 기록(스크립트가 회수·assert).
+    console.log("SUJI_E2E_RESULT " + JSON.stringify(verdict));
+    try { await window.__suji__.invoke("e2e:report", verdict); } catch (e) {}
+  }
+
+  // __suji__ 준비 대기(iOS WKUserScript / Android 위 인라인).
+  (function wait(n) {
+    if (window.__suji__ && window.__suji__.core) { run(); return; }
+    if (n <= 0) {
+      document.title = "suji-e2e-fail";
+      console.log('SUJI_E2E_RESULT {"suite":"clipboard","ok":false,"fail":1,' +
+                  '"cases":[{"name":"bridge unavailable","ok":false}]}');
+      return;
+    }
+    setTimeout(function () { wait(n - 1); }, 100);
+  })(50);
+})();
+</script>
+</body>
+</html>
