@@ -11,7 +11,7 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 단위 테스트 (339개)
+zig build test     # 단위 테스트 (790개)
 zig build run      # CLI 도움말
 
 # 공식 플러그인 테스트 (dylib 선빌드 필요 — cd plugins/<p>/zig && zig build)

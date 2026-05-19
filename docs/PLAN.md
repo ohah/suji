@@ -157,7 +157,7 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
         backend SDK 변형. js/Rust/Go 와이어 동형 — `globalThis.suji.invoke
         ("state",{cmd,...})` + `{from:"zig",result|error}` 언랩. dist+lock
         커밋. Node libnode 임베디드라 dylib 하니스 불가 → mock 브릿지로
-        계약 검증(plugins/state/js 테스트 동형), bun 18 단위 테스트)
+        계약 검증(plugins/state/js 테스트 동형), bun 26 단위 테스트)
   - [x] SQLite 플러그인 — `plugins/sqlite` (두 번째 공식 플러그인, state 동형).
         벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼
         빌드) + `sql:open/execute/query/close`. positional `?` 파라미터
@@ -165,7 +165,7 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
         + Rust/Go/JS/Node 래퍼(state parity, js/node dist+lock 커밋). `zig
         build test-sqlite` 10 테스트(round-trip/파라미터 주입안전/타입/격리/
         에러). Node 래퍼 — `plugins/sqlite/node/` (`@suji/plugin-sqlite-node`,
-        state/node 동형: mock 브릿지 bun 8 단위 테스트).
+        state/node 동형: mock 브릿지 bun 16 단위 테스트).
   - [x] **모바일 SQLite 백엔드** — `examples/ios/backends/sqlite/`
         (데스크탑 plugins/sqlite 모바일 대응; 데스크탑=동적 dylib/BackendRegistry,
         모바일=정적 링크라 코어/SDK 독립 재구현, 고유 심볼 `suji_sqlite_backend_*`).
@@ -537,7 +537,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
             Linux용 `cef_print_handler_t.get_pdf_paper_size`(U.S. Letter) 등록 완료
             (cef.zig `getPrintHandler`/`getPdfPaperSize`, initClient 배선). macOS/
             Windows 는 네이티브 인쇄라 print_handler 무시 → 등록 무영향(회귀 가드:
-            단위 339 + window-lifecycle pdf-print). ⚠️ 실 PDF 출력 e2e 는 macOS
+            단위 790 + window-lifecycle pdf-print). ⚠️ 실 PDF 출력 e2e 는 macOS
             러너뿐이라 **Linux 산출은 미검증**(Linux CI 빌드까지만, 정직).
       - [x] **`capture_page`** — CEF 직접 미지원 → CDP `Page.captureScreenshot`
             (send_dev_tools_message + dev_tools_message_observer). base64 PNG 가
@@ -1405,12 +1405,12 @@ suji build → 결과물:
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
-| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 16·node 24. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
+| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | ✅ `suji.json app.deepLinkSchemes:["myapp"]` → bundle_macos 가 `.app` Info.plist `CFBundleURLTypes` 자동 주입(scheme 당 dict, identifier-prefixed URLName). isValidUrlScheme(RFC 3986 — ALPHA 시작 [A-Za-z0-9+.-])로 무효 skip(XML 주입 차단). writeInfoPlist→buildInfoPlist 순수 분리. 검증: 실 `suji build` adhoc → `plutil -lint` OK + CFBundleURLTypes 에 유효 2/무효 1 skip 실증 + 단위 회귀. ⚠️ OS 레벨 *라우팅 실동작*(Launch Services)은 설치+등록 필요 = 헤드리스 미검증, plist 선언만 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
 | 클립보드 — 이미지/HTML/format 검사 | `clipboard.readImage` / `writeImage` / `readHTML` / `has` / `availableFormats` | -- | ✅ HTML (`readHTML`/`writeHTML`) + format 검사 (`has`/`availableFormats`) + PNG image (`writeImage(base64)` / `readImage()` — NSPasteboard `public.png`, raw 한도 ~8KB 1차) + TIFF (`writeTiff`/`readTiff` — `public.tiff`, PNG 동형, 5 SDK + e2e 3) + RTF (`readRtf`/`writeRtf` — `public.rtf`) |
 | `shell.openPath` (파일 기본 앱으로) | `shell.openPath(path)` | `opener` | ✅ macOS NSWorkspace `openURL:` (file://) — `shell_open_path` IPC, 존재 검증 + 5 SDK + e2e 2 |
-| Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ✅ `menu_popup`(cef.zig `popupContextMenu` — NSMenu `popUpMenuPositioningItem:atLocation:inView:`, item/view=nil→화면좌표; x/y 미지정 시 커서). items 파싱·`menu:click` emit 은 `setApplicationMenu` 와 동일 경로 재사용. 프론트 `menu.popup(items,{x?,y?})`. ⚠️ 동기 모달이라 정상 popup e2e 자동 클릭 불가(데스크톱 dialog 동일 경계) — zig build+단위 339+menu e2e parse-error+menu:click 경로 재사용으로 검증 |
+| Programmatic context menu | `Menu.popup({window?, x?, y?})` | `menu.popup` | ✅ `menu_popup`(cef.zig `popupContextMenu` — NSMenu `popUpMenuPositioningItem:atLocation:inView:`, item/view=nil→화면좌표; x/y 미지정 시 커서). items 파싱·`menu:click` emit 은 `setApplicationMenu` 와 동일 경로 재사용. 프론트 `menu.popup(items,{x?,y?})`. ⚠️ 동기 모달이라 정상 popup e2e 자동 클릭 불가(데스크톱 dialog 동일 경계) — zig build+단위 790+menu e2e parse-error+menu:click 경로 재사용으로 검증 |
 | 사용자 정의 protocol 풀 셋 | `protocol.handle(scheme, handler)` | -- | 🟡 same-origin 정적 서빙은 `protocol:"suji"` 가 이미 충족(앱이 `suji://app/` 에서 로드 + dist factory 서빙, 프로덕션 검증). **임의 cross-origin 동적 핸들러는 보류** — 아래 "protocol.handle 보류 사유" 참조 |
 | Session 쿠키/스토리지 관리 | `session.cookies.get/set/remove` / `clearStorageData` / `clearCache` | -- | ✅ `session.clearCookies` / `flushStore` / `setCookie` / `getCookies` / `removeCookies` — CEF cookie_manager + visitor 패턴 (`session:cookies-result` 이벤트 + requestId 매칭, race-safe pending buffer + 1초 timeout). 5 SDK 노출 + e2e 8 케이스 (set/get round-trip, httponly 필터, removeCookies, includeHttpOnly:false, URL 검증, SDK wrapper). cookies 0개 case는 visit fn 호출 안 돼 SDK timeout으로 빈 결과 (Electron 동등 동작). ✅ `clearStorageData(origin?, storageTypes?)` — CDP `Storage.clearDataForOrigin` + `Network.clearBrowserCache` fire-and-forget(clearCookies 동형, g_browser send_dev_tools_message 재사용). 5 SDK 노출 + e2e 3(무-origin/origin+types/escape-safe). origin 미지정 시 현재 문서 origin 자동 해석(`getMainFrameUrl`→`util.originFromUrl`, scheme://authority 추출; file://=불투명 best-effort)으로 **앱 자기 storage** 삭제 + 전역 HTTP 캐시. ⚠️ 진짜 제약: IndexedDB/localStorage 는 origin-scoped 라 전 origin 프로필-전역 wipe 는 CDP(per-origin `clearDataForOrigin`) 구조상 단일 호출 불가 — about:/data: 등 origin 해석불가 시 캐시만(Electron 무인자 전역 wipe 와 다른 한계). |
 
@@ -1561,6 +1561,22 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 25. ✅ **Windows dlopen 백엔드 복구** — Zig 0.16 std.DynLib Windows 제거(의도된 설계)에
     대응해 kernel32 `LoadLibraryExW`/`GetProcAddress`/`FreeLibrary` 직접 래핑
     (`loader.zig` `WinDynLib`). 이슈 #11 해결.
+26. ✅ **로드맵 잔존 sharp edge 5건** (코드 스윕 견고화 — 깨진 기능 아님,
+    경계 오동작/무경고 절단/프로세스 사망 위험 제거). 커밋 `e3433cb` + D4
+    회귀 보완 `55de50e`:
+    - **D-1** `util.matchGlob` 에 `?`·`[abc]`/`[a-z]`·`[!^]` 부정·`\`
+      이스케이프 추가 (Electron/표준 glob 패리티; webRequest URL filter;
+      `zig test util.zig` 신규 8 describe).
+    - **D-2** `loader.extractCmdField` → 검증된 `util.extractJsonString`
+      위임 (`"cmd": "x"` 공백·`\"` escape 오라우팅 제거; 모바일 `__core__`).
+    - **D-3** `get_child_views` 4KB 스택 FBA(>1024 view 무경고 절단→오인
+      `ok:false`) → `registry.allocator` 힙(무제한).
+    - **D-4** `EventBus on/onC/once` OOM 시 `@panic`→`return 0`(invalid-id
+      sentinel, 임베드 graceful degrade) + 회귀 테스트 신설
+      (`events_test.zig`, FailingAllocator).
+    - **D-5** `util.originFromUrl`(scheme://authority) 신설 →
+      `clearStorageData` 무인자 시 자기 origin 자동 해석(위 23번 항목).
+    각 /simplify 3-에이전트 + `zig build test` 무회귀.
 
 ---
 
