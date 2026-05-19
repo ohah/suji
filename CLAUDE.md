@@ -68,7 +68,8 @@ E2E 스크립트는 suji dev를 띄우고 CEF DevTools(`localhost:9222`)에 pupp
 ## CLI
 
 ```bash
-suji init <name> --backend=zig|rust|go|multi
+suji init <name> --backend=zig|rust|go|multi \
+  --frontend=react|vue|svelte|solid|preact|vanilla   # 기본 react
 suji dev
 suji build
 suji run

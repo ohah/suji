@@ -154,14 +154,15 @@ fn printUsage() void {
         \\Suji - Zig core multi-backend desktop framework
         \\
         \\Usage:
-        \\  suji init <name> [--backend=rust|go|multi]  Create new project
+        \\  suji init <name> [--backend=rust|go|multi]   Create new project
+        \\         [--frontend=react|vue|svelte|solid|preact|vanilla]
         \\  suji dev                                     Development mode
         \\  suji build                                   Production build
         \\  suji run                                     Run production build
         \\  suji types [--out <path>]                    Gen SujiHandlers .d.ts (zig .schema())
         \\
         \\Example:
-        \\  suji init my-app --backend=rust
+        \\  suji init my-app --backend=rust --frontend=vue
         \\  cd my-app && suji dev
         \\
     , .{});
@@ -171,20 +172,26 @@ const init_mod = @import("core/init.zig");
 const proc = @import("core/proc.zig");
 const release_opts = @import("core/release_opts.zig");
 
-fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
-    if (init_args.len == 0) {
-        std.debug.print("Usage: suji init <project-name> [--backend=rust|go|multi]\n", .{});
-        return;
-    }
+const INIT_USAGE = "Usage: suji init <project-name> [--backend=rust|go|multi] [--frontend=react|vue|svelte|solid|preact|vanilla]\n";
 
+fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
     var name: []const u8 = "";
     var backend = init_mod.BackendLang.rust;
+    var frontend = init_mod.FrontendTemplate.react;
 
+    const backend_prefix = "--backend=";
+    const frontend_prefix = "--frontend=";
     for (init_args) |arg| {
-        if (std.mem.startsWith(u8, arg, "--backend=")) {
-            const lang_str = arg[10..];
+        if (std.mem.startsWith(u8, arg, backend_prefix)) {
+            const lang_str = arg[backend_prefix.len..];
             backend = init_mod.BackendLang.fromString(lang_str) orelse {
                 std.debug.print("Unknown backend: {s}. Use: rust, go, multi\n", .{lang_str});
+                return;
+            };
+        } else if (std.mem.startsWith(u8, arg, frontend_prefix)) {
+            const fe_str = arg[frontend_prefix.len..];
+            frontend = init_mod.FrontendTemplate.fromString(fe_str) orelse {
+                std.debug.print("Unknown frontend: {s}. Use: react, vue, svelte, solid, preact, vanilla\n", .{fe_str});
                 return;
             };
         } else {
@@ -192,14 +199,16 @@ fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void 
         }
     }
 
+    // 빈 인자 / name 누락 모두 여기서 커버 (init_args.len==0 → name 그대로 "").
     if (name.len == 0) {
-        std.debug.print("Usage: suji init <project-name> [--backend=rust|go|multi]\n", .{});
+        std.debug.print(INIT_USAGE, .{});
         return;
     }
 
     try init_mod.run(allocator, .{
         .name = name,
         .backend = backend,
+        .frontend = frontend,
     });
 }
 

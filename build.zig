@@ -392,6 +392,23 @@ pub fn build(b: *std.Build) void {
     const release_opts_test = b.addTest(.{ .root_module = release_opts_test_mod });
     test_step.dependOn(&b.addRunArtifact(release_opts_test).step);
 
+    // init tests (suji init — BackendLang/FrontendTemplate 파싱 + create-vite 매핑)
+    const init_module = b.createModule(.{
+        .root_source_file = b.path("src/core/init.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    init_module.addImport("runtime", runtime_module);
+    const init_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/init_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    init_test_mod.addImport("init", init_module);
+    const init_test = b.addTest(.{ .root_module = init_test_mod });
+    test_step.dependOn(&b.addRunArtifact(init_test).step);
+
     // App tests
     const app_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/app_test.zig"),

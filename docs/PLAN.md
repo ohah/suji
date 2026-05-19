@@ -698,7 +698,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - **구현 순서**: Phase 2 (기본) + Phase 2.5 (데이터 인프라) **분리 유지**. 2.5 없이 Phase 2만 완료되면 플러그인이 멀티 윈도우 인지 불가
     - **E2E 실행**: macOS CI만 (필수/권장). Linux/Windows는 컴파일/단위만
 - [ ] CLI 도구
-  - [x] `suji init` — 프로젝트 스캐폴딩 (rust/go/multi)
+  - [x] `suji init` — 프로젝트 스캐폴딩 (backend zig/rust/go/multi + frontend react/vue/svelte/solid/preact/vanilla)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
   - [x] `suji run` — 빌드된 앱 실행
@@ -720,7 +720,7 @@ my-app/
 ├── suji.json
 ├── Cargo.toml
 ├── src/lib.rs
-└── frontend/          ← Vite + React (bun)
+└── frontend/          ← Vite (bun) — --frontend=react|vue|svelte|solid|preact|vanilla (기본 react, create-vite -ts 위임)
     ├── package.json
     ├── src/App.tsx
     └── ...
@@ -1390,7 +1390,7 @@ suji build → 결과물:
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ❌ |
 | Homebrew tap | 사용자 직접 | -- | ❌ (CLAUDE.md "예정") |
-| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep). 로컬 실증: npm pack→npx zig/rust/go/multi + 에러케이스. npm publish 는 토큰 대기(워크플로 후속) |
+| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep — `--frontend` 도 양쪽 반영). 로컬 실증: npm pack→npx zig/rust/go/multi + frontend 분기 + 에러케이스. npm publish 는 토큰 대기(워크플로 후속) |
 
 ### 플러그인 / 확장 API
 
@@ -1445,7 +1445,7 @@ suji build → 결과물:
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
 | TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`). **`suji types` CLI ✅(Zig)** — `.schema(ch,Req,Res)` 체인 → `exportApp.backend_dump_schema` C ABI → CLI 가 백엔드 빌드→dlopen→`emitSchemaTs` → `declare module '@suji/api'{interface SujiHandlers{…}}` 를 stdout/`--out`. 검증: app_test 골든(emitSchemaTs 결정론) + 실 CLI 통합(examples/zig-backend, stdout==--out, types.test-d 계약 일치). Rust=specta 수동 / Go·Node=수동 augment 는 후속(정직 — runtime 타입메타 부재) |
-| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | 🟡 (`suji init` 존재, 제한적) |
+| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). 스캐폴딩은 create-vite 에 위임(`<name>-ts` 매핑, 번들 템플릿 0개 유지). `--backend` 패턴 대칭. `BackendLang`/`FrontendTemplate` 둘 다 `std.meta.stringToEnum`. suji-cli(npx) lockstep 반영. 검증=`tests/init_test.zig`(fromString/viteTemplate/기본값 + 전 variant -ts 계약) + cli.js 스모크(multi+svelte/기본/거부) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |
 

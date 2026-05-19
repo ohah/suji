@@ -17,17 +17,23 @@ let cmd = argv[0];
 // `create-suji <name>` 별칭: init 생략 허용.
 let rest = argv.slice(1);
 if (cmd && cmd !== "init") { rest = argv; cmd = "init"; }
-if (cmd !== "init") die("사용법: npx @suji/cli init <name> [--backend=zig|rust|go|multi]");
+const USAGE =
+  "사용법: npx @suji/cli init <name> [--backend=zig|rust|go|multi] [--frontend=react|vue|svelte|solid|preact|vanilla]";
+if (cmd !== "init") die(USAGE);
 
 let name = null;
 let backend = "rust"; // init.zig 기본값과 동일
+let frontendTpl = "react"; // init.zig FrontendTemplate 기본값과 동일
 for (const a of rest) {
   if (a.startsWith("--backend=")) backend = a.slice("--backend=".length);
+  else if (a.startsWith("--frontend=")) frontendTpl = a.slice("--frontend=".length);
   else if (!a.startsWith("-") && !name) name = a;
 }
 if (!name) die("프로젝트 이름 필요: npx @suji/cli init <name>");
 if (!["zig", "rust", "go", "multi"].includes(backend))
   die("backend 는 zig|rust|go|multi 중 하나");
+if (!["react", "vue", "svelte", "solid", "preact", "vanilla"].includes(frontendTpl))
+  die("frontend 는 react|vue|svelte|solid|preact|vanilla 중 하나");
 if (existsSync(name)) die(`'${name}' 이미 존재`);
 
 const W = (p, c) => {
@@ -105,11 +111,11 @@ W("frontend/index.html", `<!doctype html>
 </body></html>
 `);
 
-console.log(`✓ ${name} (${backend}) 생성 완료
+console.log(`✓ ${name} (${backend} + ${frontendTpl}) 생성 완료
 
   cd ${name}
   suji dev          # 개발 서버 (suji 바이너리 필요)
 
-frontend/ 는 의존 0 정적 stub 입니다. Vite/React 로 교체하려면:
-  cd ${name}/frontend && npm create vite@latest . -- --template react-ts
+frontend/ 는 의존 0 정적 stub 입니다. Vite 로 교체하려면:
+  cd ${name}/frontend && npm create vite@latest . -- --template ${frontendTpl}-ts
 `);

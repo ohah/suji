@@ -10,17 +10,40 @@ pub const BackendLang = enum {
     multi,
 
     pub fn fromString(s: []const u8) ?BackendLang {
-        if (std.mem.eql(u8, s, "zig")) return .zig;
-        if (std.mem.eql(u8, s, "rust")) return .rust;
-        if (std.mem.eql(u8, s, "go")) return .go;
-        if (std.mem.eql(u8, s, "multi")) return .multi;
-        return null;
+        return std.meta.stringToEnum(BackendLang, s);
+    }
+};
+
+pub const FrontendTemplate = enum {
+    react,
+    vue,
+    svelte,
+    solid,
+    preact,
+    vanilla,
+
+    pub fn fromString(s: []const u8) ?FrontendTemplate {
+        return std.meta.stringToEnum(FrontendTemplate, s);
+    }
+
+    /// create-vite 의 TypeScript 템플릿 식별자 — 프론트엔드 스캐폴딩은
+    /// create-vite 에 위임(번들 템플릿 0개 유지). 전부 `-ts` 변형.
+    pub fn viteTemplate(self: FrontendTemplate) []const u8 {
+        return switch (self) {
+            .react => "react-ts",
+            .vue => "vue-ts",
+            .svelte => "svelte-ts",
+            .solid => "solid-ts",
+            .preact => "preact-ts",
+            .vanilla => "vanilla-ts",
+        };
     }
 };
 
 pub const InitOptions = struct {
     name: []const u8,
     backend: BackendLang = .rust,
+    frontend: FrontendTemplate = .react,
 };
 
 pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
@@ -71,8 +94,8 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     }
 
     // 프론트엔드
-    std.debug.print("[suji] creating frontend (Vite + React)...\n", .{});
-    try createFrontend(allocator, name);
+    std.debug.print("[suji] creating frontend (Vite + {s})...\n", .{@tagName(opts.frontend)});
+    try createFrontend(allocator, name, opts.frontend);
 
     // .gitignore
     try writeFileContent(project_dir, ".gitignore", @embedFile("../templates/gitignore"));
@@ -131,13 +154,13 @@ fn scaffoldGo(allocator: std.mem.Allocator, dir: Dir, name: []const u8) !void {
     try writeFileContent(dir, "main.go", @embedFile("../templates/go_main.go"));
 }
 
-fn createFrontend(allocator: std.mem.Allocator, project_name: []const u8) !void {
+fn createFrontend(allocator: std.mem.Allocator, project_name: []const u8, template: FrontendTemplate) !void {
     const io = runtime.io;
     const project_path = Dir.cwd().realPathFileAlloc(io, project_name, allocator) catch null;
     defer if (project_path) |p| allocator.free(p);
 
     var child = try std.process.spawn(io, .{
-        .argv = &.{ "bunx", "create-vite", "frontend", "--template", "react-ts" },
+        .argv = &.{ "bunx", "create-vite", "frontend", "--template", template.viteTemplate() },
         .cwd = if (project_path) |p| .{ .path = p } else .inherit,
     });
     const result = try child.wait(io);
