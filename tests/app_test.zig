@@ -1277,6 +1277,12 @@ test "globalShortcut.*: __core__ Carbon Hot Key cmd 전송" {
             _ = app_mod.globalShortcut.isRegistered("Cmd+Q");
             try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"global_shortcut_is_registered\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"accelerator\":\"Cmd+Q\"") != null);
+
+            // Electron 패리티: 미디어키도 동일 global_shortcut_register IPC —
+            // 신규 cmd/SDK 표면 0, accelerator 토큰만 Media* 로 전달.
+            _ = app_mod.globalShortcut.register("MediaPlayPause", "togglePlay");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"global_shortcut_register\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"accelerator\":\"MediaPlayPause\"") != null);
         }
     }.run);
 }

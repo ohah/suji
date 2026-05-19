@@ -9,14 +9,39 @@
 
 #import <Foundation/Foundation.h>
 #import <Carbon/Carbon.h>
+#import <AppKit/AppKit.h>
 #import <strings.h>
+
+// 미디어 키 — Carbon RegisterEventHotKey 로는 불가(키보드 hotkey 아님,
+// NSEventTypeSystemDefined subtype 8). Electron 과 동일하게 NSEvent
+// system-defined 글로벌+로컬 모니터로 별도 처리하되, accelerator 토큰은
+// Electron 명칭 그대로(`MediaPlayPause`/`MediaNextTrack`/`MediaPreviousTrack`/
+// `MediaStop`) — globalShortcut.register 한 경로로 동작(신규 API 0).
+// NX_KEYTYPE_* (Apple <IOKit/hidsystem/ev_keymap.h> 안정 상수, 하드코딩).
+#define SUJI_NX_KEYTYPE_PLAY      16
+#define SUJI_NX_KEYTYPE_NEXT      17
+#define SUJI_NX_KEYTYPE_PREVIOUS  18
+// MediaStop: macOS HW 표준 transport 키 부재 — 토큰은 Electron 패리티로
+// 수용(등록 성공)하되 실 HW 이벤트 소스 없음(정직: 대부분 키보드서 미발화).
+#define SUJI_NX_KEYTYPE_STOP      255
+
+// accelerator 가 미디어 토큰이면 NX_KEYTYPE, 아니면 0.
+static UInt32 media_key_for(const char *name) {
+    if (name == NULL || *name == 0) return 0;
+    if (strcasecmp(name, "MediaPlayPause") == 0) return SUJI_NX_KEYTYPE_PLAY;
+    if (strcasecmp(name, "MediaNextTrack") == 0) return SUJI_NX_KEYTYPE_NEXT;
+    if (strcasecmp(name, "MediaPreviousTrack") == 0) return SUJI_NX_KEYTYPE_PREVIOUS;
+    if (strcasecmp(name, "MediaStop") == 0) return SUJI_NX_KEYTYPE_STOP;
+    return 0;
+}
 
 #define SUJI_HOTKEY_MAX 64
 #define SUJI_HOTKEY_STR_MAX 128
 
 typedef struct {
-    EventHotKeyRef ref;
+    EventHotKeyRef ref;       // 미디어 엔트리는 NULL (Carbon 미등록)
     UInt32 hkid;
+    UInt32 media_key;         // 0 = 일반 Carbon hotkey, 그 외 = NX_KEYTYPE_*
     char accelerator[SUJI_HOTKEY_STR_MAX];
     char click[SUJI_HOTKEY_STR_MAX];
 } HotKeyEntry;
@@ -26,6 +51,8 @@ static int g_hotkey_count = 0;
 static UInt32 g_next_hkid = 1;
 static EventHandlerRef g_event_handler = NULL;
 static void (*g_callback)(const char *accelerator, const char *click) = NULL;
+static id g_media_global_monitor = nil;
+static id g_media_local_monitor = nil;
 
 typedef struct {
     UInt32 modifiers;
@@ -192,6 +219,65 @@ static void ensure_event_handler(void) {
     InstallEventHandler(GetApplicationEventTarget(), hotkey_handler, 1, &spec, NULL, &g_event_handler);
 }
 
+// NSEventTypeSystemDefined media-key 디코드 → keyDown 시 등록된 media
+// 엔트리로 g_callback (Carbon hotkey_handler 와 동일 emit 경로 재사용).
+static void media_event_dispatch(NSEvent *event) {
+    // type 은 NSEventMaskSystemDefined 모니터가 보장 — subtype 만 검사.
+    if ([event subtype] != 8) return;
+    int data1 = (int)[event data1];
+    int key_code = (data1 & 0xFFFF0000) >> 16;
+    int key_flags = data1 & 0x0000FFFF;
+    int key_state = (key_flags & 0xFF00) >> 8;
+    if (key_state != 0x0A) return; // 0x0A=down, 0x0B=up — down 만
+    for (int i = 0; i < g_hotkey_count; i++) {
+        if (g_hotkeys[i].media_key != 0 && (UInt32)key_code == g_hotkeys[i].media_key) {
+            if (g_callback) g_callback(g_hotkeys[i].accelerator, g_hotkeys[i].click);
+            break;
+        }
+    }
+}
+
+// 글로벌(앱 비포커스)+로컬(포커스) 모니터 1회 설치 — Electron 도 동일하게
+// 양쪽. 프로세스 라이프타임 유지(ensure_event_handler 와 동일 정책).
+// ⚠️ 글로벌 system-defined 키 수신은 Accessibility(TCC) 신뢰 필요 — 헤드리스
+// /미부여 시 미발화(정직 경계: globalShortcut 실 키 e2e 불가와 동급).
+// local 모니터를 sentinel 로 — global 은 TCC 미신뢰 시 nil 을 반환하므로
+// dedup 기준으로 못 씀(매 register 마다 local 중복 설치/콜백 이중발화 유발).
+// local 은 TCC 불요로 항상 non-nil → 안정 기준. global 은 nil 인 동안만 재시도.
+static void ensure_media_monitor(void) {
+    if (g_media_local_monitor) return;
+    if (!g_media_global_monitor)
+        g_media_global_monitor = [NSEvent
+            addGlobalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
+                                          handler:^(NSEvent *e) { media_event_dispatch(e); }];
+    g_media_local_monitor = [NSEvent
+        addLocalMonitorForEventsMatchingMask:NSEventMaskSystemDefined
+                                     handler:^NSEvent *(NSEvent *e) {
+                                         media_event_dispatch(e);
+                                         return e;
+                                     }];
+}
+
+// 신규 슬롯 점유 + accelerator/click 안전 복사. capacity/dup 체크는 caller.
+// hkid 는 명시 인자 — Carbon 경로는 RegisterEventHotKey 성공 후에만 ID 를
+// 소비하므로 g_next_hkid 증가 정책을 caller 가 소유.
+static HotKeyEntry *push_entry(EventHotKeyRef ref, UInt32 media_key, UInt32 hkid,
+                               const char *accel, const char *click) {
+    HotKeyEntry *e = &g_hotkeys[g_hotkey_count++];
+    e->ref = ref;
+    e->hkid = hkid;
+    e->media_key = media_key;
+    strncpy(e->accelerator, accel, sizeof(e->accelerator) - 1);
+    e->accelerator[sizeof(e->accelerator) - 1] = 0;
+    if (click) {
+        strncpy(e->click, click, sizeof(e->click) - 1);
+        e->click[sizeof(e->click) - 1] = 0;
+    } else {
+        e->click[0] = 0;
+    }
+    return e;
+}
+
 static int find_index(const char *accel) {
     for (int i = 0; i < g_hotkey_count; i++) {
         if (strcmp(g_hotkeys[i].accelerator, accel) == 0) return i;
@@ -218,6 +304,15 @@ int suji_global_shortcut_register(const char *accel, const char *click) {
     if (g_hotkey_count >= SUJI_HOTKEY_MAX) return -1;
     if (find_index(accel) >= 0) return -2;
 
+    // 미디어 키 분기 — Carbon 미사용. NSEvent system-defined 모니터로 처리
+    // (Electron 패리티: 토큰만으로 등록, 수정자 없음). ref=NULL sentinel.
+    UInt32 mk = media_key_for(accel);
+    if (mk != 0) {
+        push_entry(NULL, mk, g_next_hkid++, accel, click);
+        ensure_media_monitor();
+        return 0;
+    }
+
     ParsedAccel p = parse_accelerator(accel);
     if (!p.valid) return -3;
 
@@ -227,24 +322,14 @@ int suji_global_shortcut_register(const char *accel, const char *click) {
     if (s != noErr || ref == NULL) return -4;
     g_next_hkid++;
 
-    HotKeyEntry *e = &g_hotkeys[g_hotkey_count++];
-    e->ref = ref;
-    e->hkid = hkid.id;
-    strncpy(e->accelerator, accel, sizeof(e->accelerator) - 1);
-    e->accelerator[sizeof(e->accelerator) - 1] = 0;
-    if (click) {
-        strncpy(e->click, click, sizeof(e->click) - 1);
-        e->click[sizeof(e->click) - 1] = 0;
-    } else {
-        e->click[0] = 0;
-    }
+    push_entry(ref, 0, hkid.id, accel, click);
     return 0;
 }
 
 int suji_global_shortcut_unregister(const char *accel) {
     int idx = find_index(accel);
     if (idx < 0) return 0;
-    UnregisterEventHotKey(g_hotkeys[idx].ref);
+    if (g_hotkeys[idx].ref) UnregisterEventHotKey(g_hotkeys[idx].ref); // 미디어=NULL skip
     for (int j = idx; j < g_hotkey_count - 1; j++) {
         g_hotkeys[j] = g_hotkeys[j + 1];
     }
@@ -254,7 +339,7 @@ int suji_global_shortcut_unregister(const char *accel) {
 
 void suji_global_shortcut_unregister_all(void) {
     for (int i = 0; i < g_hotkey_count; i++) {
-        UnregisterEventHotKey(g_hotkeys[i].ref);
+        if (g_hotkeys[i].ref) UnregisterEventHotKey(g_hotkeys[i].ref); // 미디어=NULL skip
     }
     g_hotkey_count = 0;
 }

@@ -140,6 +140,10 @@ fn onAllClosed(_: suji.Event) void {
 //                                       (macOS NSMenu, menu:click 이벤트)
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key, globalShortcut:trigger 이벤트)
+//   미디어키: register("MediaPlayPause"|"MediaNextTrack"|"MediaPreviousTrack"|
+//   "MediaStop", click) — Electron 토큰 패리티. Carbon 불가분 NSEvent
+//   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
+//   수신은 Accessibility(TCC) 필요(헤드리스 미발화 — globalShortcut 동급 경계)
 // suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen)
 // suji.desktopCapturer.getSources("screen,window")  — 화면/창 소스
 //   {id,name,type,x,y,width,height,displayId?} (CGGetActiveDisplayList +

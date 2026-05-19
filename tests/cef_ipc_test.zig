@@ -1091,6 +1091,36 @@ test "nativeTheme — KVO observer install + nativeTheme:updated emit" {
     }
 }
 
+test "globalShortcut 미디어키 — global_shortcut.m NSEvent systemDefined 경로" {
+    // Electron 패리티: Media* accelerator 는 신규 IPC/SDK 없이 기존
+    // global_shortcut_register 로 흐르고, Carbon 불가 → NSEvent
+    // systemDefined 모니터로 분기(ref=NULL, UnregisterEventHotKey skip).
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "src/platform/global_shortcut.m",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(m_src);
+    inline for (.{
+        "media_key_for",
+        "\"MediaPlayPause\"",
+        "\"MediaNextTrack\"",
+        "\"MediaPreviousTrack\"",
+        "\"MediaStop\"",
+        "media_event_dispatch",
+        "ensure_media_monitor",
+        "NSEventMaskSystemDefined",
+        "addGlobalMonitorForEventsMatchingMask:",
+        "addLocalMonitorForEventsMatchingMask:",
+        "media_key", // HotKeyEntry 필드
+        "if (g_hotkeys[idx].ref)", // 미디어 ref=NULL 가드(unregister)
+        "if (g_hotkeys[i].ref)", // unregister_all 가드
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, m_src, needle) != null);
+    }
+}
+
 test "app.getPath IPC — main.zig dispatch + cef.zig 함수 + 7 키" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
