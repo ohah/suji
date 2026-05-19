@@ -3,3 +3,6 @@ rust = "latest"
 zig = "0.16.0"
 go = "latest"
 node = "latest"
+# website/ Astro 문서 사이트 + e2e(puppeteer/bun) 툴체인 재현성
+# (`cd website && bun install/build`). zts/.mise.toml 과 동일 핀.
+bun = "1.3.11"
