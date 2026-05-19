@@ -1,0 +1,41 @@
+---
+title: 소개
+description: Suji 가 무엇이고 어떤 구조인지
+---
+
+**Suji** 는 Zig 코어 기반의 올인원 데스크톱·모바일 앱 프레임워크입니다. Electron
+스타일 API(`handle`/`invoke`/`on`/`send`)를 제공하면서, 한 앱에 Zig·Rust·Go·
+Node.js 백엔드를 동시에 둘 수 있습니다.
+
+## 핵심 구조
+
+- **데스크톱**: CEF(Chromium Embedded Framework)가 창/렌더러를 담당. macOS는
+  Cocoa+`.app` 번들, Linux는 GTK3+X11, Windows는 Win32.
+- **모바일/임베드**: 코어 로직(`BackendRegistry`+`EventBus`)은 CEF 의존이 0이라
+  `libsuji_core` 정적 라이브러리로 분리 — iOS(Swift `WKWebView`)·Android
+  (Kotlin/JNI)에서 동일 `@suji/api` 가 `__core__` 와이어로 동작.
+- **자동 라우팅**: 각 백엔드가 처리 채널을 `register` → 프론트엔드는
+  `invoke("ping")` 처럼 채널명만으로 호출, 코어가 올바른 백엔드로 라우팅.
+
+## 백엔드 예시
+
+```zig
+// Zig
+pub const app = suji.app()
+    .handle("ping", ping)
+    .schema("ping", void, struct { msg: []const u8 })  // suji types 로 .d.ts 자동
+    .on("window:all-closed", onAllClosed);
+
+fn ping(req: suji.Request) suji.Response { return req.ok(.{ .msg = "pong" }); }
+```
+
+```js
+// Frontend (Electron 스타일 — 자동 라우팅)
+import { invoke } from '@suji/api';
+const { msg } = await invoke('ping');           // "pong"
+await invoke('greet', { name: 'Suji' });        // 인자 전달
+suji.on('event', (data) => console.log(data));
+```
+
+자세한 API 표면은 저장소 [`CLAUDE.md`](https://github.com/ohah/suji/blob/main/CLAUDE.md)
+의 "API (Electron 스타일)" 절을 참고하세요.

@@ -1,0 +1,36 @@
+---
+title: Suji
+description: Zig 코어 기반 올인원 데스크톱·모바일 앱 프레임워크 — Electron 스타일 API
+template: splash
+hero:
+  tagline: Zig 코어 하나로 데스크톱(CEF)과 모바일(iOS/Android)을. Electron 스타일 handle/invoke/on/send API, Zig·Rust·Go·Node 멀티 백엔드.
+  actions:
+    - text: 빠른 시작
+      link: /suji/guides/quick-start/
+      icon: right-arrow
+    - text: GitHub
+      link: https://github.com/ohah/suji
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+<CardGrid stagger>
+  <Card title="Electron 스타일 API" icon="laptop">
+    `handle`/`invoke`/`on`/`send` + `windows`/`clipboard`/`dialog`/`shell`/
+    `globalShortcut`/`tray`/`menu`/`session` … 익숙한 표면 그대로.
+  </Card>
+  <Card title="멀티 백엔드" icon="puzzle">
+    Zig·Rust·Go·Node 백엔드 동시 등록 + 채널명 자동 라우팅. 크로스 호출
+    (`invoke`)·이벤트(`send`/`on`)가 언어 경계를 넘나듦.
+  </Card>
+  <Card title="데스크톱 + 모바일" icon="rocket">
+    데스크톱은 CEF, 모바일은 CEF-free 임베드 코어(`libsuji_core`) — 동일
+    `@suji/api` 가 iOS/Android WebView 에서도 동작.
+  </Card>
+  <Card title="보안 모델" icon="approve-check">
+    fs 화이트리스트 샌드박스 + shell/dialog/capture opt-in allowlist +
+    contextIsolation. 데스크톱·모바일 동일 게이트(Tauri 패리티).
+  </Card>
+</CardGrid>

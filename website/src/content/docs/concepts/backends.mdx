@@ -1,0 +1,46 @@
+---
+title: 멀티 백엔드 & 플러그인
+description: Zig·Rust·Go·Node 백엔드와 공식 플러그인
+---
+
+## 멀티 백엔드
+
+한 앱에 여러 언어 백엔드를 등록하고 채널명으로 자동 라우팅합니다.
+
+```js
+await suji.invoke("ping")                              // 등록된 백엔드 자동 탐색
+await suji.invoke("greet", { name: "x" }, { target: "rust" })  // 특정 백엔드 지정
+```
+
+- **크로스 호출**: 백엔드에서 `invoke("go", req)` 로 다른 언어 백엔드 호출.
+- **이벤트**: `suji.send("ch", data)` / `suji.on("ch", cb)` — 언어 무관 동일 채널.
+- **Node.js**: 별도 프로세스 없이 libnode 임베딩(`~/.suji/node/.../libnode.dylib`),
+  `package.json`+`npm install` 완전 호환.
+
+`examples/multi-backend` 는 Zig+Rust+Go+Node.js 를 한 앱에서 함께 구동합니다.
+
+## 공식 플러그인
+
+| 플러그인 | 채널 | 래퍼 |
+|----------|------|------|
+| `state` | `state:get/set/delete/keys/clear` (+scope, watch) | Zig·Rust·Go·JS·**Node** |
+| `sqlite` | `sql:open/execute/query/close` (벤더 SQLite 3.51, positional `?`) | Zig·Rust·Go·JS·**Node** |
+
+```js
+// renderer
+import { state } from '@suji/plugin-state';
+await state.set("user", { name: "yoon" }, { scope: "window:1" });
+
+import { sqlite } from '@suji/plugin-sqlite';
+const db = await sqlite.open(":memory:");
+await sqlite.execute(db, "INSERT INTO t(name) VALUES (?)", ["yoon"]);
+```
+
+```js
+// Node 백엔드
+const { state } = require('@suji/plugin-state-node');
+const { sqlite } = require('@suji/plugin-sqlite-node');
+```
+
+두 플러그인 모두 데스크톱(동적 dylib) + 모바일(정적 링크, 응답 바이트 동형)
+지원 — 동일 래퍼 무수정.

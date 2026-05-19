@@ -16,6 +16,12 @@ examples/*/backends/go/*.h
 node_modules/
 bun.lock
 
+# Astro docs site (website/) build artifacts
+website/dist/
+website/.astro/
+# but track website/bun.lock — CI(docs.yml)가 --frozen-lockfile 사용
+!website/bun.lock
+
 # Cargo lock in examples
 examples/*/Cargo.lock
 examples/*/backends/*/Cargo.lock
@@ -47,3 +53,8 @@ test-results/
 
 # npm pack artifacts
 *.tgz
+
+# website docs 의 reference/ 페이지는 위 광범위 `reference/` 무시에서 제외
+# (그 패턴은 Claude 스크래치 dir 용 — docs 사이트 콘텐츠와 무관).
+!website/src/content/docs/reference/
+!website/src/content/docs/reference/roadmap.mdx

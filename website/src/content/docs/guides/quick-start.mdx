@@ -1,0 +1,52 @@
+---
+title: 빠른 시작
+description: 프로젝트 생성부터 개발/빌드까지
+---
+
+import { Steps } from '@astrojs/starlight/components';
+
+<Steps>
+
+1. **프로젝트 생성** — 의존성 0의 npx CLI(바이너리 불요):
+
+   ```bash
+   npx @suji/cli init my-app --backend=zig   # zig | rust | go | multi
+   cd my-app
+   ```
+
+2. **개발 모드** — 백엔드 빌드 + CEF 창 + 핫 리로드:
+
+   ```bash
+   suji dev
+   ```
+
+3. **타입 자동 생성**(zig 백엔드) — `.schema()` 체인 → frontend
+   `SujiHandlers` `.d.ts`(수동 augment 불요):
+
+   ```bash
+   suji types > src/suji.d.ts
+   ```
+
+4. **프로덕션 빌드 / 실행**:
+
+   ```bash
+   suji build
+   suji run
+   ```
+
+</Steps>
+
+## suji.json
+
+```json
+{
+  "$schema": "./suji.schema.json",
+  "app": { "name": "My App", "version": "1.0.0" },
+  "window": { "title": "My App", "width": 1024, "height": 768 },
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173" },
+  "fs": { "allowedRoots": ["~/Documents/myapp"] }
+}
+```
+
+`fs.allowedRoots` 를 설정하면 렌더러의 `fs.*`(및 캡처/인쇄/nativeImage 경로)가
+그 경계로 샌드박스됩니다 — [권한 & 샌드박스](/suji/concepts/permissions/) 참고.

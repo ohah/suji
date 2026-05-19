@@ -1,0 +1,48 @@
+---
+title: 권한 & 샌드박스
+description: fs 샌드박스 · shell/dialog allowlist · 캡처/nativeImage 게이트 · 모바일 권한
+---
+
+신뢰할 수 없는 웹 콘텐츠를 로드할 수 있는 렌더러가 네이티브 자원에 접근하는
+경계를 통제합니다. **backend SDK 호출은 신뢰 코드라 항상 우회**(thread-local 마커).
+
+## fs 샌드박스 (default-deny)
+
+`config.fs.allowedRoots` 화이트리스트로 렌더러 `fs.*` 를 검증.
+
+| 설정 | 렌더러 동작 |
+|------|---|
+| 미설정 / `[]` | 모든 `fs.*` 차단 → `error:"forbidden"` (default-safe) |
+| `["~/Documents/myapp"]` | 해당 prefix 안 path 만 허용(`~` 사전 expand) |
+| `["*"]` | escape hatch(`..` traversal 은 여전히 차단) |
+
+`..` path component 는 모든 모드에서 항상 차단. prefix 매치는 separator
+boundary 가드(`/foo/bar` 허용 시 `/foo/barX` 통과 X).
+
+## shell / dialog allowlist (opt-in)
+
+`shell.openExternal`(URL glob)·`shell.openPath/showItemInFolder/trashItem`(path)
+와 `dialog` open/save 의 `defaultPath` 를 동일 메커니즘으로 게이트. **fs 와 달리
+opt-in** — 키 부재 시 레거시 무제한(비파괴), 존재 시 enforce(`[]`=deny-all /
+`["*"]`=allow / 특정=제한).
+
+```json
+{ "shell": { "allowedPaths": ["~/Documents/x"],
+             "allowedExternalUrls": ["https://*.example.com/*"] },
+  "dialog": { "allowedPaths": ["~/Documents"] } }
+```
+
+## 캡처/인쇄/nativeImage 경로 게이트
+
+`print_to_pdf`·`capture_page`·`desktop_capturer_capture_thumbnail`(쓰기)와
+`native_image_get_size`·`native_image_to_png|jpeg`(읽기 — 파일을 base64 로
+렌더러에 반환 = 내용 유출 가능)도 fs 우회를 막기 위해 동일 `allowedRoots`
+경계로 게이트(`rendererPathFsGate`). opt-in(설정 시 `fs.*` 와 동일 경계).
+
+## 모바일 (Tauri 패리티)
+
+게이트 로직은 Zig 코어(`util.*`) 단일 출처이며 C ABI(`suji_core_set_permissions`
+/`suji_core_permission_check`)로 노출 — iOS Swift / Android Kotlin·JNI 호스트가
+네이티브 액션 직전 호출(Swift/Kotlin 보안 로직 0줄). 모바일은 uniform opt-in,
+OS 앱 샌드박스 위 defense-in-depth. iOS 실 시뮬레이터 + Android 실 에뮬레이터
+기능 e2e 양쪽 검증 완료.
