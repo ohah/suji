@@ -224,3 +224,20 @@ test "emitTo with target=0 still sets webview_eval target to 0 (renderer-side가
     try std.testing.expectEqual(@as(?u32, 0), last_eval_target);
 }
 
+fn testCEvent(_: [*c]const u8, _: [*c]const u8, _: ?*anyopaque) callconv(.c) void {}
+
+// D4 회귀: on/onC/once 는 OOM(addListener 실패) 시 @panic 이 아니라 0 반환
+// (0 = invalid-id sentinel; `return 0` 이 `next_id += 1` *전*이라 실패가
+// next_id 를 오염 안 함 = 실 id 와 0 무충돌은 코드 순서로 구조 보장).
+// off(0) 안전 no-op. 임베드(libsuji_core)에서 프로세스 사망 대신 graceful.
+test "EventBus on/onC/once: OOM → 0 sentinel + off(0) 안전" {
+    var fail = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var bus = events.EventBus.init(fail.allocator(), std.testing.io);
+    defer bus.deinit();
+
+    try std.testing.expectEqual(@as(u64, 0), bus.on("e", testCallback));
+    try std.testing.expectEqual(@as(u64, 0), bus.onC("e", testCEvent, null));
+    try std.testing.expectEqual(@as(u64, 0), bus.once("e", testCallback));
+    bus.off(0); // 어떤 리스너도 id 0 아님 → 안전한 no-op (크래시 없음)
+}
+
