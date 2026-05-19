@@ -1509,7 +1509,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         const pdf_path = util.extractJsonString(req_clean, "path") orelse "";
-        if (captureFsGate(response_buf, "print_to_pdf", pdf_path)) |e| return e;
+        if (rendererPathFsGate(response_buf, "print_to_pdf", pdf_path)) |e| return e;
         return window_ipc.handlePrintToPDF(.{
             .window_id = win_id,
             .path = pdf_path,
@@ -1533,7 +1533,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         else
             null;
         const cap_path = util.extractJsonString(req_clean, "path") orelse "";
-        if (captureFsGate(response_buf, "capture_page", cap_path)) |e| return e;
+        if (rendererPathFsGate(response_buf, "capture_page", cap_path)) |e| return e;
         return window_ipc.handleCapturePage(.{
             .window_id = win_id,
             .path = cap_path,
@@ -1913,7 +1913,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "desktop_capturer_capture_thumbnail")) {
         const source_id = util.extractJsonString(req_clean, "sourceId") orelse "";
         const path = util.extractJsonString(req_clean, "path") orelse "";
-        if (captureFsGate(response_buf, "desktop_capturer_capture_thumbnail", path)) |e| return e;
+        if (rendererPathFsGate(response_buf, "desktop_capturer_capture_thumbnail", path)) |e| return e;
         const ok = source_id.len > 0 and path.len > 0 and
             cef.desktopCapturerCaptureThumbnail(source_id, path);
         return std.fmt.bufPrint(
@@ -2016,10 +2016,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "native_image_get_size")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
         var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
-        const sz = if (util.unescapeJsonStr(raw, &unesc_buf)) |unesc_n|
-            cef.nativeImageGetSize(unesc_buf[0..unesc_n])
-        else
-            cef.NSSize{ .width = 0, .height = 0 };
+        const sz = blk: {
+            const unesc_n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk cef.NSSize{ .width = 0, .height = 0 };
+            const p = unesc_buf[0..unesc_n];
+            if (rendererPathFsGate(response_buf, "native_image_get_size", p)) |e| return e;
+            break :blk cef.nativeImageGetSize(p);
+        };
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"native_image_get_size\",\"width\":{d},\"height\":{d}}}",
@@ -2033,6 +2035,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const raw_path = util.extractJsonString(req_clean, "path") orelse "";
         var path_buf: [util.MAX_RESPONSE]u8 = undefined;
         const path_n = util.unescapeJsonStr(raw_path, &path_buf) orelse return respondBase64Data(response_buf, cmd, &.{});
+        if (rendererPathFsGate(response_buf, cmd, path_buf[0..path_n])) |e| return e;
         const quality = util.extractJsonFloat(req_clean, "quality") orelse 90;
         var raw_buf: [8 * 1024]u8 = undefined;
         const bytes = cef.nativeImageEncodeFromPath(path_buf[0..path_n], file_type, quality, &raw_buf);
@@ -2690,14 +2693,16 @@ fn isPathAllowedForFrontend(path: []const u8) bool {
     return util.pathAllowedInRoots(path, roots);
 }
 
-/// 캡처/인쇄 출력 경로 게이트 — print_to_pdf / capture_page /
-/// desktop_capturer_capture_thumbnail 가 렌더러-제어 path 에 파일을 쓰므로
-/// fs 샌드박스를 우회하던 갭 보완(보안 점검 지적). **opt-in**: fs.allowedRoots
-/// 미설정/빈이면 레거시 무제한(비파괴 — 이 API 들은 그동안 무제한 출하), 설정
-/// 시 fs_write_file 와 동일 경계로 enforce(설정한 fs 통제가 캡처 출력경로도
-/// 포함 → 신뢰불가 렌더러의 임의 파일쓰기 차단). backend SDK 호출은 fs 와
-/// 동일 thread-local 마커로 우회.
-fn captureFsGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
+/// 렌더러-제어 파일경로 게이트 — fs.* 외에 path 를 받는 역사적-무제한 API 가
+/// fs 샌드박스를 우회하던 갭 보완(보안 점검 지적·후속). 대상:
+///  - 쓰기: print_to_pdf / capture_page / desktop_capturer_capture_thumbnail
+///  - 읽기: native_image_get_size / native_image_to_png|jpeg (임의 파일을
+///    base64 로 인코딩해 렌더러로 반환 = 파일내용 유출)
+/// **opt-in**: fs.allowedRoots 미설정/빈이면 레거시 무제한(비파괴 — 이 API
+/// 들은 그동안 무제한 출하), 설정 시 `fs.*` 와 동일 경계로 enforce(설정한 fs
+/// 통제가 이 경로들도 포함 → 신뢰불가 렌더러의 임의 파일 읽기/쓰기 차단).
+/// backend SDK 호출은 fs 와 동일 thread-local 마커로 우회.
+fn rendererPathFsGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
     if (g_in_backend_invoke) return null;
     const cfg = g_config orelse return null;
     if (cfg.fs.allowed_roots.len == 0) return null; // opt-in: 미설정=레거시 허용
@@ -2783,7 +2788,7 @@ test "fsSandboxCheck: g_in_backend_invoke 마커는 sandbox 우회" {
     try std.testing.expect(be == null);
 }
 
-test "captureFsGate: opt-in (fs.allowedRoots 미설정=레거시 허용, 설정=enforce) + backend 우회" {
+test "rendererPathFsGate: opt-in (fs.allowedRoots 미설정=레거시 허용, 설정=enforce) + backend 우회" {
     const saved_cfg = g_config;
     const saved_marker = g_in_backend_invoke;
     defer {
@@ -2795,28 +2800,32 @@ test "captureFsGate: opt-in (fs.allowedRoots 미설정=레거시 허용, 설정=
 
     // g_config null → 레거시 허용.
     g_config = null;
-    try std.testing.expect(captureFsGate(&resp, "capture_page", "/etc/evil.png") == null);
+    try std.testing.expect(rendererPathFsGate(&resp, "capture_page", "/etc/evil.png") == null);
 
     // fs.allowedRoots 미설정(빈) → 레거시 무제한(비파괴 — 기존 동작 불변).
     var cfg_unset = suji.Config{};
     cfg_unset.fs.allowed_roots = &.{};
     g_config = &cfg_unset;
-    try std.testing.expect(captureFsGate(&resp, "print_to_pdf", "/etc/evil.pdf") == null);
+    try std.testing.expect(rendererPathFsGate(&resp, "print_to_pdf", "/etc/evil.pdf") == null);
 
     // fs.allowedRoots 설정 → enforce: 안쪽 허용, 밖/`..` 차단(fs_write_file 동형).
     var cfg_set = suji.Config{};
     const roots = [_][:0]const u8{"/Users/x/app"};
     cfg_set.fs.allowed_roots = &roots;
     g_config = &cfg_set;
-    try std.testing.expect(captureFsGate(&resp, "capture_page", "/Users/x/app/shot.png") == null);
-    const denied = captureFsGate(&resp, "capture_page", "/etc/passwd");
+    try std.testing.expect(rendererPathFsGate(&resp, "capture_page", "/Users/x/app/shot.png") == null);
+    const denied = rendererPathFsGate(&resp, "capture_page", "/etc/passwd");
     try std.testing.expect(denied != null and std.mem.indexOf(u8, denied.?, "\"error\":\"forbidden\"") != null);
-    try std.testing.expect(captureFsGate(&resp, "print_to_pdf", "/Users/x/app/../etc/x.pdf") != null); // `..` 차단
-    try std.testing.expect(captureFsGate(&resp, "desktop_capturer_capture_thumbnail", "/Users/x/app_evil/t.png") != null); // prefix-extension
+    try std.testing.expect(rendererPathFsGate(&resp, "print_to_pdf", "/Users/x/app/../etc/x.pdf") != null); // `..` 차단
+    try std.testing.expect(rendererPathFsGate(&resp, "desktop_capturer_capture_thumbnail", "/Users/x/app_evil/t.png") != null); // prefix-extension
+    // 읽기 sink(nativeImage) 도 동일 경계 — 임의 파일 base64 유출 차단.
+    try std.testing.expect(rendererPathFsGate(&resp, "native_image_get_size", "/Users/x/app/i.png") == null);
+    try std.testing.expect(rendererPathFsGate(&resp, "native_image_to_png", "/etc/shadow") != null);
+    try std.testing.expect(rendererPathFsGate(&resp, "native_image_to_jpeg", "/Users/x/app/../secret.jpg") != null);
 
     // backend SDK 호출 → 우회(설정돼 있어도 null).
     g_in_backend_invoke = true;
-    try std.testing.expect(captureFsGate(&resp, "capture_page", "/etc/passwd") == null);
+    try std.testing.expect(rendererPathFsGate(&resp, "capture_page", "/etc/passwd") == null);
 }
 
 test "shell/dialog 게이트: opt-in (키 부재=레거시 허용, 존재=enforce) + backend 우회" {
