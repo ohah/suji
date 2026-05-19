@@ -25,19 +25,6 @@ pub const FrontendTemplate = enum {
     pub fn fromString(s: []const u8) ?FrontendTemplate {
         return std.meta.stringToEnum(FrontendTemplate, s);
     }
-
-    /// create-vite 의 TypeScript 템플릿 식별자 — 프론트엔드 스캐폴딩은
-    /// create-vite 에 위임(번들 템플릿 0개 유지). 전부 `-ts` 변형.
-    pub fn viteTemplate(self: FrontendTemplate) []const u8 {
-        return switch (self) {
-            .react => "react-ts",
-            .vue => "vue-ts",
-            .svelte => "svelte-ts",
-            .solid => "solid-ts",
-            .preact => "preact-ts",
-            .vanilla => "vanilla-ts",
-        };
-    }
 };
 
 pub const InitOptions = struct {
@@ -95,7 +82,8 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
 
     // 프론트엔드
     std.debug.print("[suji] creating frontend (Vite + {s})...\n", .{@tagName(opts.frontend)});
-    try createFrontend(allocator, name, opts.frontend);
+    try scaffoldFrontend(project_dir, opts.frontend);
+    try bunInstall(allocator, name);
 
     // .gitignore
     try writeFileContent(project_dir, ".gitignore", @embedFile("../templates/gitignore"));
@@ -154,24 +142,47 @@ fn scaffoldGo(allocator: std.mem.Allocator, dir: Dir, name: []const u8) !void {
     try writeFileContent(dir, "main.go", @embedFile("../templates/go_main.go"));
 }
 
-fn createFrontend(allocator: std.mem.Allocator, project_name: []const u8, template: FrontendTemplate) !void {
+// 번들 프론트엔드 템플릿의 상대 파일 목록 (src/templates/frontend/<fw>/).
+// @embedFile 가 comptime 이라 목록/파일 불일치는 컴파일 단계에서 실패 →
+// 템플릿 회귀 가드. 전 6 프레임워크 bun build 실증(검증 천장: CEF 런타임
+// suji.invoke 왕복은 e2e 영역, 여기선 빌드·존재만).
+pub fn feFiles(comptime t: FrontendTemplate) []const []const u8 {
+    return switch (t) {
+        .react => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/App.tsx" },
+        .vue => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.vue" },
+        .svelte => &.{ "package.json", "vite.config.ts", "svelte.config.js", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.svelte" },
+        .solid => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/index.tsx", "src/App.tsx" },
+        .preact => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/app.tsx" },
+        .vanilla => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts" },
+    };
+}
+
+fn scaffoldFrontend(project_dir: Dir, template: FrontendTemplate) !void {
     const io = runtime.io;
-    const project_path = Dir.cwd().realPathFileAlloc(io, project_name, allocator) catch null;
-    defer if (project_path) |p| allocator.free(p);
+    try project_dir.createDir(io, "frontend", .default_dir);
+    var fe = try project_dir.openDir(io, "frontend", .{});
+    defer fe.close(io);
+    try fe.createDir(io, "src", .default_dir);
+    var src = try fe.openDir(io, "src", .{});
+    defer src.close(io);
 
-    var child = try std.process.spawn(io, .{
-        .argv = &.{ "bunx", "create-vite", "frontend", "--template", template.viteTemplate() },
-        .cwd = if (project_path) |p| .{ .path = p } else .inherit,
-    });
-    const result = try child.wait(io);
-    switch (result) {
-        .exited => |code| if (code != 0) {
-            std.debug.print("[suji] warning: frontend creation failed\n", .{});
+    switch (template) {
+        inline else => |t| {
+            const base = "../templates/frontend/" ++ @tagName(t) ++ "/";
+            inline for (comptime feFiles(t)) |rel| {
+                const content = @embedFile(base ++ rel);
+                if (comptime std.mem.startsWith(u8, rel, "src/")) {
+                    try writeFileContent(src, rel["src/".len..], content);
+                } else {
+                    try writeFileContent(fe, rel, content);
+                }
+            }
         },
-        else => {},
     }
+}
 
-    // bun install
+fn bunInstall(allocator: std.mem.Allocator, project_name: []const u8) !void {
+    const io = runtime.io;
     const frontend_path = try std.fmt.allocPrint(allocator, "{s}/frontend", .{project_name});
     defer allocator.free(frontend_path);
     const frontend_real = Dir.cwd().realPathFileAlloc(io, frontend_path, allocator) catch null;

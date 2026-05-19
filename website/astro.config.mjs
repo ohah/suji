@@ -29,6 +29,7 @@ export default defineConfig({
           translations: { en: 'Guides' },
           items: [
             { label: '소개', slug: 'guides/introduction', translations: { en: 'Introduction' } },
+            { label: '설치 & 사용', slug: 'guides/installation', translations: { en: 'Installation & Usage' } },
             { label: '빠른 시작', slug: 'guides/quick-start', translations: { en: 'Quick Start' } },
             { label: 'CLI', slug: 'guides/cli' },
           ],

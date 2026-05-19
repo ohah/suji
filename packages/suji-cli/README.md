@@ -12,21 +12,19 @@ npx @suji/cli init my-app --frontend=vue  # react | vue | svelte | solid | preac
 
 생성물: `suji.json` · 백엔드(zig=`app.zig` / rust=`Cargo.toml`+`src/lib.rs` /
 go=`go.mod`+`main.go` / multi=`backends/{zig,rust,go}`) · `.gitignore` ·
-`frontend/index.html`(의존 0 정적 stub).
+`frontend/`(`--frontend` 프레임워크의 번들 Vite 템플릿 — `invoke("ping")`/
+`invoke("greet")` 데모가 스캐폴딩 백엔드와 연결되어 동작).
 
 다음 단계:
 
 ```bash
-cd my-app
-suji dev      # suji 바이너리 필요 (별도 설치)
+cd my-app/frontend && bun install   # 또는 npm/pnpm install
+cd .. && suji dev                   # suji 바이너리 필요 (별도 설치)
 ```
 
-`frontend/` 는 빠른 시작용 정적 stub 입니다. Vite 로 교체(`--frontend` 값에
-맞춰 안내됨, 기본 `react-ts`):
-
-```bash
-cd my-app/frontend && npm create vite@latest . -- --template react-ts
-```
+> ℹ️ 프론트엔드는 `src/suji.ts`(런타임 `window.__suji__` 래퍼)로 백엔드를
+> 호출합니다. `@suji/api` 가 npm 에 발행되면 `import ... from "@suji/api"`
+> 로 교체 가능(표면 동일, 코드 변경 0).
 
 > ⚠️ `bin/cli.js` 산출물은 `src/core/init.zig`(로컬 `suji init`)와 **동형**이고
 > `templates/*` 는 `src/templates/*` 의 사본입니다. **단일출처는 init.zig** —

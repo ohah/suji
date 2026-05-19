@@ -2,10 +2,11 @@
 // @suji/cli — Suji 프로젝트 스캐폴더 (npx @suji/cli init <name>).
 // suji 바이너리 불요(순수 Node, 의존 0). 산출물은 src/core/init.zig 와
 // 동형 — ⚠️ 단일출처는 init.zig. templates/* 는 src/templates/* 의 사본
-// (drift 주의: 둘을 lockstep 유지). frontend 는 suji init(bunx create-vite)
-// 과 달리 의존 0 정적 stub — README 가 Vite 교체를 안내.
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+// (drift 주의: 둘을 lockstep 유지). frontend 는 init.zig 와 동일한
+// 번들 Vite 템플릿(templates/frontend/<fw>/)을 복사 — bun install 은
+// 사용자가 수동(이 CLI 는 의존 0, suji 바이너리 불요).
+import { mkdirSync, writeFileSync, readFileSync, existsSync, cpSync } from "node:fs";
+import { join, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const TPL = join(dirname(fileURLToPath(import.meta.url)), "..", "templates");
@@ -32,6 +33,7 @@ for (const a of rest) {
 if (!name) die("프로젝트 이름 필요: npx @suji/cli init <name>");
 if (!["zig", "rust", "go", "multi"].includes(backend))
   die("backend 는 zig|rust|go|multi 중 하나");
+// init.zig FrontendTemplate 동형 (drift 주의: 둘을 lockstep 유지).
 if (!["react", "vue", "svelte", "solid", "preact", "vanilla"].includes(frontendTpl))
   die("frontend 는 react|vue|svelte|solid|preact|vanilla 중 하나");
 if (existsSync(name)) die(`'${name}' 이미 존재`);
@@ -91,31 +93,18 @@ else {
   scaffoldGo("backends/go");
 }
 
-// frontend — 의존 0 정적 stub(suji dev 가 frontend.dir 서빙). README 가
-// Vite 교체 안내(suji init 의 bunx create-vite 대신).
-W("frontend/index.html", `<!doctype html>
-<html><head><meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>${name}</title></head>
-<body style="font:16px system-ui;padding:2rem">
-  <h1>${name}</h1>
-  <button id="ping">ping</button>
-  <pre id="out">…</pre>
-  <script>
-    document.getElementById("ping").onclick = function () {
-      suji.invoke("ping").then(function (r) {
-        document.getElementById("out").textContent = JSON.stringify(r);
-      });
-    };
-  </script>
-</body></html>
-`);
+// frontend — init.zig 와 동일한 번들 Vite 템플릿 트리 복사.
+// (의존 0 CLI 라 bun install 은 사용자가 수동 — 안내 출력.)
+cpSync(join(TPL, "frontend", frontendTpl), join(name, "frontend"), {
+  recursive: true,
+  // 템플릿은 의존물 없이 커밋되지만, 로컬 dev 가 실수로 깔아둔
+  // node_modules/lockfile 이 릴리스에 새는 것을 방어적으로 차단.
+  filter: (s) => !s.includes(`${sep}node_modules${sep}`) && !s.endsWith(".lock"),
+});
 
 console.log(`✓ ${name} (${backend} + ${frontendTpl}) 생성 완료
 
   cd ${name}
-  suji dev          # 개발 서버 (suji 바이너리 필요)
-
-frontend/ 는 의존 0 정적 stub 입니다. Vite 로 교체하려면:
-  cd ${name}/frontend && npm create vite@latest . -- --template ${frontendTpl}-ts
+  cd frontend && bun install   # 또는 npm/pnpm install
+  cd .. && suji dev            # 개발 서버 (suji 바이너리 필요)
 `);

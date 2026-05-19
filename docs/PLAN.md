@@ -720,7 +720,7 @@ my-app/
 ├── suji.json
 ├── Cargo.toml
 ├── src/lib.rs
-└── frontend/          ← Vite (bun) — --frontend=react|vue|svelte|solid|preact|vanilla (기본 react, create-vite -ts 위임)
+└── frontend/          ← 번들 Vite 템플릿 — --frontend=react|vue|svelte|solid|preact|vanilla (기본 react, invoke 데모 동작)
     ├── package.json
     ├── src/App.tsx
     └── ...
@@ -1445,7 +1445,7 @@ suji build → 결과물:
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
 | TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`). **`suji types` CLI ✅(Zig)** — `.schema(ch,Req,Res)` 체인 → `exportApp.backend_dump_schema` C ABI → CLI 가 백엔드 빌드→dlopen→`emitSchemaTs` → `declare module '@suji/api'{interface SujiHandlers{…}}` 를 stdout/`--out`. 검증: app_test 골든(emitSchemaTs 결정론) + 실 CLI 통합(examples/zig-backend, stdout==--out, types.test-d 계약 일치). Rust=specta 수동 / Go·Node=수동 augment 는 후속(정직 — runtime 타입메타 부재) |
-| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). 스캐폴딩은 create-vite 에 위임(`<name>-ts` 매핑, 번들 템플릿 0개 유지). `--backend` 패턴 대칭. `BackendLang`/`FrontendTemplate` 둘 다 `std.meta.stringToEnum`. suji-cli(npx) lockstep 반영. 검증=`tests/init_test.zig`(fromString/viteTemplate/기본값 + 전 variant -ts 계약) + cli.js 스모크(multi+svelte/기본/거부) |
+| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). **번들 Vite 템플릿**(Tauri식, create-vite 미위임 — `src/templates/frontend/<fw>/` 트리 comptime `@embedFile`; 누락 시 컴파일 실패=회귀 가드). 각 템플릿은 스캐폴딩 백엔드의 `ping`/`greet` 를 호출하는 동작 데모. `--backend` 대칭, `FrontendTemplate=std.meta.stringToEnum`. ⚠️ **정직 한계**: `@suji/api` npm 미발행 → 템플릿은 발행 불요 로컬 래퍼 `src/suji.ts`(런타임 `window.__suji__` 감쌈, @suji/api 와 표면 동형 — 발행 시 import 경로만 교체)로 동작. suji-cli(npx)는 `cpSync` 로 동일 트리 복사(lockstep). 검증=전 6 fw `bun install`+`bun run build`=0+dist 실증, 실 `suji init` E2E(zig+svelte 스캐폴딩→빌드), `tests/init_test.zig`(enum 구동 계약 + **suji-cli 미러 byte-동형 drift 가드** + 루트 템플릿 미러). 미검증=CEF 런타임 invoke 왕복(globalShortcut 동급 e2e 경계) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |
 

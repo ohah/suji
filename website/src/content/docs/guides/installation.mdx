@@ -1,0 +1,95 @@
+---
+title: 설치 & 사용
+description: Suji 설치, 프로젝트 생성, 프론트엔드 연동까지
+---
+
+## 1. 사전 요구사항
+
+| 도구 | 용도 | 비고 |
+|------|------|------|
+| **Node.js** ≥ 18 | `npx @suji/cli` 스캐폴더 | 의존 0 순수 Node |
+| **bun** (권장) 또는 npm/pnpm | 프론트엔드 의존 설치 | 템플릿은 Vite 기반 |
+| **suji 바이너리** | `suji dev` / `build` | 백엔드 빌드 + CEF 창 (별도 설치) |
+| 백엔드 툴체인 | 선택한 `--backend` | zig / rust(cargo) / go |
+
+`npx @suji/cli` 만으로 프로젝트 *생성*은 suji 바이너리 없이 가능합니다.
+실행(`suji dev`)에는 suji 바이너리가 필요합니다.
+
+## 2. 프로젝트 생성
+
+```bash
+npx @suji/cli init my-app --backend=zig --frontend=react
+# 별칭: npx create-suji my-app
+```
+
+| 플래그 | 값 | 기본 |
+|--------|----|----|
+| `--backend` | `zig` \| `rust` \| `go` \| `multi` | `rust` |
+| `--frontend` | `react` \| `vue` \| `svelte` \| `solid` \| `preact` \| `vanilla` | `react` |
+
+생성물:
+
+```
+my-app/
+├── suji.json                  # 앱/창/백엔드/프론트 설정
+├── app.zig (또는 백엔드별)     # ping/greet 핸들러
+├── frontend/                  # 선택한 프레임워크의 번들 Vite 템플릿
+│   ├── package.json           # @suji/api 의존 없음 (아래 참고)
+│   ├── index.html / vite.config.ts / tsconfig.json
+│   └── src/
+│       ├── suji.ts            # 백엔드 호출 래퍼
+│       └── App.*              # invoke("ping") / invoke("greet") 데모
+└── .gitignore
+```
+
+## 3. 실행
+
+```bash
+cd my-app/frontend && bun install   # 또는 npm/pnpm install
+cd .. && suji dev                   # 백엔드 빌드 + Vite + CEF 창
+```
+
+데모 화면의 **invoke("ping")** 버튼은 스캐폴딩된 백엔드의 `ping`
+핸들러를 호출해 응답(`{"msg":"pong", ...}`)을 그대로 출력합니다.
+`greet` 는 입력한 이름을 인자로 전달합니다.
+
+## 4. 프론트엔드에서 백엔드 호출
+
+템플릿의 `src/suji.ts` 는 런타임에 CEF 호스트가 주입하는
+`window.__suji__` 브리지를 타입 있는 함수로 감싼 것입니다.
+
+```ts
+import { invoke, on, send } from "./suji";
+
+const res = await invoke<{ msg: string }>("ping");
+const hi  = await invoke("greet", { name: "Suji" });
+
+const off = on("my-event", (data) => console.log(data));
+send("from-frontend", { hello: true });
+```
+
+백엔드(예: Zig)는 같은 채널명을 핸들러로 등록합니다:
+
+```zig
+pub const app = suji.app()
+    .handle("ping", ping)
+    .handle("greet", greet);
+```
+
+:::note[@suji/api 와의 관계 — 정직한 한계]
+`src/suji.ts` 는 npm 패키지 **`@suji/api` 와 표면이 동일**합니다.
+현재 `@suji/api` 는 npm 미발행 상태라 신규 프로젝트가 설치할 수
+없어, 템플릿은 **발행 불요 로컬 래퍼**를 동봉합니다. `@suji/api`
+가 발행되면 `bun add @suji/api` 후 import 를 `from "@suji/api"`
+로 바꾸기만 하면 됩니다(코드 변경 0). 그때 타입 안전 `SujiHandlers`
+augmentation(`suji types`)도 사용할 수 있습니다.
+:::
+
+## 5. 빌드 / 실행
+
+```bash
+suji build   # 프로덕션 빌드
+suji run     # 빌드된 앱 실행
+```
+
+자세한 명령은 [CLI](/suji/guides/cli/) 참고.
