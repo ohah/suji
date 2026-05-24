@@ -234,8 +234,9 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
           NO_AT_BRIDGE: "1"
-          SUJI_LOG: ${{ runner.temp }}/suji-e2e-view-lifecycle.log
+          SUJI_LOG: ${{ github.workspace }}/.e2e-logs/suji-e2e-view-lifecycle.log
         run: |
+          mkdir -p .e2e-logs
           mkdir -p "$RUNNER_TEMP/xdg-runtime"
           chmod 700 "$RUNNER_TEMP/xdg-runtime"
           XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" \
@@ -246,18 +247,34 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         env:
-          SUJI_LOG: ${{ runner.temp }}/suji-e2e-view-lifecycle.log
-        run: bash tests/e2e/run-view-lifecycle.sh
+          SUJI_LOG: ${{ github.workspace }}/.e2e-logs/suji-e2e-view-lifecycle.log
+        run: |
+          mkdir -p .e2e-logs
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-view-lifecycle.sh
+
+      - name: Collect cross-platform suji logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p .e2e-logs
+          cp /tmp/suji-e2e-*.log .e2e-logs/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/suji-e2e-*.log .e2e-logs/ 2>/dev/null || true
+          cp "$HOME"/.suji/logs/suji-*.log .e2e-logs/ 2>/dev/null || true
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            app_debug="$(cygpath -u "$APPDATA/Multi Backend Example/Cache/debug.log" 2>/dev/null || true)"
+          else
+            app_debug="$HOME/.config/Multi Backend Example/Cache/debug.log"
+          fi
+          if [ -n "${app_debug:-}" ]; then
+            cp "$app_debug" .e2e-logs/debug.log 2>/dev/null || true
+          fi
+          find .e2e-logs -maxdepth 2 -type f -print -exec tail -80 {} \; || true
 
       - name: Upload cross-platform suji logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: suji-webcontentsview-e2e-${{ runner.os }}-logs
-          path: |
-            /tmp/suji-e2e-*.log
-            C:\msys64\tmp\suji-e2e-*.log
-            ${{ runner.temp }}/suji-e2e-*.log
-            ~/.config/Multi Backend Example/Cache/debug.log
-            ~/AppData/Roaming/Multi Backend Example/Cache/debug.log
+          path: .e2e-logs/**
           if-no-files-found: ignore

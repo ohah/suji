@@ -13,7 +13,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "prepare": "tsc"
+    "prepare": "npm install --include=dev --ignore-scripts && node node_modules/typescript/bin/tsc"
   },
   "devDependencies": {
     "typescript": "5.9.3"
