@@ -11,6 +11,25 @@ async function hasSujiBridge(page: Page): Promise<boolean> {
   }
 }
 
+async function waitForStableSujiBridge(page: Page, timeoutMs = 10000, stableMs = 2000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  let stableSince = 0;
+  while (Date.now() < deadline) {
+    const ready = await page.evaluate(() => {
+      return Boolean((globalThis as any).__suji__?.core) && document.readyState === "complete";
+    }).catch(() => false);
+
+    if (ready) {
+      stableSince ||= Date.now();
+      if (Date.now() - stableSince >= stableMs) return true;
+    } else {
+      stableSince = 0;
+    }
+    await wait(100);
+  }
+  return false;
+}
+
 export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
   let lastUrls = "";
@@ -18,12 +37,12 @@ export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<
     const pages = await browser.pages();
     const localhostPages = pages.filter((p) => p.url().startsWith("http://localhost"));
     for (const page of localhostPages) {
-      if (await hasSujiBridge(page)) return page;
+      if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
     }
 
     for (const page of pages) {
       if (localhostPages.includes(page)) continue;
-      if (await hasSujiBridge(page)) return page;
+      if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
     }
 
     lastUrls = pages.map((p) => p.url() || "<empty>").join(", ");
