@@ -1377,7 +1377,7 @@ suji build → 결과물:
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
 | `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | ✅ 별도 창은 `windows.create({url})` ✅. 한 창 multi-content 합성은 `windows.createView` Phase 17-B CEF Views 경로로 macOS/Linux/Windows 기본 지원. dynamic `destroyView` 후 child target cleanup/host 생존/recreate E2E 검증 완료. Linux/Windows overlay child view도 GitHub Actions runtime E2E로 검증 완료 |
 | webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ✅ declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max) + dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) — `webRequest.onBeforeRequest({urls}, listener)`로 cancel/allow round-trip. 5 SDK 노출 + e2e 13 케이스 (cancel/allow round-trip 포함). **timeout fallback**: JS SDK `webRequest.onBeforeRequest` 가 listener 미응답/동기 throw 시 `options.timeoutMs`(기본 5000, ≤0=opt-out) 후 자동 통과(fail-open) — 네이티브 RV_CONTINUE_ASYNC hold 해제, 영구 hang 방지(cookie SDK 타임아웃 선례 동형, mock-bridge 단위 6 케이스). 네이티브측은 단일스레드·무 CEF-task 라 설계상 hold 유지(SDK 가 caller 책임 이행) |
-| safeStorage (OS secure store) | `safeStorage.encryptString` | -- | 🟡 macOS Keychain + Windows Credential Manager(`safe_storage_set/get/delete`) 완료. Windows는 Credential Manager의 DPAPI-backed generic credential 저장소 사용. Linux libsecret 미구현 |
+| safeStorage (OS secure store) | `safeStorage.encryptString` | -- | ✅ macOS Keychain + Linux libsecret/Secret Service + Windows Credential Manager(`safe_storage_set/get/delete`) 완료. Windows는 Credential Manager의 DPAPI-backed generic credential 저장소 사용. Linux는 libsecret simple API + gnome-keyring CI E2E |
 
 ### 앱 배포 & 패키징
 
@@ -1513,17 +1513,19 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. **자동 업데이트** — 배포 후 유지보수에 필수
 14. 🟡 **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite plugin만 후속.
-15. 🟡 **`safeStorage` (OS secure store) — macOS + Windows 완료, Linux 후속**.
+15. ✅ **`safeStorage` (OS secure store) — macOS + Linux + Windows 완료**.
     `safe_storage_set/get/delete` IPC 3개. macOS는 Keychain Services
-    (SecItemAdd/CopyMatching/Delete), Windows는 Credential Manager generic
+    (SecItemAdd/CopyMatching/Delete), Linux는 libsecret Secret Service simple API
+    (secret_password_store/lookup/clear_sync), Windows는 Credential Manager generic
     credential(CredWriteW/CredReadW/CredDeleteW, DPAPI-backed) 기반. idempotent
-    set/delete + escape-safe value + multi-service 격리 e2e. Linux libsecret 후속.
+    set/delete + escape-safe value + multi-service 격리 e2e. Linux는 GitHub Actions에서
+    gnome-keyring을 세션 D-Bus 안에서 unlock해 실제 libsecret 왕복 검증.
 16. 🟡 **시스템 통합 (macOS 거의 완료)** — `tests/e2e/system-integration.test.ts` 33 e2e. 구현된 항목:
     - `screen.getAllDisplays` (NSScreen)
     - `app.dock.setBadge`/`getBadge` (NSDockTile, 멀티바이트 round-trip 포함)
     - `powerSaveBlocker.start`/`stop` (IOPMAssertion, idempotent guard)
     - `safeStorage.setItem`/`getItem`/`deleteItem` (macOS Keychain Services,
-      Windows Credential Manager, multi-service 격리)
+      Linux libsecret/Secret Service, Windows Credential Manager, multi-service 격리)
     - `app.requestUserAttention`/`cancelUserAttentionRequest` (NSApp dock bounce)
     - `app.getPath` (7 표준 키: home/appData/userData/temp/desktop/documents/downloads)
     - `shell.trashItem` (NSFileManager)

@@ -55,7 +55,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libx11-dev libnss3 libatk-bridge2.0-0 libdrm2 libgbm1
+          sudo apt-get install -y libgtk-3-dev libx11-dev libsecret-1-dev libnss3 libatk-bridge2.0-0 libdrm2 libgbm1
 
       - name: Download CEF (Unix)
         if: runner.os != 'Windows'

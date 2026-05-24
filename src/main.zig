@@ -2381,7 +2381,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         ) catch null;
     }
 
-    // safeStorage — Keychain Services. service/account/value 셋 다 unescape 필요 (wire JSON).
+    // safeStorage — OS secure store. service/account/value 셋 다 unescape 필요 (wire JSON).
     if (std.mem.eql(u8, cmd, "safe_storage_set")) {
         const svc_raw = util.extractJsonString(req_clean, "service") orelse "";
         const acc_raw = util.extractJsonString(req_clean, "account") orelse "";

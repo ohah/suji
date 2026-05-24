@@ -2,6 +2,7 @@
  * safeStorage E2E — OS secure store round-trips.
  *
  * macOS: Keychain Services.
+ * Linux: libsecret over Secret Service.
  * Windows: Credential Manager.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";

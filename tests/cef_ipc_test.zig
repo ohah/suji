@@ -1047,6 +1047,11 @@ test "safeStorage IPC — OS secure store set/get/delete" {
         "SecItemDelete",
         "kSecClassGenericPassword",
         "errSecItemNotFound",
+        "secret_password_store_sync",
+        "secret_password_lookup_sync",
+        "secret_password_clear_sync",
+        "dev.suji.SafeStorage",
+        "linux_secret.schema",
         "CredWriteW",
         "CredReadW",
         "CredDeleteW",
@@ -1064,6 +1069,8 @@ test "safeStorage IPC — OS secure store set/get/delete" {
     );
     defer std.testing.allocator.free(build_src);
     try std.testing.expect(std.mem.indexOf(u8, build_src, "Security") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "secret-1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "glib-2.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_src, "advapi32") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/safe_storage.zig") != null);
 
@@ -1080,8 +1087,25 @@ test "safeStorage IPC — OS secure store set/get/delete" {
         "safe_storage_delete",
         "service namespace isolates same account",
         "escape-sensitive value round-trips",
+        "Linux: libsecret",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const ci_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        ".github/workflows/e2e.yml",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(ci_src);
+    inline for (.{
+        "E2E — safeStorage (Linux)",
+        "gnome-keyring",
+        "libsecret-1-dev",
+        "gnome-keyring-daemon --unlock",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, ci_src, needle) != null);
     }
 }
 
