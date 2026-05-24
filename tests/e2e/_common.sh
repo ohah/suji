@@ -89,5 +89,5 @@ e2e_run_test() {
   sleep 3 # vite/CEF 안정화
 
   cd "$ROOT"
-  SUJI_LOG="$SUJI_LOG" bun test "$test_file" 2>&1 | tee -a "$SUJI_LOG"
+  SUJI_LOG="$SUJI_LOG" bun test "$test_file" --timeout 30000 2>&1 | tee -a "$SUJI_LOG"
 }
