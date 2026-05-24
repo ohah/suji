@@ -751,6 +751,7 @@ pub const CefNative = struct {
         /// borderless NSWindows attached to the host instead.
         child_ns_window: ?*anyopaque = null,
         child_window_parent_handle: ?u64 = null,
+        child_window_visible: bool = true,
         /// Phase 17-B probe path: CEF Views top-level window. Enabled only with
         /// SUJI_CEF_VIEWS=1 while the migration is validated.
         views_window: ?*c.cef_window_t = null,
@@ -1221,10 +1222,18 @@ pub const CefNative = struct {
         assertUiThread();
         if (self.browsers.get(view_handle)) |entry| {
             if (entry.child_ns_window) |child_window| {
+                const parent_handle = entry.child_window_parent_handle orelse return;
+                const parent_entry = self.browsers.get(parent_handle) orelse return;
+                const parent_window = parent_entry.ns_window orelse return;
                 if (visible) {
+                    attachMacChildWindow(parent_window, child_window);
                     orderMacWindowFront(child_window);
                 } else {
+                    detachMacChildWindow(parent_window, child_window);
                     orderMacWindowOut(child_window);
+                }
+                if (self.browsers.getPtr(view_handle)) |mutable_entry| {
+                    mutable_entry.child_window_visible = visible;
                 }
                 const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser));
                 if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
@@ -1272,6 +1281,10 @@ pub const CefNative = struct {
             if (entry.child_ns_window) |child_window| {
                 const host_entry = self.browsers.get(host_handle) orelse return;
                 const parent_window = host_entry.ns_window orelse return;
+                if (!entry.child_window_visible) {
+                    orderMacWindowOut(child_window);
+                    return;
+                }
                 detachMacChildWindow(parent_window, child_window);
                 attachMacChildWindow(parent_window, child_window);
                 orderMacWindowFront(child_window);

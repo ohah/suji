@@ -18,6 +18,7 @@
  *       close_window 노출 후 추가.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { execFileSync } from "node:child_process";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 let browser: Browser;
@@ -30,6 +31,28 @@ const coreCall = (request: object): Promise<CoreResponse> =>
     (req) => (window as any).__suji__.core(JSON.stringify(req)),
     request,
   ) as Promise<CoreResponse>;
+
+const isCefViewsMac = () =>
+  process.platform === "darwin" &&
+  process.env.SUJI_CEF_VIEWS !== undefined &&
+  process.env.SUJI_CEF_VIEWS !== "0" &&
+  process.env.SUJI_CEF_VIEWS !== "false";
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function visibleSujiChildWindowCount(): number {
+  const script = `
+import CoreGraphics
+let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+let count = windows.filter {
+    ($0[kCGWindowOwnerName as String] as? String) == "suji" &&
+    ($0[kCGWindowName as String] as? String) == "Suji WebContentsView"
+}.count
+print(count)
+`;
+  const out = execFileSync("swift", ["-"], { input: script, encoding: "utf8" }).trim();
+  return Number(out);
+}
 
 beforeAll(async () => {
   browser = await puppeteer.connect({
@@ -159,6 +182,30 @@ describe("17-A.7: setViewBounds / setViewVisible", () => {
     expect(r1.ok).toBe(true);
     const r2 = (await coreCall({ cmd: "set_view_visible", viewId: view, visible: true })) as { ok: boolean };
     expect(r2.ok).toBe(true);
+  });
+
+  test("CEF Views child-window reorder keeps hidden siblings hidden", async () => {
+    if (!isCefViewsMac()) return;
+
+    const baseline = visibleSujiChildWindowCount();
+    const host = await freshHost();
+    const hidden = await mkView(host, { x: 20, y: 20, width: 160, height: 120 });
+    const visible = await mkView(host, { x: 220, y: 20, width: 160, height: 120 });
+    await wait(250);
+
+    const afterCreate = visibleSujiChildWindowCount();
+    expect(afterCreate).toBeGreaterThanOrEqual(baseline + 2);
+
+    const r1 = (await coreCall({ cmd: "set_view_visible", viewId: hidden, visible: false })) as { ok: boolean };
+    expect(r1.ok).toBe(true);
+    await wait(250);
+    const afterHide = visibleSujiChildWindowCount();
+    expect(afterHide).toBe(afterCreate - 1);
+
+    const r2 = (await coreCall({ cmd: "set_top_view", hostId: host, viewId: visible })) as { ok: boolean };
+    expect(r2.ok).toBe(true);
+    await wait(250);
+    expect(visibleSujiChildWindowCount()).toBe(afterHide);
   });
 });
 
