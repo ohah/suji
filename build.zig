@@ -185,6 +185,11 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/platform/power_monitor_linux.c"),
             .flags = &[_][]const u8{},
         });
+        // badge_linux.c — optional libunity launcher badge via dlopen.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/badge_linux.c"),
+            .flags = &[_][]const u8{},
+        });
         root_module.linkSystemLibrary("pthread", .{});
         root_module.linkSystemLibrary("dl", .{});
         // libsecret + GLib — safeStorage Linux backend.
@@ -207,7 +212,13 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/platform/power_monitor_win.c"),
             .flags = &[_][]const u8{},
         });
+        // badge_win.c — taskbar overlay icon via ITaskbarList3.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/badge_win.c"),
+            .flags = &[_][]const u8{},
+        });
         root_module.linkSystemLibrary("wtsapi32", .{});
+        root_module.linkSystemLibrary("ole32", .{});
     }
 
     // libnode (Node.js 임베딩) — 선택적

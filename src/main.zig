@@ -6,6 +6,7 @@ const suji = @import("root.zig");
 const embed = @import("embed.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
+const badge_count = @import("core/badge_count.zig");
 const crash_reporter = @import("core/crash_reporter.zig");
 const window_mod = @import("window");
 const window_stack_mod = @import("window_stack");
@@ -1456,11 +1457,6 @@ var g_crash_params: [MAX_CRASH_PARAMS]CrashParam = [_]CrashParam{.{}} ** MAX_CRA
 var g_crash_param_count: usize = 0;
 var g_app_badge_count: u32 = 0;
 
-fn badgeCountFromLabel(label: []const u8) u32 {
-    if (label.len == 0) return 0;
-    return std.fmt.parseInt(u32, label, 10) catch 0;
-}
-
 fn crashParamIndex(key: []const u8) ?usize {
     for (g_crash_params[0..g_crash_param_count], 0..) |p, i| {
         if (std.mem.eql(u8, p.key(), key)) return i;
@@ -2263,7 +2259,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |n| blk: {
             const label = unesc_buf[0..n];
             cef.dockSetBadge(label);
-            g_app_badge_count = badgeCountFromLabel(label);
+            g_app_badge_count = badge_count.countFromLabel(label);
             break :blk true;
         } else false;
         const result = std.fmt.bufPrint(
@@ -2286,15 +2282,14 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
     if (std.mem.eql(u8, cmd, "app_set_badge_count")) {
-        const count = util.nonNegU32(util.extractJsonInt(req_clean, "count") orelse 0);
+        const count = badge_count.countFromWire(util.extractJsonInt(req_clean, "count"));
         g_app_badge_count = count;
-        var label_buf: [32]u8 = undefined;
-        const label = if (count == 0)
-            ""
-        else
-            std.fmt.bufPrint(&label_buf, "{d}", .{count}) catch return coreError(response_buf, "app_set_badge_count", "encode");
-        cef.dockSetBadge(label);
-        return respondSuccess(response_buf, "app_set_badge_count", true);
+        const native = cef.appSetBadgeCount(count);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_set_badge_count\",\"success\":true,\"native\":{}}}",
+            .{native},
+        ) catch null;
     }
     if (std.mem.eql(u8, cmd, "app_get_badge_count")) {
         return std.fmt.bufPrint(

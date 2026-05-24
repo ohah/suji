@@ -98,6 +98,11 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-power-save-blocker.log
         run: bash tests/e2e/run-power-save-blocker.sh
 
+      - name: E2E — badge count
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-badge-count.log
+        run: bash tests/e2e/run-badge-count.sh
+
       - name: E2E — powerMonitor
         env:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-power-monitor.log
@@ -366,6 +371,26 @@ jobs:
             xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
             dbus-run-session -- bash tests/e2e/run-power-save-blocker.sh
 
+      - name: E2E — badge count (Linux)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          NO_AT_BRIDGE: "1"
+          GDK_BACKEND: "x11"
+          GTK_USE_PORTAL: "0"
+          SUJI_CEF_CI: "1"
+          SUJI_CEF_LOG: ${{ github.workspace }}/e2e-logs/cef-debug.log
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-badge-count.log
+        run: |
+          mkdir -p e2e-logs
+          mkdir -p "$RUNNER_TEMP/xdg-runtime"
+          chmod 700 "$RUNNER_TEMP/xdg-runtime"
+          export LD_LIBRARY_PATH="$HOME/.suji/cef/linux-x86_64/Release:${LD_LIBRARY_PATH:-}"
+          export LD_PRELOAD="$HOME/.suji/cef/linux-x86_64/Release/libcef.so${LD_PRELOAD:+:$LD_PRELOAD}"
+          XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" \
+            xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
+            dbus-run-session -- bash tests/e2e/run-badge-count.sh
+
       - name: E2E — WebContentsView lifecycle (Windows)
         if: runner.os == 'Windows'
         shell: bash
@@ -413,6 +438,18 @@ jobs:
           export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
           export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
           bash tests/e2e/run-power-save-blocker.sh
+
+      - name: E2E — badge count (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-badge-count.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-badge-count.sh
 
       - name: Collect cross-platform suji logs on failure
         if: failure()

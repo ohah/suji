@@ -77,7 +77,7 @@ interface InvokeOptions {
 | `fs_stat` | `path` | `{success:true,type,size,mtime}` |
 | `fs_mkdir` | `path`, `recursive?` | `{success:true}` |
 | `fs_readdir` | `path` | `{success:true,entries}` |
-| `app_set_badge_count` | `count` | `{success:bool}` |
+| `app_set_badge_count` | `count` | `{success:bool,native:bool}` |
 | `app_get_badge_count` | — | `{count:N}` |
 | `crash_reporter_start` | `uploadToServer?`, `submitURL?`, `extra?` | `{success:true,enabled:bool}` |
 | `crash_reporter_get_parameters` | — | `{parameters:{...}}` |

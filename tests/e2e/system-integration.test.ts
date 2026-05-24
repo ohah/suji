@@ -213,8 +213,9 @@ describe("app.dock.setBadge", () => {
 
 describe("app.setBadgeCount", () => {
   test("set → get round-trip and dock label sync", async () => {
-    const set = await core<{ success: boolean }>({ cmd: "app_set_badge_count", count: 7 });
+    const set = await core<{ success: boolean; native: boolean }>({ cmd: "app_set_badge_count", count: 7 });
     expect(set.success).toBe(true);
+    expect(typeof set.native).toBe("boolean");
 
     const count = await core<{ count: number }>({ cmd: "app_get_badge_count" });
     expect(count.count).toBe(7);
@@ -225,8 +226,9 @@ describe("app.setBadgeCount", () => {
 
   test("0 clears badge count and dock label", async () => {
     await core({ cmd: "app_set_badge_count", count: 3 });
-    const set = await core<{ success: boolean }>({ cmd: "app_set_badge_count", count: 0 });
+    const set = await core<{ success: boolean; native: boolean }>({ cmd: "app_set_badge_count", count: 0 });
     expect(set.success).toBe(true);
+    expect(typeof set.native).toBe("boolean");
 
     const count = await core<{ count: number }>({ cmd: "app_get_badge_count" });
     expect(count.count).toBe(0);
@@ -236,8 +238,9 @@ describe("app.setBadgeCount", () => {
   });
 
   test("negative count clamps to 0", async () => {
-    const set = await core<{ success: boolean }>({ cmd: "app_set_badge_count", count: -5 });
+    const set = await core<{ success: boolean; native: boolean }>({ cmd: "app_set_badge_count", count: -5 });
     expect(set.success).toBe(true);
+    expect(typeof set.native).toBe("boolean");
     const count = await core<{ count: number }>({ cmd: "app_get_badge_count" });
     expect(count.count).toBe(0);
   });

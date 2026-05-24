@@ -3282,6 +3282,64 @@ pub fn dockGetBadge(out_buf: []u8) []const u8 {
     return nsStringToUtf8Buf(ns_str, out_buf);
 }
 
+extern "c" fn suji_linux_badge_set_count(desktop_id: [*:0]const u8, count: u32) c_int;
+extern "c" fn suji_windows_badge_set_count(hwnd: ?*anyopaque, count: u32) c_int;
+
+fn nativeWindowHandlePtr(handle: anytype) ?*anyopaque {
+    const T = @TypeOf(handle);
+    return switch (@typeInfo(T)) {
+        .optional => if (handle) |h| nativeWindowHandlePtr(h) else null,
+        .pointer => if (@intFromPtr(handle) == 0) null else @ptrCast(handle),
+        .int, .comptime_int => if (handle == 0) null else @ptrFromInt(@as(usize, @intCast(handle))),
+        else => null,
+    };
+}
+
+fn windowsEntryHwnd(entry: *const CefNative.BrowserEntry) ?*anyopaque {
+    if (!comptime is_windows) return null;
+    if (entry.views_window) |views_window| {
+        if (views_window.get_window_handle) |get_handle| {
+            if (nativeWindowHandlePtr(get_handle(views_window))) |hwnd| return hwnd;
+        }
+    }
+    const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser)) orelse return null;
+    if (host.get_window_handle) |get_handle| return nativeWindowHandlePtr(get_handle(host));
+    return null;
+}
+
+fn windowsSetBadgeCount(count: u32) bool {
+    if (!comptime is_windows) return false;
+    const native = g_cef_native orelse return false;
+    var any_ok = false;
+    var it = native.browsers.valueIterator();
+    while (it.next()) |entry| {
+        if (entry.views_parent_handle != null) continue;
+        const hwnd = windowsEntryHwnd(entry) orelse continue;
+        if (suji_windows_badge_set_count(hwnd, count) != 0) any_ok = true;
+    }
+    return any_ok;
+}
+
+/// Electron `app.setBadgeCount(count)` native backend.
+/// macOS는 dock label, Linux는 Unity LauncherEntry(libunity best-effort),
+/// Windows는 taskbar overlay icon(ITaskbarList3)로 적용한다.
+pub fn appSetBadgeCount(count: u32) bool {
+    if (comptime is_macos) {
+        var label_buf: [32]u8 = undefined;
+        const label = if (count == 0) "" else std.fmt.bufPrint(&label_buf, "{d}", .{count}) catch return false;
+        dockSetBadge(label);
+        return true;
+    }
+    if (comptime is_linux) {
+        var id_buf: [256]u8 = undefined;
+        const desktop_id = runtime.env("SUJI_DESKTOP_ID") orelse "suji.desktop";
+        const desktop_id_z = nullTerminateOrTruncate(desktop_id, &id_buf) orelse "suji.desktop";
+        return suji_linux_badge_set_count(desktop_id_z.ptr, count) != 0;
+    }
+    if (comptime is_windows) return windowsSetBadgeCount(count);
+    return false;
+}
+
 // ============================================
 // Power-save blocker — Electron `powerSaveBlocker`
 // ============================================
