@@ -11,15 +11,18 @@ async function hasSujiBridge(page: Page): Promise<boolean> {
   }
 }
 
-export async function getMainPage(browser: Browser, timeoutMs = 10000): Promise<Page> {
+export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
   let lastUrls = "";
   while (Date.now() < deadline) {
     const pages = await browser.pages();
-    const main = pages.find((p) => p.url().startsWith("http://localhost"));
-    if (main) return main;
+    const localhostPages = pages.filter((p) => p.url().startsWith("http://localhost"));
+    for (const page of localhostPages) {
+      if (await hasSujiBridge(page)) return page;
+    }
 
     for (const page of pages) {
+      if (localhostPages.includes(page)) continue;
       if (await hasSujiBridge(page)) return page;
     }
 
