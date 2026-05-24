@@ -856,7 +856,8 @@ test "Phase 17-B docs record Linux Windows runtime E2E completion" {
     inline for (.{
         "17. ✅ **`windows.createView`",
         "Linux/Windows runtime E2E(`webcontentsview-cross-platform`)로 검증",
-        "CI에서 초기\n    `about:blank` 커밋 후 요청 URL navigation이 유실되는 CEF Views 레이스",
+        "CI에서 초기",
+        "`about:blank` 커밋 후 요청 URL navigation이 유실되는 CEF Views 레이스",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, plan, needle) != null);
     }
