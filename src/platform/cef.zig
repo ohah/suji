@@ -176,17 +176,27 @@ pub fn executeSubprocess() void {
 }
 
 /// CEF 초기화 — OS 표준 user-data dir + `<app>/Cache` (Electron `app.getPath('userData') + Cache`).
-/// macOS: ~/Library/Application Support/<app>/Cache
-/// Linux: $XDG_CONFIG_HOME or ~/.config / <app>/Cache
-/// Windows: %APPDATA% or %USERPROFILE%/AppData/Roaming / <app>/Cache
+/// root_cache_path:
+///   macOS: ~/Library/Application Support/<app>
+///   Linux: $XDG_CONFIG_HOME or ~/.config / <app>
+///   Windows: %APPDATA% or %USERPROFILE%/AppData/Roaming / <app>
+/// cache_path:
+///   <root_cache_path>/Cache
 /// other: ~/.suji/<app>/Cache (fallback)
 ///
 /// resolveAppDataDir과 OS 분기를 공유 — `<app_data>/<app>/Cache`만 합쳐 cef 디렉토리 포지션.
-fn buildAppCachePath(buf: []u8, home: []const u8, app_name: []const u8) ?[]const u8 {
+fn buildAppUserDataPath(buf: []u8, home: []const u8, app_name: []const u8) ?[]const u8 {
     var ad_buf: [512]u8 = undefined;
     const app_data = resolveAppDataDir(&ad_buf, home) orelse return null;
     const sep: []const u8 = if (builtin.os.tag == .windows) "\\" else "/";
-    return std.fmt.bufPrint(buf, "{s}{s}{s}{s}Cache", .{ app_data, sep, app_name, sep }) catch null;
+    return std.fmt.bufPrint(buf, "{s}{s}{s}", .{ app_data, sep, app_name }) catch null;
+}
+
+fn buildAppCachePath(buf: []u8, home: []const u8, app_name: []const u8) ?[]const u8 {
+    const sep: []const u8 = if (builtin.os.tag == .windows) "\\" else "/";
+    var user_data_buf: [512]u8 = undefined;
+    const user_data = buildAppUserDataPath(&user_data_buf, home, app_name) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}{s}Cache", .{ user_data, sep }) catch null;
 }
 
 test "buildAppCachePath: 현재 OS 표준 경로 + app_name 포함" {
@@ -209,6 +219,17 @@ test "buildAppCachePath: 현재 OS 표준 경로 + app_name 포함" {
         },
         else => {},
     }
+}
+
+test "buildAppUserDataPath: cache path parent is CEF root cache path" {
+    var root_buf: [512]u8 = undefined;
+    var cache_buf: [512]u8 = undefined;
+    const root = buildAppUserDataPath(&root_buf, "/Users/test", "MyApp").?;
+    const cache = buildAppCachePath(&cache_buf, "/Users/test", "MyApp").?;
+
+    try std.testing.expect(std.mem.startsWith(u8, cache, root));
+    try std.testing.expect(std.mem.endsWith(u8, cache, "Cache"));
+    try std.testing.expect(!std.mem.eql(u8, root, cache));
 }
 
 test "buildAppCachePath: 너무 긴 path는 null" {
@@ -344,6 +365,7 @@ pub fn initialize(config: CefConfig) !void {
     var fw_buf: [1024]u8 = undefined;
     var res_buf: [1024]u8 = undefined;
     var loc_buf: [1024]u8 = undefined;
+    var user_data_buf: [1024]u8 = undefined;
     var cache_buf: [1024]u8 = undefined;
 
     if (is_macos) {
@@ -356,9 +378,13 @@ pub fn initialize(config: CefConfig) !void {
     //   Linux:   $XDG_CONFIG_HOME or ~/.config/<app_name>
     //   Windows: %APPDATA%/<app_name>  (HOME 대용으로 USERPROFILE 사용 X — runtime.env가 emit)
     // 한 system에 여러 Suji 앱 설치 시 cookie/localStorage/IndexedDB 자동 격리.
+    const user_data_path = buildAppUserDataPath(&user_data_buf, home, config.app_name) orelse return error.PathTooLong;
     const cache_path = buildAppCachePath(&cache_buf, home, config.app_name) orelse return error.PathTooLong;
+    std.Io.Dir.createDirPath(.cwd(), runtime.io, cache_path) catch |err| {
+        std.debug.print("[suji] CEF cache dir create failed: {s} ({s})\n", .{ cache_path, @errorName(err) });
+    };
     setCefString(&settings.cache_path, cache_path);
-    setCefString(&settings.root_cache_path, cache_path);
+    setCefString(&settings.root_cache_path, user_data_path);
 
     // macOS: NSApplication 초기화 (cef_initialize 전에 필수)
     if (comptime is_macos) initNSApp();

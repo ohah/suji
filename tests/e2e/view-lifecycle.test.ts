@@ -19,6 +19,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { getMainPage } from "./_page";
 
 let browser: Browser;
 let page: Page;
@@ -143,11 +144,7 @@ beforeAll(async () => {
     protocolTimeout: 10000,
     defaultViewport: null,
   });
-  const pages = await browser.pages();
-  expect(pages.length).toBeGreaterThan(0);
-  const main = pages.find((p) => p.url().startsWith("http://localhost"));
-  if (!main) throw new Error("main window (localhost) not found in puppeteer pages");
-  page = main;
+  page = await getMainPage(browser);
   page.setDefaultTimeout(10000);
 });
 

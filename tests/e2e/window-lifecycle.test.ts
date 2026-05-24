@@ -19,6 +19,7 @@ import puppeteer, { type Browser, type Page, type Target } from "puppeteer-core"
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getMainPage } from "./_page";
 
 let browser: Browser;
 let page: Page;
@@ -54,13 +55,7 @@ beforeAll(async () => {
     // 강제 emulation해서 window.innerWidth / page.screenshot 결과가 실제 NSWindow와 달라짐.
     defaultViewport: null,
   });
-  const pages = await browser.pages();
-  expect(pages.length).toBeGreaterThan(0);
-  // 메인 창 찾기: http://localhost:51XX/ (vite dev) — about:blank 창들은 이전
-  // 테스트 실행에서 누적됐을 수 있으므로 걸러냄.
-  const main = pages.find((p) => p.url().startsWith("http://localhost"));
-  if (!main) throw new Error("main window (localhost) not found in puppeteer pages");
-  page = main;
+  page = await getMainPage(browser);
   page.setDefaultTimeout(10000);
 });
 

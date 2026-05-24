@@ -10,6 +10,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { getMainPage } from "./_page";
 
 let browser: Browser;
 let page: Page;
@@ -26,7 +27,7 @@ beforeAll(async () => {
     protocolTimeout: 30000,
     defaultViewport: null,
   });
-  page = (await browser.pages())[0];
+  page = await getMainPage(browser, 30000);
   page.setDefaultTimeout(30000);
 });
 

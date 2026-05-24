@@ -19,8 +19,8 @@
  * `puppeteer.connect({ browserURL })` 모드는 CDP 서버에서 신규 target을 discover만 하고
  * Page 객체 자동 attach는 하지 않음. `target.page()`는 null을 계속 반환. 대신
  * `target.createCDPSession()`으로 raw CDP 세션을 만들어 `Runtime.evaluate`로 JS를
- * 실행하면 신규 창에서도 호출 가능. main 창은 beforeAll에서 `browser.pages()[0]`로
- * 이미 attached 상태이므로 Page API 그대로 사용.
+ * 실행하면 신규 창에서도 호출 가능. main 창은 beforeAll에서 CDP page 중 Suji bridge를
+ * 가진 target을 찾아 attached Page API로 사용.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import puppeteer, {
@@ -30,6 +30,7 @@ import puppeteer, {
   type Target,
 } from "puppeteer-core";
 import { readFileSync } from "node:fs";
+import { getMainPage } from "./_page";
 
 const LOG_PATH = process.env.SUJI_LOG ?? "/tmp/suji-e2e.log";
 
@@ -98,14 +99,7 @@ beforeAll(async () => {
     // CEF 실제 창 크기를 그대로 사용 (puppeteer 기본 800x600 emulation 비활성).
     defaultViewport: null,
   });
-  const pages = await browser.pages();
-  const main = pages.find((p) => p.url().startsWith("http://localhost"));
-  if (!main) {
-    throw new Error(
-      "main window (localhost) not found — is `suji dev` running with DevTools on :9222?",
-    );
-  }
-  page1 = main;
+  page1 = await getMainPage(browser);
   page1.setDefaultTimeout(10000);
 });
 
