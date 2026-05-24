@@ -51,6 +51,9 @@ pub fn switches(platform: Platform, ci_env_value: ?[]const u8) SwitchSet {
 
     if (platform == .linux) {
         set.add(.{ .name = "no-sandbox" });
+        // Keep Chromium itself from auto-activating Secret Service. Suji's explicit
+        // safeStorage path still talks to libsecret directly when requested.
+        set.add(.{ .name = "password-store", .value = "basic" });
 
         if (envTruthy(ci_env_value)) {
             set.add(.{ .name = "disable-dev-shm-usage" });
@@ -94,6 +97,7 @@ test "CEF command switches disable GPU on non-macOS platforms" {
 test "CEF command switches add Linux CI headless guards only when requested" {
     const normal = switches(.linux, null).slice();
     try std.testing.expect(containsSwitch(normal, "no-sandbox"));
+    try std.testing.expectEqualStrings("basic", switchValue(normal, "password-store").?);
     try std.testing.expect(!containsSwitch(normal, "disable-dev-shm-usage"));
     try std.testing.expect(!containsSwitch(normal, "no-zygote"));
     try std.testing.expect(!containsSwitch(normal, "ozone-platform"));
