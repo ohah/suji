@@ -85,6 +85,11 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-types-cli.log
         run: bash tests/e2e/run-types-cli.sh
 
+      - name: E2E — Rust TypeScript helper
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-rust-types-helper.log
+        run: bash tests/e2e/run-rust-types-helper.sh
+
       - name: Install root e2e dependencies (puppeteer-core)
         run: bun install
 

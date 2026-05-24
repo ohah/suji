@@ -1448,7 +1448,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
-| TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`). **`suji types` CLI ✅(Zig)** — `.schema(ch,Req,Res)` 체인 → `exportApp.backend_dump_schema` C ABI → CLI 가 백엔드 빌드→dlopen→`emitSchemaTs` → `declare module '@suji/api'{interface SujiHandlers{…}}` 를 stdout/`--out`. 검증: app_test 골든(emitSchemaTs 결정론) + 실 CLI 통합(examples/zig-backend, stdout==--out, types.test-d 계약 일치). Rust=specta 수동 / Go·Node=수동 augment 는 후속(정직 — runtime 타입메타 부재) |
+| TypeScript 타입 자동 생성 | - | specta 연동 | 🟡 옵션 A (manual SujiHandlers augment) — `@suji/api` invoke<K> + `@suji/node` call/callSync 모두 conditional generic으로 cmd/req/res 추론. ts-expect-error 검증. Zig SDK는 comptime `typeToTs` + `App.schema` chain. Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`) + `suji::typescript::SujiHandlers` helper로 수동 등록한 req/res를 `.d.ts` module augmentation으로 emit. **`suji types` CLI ✅(Zig)** — `.schema(ch,Req,Res)` 체인 → `exportApp.backend_dump_schema` C ABI → CLI 가 백엔드 빌드→dlopen→`emitSchemaTs` → `declare module '@suji/api'{interface SujiHandlers{…}}` 를 stdout/`--out`. 검증: app_test 골든(emitSchemaTs 결정론) + 실 CLI 통합(examples/zig-backend, stdout==--out, types.test-d 계약 일치) + Rust SDK unit/외부 consumer E2E. Go·Node=수동 augment 는 후속(정직 — runtime 타입메타 부재) |
 | 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). **번들 Vite 템플릿**(Tauri식, create-vite 미위임 — `src/templates/frontend/<fw>/` 트리 comptime `@embedFile`; 누락 시 컴파일 실패=회귀 가드). 각 템플릿은 스캐폴딩 백엔드의 `ping`/`greet` 를 호출하는 동작 데모. `--backend` 대칭, `FrontendTemplate=std.meta.stringToEnum`. ⚠️ **정직 한계**: `@suji/api` npm 미발행 → 템플릿은 발행 불요 로컬 래퍼 `src/suji.ts`(런타임 `window.__suji__` 감쌈, @suji/api 와 표면 동형 — 발행 시 import 경로만 교체)로 동작. suji-cli(npx)는 `cpSync` 로 동일 트리 복사(lockstep). 검증=전 6 fw `bun install`+`bun run build`=0+dist 실증, 실 `suji init` E2E(zig+svelte 스캐폴딩→빌드), `tests/init_test.zig`(enum 구동 계약 + **suji-cli 미러 byte-동형 drift 가드** + 루트 템플릿 미러). 미검증=CEF 런타임 invoke 왕복(globalShortcut 동급 e2e 경계) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |
@@ -1566,7 +1566,11 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     `typeToTs` + App.schema chain, Rust specta v2 re-export. `suji types` CLI는
     Zig backend `.schema()` stdout/`--out` 생성까지 완료했고
     `tests/e2e/run-types-cli.sh` + GitHub Actions macOS E2E로 고정.
-    Rust=specta 수동 / Go·Node=수동 augment 는 후속(런타임 타입메타 부재).
+    Rust는 `suji::typescript::SujiHandlers` helper로 `#[derive(suji::Type)]`
+    req/res를 `@suji/api` module augmentation `.d.ts`로 emit하는 수동 등록 경로를
+    추가했고, Rust SDK 단위 테스트 + 임시 외부 Rust consumer E2E
+    (`tests/e2e/run-rust-types-helper.sh`, GitHub Actions macOS E2E)로 고정.
+    Go·Node=수동 augment 는 후속(런타임 타입메타 부재).
 21. 🟡 **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (crashReporter 1차 runtime API + CEF cfg, 실제 crash upload/DB는 후속)
 22. ✅ **SQLite plugin** — `plugins/sqlite` 공식 플러그인 완료. 벤더 SQLite 3.51.0 + Zig/Rust/Go/JS/Node 래퍼 + `zig build test-sqlite` + 모바일 host harness.
 23. ✅ **session 쿠키 풀 셋** — `setCookie` / `getCookies` / `removeCookies` 추가

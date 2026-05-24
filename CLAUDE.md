@@ -35,6 +35,7 @@ suji run backends/node/main.js          # CEF 없이 embedded Node.js 파일 직
 # E2E 테스트 (puppeteer + bun) — 대부분 fresh suji dev, CLI 테스트는 단독 실행
 bash tests/e2e/run-node-run.sh          # suji run main.js embedded Node.js CLI
 bash tests/e2e/run-types-cli.sh         # suji types stdout/--out schema generation
+bash tests/e2e/run-rust-types-helper.sh # Rust SDK SujiHandlers .d.ts helper
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView/z-order/lifecycle)
@@ -83,8 +84,10 @@ suji types [--out <path>]   # zig 백엔드 .schema() → SujiHandlers .d.ts (st
 `suji types`: zig 백엔드의 `.schema("ch", Req, Res)` 체인을 frontend
 `declare module '@suji/api' { interface SujiHandlers {…} }` 로 자동 생성(수동
 augment 불요). 백엔드 빌드→dlopen→`backend_dump_schema`(comptime `typeToTs`).
-미지정 시 stdout(`suji types > src/suji.d.ts`), `--out`이면 파일. Rust=specta
-수동 / Go·Node=수동 augment(runtime 타입메타 부재 — 정직 한계).
+미지정 시 stdout(`suji types > src/suji.d.ts`), `--out`이면 파일. Rust는
+`suji::typescript::SujiHandlers` + `#[derive(suji::Type)]`로 수동 등록한
+req/res 타입에서 동일한 module augmentation을 생성. Go·Node=수동 augment(runtime
+타입메타 부재 — 정직 한계).
 
 ## API (Electron 스타일)
 
@@ -240,8 +243,9 @@ suji::export_handlers!(ping);
 // suji::exit()                 — 앱 강제 종료 (Electron app.exit, code 무시)
 // suji::session::{clear_cookies(), flush_store()}  — CEF cookie_manager fire-and-forget
 // suji::platform()             — "macos" | "linux" | "windows"
-// #[derive(suji::Type)] struct GreetReq { name: String }   — specta re-export로
-//   타입을 ts emit 가능 (specta::ts::export::<T>()로 시그니처 추출)
+// suji::typescript::SujiHandlers::new()
+//   .handler::<GreetReq, GreetRes>("greet")
+//   .export()?              — Rust req/res Type → SujiHandlers .d.ts
 ```
 
 ```go

@@ -120,6 +120,9 @@ jobs:
       - name: Test
         run: zig build test
 
+      - name: Test Rust SDK
+        run: cargo test --manifest-path crates/suji-rs/Cargo.toml
+
       - name: Build state plugin
         working-directory: plugins/state/zig
         run: zig build

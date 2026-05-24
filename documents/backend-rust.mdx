@@ -95,6 +95,34 @@ fn save(filename: String, event: InvokeEvent) -> Value {
 
 파싱 실패 / 누락 / 타입 불일치는 모두 `id=0, name=None` default로 안전 폴백.
 
+## TypeScript Handler 타입 생성
+
+Rust 백엔드는 런타임 자동 타입 추출 대신, 명시적으로 `#[derive(suji::Type)]`를 붙인
+req/res 타입을 `SujiHandlers` module augmentation으로 내보낸다.
+
+```rust
+use serde::{Deserialize, Serialize};
+use suji::prelude::*;
+
+#[derive(Type, Serialize, Deserialize)]
+struct GreetReq {
+    name: String,
+}
+
+#[derive(Type, Serialize, Deserialize)]
+struct GreetRes {
+    greeting: String,
+}
+
+let dts = SujiHandlers::new()
+    .handler::<GreetReq, GreetRes>("greet")
+    .export()?;
+```
+
+생성 결과는 frontend `@suji/api`의 `invoke("greet", ...)` 타입 추론에 바로 쓰는
+`.d.ts` 파일이다. `export_for("@suji/node")`를 쓰면 Node SDK module augmentation도
+같은 방식으로 만들 수 있다.
+
 ## `send_to` — 특정 창에만 이벤트 전달 (Phase 2.5)
 
 ```rust

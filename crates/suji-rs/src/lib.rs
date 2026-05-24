@@ -26,7 +26,7 @@ pub use suji_macros::command as handle;
 /// augmentation)에 그대로 사용.
 ///
 /// ```
-/// use suji::Type;
+/// use suji::{specta, Type};
 ///
 /// #[derive(Type, serde::Serialize, serde::Deserialize)]
 /// pub struct GreetReq { pub name: String }
@@ -34,6 +34,180 @@ pub use suji_macros::command as handle;
 /// pub struct GreetRes { pub greeting: String }
 /// ```
 pub use specta::{self, Type};
+
+/// TypeScript declaration helpers for Rust backends.
+///
+/// Rust cannot be inspected by `suji types` at runtime without user-authored type metadata, so
+/// this module turns explicit `#[derive(suji::Type)]` request/response types into the same
+/// `SujiHandlers` module augmentation used by the frontend and Node SDKs.
+///
+/// ```rust
+/// use serde::{Deserialize, Serialize};
+/// use suji::{specta, Type, typescript::SujiHandlers};
+///
+/// #[derive(Type, Serialize, Deserialize)]
+/// struct GreetReq {
+///     name: String,
+/// }
+///
+/// #[derive(Type, Serialize, Deserialize)]
+/// struct GreetRes {
+///     greeting: String,
+/// }
+///
+/// let dts = SujiHandlers::new()
+///     .handler::<GreetReq, GreetRes>("greet")
+///     .export()
+///     .unwrap();
+///
+/// assert!(dts.contains("declare module '@suji/api'"));
+/// ```
+pub mod typescript {
+    use std::{any::TypeId, borrow::Cow};
+
+    pub use specta_typescript::{Error, Typescript};
+
+    use specta::datatype::DataType;
+    use specta_typescript::Exporter;
+
+    const DEFAULT_MODULE: &str = "@suji/api";
+
+    #[derive(Debug, Clone)]
+    enum HandlerType {
+        Void,
+        Specta(DataType),
+    }
+
+    #[derive(Debug, Clone)]
+    struct Handler {
+        channel: String,
+        req: HandlerType,
+        res: HandlerType,
+    }
+
+    /// Builder for `declare module '@suji/api' { interface SujiHandlers { ... } }`.
+    ///
+    /// Register each backend command with its Rust request/response types, then call
+    /// [`export`](Self::export). `()` is rendered as `void`; named `#[derive(suji::Type)]`
+    /// structs/enums are emitted as normal TypeScript aliases and referenced from the handler.
+    #[derive(Debug, Clone, Default)]
+    pub struct SujiHandlers {
+        types: specta::Types,
+        handlers: Vec<Handler>,
+    }
+
+    impl SujiHandlers {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
+        /// Register one command channel with its request and response types.
+        pub fn handler<Req, Res>(mut self, channel: impl Into<String>) -> Self
+        where
+            Req: specta::Type + 'static,
+            Res: specta::Type + 'static,
+        {
+            self.add_handler::<Req, Res>(channel);
+            self
+        }
+
+        /// Mutable form of [`handler`](Self::handler) for code generators.
+        pub fn add_handler<Req, Res>(&mut self, channel: impl Into<String>) -> &mut Self
+        where
+            Req: specta::Type + 'static,
+            Res: specta::Type + 'static,
+        {
+            let req = handler_type::<Req>(&mut self.types);
+            let res = handler_type::<Res>(&mut self.types);
+            self.handlers.push(Handler {
+                channel: channel.into(),
+                req,
+                res,
+            });
+            self
+        }
+
+        /// Export declarations for the frontend package module (`@suji/api`).
+        pub fn export(self) -> Result<String, Error> {
+            self.export_for(DEFAULT_MODULE)
+        }
+
+        /// Export declarations for a specific module, for example `@suji/node`.
+        pub fn export_for(self, module_name: impl Into<String>) -> Result<String, Error> {
+            let handlers = self.handlers;
+            let module_name = module_name.into();
+            let exporter: Exporter = Typescript::default().into();
+            let exporter = exporter.framework_runtime(move |ctx| {
+                let mut out = String::new();
+                out.push_str("declare module '");
+                out.push_str(&escape_single_quoted(&module_name));
+                out.push_str("' {\n  interface SujiHandlers {\n");
+                for handler in &handlers {
+                    let req = render_handler_type(&ctx, &handler.req)?;
+                    let res = render_handler_type(&ctx, &handler.res)?;
+                    out.push_str("    ");
+                    out.push_str(&ts_property_key(&handler.channel));
+                    out.push_str(": { req: ");
+                    out.push_str(&req);
+                    out.push_str("; res: ");
+                    out.push_str(&res);
+                    out.push_str(" };\n");
+                }
+                out.push_str("  }\n}\n");
+                Ok(Cow::Owned(out))
+            });
+
+            Typescript::from(exporter)
+                .header("// auto-generated - do not edit\n")
+                .export(&self.types, specta_serde::Format)
+        }
+    }
+
+    fn handler_type<T>(types: &mut specta::Types) -> HandlerType
+    where
+        T: specta::Type + 'static,
+    {
+        if TypeId::of::<T>() == TypeId::of::<()>() {
+            HandlerType::Void
+        } else {
+            HandlerType::Specta(T::definition(types))
+        }
+    }
+
+    fn render_handler_type(
+        ctx: &specta_typescript::FrameworkExporter<'_>,
+        ty: &HandlerType,
+    ) -> Result<String, Error> {
+        match ty {
+            HandlerType::Void => Ok("void".to_string()),
+            HandlerType::Specta(DataType::Reference(reference)) => ctx.reference(reference),
+            HandlerType::Specta(dt) => ctx.inline(dt),
+        }
+    }
+
+    fn ts_property_key(channel: &str) -> String {
+        if is_ts_identifier(channel) {
+            channel.to_string()
+        } else {
+            serde_json::to_string(channel).expect("serializing TS property key")
+        }
+    }
+
+    fn is_ts_identifier(s: &str) -> bool {
+        let mut chars = s.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !(first == '_' || first == '$' || first.is_ascii_alphabetic()) {
+            return false;
+        }
+        chars.all(|c| c == '_' || c == '$' || c.is_ascii_alphanumeric())
+    }
+
+    fn escape_single_quoted(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('\'', "\\'")
+    }
+}
 
 /// IPC 요청의 sender 창 컨텍스트 — Electron의 `event.sender`/`BrowserWindow.fromWebContents` 대응.
 ///
@@ -2641,6 +2815,62 @@ mod tests {
     }
 
     #[test]
+    fn typescript_suji_handlers_export_module_augmentation() {
+        use crate::{typescript::SujiHandlers, Type};
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Type, Serialize, Deserialize)]
+        #[allow(dead_code)]
+        struct PingRes {
+            msg: String,
+        }
+
+        #[derive(Type, Serialize, Deserialize)]
+        #[allow(dead_code)]
+        struct GreetReq {
+            name: String,
+        }
+
+        #[derive(Type, Serialize, Deserialize)]
+        #[allow(dead_code)]
+        struct GreetRes {
+            greeting: String,
+        }
+
+        #[derive(Type, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        #[allow(dead_code)]
+        struct AddReq {
+            first_value: i32,
+            second_value: i32,
+        }
+
+        #[derive(Type, Serialize, Deserialize)]
+        #[allow(dead_code)]
+        struct AddRes {
+            result: i32,
+        }
+
+        let dts = SujiHandlers::new()
+            .handler::<(), PingRes>("ping")
+            .handler::<GreetReq, GreetRes>("greet")
+            .handler::<AddReq, AddRes>("math:add")
+            .export()
+            .unwrap();
+
+        assert!(dts.contains("declare module '@suji/api'"));
+        assert!(dts.contains("ping: { req: void; res: PingRes };"), "{dts}");
+        assert!(dts.contains("greet: { req: GreetReq; res: GreetRes };"));
+        assert!(dts.contains("\"math:add\": { req: AddReq; res: AddRes };"));
+        assert!(dts.contains("export type PingRes ="));
+        assert!(dts.contains("msg: string"));
+        assert!(dts.contains("export type GreetReq ="));
+        assert!(dts.contains("name: string"));
+        assert!(dts.contains("firstValue: number"));
+        assert!(dts.contains("secondValue: number"));
+    }
+
+    #[test]
     fn user_attention_requests_carry_critical_and_id() {
         let req: serde_json::Value =
             serde_json::from_str(&crate::attention_request_json(true)).unwrap();
@@ -2663,7 +2893,10 @@ pub mod prelude {
     pub use crate::quit;
     pub use crate::send;
     pub use crate::send_to;
+    pub use crate::specta;
+    pub use crate::typescript::SujiHandlers;
     pub use crate::InvokeEvent;
+    pub use crate::Type;
     pub use crate::Window;
     pub use crate::PLATFORM_LINUX;
     pub use crate::PLATFORM_MACOS;
