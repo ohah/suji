@@ -186,6 +186,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("user32", .{});
         root_module.linkSystemLibrary("gdi32", .{});
         root_module.linkSystemLibrary("shell32", .{});
+        // Credential Manager — safeStorage persistent OS-protected secrets.
+        root_module.linkSystemLibrary("advapi32", .{});
     }
 
     // libnode (Node.js 임베딩) — 선택적
@@ -716,6 +718,15 @@ pub fn build(b: *std.Build) void {
     });
     const cef_command_line_policy_test = b.addTest(.{ .root_module = cef_command_line_policy_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_command_line_policy_test).step);
+
+    // safeStorage target key tests (CEF 런타임/OS secure store 불필요).
+    const safe_storage_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/safe_storage.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const safe_storage_test = b.addTest(.{ .root_module = safe_storage_test_mod });
+    test_step.dependOn(&b.addRunArtifact(safe_storage_test).step);
 }
 
 /// Linux/Windows CEF expects required runtime assets in the executable

@@ -155,7 +155,7 @@ fn onAllClosed(_: suji.Event) void {
 //   실행(헤드리스=컴파일/링크+graceful-fail 만 검증, 정직 경계)
 // suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)   (macOS IOPMAssertion)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
-//                                       (macOS Keychain Services)
+//                                       (macOS Keychain Services, Windows Credential Manager)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
 // suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
 // suji.isPackaged()                              — `.app` 번들 여부 (dev=false, prod=true)
@@ -341,7 +341,7 @@ suji.platform                                                // "macos" | "linux
 // const id = await powerSaveBlocker.start("prevent_display_sleep")
 // await powerSaveBlocker.stop(id)                                         (macOS IOPMAssertion)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
-//                                                                         (macOS Keychain Services)
+//                                                                         (macOS Keychain Services, Windows Credential Manager)
 // await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)

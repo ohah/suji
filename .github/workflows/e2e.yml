@@ -88,6 +88,11 @@ jobs:
           SUJI_TRACE_IPC: "1"
         run: bash tests/e2e/run-fs.sh
 
+      - name: E2E — safeStorage
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-safe-storage.log
+        run: bash tests/e2e/run-safe-storage.sh
+
       - name: E2E — global shortcut
         run: bash tests/e2e/run-global-shortcut.sh
 
@@ -297,6 +302,18 @@ jobs:
           export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
           export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
           bash tests/e2e/run-view-lifecycle.sh
+
+      - name: E2E — safeStorage (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-safe-storage.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-safe-storage.sh
 
       - name: Collect cross-platform suji logs on failure
         if: failure()

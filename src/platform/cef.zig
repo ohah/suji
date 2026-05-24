@@ -36,11 +36,13 @@ const util = @import("util");
 const drag_region = @import("cef_drag_region.zig");
 const cef_views_policy = @import("cef_views_policy.zig");
 const cef_command_line_policy = @import("cef_command_line_policy.zig");
+const safe_storage = @import("safe_storage.zig");
 
 const log = logger.module("cef");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
+const is_windows = builtin.os.tag == .windows;
 const cef_views_platform: cef_views_policy.Platform = switch (builtin.os.tag) {
     .macos => .macos,
     .linux => .linux,
@@ -3227,7 +3229,7 @@ extern "c" fn IOPMAssertionRelease(assertion_id: u32) c_int;
 const kIOPMAssertionLevelOn: u32 = 255;
 
 // ============================================
-// safeStorage — macOS Keychain Services (Electron `safeStorage`)
+// safeStorage — OS secure stores (Electron `safeStorage`)
 // ============================================
 // SecItemAdd / SecItemCopyMatching / SecItemDelete — generic password class.
 // service = "Suji" + 사용자 지정 namespace, account = key. value는 plain UTF-8.
@@ -3257,6 +3259,40 @@ const errSecSuccess: c_int = 0;
 const errSecItemNotFound: c_int = -25300;
 const errSecDuplicateItem: c_int = -25299;
 
+const win_cred = if (is_windows) struct {
+    const w = std.os.windows;
+
+    const FILETIME = extern struct {
+        dwLowDateTime: u32,
+        dwHighDateTime: u32,
+    };
+
+    const CREDENTIALW = extern struct {
+        Flags: u32,
+        Type: u32,
+        TargetName: ?[*:0]u16,
+        Comment: ?[*:0]u16,
+        LastWritten: FILETIME,
+        CredentialBlobSize: u32,
+        CredentialBlob: ?[*]u8,
+        Persist: u32,
+        AttributeCount: u32,
+        Attributes: ?*anyopaque,
+        TargetAlias: ?[*:0]u16,
+        UserName: ?[*:0]u16,
+    };
+
+    extern "advapi32" fn CredWriteW(Credential: *const CREDENTIALW, Flags: u32) callconv(.winapi) w.BOOL;
+    extern "advapi32" fn CredReadW(TargetName: [*:0]const u16, Type: u32, Flags: u32, Credential: *?*CREDENTIALW) callconv(.winapi) w.BOOL;
+    extern "advapi32" fn CredDeleteW(TargetName: [*:0]const u16, Type: u32, Flags: u32) callconv(.winapi) w.BOOL;
+    extern "advapi32" fn CredFree(Buffer: ?*anyopaque) callconv(.winapi) void;
+    extern "kernel32" fn GetLastError() callconv(.winapi) u32;
+
+    const CRED_TYPE_GENERIC: u32 = 1;
+    const CRED_PERSIST_LOCAL_MACHINE: u32 = 2;
+    const ERROR_NOT_FOUND: u32 = 1168;
+} else struct {};
+
 /// service/account/class 3개 필드를 가진 NSMutableDictionary (NSDictionary ↔ CFDictionary toll-free bridged).
 fn buildKeychainQuery(class_val: ?*anyopaque, service: []const u8, account: []const u8) ?*anyopaque {
     const NSMutableDictionary = getClass("NSMutableDictionary") orelse return null;
@@ -3270,6 +3306,26 @@ fn buildKeychainQuery(class_val: ?*anyopaque, service: []const u8, account: []co
 /// 키체인에 utf-8 값을 저장. 같은 key가 있으면 update. 성공 = true.
 /// Add → DuplicateItem이면 Update fallback — race-free + 1 syscall (Apple 권장 패턴).
 pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u8) bool {
+    if (comptime is_windows) {
+        var target_buf: [1024]u16 = undefined;
+        const target = safe_storage.buildTargetUtf16(&target_buf, service, account) orelse return false;
+        var credential = win_cred.CREDENTIALW{
+            .Flags = 0,
+            .Type = win_cred.CRED_TYPE_GENERIC,
+            .TargetName = target.ptr,
+            .Comment = null,
+            .LastWritten = .{ .dwLowDateTime = 0, .dwHighDateTime = 0 },
+            .CredentialBlobSize = @intCast(value.len),
+            .CredentialBlob = if (value.len == 0) null else @constCast(value.ptr),
+            .Persist = win_cred.CRED_PERSIST_LOCAL_MACHINE,
+            .AttributeCount = 0,
+            .Attributes = null,
+            .TargetAlias = null,
+            .UserName = target.ptr,
+        };
+        return win_cred.CredWriteW(&credential, 0) != 0;
+    }
+
     if (!comptime is_macos) return false;
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
     const data = CFDataCreate(null, value.ptr, @intCast(value.len)) orelse return false;
@@ -3291,6 +3347,21 @@ pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u
 
 /// 키체인에서 utf-8 값 read. out_buf에 복사 후 length 반환. 못 찾으면 빈 slice.
 pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) []const u8 {
+    if (comptime is_windows) {
+        var target_buf: [1024]u16 = undefined;
+        const target = safe_storage.buildTargetUtf16(&target_buf, service, account) orelse return out_buf[0..0];
+        var credential: ?*win_cred.CREDENTIALW = null;
+        if (win_cred.CredReadW(target.ptr, win_cred.CRED_TYPE_GENERIC, 0, &credential) == 0) return out_buf[0..0];
+        const cred = credential orelse return out_buf[0..0];
+        defer win_cred.CredFree(cred);
+
+        const blob = cred.CredentialBlob orelse return out_buf[0..0];
+        const len: usize = @intCast(cred.CredentialBlobSize);
+        const n = @min(len, out_buf.len);
+        @memcpy(out_buf[0..n], blob[0..n]);
+        return out_buf[0..n];
+    }
+
     if (!comptime is_macos) return out_buf[0..0];
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return out_buf[0..0];
     msgSendVoid2(query, "setObject:forKey:", kCFBooleanTrue, kSecReturnData);
@@ -3309,6 +3380,13 @@ pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) [
 }
 
 pub fn safeStorageDelete(service: []const u8, account: []const u8) bool {
+    if (comptime is_windows) {
+        var target_buf: [1024]u16 = undefined;
+        const target = safe_storage.buildTargetUtf16(&target_buf, service, account) orelse return false;
+        if (win_cred.CredDeleteW(target.ptr, win_cred.CRED_TYPE_GENERIC, 0) != 0) return true;
+        return win_cred.GetLastError() == win_cred.ERROR_NOT_FOUND;
+    }
+
     if (!comptime is_macos) return false;
     const query = buildKeychainQuery(kSecClassGenericPassword, service, account) orelse return false;
     const r = SecItemDelete(query);

@@ -1021,7 +1021,7 @@ test "find_result IPC — find_handler 등록 + main.zig final-only forward + di
     }
 }
 
-test "safeStorage IPC — Keychain set/get/delete + Security framework" {
+test "safeStorage IPC — OS secure store set/get/delete" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
     inline for (.{
@@ -1041,11 +1041,17 @@ test "safeStorage IPC — Keychain set/get/delete + Security framework" {
         "pub fn safeStorageSet",
         "pub fn safeStorageGet",
         "pub fn safeStorageDelete",
+        "safe_storage.buildTargetUtf16",
         "SecItemAdd",
         "SecItemCopyMatching",
         "SecItemDelete",
         "kSecClassGenericPassword",
         "errSecItemNotFound",
+        "CredWriteW",
+        "CredReadW",
+        "CredDeleteW",
+        "CRED_TYPE_GENERIC",
+        "CRED_PERSIST_LOCAL_MACHINE",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
@@ -1058,6 +1064,25 @@ test "safeStorage IPC — Keychain set/get/delete + Security framework" {
     );
     defer std.testing.allocator.free(build_src);
     try std.testing.expect(std.mem.indexOf(u8, build_src, "Security") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "advapi32") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/safe_storage.zig") != null);
+
+    const e2e_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "tests/e2e/safe-storage.test.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "safe_storage_set",
+        "safe_storage_get",
+        "safe_storage_delete",
+        "service namespace isolates same account",
+        "escape-sensitive value round-trips",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
 }
 
 test "webRequest — CefRequestHandler wiring + URL glob blocklist + 2 이벤트 채널" {

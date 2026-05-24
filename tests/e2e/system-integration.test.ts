@@ -886,7 +886,7 @@ describe("shell.trashItem", () => {
   });
 });
 
-describe("safeStorage (Keychain)", () => {
+describe("safeStorage (OS secure store)", () => {
   const SVC = "Suji-e2e-test";
 
   test("set → get round-trip", async () => {
