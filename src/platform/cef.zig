@@ -3323,7 +3323,7 @@ pub fn safeStorageSet(service: []const u8, account: []const u8, value: []const u
             .TargetAlias = null,
             .UserName = target.ptr,
         };
-        return win_cred.CredWriteW(&credential, 0) != 0;
+        return win_cred.CredWriteW(&credential, 0).toBool();
     }
 
     if (!comptime is_macos) return false;
@@ -3351,7 +3351,7 @@ pub fn safeStorageGet(service: []const u8, account: []const u8, out_buf: []u8) [
         var target_buf: [1024]u16 = undefined;
         const target = safe_storage.buildTargetUtf16(&target_buf, service, account) orelse return out_buf[0..0];
         var credential: ?*win_cred.CREDENTIALW = null;
-        if (win_cred.CredReadW(target.ptr, win_cred.CRED_TYPE_GENERIC, 0, &credential) == 0) return out_buf[0..0];
+        if (!win_cred.CredReadW(target.ptr, win_cred.CRED_TYPE_GENERIC, 0, &credential).toBool()) return out_buf[0..0];
         const cred = credential orelse return out_buf[0..0];
         defer win_cred.CredFree(cred);
 
@@ -3383,7 +3383,7 @@ pub fn safeStorageDelete(service: []const u8, account: []const u8) bool {
     if (comptime is_windows) {
         var target_buf: [1024]u16 = undefined;
         const target = safe_storage.buildTargetUtf16(&target_buf, service, account) orelse return false;
-        if (win_cred.CredDeleteW(target.ptr, win_cred.CRED_TYPE_GENERIC, 0) != 0) return true;
+        if (win_cred.CredDeleteW(target.ptr, win_cred.CRED_TYPE_GENERIC, 0).toBool()) return true;
         return win_cred.GetLastError() == win_cred.ERROR_NOT_FOUND;
     }
 
