@@ -555,14 +555,19 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
             try runCmd(allocator, &.{ "cargo", "build", "--manifest-path", manifest });
         }
     } else if (std.mem.eql(u8, lang, "go")) {
-        const output = try std.fmt.allocPrint(allocator, "{s}/libbackend.dylib", .{entry});
+        const output = try getDylibPath(allocator, "go", entry, release);
         defer allocator.free(output);
         const go_entry = try std.fmt.allocPrint(allocator, "{s}/main.go", .{entry});
         defer allocator.free(go_entry);
-        try runCmdEnv(allocator, &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry }, &.{
-            .{ "CC", "/usr/bin/clang" },
-            .{ "CGO_ENABLED", "1" },
-        });
+        const argv = &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry };
+        if (builtin.os.tag == .windows) {
+            try runCmdEnv(allocator, argv, &.{.{ "CGO_ENABLED", "1" }});
+        } else {
+            try runCmdEnv(allocator, argv, &.{
+                .{ "CC", "/usr/bin/clang" },
+                .{ "CGO_ENABLED", "1" },
+            });
+        }
     } else if (std.mem.eql(u8, lang, "node")) {
         // Node 백엔드: npm install (빌드 불필요, 런타임에 JS 실행)
         const pkg_path = try std.fmt.allocPrint(allocator, "{s}/package.json", .{entry});
@@ -594,13 +599,53 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
 fn getDylibPath(allocator: std.mem.Allocator, lang: []const u8, entry: []const u8, release: bool) ![]const u8 {
     if (std.mem.eql(u8, lang, "rust")) {
         const profile: []const u8 = if (release) "release" else "debug";
-        return try std.fmt.allocPrint(allocator, "{s}/target/{s}/librust_backend.dylib", .{ entry, profile });
+        return switch (builtin.os.tag) {
+            .windows => try std.fmt.allocPrint(allocator, "{s}/target/{s}/rust_backend.dll", .{ entry, profile }),
+            .linux => try std.fmt.allocPrint(allocator, "{s}/target/{s}/librust_backend.so", .{ entry, profile }),
+            else => try std.fmt.allocPrint(allocator, "{s}/target/{s}/librust_backend.dylib", .{ entry, profile }),
+        };
     } else if (std.mem.eql(u8, lang, "go")) {
-        return try std.fmt.allocPrint(allocator, "{s}/libbackend.dylib", .{entry});
+        return switch (builtin.os.tag) {
+            .windows => try std.fmt.allocPrint(allocator, "{s}/backend.dll", .{entry}),
+            .linux => try std.fmt.allocPrint(allocator, "{s}/libbackend.so", .{entry}),
+            else => try std.fmt.allocPrint(allocator, "{s}/libbackend.dylib", .{entry}),
+        };
     } else if (std.mem.eql(u8, lang, "zig")) {
-        return try std.fmt.allocPrint(allocator, "{s}/zig-out/lib/libbackend.dylib", .{entry});
+        return switch (builtin.os.tag) {
+            .windows => try std.fmt.allocPrint(allocator, "{s}/zig-out/bin/backend.dll", .{entry}),
+            .linux => try std.fmt.allocPrint(allocator, "{s}/zig-out/lib/libbackend.so", .{entry}),
+            else => try std.fmt.allocPrint(allocator, "{s}/zig-out/lib/libbackend.dylib", .{entry}),
+        };
     }
     return error.UnsupportedLang;
+}
+
+test "getDylibPath uses host platform library extension" {
+    const allocator = std.testing.allocator;
+    const zig_path = try getDylibPath(allocator, "zig", "backends/zig", false);
+    defer allocator.free(zig_path);
+    const rust_path = try getDylibPath(allocator, "rust", "backends/rust", false);
+    defer allocator.free(rust_path);
+    const go_path = try getDylibPath(allocator, "go", "backends/go", false);
+    defer allocator.free(go_path);
+
+    switch (builtin.os.tag) {
+        .windows => {
+            try std.testing.expectEqualStrings("backends/zig/zig-out/bin/backend.dll", zig_path);
+            try std.testing.expectEqualStrings("backends/rust/target/debug/rust_backend.dll", rust_path);
+            try std.testing.expectEqualStrings("backends/go/backend.dll", go_path);
+        },
+        .linux => {
+            try std.testing.expectEqualStrings("backends/zig/zig-out/lib/libbackend.so", zig_path);
+            try std.testing.expectEqualStrings("backends/rust/target/debug/librust_backend.so", rust_path);
+            try std.testing.expectEqualStrings("backends/go/libbackend.so", go_path);
+        },
+        else => {
+            try std.testing.expectEqualStrings("backends/zig/zig-out/lib/libbackend.dylib", zig_path);
+            try std.testing.expectEqualStrings("backends/rust/target/debug/librust_backend.dylib", rust_path);
+            try std.testing.expectEqualStrings("backends/go/libbackend.dylib", go_path);
+        },
+    }
 }
 
 /// `suji types [--out <path>]` — zig 백엔드의 `.schema()` 체인을 SujiHandlers

@@ -98,6 +98,8 @@ jobs:
         run: bash tests/e2e/run-window-lifecycle-events-cef-views.sh
 
       - name: E2E — CEF Views WebContentsView lifecycle
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-view-lifecycle-cef-views.log
         run: bash tests/e2e/run-view-lifecycle-cef-views.sh
 
       - name: Upload suji logs on failure
@@ -105,7 +107,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: suji-e2e-logs
-          path: /tmp/suji-e2e-*.log
+          path: |
+            /tmp/suji-e2e-*.log
+            ${{ runner.temp }}/suji-e2e-*.log
+            ~/Library/Application Support/Multi Backend Example/Cache/debug.log
           if-no-files-found: ignore
 
   webcontentsview-cross-platform:
@@ -226,11 +231,22 @@ jobs:
 
       - name: E2E — WebContentsView lifecycle (Linux)
         if: runner.os == 'Linux'
-        run: xvfb-run -a --server-args="-screen 0 1280x1024x24" bash tests/e2e/run-view-lifecycle.sh
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          NO_AT_BRIDGE: "1"
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-view-lifecycle.log
+        run: |
+          mkdir -p "$RUNNER_TEMP/xdg-runtime"
+          chmod 700 "$RUNNER_TEMP/xdg-runtime"
+          XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" \
+            xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
+            dbus-run-session -- bash tests/e2e/run-view-lifecycle.sh
 
       - name: E2E — WebContentsView lifecycle (Windows)
         if: runner.os == 'Windows'
         shell: bash
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-view-lifecycle.log
         run: bash tests/e2e/run-view-lifecycle.sh
 
       - name: Upload cross-platform suji logs on failure
@@ -241,4 +257,7 @@ jobs:
           path: |
             /tmp/suji-e2e-*.log
             C:\msys64\tmp\suji-e2e-*.log
+            ${{ runner.temp }}/suji-e2e-*.log
+            ~/.config/Multi Backend Example/Cache/debug.log
+            ~/AppData/Roaming/Multi Backend Example/Cache/debug.log
           if-no-files-found: ignore

@@ -12,11 +12,15 @@
 # Caller MUST set: ROOT (project root).
 # Caller MAY set: SUJI_LOG (log path), SUJI_TRACE_IPC (1 to enable trace).
 
-: "${SUJI_LOG:=/tmp/suji-e2e.log}"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) SUJI_E2E_WINDOWS=1 ;;
   *) SUJI_E2E_WINDOWS=0 ;;
 esac
+
+if [ "$SUJI_E2E_WINDOWS" = "1" ] && [ -n "${SUJI_LOG:-}" ] && command -v cygpath >/dev/null 2>&1; then
+  SUJI_LOG="$(cygpath -u "$SUJI_LOG")"
+fi
+: "${SUJI_LOG:=/tmp/suji-e2e.log}"
 
 if [ "$SUJI_E2E_WINDOWS" = "1" ]; then
   SUJI_BIN="$ROOT/zig-out/bin/suji.exe"
@@ -47,6 +51,7 @@ e2e_wait_cef() {
     sleep 2
   done
   echo "ERROR: suji did not reach 'CEF running' within 120s"
+  echo "SUJI_LOG=$SUJI_LOG"
   tail -30 "$SUJI_LOG" || true
   return 1
 }
@@ -68,6 +73,8 @@ e2e_run_test() {
   [ -x "$SUJI_BIN" ] || { echo "suji binary not found at $SUJI_BIN — run 'zig build' first"; exit 1; }
 
   cd "$EXAMPLE_DIR"
+  echo "Launching $SUJI_BIN dev in $EXAMPLE_DIR"
+  echo "Writing suji log to $SUJI_LOG"
   if [ "${SUJI_TRACE_IPC:-}" = "1" ]; then
     SUJI_TRACE_IPC=1 "$SUJI_BIN" dev 2>&1 | tee "$SUJI_LOG" &
   else
@@ -78,5 +85,5 @@ e2e_run_test() {
   sleep 3 # vite/CEF 안정화
 
   cd "$ROOT"
-  SUJI_LOG="$SUJI_LOG" bun test "$test_file"
+  SUJI_LOG="$SUJI_LOG" bun test "$test_file" 2>&1 | tee -a "$SUJI_LOG"
 }
