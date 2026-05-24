@@ -281,7 +281,7 @@ describe("window lifecycle events", () => {
     await new Promise((r) => setTimeout(r, 1500));
     await core({ cmd: "destroy_window", windowId: id });
     await new Promise((r) => setTimeout(r, 200));
-  });
+  }, 10000);
 
   // ==================== Phase 5: ready-to-show + page-title-updated ====================
 

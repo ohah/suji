@@ -393,11 +393,15 @@ const ViewsWindowDelegate = struct {
     ref_count: std.atomic.Value(u32) = .init(1),
     browser_view: ?*c.cef_browser_view_t,
     cef_window: ?*c.cef_window_t = null,
+    handle: u64 = 0,
     title_buf: [512]u8 = undefined,
     title_len: usize = 0,
     bounds: window_mod.Bounds,
     appearance: window_mod.Appearance,
     constraints: window_mod.Constraints,
+    last_bounds: c.cef_rect_t = .{ .x = 0, .y = 0, .width = 0, .height = 0 },
+    has_last_bounds: bool = false,
+    last_fullscreen: bool = false,
 };
 
 fn viewsBrowserFromBase(base: ?*c.cef_base_ref_counted_t) ?*ViewsBrowserViewDelegate {
@@ -437,6 +441,52 @@ fn releaseWindowRef(window: ?*c.cef_window_t) void {
 fn releaseOverlayRef(controller: ?*c.cef_overlay_controller_t) void {
     const ctrl = controller orelse return;
     releaseCefBase(&ctrl.base);
+}
+
+fn viewsWindowRememberBounds(d: *ViewsWindowDelegate, bounds: c.cef_rect_t) void {
+    d.last_bounds = bounds;
+    d.has_last_bounds = true;
+}
+
+fn viewsWindowEmitBoundsChanged(d: *ViewsWindowDelegate, bounds: c.cef_rect_t) void {
+    const had_last = d.has_last_bounds;
+    const prev = d.last_bounds;
+    viewsWindowRememberBounds(d, bounds);
+
+    if (d.handle == 0) return;
+    if (had_last and prev.x == bounds.x and prev.y == bounds.y and
+        prev.width == bounds.width and prev.height == bounds.height)
+    {
+        return;
+    }
+
+    const x: f64 = @floatFromInt(bounds.x);
+    const y: f64 = @floatFromInt(bounds.y);
+    if (!had_last or prev.width != bounds.width or prev.height != bounds.height) {
+        const width: f64 = @floatFromInt(bounds.width);
+        const height: f64 = @floatFromInt(bounds.height);
+        if (g_window_resized_handler) |h| h(d.handle, x, y, width, height);
+        return;
+    }
+
+    if (prev.x != bounds.x or prev.y != bounds.y) {
+        if (g_window_moved_handler) |h| h(d.handle, x, y);
+    }
+}
+
+fn viewsWindowIsMinimized(window: *c.cef_window_t) bool {
+    const is_minimized = window.is_minimized orelse return false;
+    return is_minimized(window) != 0;
+}
+
+fn viewsWindowIsMaximized(window: *c.cef_window_t) bool {
+    const is_maximized = window.is_maximized orelse return false;
+    return is_maximized(window) != 0;
+}
+
+fn viewsWindowIsFullscreen(window: *c.cef_window_t) bool {
+    const is_fullscreen = window.is_fullscreen orelse return false;
+    return is_fullscreen(window) != 0;
 }
 
 fn viewsBrowserAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
@@ -545,12 +595,14 @@ fn viewsWindowInitialBounds(
 ) callconv(.c) c.cef_rect_t {
     const d = viewsWindowFromSelf(self) orelse return .{ .x = 0, .y = 0, .width = 800, .height = 600 };
     releaseWindowRef(@ptrCast(window));
-    return .{
+    const bounds: c.cef_rect_t = .{
         .x = d.bounds.x,
         .y = d.bounds.y,
         .width = @intCast(d.bounds.width),
         .height = @intCast(d.bounds.height),
     };
+    viewsWindowRememberBounds(d, bounds);
+    return bounds;
 }
 
 fn viewsWindowInitialShowState(
@@ -636,12 +688,70 @@ fn viewsWindowRuntimeStyle(_: ?*c._cef_window_delegate_t) callconv(.c) c.cef_run
     return c.CEF_RUNTIME_STYLE_ALLOY;
 }
 
+fn viewsWindowActivationChanged(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+    active: c_int,
+) callconv(.c) void {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return;
+    };
+    releaseWindowRef(@ptrCast(window));
+    if (d.handle == 0) return;
+    if (active != 0) {
+        if (g_window_focus_handler) |h| h(d.handle);
+    } else {
+        if (g_window_blur_handler) |h| h(d.handle);
+    }
+}
+
+fn viewsWindowBoundsChanged(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+    new_bounds: ?*const c.cef_rect_t,
+) callconv(.c) void {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return;
+    };
+    defer releaseWindowRef(@ptrCast(window));
+    const bounds = new_bounds orelse return;
+    viewsWindowEmitBoundsChanged(d, bounds.*);
+}
+
+fn viewsWindowFullscreenTransition(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+    is_completed: c_int,
+) callconv(.c) void {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return;
+    };
+    const win: *c.cef_window_t = @ptrCast(window orelse return);
+    defer releaseWindowRef(win);
+    if (is_completed == 0) return;
+
+    const is_fullscreen = viewsWindowIsFullscreen(win);
+    if (is_fullscreen == d.last_fullscreen) return;
+    d.last_fullscreen = is_fullscreen;
+    if (d.handle == 0) return;
+
+    if (is_fullscreen) {
+        if (g_window_enter_fullscreen_handler) |h| h(d.handle);
+    } else {
+        if (g_window_leave_fullscreen_handler) |h| h(d.handle);
+    }
+}
+
 fn viewsWindowOnCreated(self: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) void {
     const d = viewsWindowFromSelf(self) orelse return;
     const win: *c.cef_window_t = @ptrCast(window orelse return);
 
     if (win.base.base.base.add_ref) |add_ref| add_ref(&win.base.base.base);
     d.cef_window = win;
+    d.last_fullscreen = viewsWindowIsFullscreen(win);
 
     if (d.browser_view) |bv| {
         if (bv.base.base.add_ref) |add_ref| add_ref(&bv.base.base);
@@ -697,6 +807,9 @@ fn createViewsWindowDelegate(
     d.delegate.on_window_created = &viewsWindowOnCreated;
     d.delegate.on_window_closing = &viewsWindowOnClosing;
     d.delegate.on_window_destroyed = &viewsWindowOnDestroyed;
+    d.delegate.on_window_activation_changed = &viewsWindowActivationChanged;
+    d.delegate.on_window_bounds_changed = &viewsWindowBoundsChanged;
+    d.delegate.on_window_fullscreen_transition = &viewsWindowFullscreenTransition;
     d.delegate.get_initial_bounds = &viewsWindowInitialBounds;
     d.delegate.get_initial_show_state = &viewsWindowInitialShowState;
     d.delegate.is_frameless = &viewsWindowIsFrameless;
@@ -1388,6 +1501,11 @@ pub const CefNative = struct {
             cefViewsHandleToNSWindow(@ptrCast(views_window.get_window_handle.?(views_window)))
         else
             null;
+        window_delegate.handle = handle;
+        if (views_window.base.base.get_bounds) |get_bounds| {
+            viewsWindowRememberBounds(window_delegate, get_bounds(&views_window.base.base));
+        }
+        window_delegate.last_fullscreen = viewsWindowIsFullscreen(views_window);
 
         self.browsers.put(handle, .{
             .browser = br,
@@ -1586,7 +1704,7 @@ pub const CefNative = struct {
     fn setBounds(ctx: ?*anyopaque, handle: u64, bounds: window_mod.Bounds) void {
         assertUiThread();
         const self = fromCtx(ctx);
-        const entry = self.browsers.get(handle) orelse return;
+        const entry = self.browsers.getPtr(handle) orelse return;
         if (entry.views_window) |views_window| {
             var rect: c.cef_rect_t = .{
                 .x = bounds.x,
@@ -1595,6 +1713,7 @@ pub const CefNative = struct {
                 .height = @intCast(bounds.height),
             };
             views_window.base.base.set_bounds.?(&views_window.base.base, &rect);
+            if (entry.views_window_delegate) |delegate| viewsWindowEmitBoundsChanged(delegate, rect);
             return;
         }
         if (!is_macos) return;
@@ -1948,30 +2067,100 @@ pub const CefNative = struct {
     }
 
     fn minimizeImpl(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                const was_minimized = viewsWindowIsMinimized(views_window);
+                if (views_window.minimize) |minimize| minimize(views_window);
+                if (!was_minimized) {
+                    if (g_window_minimize_handler) |h| h(handle);
+                }
+                return;
+            }
+        }
         callOnNs(ctx, handle, suji_window_lifecycle_minimize);
     }
     fn restoreWindowImpl(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                const was_minimized = viewsWindowIsMinimized(views_window);
+                if (views_window.restore) |restore| restore(views_window);
+                if (was_minimized) {
+                    if (g_window_restore_handler) |h| h(handle);
+                }
+                return;
+            }
+        }
         callOnNs(ctx, handle, suji_window_lifecycle_deminiaturize);
     }
     fn maximizeImpl(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                if (viewsWindowIsMaximized(views_window)) return;
+                if (views_window.maximize) |maximize| maximize(views_window);
+                if (g_window_maximize_handler) |h| h(handle);
+                return;
+            }
+        }
         callOnNs(ctx, handle, suji_window_lifecycle_maximize);
     }
     fn unmaximizeImpl(ctx: ?*anyopaque, handle: u64) void {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                if (!viewsWindowIsMaximized(views_window)) return;
+                if (views_window.restore) |restore| restore(views_window);
+                if (g_window_unmaximize_handler) |h| h(handle);
+                return;
+            }
+        }
         callOnNs(ctx, handle, suji_window_lifecycle_unmaximize);
     }
     fn setFullscreenImpl(ctx: ?*anyopaque, handle: u64, flag: bool) void {
-        if (!comptime is_macos) return;
+        const self = fromCtx(ctx);
         assertUiThread();
-        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                const is_fullscreen = viewsWindowIsFullscreen(views_window);
+                if (is_fullscreen == flag) return;
+                if (views_window.set_fullscreen) |set_fullscreen| {
+                    set_fullscreen(views_window, @intFromBool(flag));
+                }
+                return;
+            }
+        }
+        if (!comptime is_macos) return;
+        const ns = self.nsWindowFor(handle) orelse return;
         suji_window_lifecycle_set_fullscreen(ns, @intFromBool(flag));
     }
     fn isMinimizedImpl(ctx: ?*anyopaque, handle: u64) bool {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| return viewsWindowIsMinimized(views_window);
+        }
         return callOnNsBool(ctx, handle, suji_window_lifecycle_is_minimized);
     }
     fn isMaximizedImpl(ctx: ?*anyopaque, handle: u64) bool {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| return viewsWindowIsMaximized(views_window);
+        }
         return callOnNsBool(ctx, handle, suji_window_lifecycle_is_maximized);
     }
     fn isFullscreenImpl(ctx: ?*anyopaque, handle: u64) bool {
+        const self = fromCtx(ctx);
+        assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| return viewsWindowIsFullscreen(views_window);
+        }
         return callOnNsBool(ctx, handle, suji_window_lifecycle_is_fullscreen);
     }
 };
