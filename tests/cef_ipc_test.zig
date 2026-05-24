@@ -954,6 +954,36 @@ test "desktopCapturer.captureThumbnail IPC + cef CG/ImageIO 인코딩 경로" {
     try std.testing.expect(std.mem.indexOf(u8, build_src, "linkFramework(\"ImageIO\"") != null);
 }
 
+test "crashReporter IPC + CEF crash util + cfg renderer 연결" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"crash_reporter_start\"",
+        "\"crash_reporter_get_parameters\"",
+        "\"crash_reporter_add_extra_parameter\"",
+        "\"crash_reporter_remove_extra_parameter\"",
+        "\"crash_reporter_get_uploaded_reports\"",
+        "writeStartupCrashReporterConfig",
+        "crash_reporter.renderConfig",
+        "cef.crashReporterEnabled",
+        "cef.crashReporterSetKeyValue",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "cef_crash_util_capi.h",
+        "pub fn crashReporterEnabled",
+        "cef_crash_reporting_enabled",
+        "pub fn crashReporterSetKeyValue",
+        "cef_set_crash_key_value",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "dock badge IPC — set/get round-trip 등록" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

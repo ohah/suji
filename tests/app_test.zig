@@ -1569,6 +1569,33 @@ test "screen.getAllDisplays: 인자 없는 cmd" {
     }.run);
 }
 
+test "crashReporter SDK: start/extra/upload/report cmd 조립" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.crashReporter.start("\"uploadToServer\":false");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"crash_reporter_start\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"uploadToServer\":false") != null);
+
+            _ = app_mod.crashReporter.addExtraParameter("suite", "zig");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"crash_reporter_add_extra_parameter\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"key\":\"suite\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"value\":\"zig\"") != null);
+
+            _ = app_mod.crashReporter.removeExtraParameter("suite");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"crash_reporter_remove_extra_parameter\"") != null);
+
+            _ = app_mod.crashReporter.setUploadToServer(false);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"crash_reporter_set_upload_to_server\"") != null);
+
+            _ = app_mod.crashReporter.getUploadedReports();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"crash_reporter_get_uploaded_reports\"") != null);
+
+            _ = app_mod.crashReporter.getLastCrashReport();
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"crash_reporter_get_last_crash_report\"") != null);
+        }
+    }.run);
+}
+
 test "powerSaveBlocker.start/stop: type 문자열 + id" {
     try withInvokeCore(struct {
         fn run() !void {

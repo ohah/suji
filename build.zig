@@ -389,8 +389,19 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     config_module.addImport("window", window_module);
+    config_module.addImport("runtime", runtime_module);
+    config_module.addImport("util", util_module);
     // config_module.addImport("toml", toml_dep.module("toml"));
     config_test_mod.addImport("config", config_module);
+
+    // crash_reporter cfg renderer tests
+    const crash_reporter_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/core/crash_reporter.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const crash_reporter_test = b.addTest(.{ .root_module = crash_reporter_test_mod });
+    test_step.dependOn(&b.addRunArtifact(crash_reporter_test).step);
     // Events tests
     const events_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/events_test.zig"),

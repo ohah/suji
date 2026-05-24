@@ -1047,6 +1047,41 @@ export const desktopCapturer = {
         return r.success === true;
     },
 };
+export const crashReporter = {
+    /** Runtime state 등록. 첫 프로세스 Crashpad enable은 suji.json app.crashReporter 필요. */
+    async start(options = {}) {
+        const r = await coreCall({ cmd: "crash_reporter_start", ...options });
+        return r.success === true;
+    },
+    async getParameters() {
+        const r = await coreCall({ cmd: "crash_reporter_get_parameters" });
+        return r.parameters ?? {};
+    },
+    async addExtraParameter(key, value) {
+        const r = await coreCall({ cmd: "crash_reporter_add_extra_parameter", key, value });
+        return r.success === true;
+    },
+    async removeExtraParameter(key) {
+        const r = await coreCall({ cmd: "crash_reporter_remove_extra_parameter", key });
+        return r.success === true;
+    },
+    async getUploadToServer() {
+        const r = await coreCall({ cmd: "crash_reporter_get_upload_to_server" });
+        return r.uploadToServer === true;
+    },
+    async setUploadToServer(uploadToServer) {
+        const r = await coreCall({ cmd: "crash_reporter_set_upload_to_server", uploadToServer });
+        return r.success === true;
+    },
+    async getUploadedReports() {
+        const r = await coreCall({ cmd: "crash_reporter_get_uploaded_reports" });
+        return r.reports ?? [];
+    },
+    async getLastCrashReport() {
+        const r = await coreCall({ cmd: "crash_reporter_get_last_crash_report" });
+        return r.report ?? null;
+    },
+};
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
     async start(type) {

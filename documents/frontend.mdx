@@ -77,6 +77,10 @@ interface InvokeOptions {
 | `fs_stat` | `path` | `{success:true,type,size,mtime}` |
 | `fs_mkdir` | `path`, `recursive?` | `{success:true}` |
 | `fs_readdir` | `path` | `{success:true,entries}` |
+| `crash_reporter_start` | `uploadToServer?`, `submitURL?`, `extra?` | `{success:true,enabled:bool}` |
+| `crash_reporter_get_parameters` | — | `{parameters:{...}}` |
+| `crash_reporter_add_extra_parameter` | `key`, `value` | `{success:bool}` |
+| `crash_reporter_remove_extra_parameter` | `key` | `{success:bool}` |
 | `quit` | — | `{cmd:"quit"}` |
 | `core_info` | — | `{backends:[...]}` |
 

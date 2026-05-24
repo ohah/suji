@@ -1083,10 +1083,7 @@ pub const fs = struct {
         const type_str = util.extractJsonString(raw, "type") orelse return null;
         const size = util.extractJsonInt(raw, "size") orelse return null;
         const mtime = util.extractJsonInt(raw, "mtime") orelse return null;
-        const t: FileType = if (std.mem.eql(u8, type_str, "file")) .file
-            else if (std.mem.eql(u8, type_str, "directory")) .directory
-            else if (std.mem.eql(u8, type_str, "symlink")) .symlink
-            else .other;
+        const t: FileType = if (std.mem.eql(u8, type_str, "file")) .file else if (std.mem.eql(u8, type_str, "directory")) .directory else if (std.mem.eql(u8, type_str, "symlink")) .symlink else .other;
         return .{ .type = t, .size = @intCast(size), .mtime_ms = mtime };
     }
 
@@ -1108,10 +1105,7 @@ pub const fs = struct {
             const obj = raw_response[pos .. obj_end + 1];
             const name = util.extractJsonString(obj, "name") orelse break;
             const type_str = util.extractJsonString(obj, "type") orelse "other";
-            const t: FileType = if (std.mem.eql(u8, type_str, "file")) .file
-                else if (std.mem.eql(u8, type_str, "directory")) .directory
-                else if (std.mem.eql(u8, type_str, "symlink")) .symlink
-                else .other;
+            const t: FileType = if (std.mem.eql(u8, type_str, "file")) .file else if (std.mem.eql(u8, type_str, "directory")) .directory else if (std.mem.eql(u8, type_str, "symlink")) .symlink else .other;
             out[count] = .{ .name = name, .type = t };
             count += 1;
             pos = obj_end + 1;
@@ -1350,6 +1344,56 @@ pub const desktopCapturer = struct {
         var fb: [2400]u8 = undefined;
         const fields = std.fmt.bufPrint(&fb, "\"sourceId\":\"{s}\",\"path\":\"{s}\"", .{ sb[0..sn], pb[0..pn] }) catch return null;
         return coreCmd("desktop_capturer_capture_thumbnail", fields);
+    }
+};
+
+/// Electron `crashReporter`. CEF Crashpad/Breakpad bridge.
+pub const crashReporter = struct {
+    /// Start/register runtime crash reporter options. `fields_json` is pre-built
+    /// JSON fields after cmd, e.g. `"uploadToServer":false`.
+    /// Full first-process enablement requires suji.json `app.crashReporter`.
+    pub fn start(fields_json: []const u8) ?[]const u8 {
+        return coreCmd("crash_reporter_start", fields_json);
+    }
+
+    pub fn getParameters() ?[]const u8 {
+        return coreCmd("crash_reporter_get_parameters", "");
+    }
+
+    pub fn addExtraParameter(key: []const u8, value: []const u8) ?[]const u8 {
+        var k_buf: [128]u8 = undefined;
+        var v_buf: [2048]u8 = undefined;
+        const k_n = util.escapeJsonStrFull(key, &k_buf) orelse return null;
+        const v_n = util.escapeJsonStrFull(value, &v_buf) orelse return null;
+        var fields_buf: [2300]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"key\":\"{s}\",\"value\":\"{s}\"", .{ k_buf[0..k_n], v_buf[0..v_n] }) catch return null;
+        return coreCmd("crash_reporter_add_extra_parameter", fields);
+    }
+
+    pub fn removeExtraParameter(key: []const u8) ?[]const u8 {
+        var k_buf: [128]u8 = undefined;
+        const k_n = util.escapeJsonStrFull(key, &k_buf) orelse return null;
+        var fields_buf: [160]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"key\":\"{s}\"", .{k_buf[0..k_n]}) catch return null;
+        return coreCmd("crash_reporter_remove_extra_parameter", fields);
+    }
+
+    pub fn getUploadToServer() ?[]const u8 {
+        return coreCmd("crash_reporter_get_upload_to_server", "");
+    }
+
+    pub fn setUploadToServer(upload_to_server: bool) ?[]const u8 {
+        var fields_buf: [64]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"uploadToServer\":{}", .{upload_to_server}) catch return null;
+        return coreCmd("crash_reporter_set_upload_to_server", fields);
+    }
+
+    pub fn getUploadedReports() ?[]const u8 {
+        return coreCmd("crash_reporter_get_uploaded_reports", "");
+    }
+
+    pub fn getLastCrashReport() ?[]const u8 {
+        return coreCmd("crash_reporter_get_last_crash_report", "");
     }
 };
 

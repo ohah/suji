@@ -9,6 +9,7 @@ test "Config default values" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("Suji App", cfg.app.name);
     try std.testing.expectEqualStrings("0.1.0", cfg.app.version);
+    try std.testing.expect(cfg.app.crash_reporter == null);
     // 기본 windows: 1개 항목 (Window 기본값)
     try std.testing.expectEqual(@as(usize, 1), cfg.windows.len);
     try std.testing.expectEqual(@as(i64, 1024), cfg.windows[0].width);
@@ -30,6 +31,47 @@ test "Config default values" {
     try std.testing.expectEqualStrings("frontend/dist", cfg.frontend.dist_dir);
 }
 
+test "Config.loadFromJsonBytes parses app.crashReporter startup config" {
+    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{
+        \\  "app": {
+        \\    "name": "Crashy",
+        \\    "version": "2.0.0",
+        \\    "crashReporter": {
+        \\      "productName": "Crashy Product",
+        \\      "submitURL": "https://crash.example/submit",
+        \\      "uploadToServer": false,
+        \\      "ignoreSystemCrashHandler": true,
+        \\      "rateLimit": false,
+        \\      "maxUploadsPerDay": 3,
+        \\      "maxDatabaseSizeInMb": 9,
+        \\      "maxDatabaseAgeInDays": 11,
+        \\      "extra": { "suite": "config" },
+        \\      "globalExtra": { "channel": "nightly" }
+        \\    }
+        \\  }
+        \\}
+    );
+    defer cfg.deinit();
+
+    const cr = cfg.app.crash_reporter.?;
+    try std.testing.expectEqualStrings("Crashy Product", cr.product_name.?);
+    try std.testing.expectEqualStrings("https://crash.example/submit", cr.submit_url.?);
+    try std.testing.expect(!cr.upload_to_server);
+    try std.testing.expect(cr.ignore_system_crash_handler);
+    try std.testing.expect(!cr.rate_limit);
+    try std.testing.expectEqual(@as(u32, 3), cr.max_uploads_per_day);
+    try std.testing.expectEqual(@as(u32, 9), cr.max_database_size_mb);
+    try std.testing.expectEqual(@as(u32, 11), cr.max_database_age_days);
+    try std.testing.expectEqual(@as(usize, 1), cr.extra.len);
+    try std.testing.expectEqualStrings("suite", cr.extra[0].key);
+    try std.testing.expectEqualStrings("config", cr.extra[0].value);
+    try std.testing.expectEqual(@as(usize, 1), cr.global_extra.len);
+
+    const opts = cr.toOptions(cfg.app.name, cfg.app.version);
+    try std.testing.expectEqualStrings("Crashy", opts.app_name);
+    try std.testing.expectEqualStrings("2.0.0", opts.product_version);
+}
 
 test "Config protocol default is file" {
     const cfg = config.Config{};

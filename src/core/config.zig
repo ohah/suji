@@ -2,6 +2,7 @@ const std = @import("std");
 const runtime = @import("runtime");
 const window_mod = @import("window");
 const util = @import("util");
+const crash_reporter = @import("crash_reporter.zig");
 
 /// Suji 프로젝트 설정
 /// suji.json에서 로드
@@ -47,6 +48,41 @@ pub const Config = struct {
         /// macOS `CFBundleURLTypes`). 비어있으면 미주입. 예: `["myapp"]` →
         /// `myapp://...` 가 OS 레벨에서 이 앱으로 라우팅(.app 번들 한정).
         deep_link_schemes: []const [:0]const u8 = &.{},
+        /// CEF Crashpad/Breakpad startup config. CEF는 initialize 전에
+        /// `crash_reporter.cfg`를 읽으므로 설정이 있으면 시작 전 cfg를 생성한다.
+        crash_reporter: ?CrashReporter = null,
+
+        pub const CrashReporter = struct {
+            enabled: bool = true,
+            product_name: ?[:0]const u8 = null,
+            submit_url: ?[:0]const u8 = null,
+            upload_to_server: bool = true,
+            ignore_system_crash_handler: bool = false,
+            rate_limit: bool = true,
+            max_uploads_per_day: u32 = 5,
+            max_database_size_mb: u32 = 20,
+            max_database_age_days: u32 = 5,
+            extra: []const crash_reporter.ExtraParam = &.{},
+            global_extra: []const crash_reporter.ExtraParam = &.{},
+
+            pub fn toOptions(self: CrashReporter, app_name: []const u8, app_version: []const u8) crash_reporter.Options {
+                return .{
+                    .enabled = self.enabled,
+                    .product_name = self.product_name orelse app_name,
+                    .product_version = app_version,
+                    .app_name = app_name,
+                    .submit_url = self.submit_url,
+                    .upload_to_server = self.upload_to_server,
+                    .ignore_system_crash_handler = self.ignore_system_crash_handler,
+                    .rate_limit = self.rate_limit,
+                    .max_uploads_per_day = self.max_uploads_per_day,
+                    .max_database_size_mb = self.max_database_size_mb,
+                    .max_database_age_days = self.max_database_age_days,
+                    .extra = self.extra,
+                    .global_extra = self.global_extra,
+                };
+            }
+        };
     };
 
     pub const Protocol = enum { suji, file };
@@ -189,6 +225,20 @@ pub const Config = struct {
         return list.toOwnedSlice(a) catch &.{};
     }
 
+    fn parseCrashParams(a: std.mem.Allocator, v: std.json.Value) []const crash_reporter.ExtraParam {
+        if (v != .object) return &.{};
+        var list = std.ArrayList(crash_reporter.ExtraParam).empty;
+        var it = v.object.iterator();
+        while (it.next()) |entry| {
+            if (entry.value_ptr.* != .string) continue;
+            list.append(a, .{
+                .key = dupeStr(a, entry.key_ptr.*),
+                .value = dupeStr(a, entry.value_ptr.string),
+            }) catch continue;
+        }
+        return list.toOwnedSlice(a) catch &.{};
+    }
+
     // ============================================
     // JSON ObjectMap 필드 추출 헬퍼 — 16+ 회 반복되는 `if (m.get("X")) |v| if (v == .Y)` 패턴 단축.
     // 매 필드마다 (1) key 존재 (2) 타입 일치 두 가드를 하나로 묶음.
@@ -213,7 +263,12 @@ pub const Config = struct {
 
     fn loadJson(allocator: std.mem.Allocator) !Config {
         const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
+        defer allocator.free(content);
 
+        return loadFromJsonBytes(allocator, content);
+    }
+
+    pub fn loadFromJsonBytes(allocator: std.mem.Allocator, content: []const u8) !Config {
         const arena = try allocator.create(std.heap.ArenaAllocator);
         errdefer allocator.destroy(arena);
         arena.* = std.heap.ArenaAllocator.init(allocator);
@@ -221,7 +276,6 @@ pub const Config = struct {
         const a = arena.allocator();
 
         const owned = a.dupe(u8, content) catch return error.OutOfMemory;
-        allocator.free(content);
 
         var config = Config{ ._arena = arena };
 
@@ -237,6 +291,24 @@ pub const Config = struct {
                 if (getStr(app, "entitlements")) |s| config.app.entitlements = dupeStr(a, s);
                 if (getBool(app, "stripCef")) |b| config.app.strip_cef = b;
                 if (getBool(app, "quitOnAllWindowsClosed")) |b| config.app.quit_on_all_windows_closed = b;
+                if (app.get("crashReporter")) |cr_val| {
+                    if (cr_val == .object) {
+                        const cr_obj = cr_val.object;
+                        var cr = App.CrashReporter{};
+                        if (getBool(cr_obj, "enabled")) |b| cr.enabled = b;
+                        if (getStr(cr_obj, "productName")) |s| cr.product_name = dupeStr(a, s);
+                        if (getStr(cr_obj, "submitURL")) |s| cr.submit_url = dupeStr(a, s);
+                        if (getBool(cr_obj, "uploadToServer")) |b| cr.upload_to_server = b;
+                        if (getBool(cr_obj, "ignoreSystemCrashHandler")) |b| cr.ignore_system_crash_handler = b;
+                        if (getBool(cr_obj, "rateLimit")) |b| cr.rate_limit = b;
+                        if (getInt(cr_obj, "maxUploadsPerDay")) |n| cr.max_uploads_per_day = util.nonNegU32(n);
+                        if (getInt(cr_obj, "maxDatabaseSizeInMb")) |n| cr.max_database_size_mb = util.nonNegU32(n);
+                        if (getInt(cr_obj, "maxDatabaseAgeInDays")) |n| cr.max_database_age_days = util.nonNegU32(n);
+                        if (cr_obj.get("extra")) |v| cr.extra = parseCrashParams(a, v);
+                        if (cr_obj.get("globalExtra")) |v| cr.global_extra = parseCrashParams(a, v);
+                        config.app.crash_reporter = cr;
+                    }
+                }
                 if (app.get("locales")) |loc_val| {
                     if (loc_val == .array) {
                         var list = std.ArrayList([:0]const u8).empty;

@@ -46,6 +46,32 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "딥링크 URL scheme. macOS .app 번들 Info.plist CFBundleURLTypes 자동 주입 → `myapp://...` 가 OS 레벨에서 이 앱으로 라우팅. 유효 scheme(ALPHA 시작, [A-Za-z0-9+.-])만, 무효는 skip."
+        },
+        "crashReporter": {
+          "type": "object",
+          "description": "CEF Crashpad/Breakpad startup config. CEF initialize 전에 crash_reporter.cfg를 생성한다.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "productName": { "type": "string", "description": "Crash reporter ProductName. 기본값은 app.name." },
+            "submitURL": { "type": "string", "description": "크래시 업로드 endpoint. uploadToServer=true면 runtime start에서도 필요." },
+            "uploadToServer": { "type": "boolean", "default": true },
+            "ignoreSystemCrashHandler": { "type": "boolean", "default": false },
+            "rateLimit": { "type": "boolean", "default": true },
+            "maxUploadsPerDay": { "type": "integer", "minimum": 0, "default": 5 },
+            "maxDatabaseSizeInMb": { "type": "integer", "minimum": 0, "default": 20 },
+            "maxDatabaseAgeInDays": { "type": "integer", "minimum": 0, "default": 5 },
+            "extra": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "프로세스별 crash key 선언/초기값. key는 ASCII [A-Za-z0-9_-] 39바이트 이하."
+            },
+            "globalExtra": {
+              "type": "object",
+              "additionalProperties": { "type": "string" },
+              "description": "모든 프로세스 crash key 선언/초기값. key는 ASCII [A-Za-z0-9_-] 39바이트 이하."
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

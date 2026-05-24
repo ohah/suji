@@ -154,6 +154,11 @@ fn onAllClosed(_: suji.Event) void {
 //   (CG capture + ImageIO 인코딩, base64 IPC 한도 우회). ⚠️ Screen Recording
 //   TCC 권한 필요 — 미부여 시 success:false. 인코딩 경로는 권한 실기기에서만
 //   실행(헤드리스=컴파일/링크+graceful-fail 만 검증, 정직 경계)
+// suji.crashReporter.start("\"uploadToServer\":false") / getParameters()
+//   / addExtraParameter(key,value) / removeExtraParameter(key)
+//   / getUploadToServer() / setUploadToServer(false)
+//   (CEF Crashpad/Breakpad 1차. 첫 프로세스 enable은 app.crashReporter cfg 필요,
+//   실제 dump upload/DB 조회는 후속 정직 경계)
 // suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)
 //   (macOS IOPMAssertion, Linux XScreenSaverSuspend, Windows Power Request API)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
@@ -339,8 +344,10 @@ suji.platform                                                // "macos" | "linux
 // await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 
-// import { screen, powerSaveBlocker, safeStorage, app, webRequest } from '@suji/api';
+// import { screen, powerSaveBlocker, safeStorage, app, webRequest, crashReporter } from '@suji/api';
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
+// await crashReporter.start({uploadToServer:false, extra:{suite:"e2e"}})
+// await crashReporter.addExtraParameter("mode", "test") / getParameters()
 // const id = await powerSaveBlocker.start("prevent_display_sleep")
 // await powerSaveBlocker.stop(id)                                         (macOS/Linux/Windows)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
@@ -419,8 +426,9 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
 // await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
-// import { screen, powerSaveBlocker, safeStorage, app, webRequest, session } from '@suji/node'
+// import { screen, powerSaveBlocker, safeStorage, app, webRequest, session, crashReporter } from '@suji/node'
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
+// await crashReporter.start({uploadToServer:false})
 // const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)  (macOS/Linux/Windows)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 // await app.dock.setBadge("99") / app.dock.getBadge()

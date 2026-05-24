@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, BrowserWindow, windows } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, BrowserWindow, windows } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -301,6 +301,45 @@ describe("screen.getAllDisplays", () => {
     expect(r.length).toBe(1);
     expect(r[0].isPrimary).toBe(true);
     expect(r[0].scaleFactor).toBe(2);
+  });
+});
+
+describe("crashReporter", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("start sends options and maps success", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await crashReporter.start({ uploadToServer: false, extra: { suite: "unit" } })).toBe(true);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "crash_reporter_start",
+      uploadToServer: false,
+      extra: { suite: "unit" },
+    });
+  });
+
+  it("parameters and upload flag wrappers unwrap core responses", async () => {
+    mockBridge.core.mockResolvedValueOnce({ parameters: { suite: "unit" } });
+    expect(await crashReporter.getParameters()).toEqual({ suite: "unit" });
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await crashReporter.addExtraParameter("mode", "test")).toBe(true);
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await crashReporter.removeExtraParameter("mode")).toBe(true);
+
+    mockBridge.core.mockResolvedValueOnce({ uploadToServer: false });
+    expect(await crashReporter.getUploadToServer()).toBe(false);
+
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await crashReporter.setUploadToServer(false)).toBe(true);
+  });
+
+  it("reports wrappers return empty/null defaults", async () => {
+    mockBridge.core.mockResolvedValueOnce({ reports: [] });
+    expect(await crashReporter.getUploadedReports()).toEqual([]);
+
+    mockBridge.core.mockResolvedValueOnce({ report: null });
+    expect(await crashReporter.getLastCrashReport()).toBeNull();
   });
 });
 

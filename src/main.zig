@@ -6,6 +6,7 @@ const suji = @import("root.zig");
 const embed = @import("embed.zig");
 const util = @import("util");
 const cef = @import("platform/cef.zig");
+const crash_reporter = @import("core/crash_reporter.zig");
 const window_mod = @import("window");
 const window_stack_mod = @import("window_stack");
 const window_ipc = @import("window_ipc");
@@ -1094,6 +1095,9 @@ fn prepareWindowUrl(
 
 fn initializeCefProcess(config: *const suji.Config) !void {
     const main_win = config.windows[0];
+    writeStartupCrashReporterConfig(allocatorScratch(), config) catch |err| {
+        log.warn("crash reporter cfg setup failed: {s}", .{@errorName(err)});
+    };
     try cef.initialize(.{
         .title = main_win.title,
         .width = @intCast(main_win.width),
@@ -1101,6 +1105,62 @@ fn initializeCefProcess(config: *const suji.Config) !void {
         .debug = main_win.debug,
         .app_name = config.app.name,
     });
+    applyStartupCrashReporterState(config);
+}
+
+fn allocatorScratch() std.mem.Allocator {
+    return runtime.gpa;
+}
+
+fn crashReporterConfigPath(buf: []u8, exe_path: []const u8) ?[]const u8 {
+    if (comptime builtin.os.tag == .macos) {
+        if (std.mem.indexOf(u8, exe_path, ".app/Contents/MacOS/")) |idx| {
+            const app_root = exe_path[0 .. idx + ".app".len];
+            return std.fmt.bufPrint(buf, "{s}/Contents/Resources/crash_reporter.cfg", .{app_root}) catch null;
+        }
+    }
+    const dir = std.fs.path.dirname(exe_path) orelse return null;
+    const sep: []const u8 = if (builtin.os.tag == .windows) "\\" else "/";
+    return std.fmt.bufPrint(buf, "{s}{s}crash_reporter.cfg", .{ dir, sep }) catch null;
+}
+
+fn writeTextFileAbsolute(path: []const u8, content: []const u8) !void {
+    if (std.fs.path.dirname(path)) |dir| {
+        std.Io.Dir.cwd().createDirPath(runtime.io, dir) catch |err| switch (err) {
+            error.PathAlreadyExists => {},
+            else => return err,
+        };
+    }
+    var file = try std.Io.Dir.cwd().createFile(runtime.io, path, .{});
+    defer file.close(runtime.io);
+    var wbuf: [4096]u8 = undefined;
+    var fw = file.writer(runtime.io, &wbuf);
+    try fw.interface.writeAll(content);
+    try fw.interface.flush();
+}
+
+fn writeStartupCrashReporterConfig(allocator: std.mem.Allocator, config: *const suji.Config) !void {
+    const cr = config.app.crash_reporter orelse return;
+    if (!cr.enabled) return;
+
+    const rendered = try crash_reporter.renderConfig(allocator, cr.toOptions(config.app.name, config.app.version));
+    defer allocator.free(rendered);
+
+    var exe_buf: [2048]u8 = undefined;
+    const exe_len = try std.process.executablePath(runtime.io, &exe_buf);
+    var path_buf: [4096]u8 = undefined;
+    const path = crashReporterConfigPath(&path_buf, exe_buf[0..exe_len]) orelse return error.InvalidPath;
+    try writeTextFileAbsolute(path, rendered);
+    log.info("crash reporter cfg written: {s}", .{path});
+}
+
+fn applyStartupCrashReporterState(config: *const suji.Config) void {
+    const cr = config.app.crash_reporter orelse return;
+    if (!cr.enabled) return;
+    g_crash_reporter_started = true;
+    g_crash_reporter_upload_to_server = cr.upload_to_server;
+    for (cr.extra) |p| _ = crashAddExtraParameter(p.key, p.value);
+    for (cr.global_extra) |p| _ = crashAddExtraParameter(p.key, p.value);
 }
 
 fn openWindow(
@@ -1372,6 +1432,110 @@ fn respondBase64Data(response_buf: []u8, cmd: []const u8, raw_bytes: []const u8)
         "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"data\":\"{s}\"}}",
         .{ cmd, encoded },
     ) catch null;
+}
+
+const MAX_CRASH_PARAMS: usize = 64;
+const CrashParam = struct {
+    key_buf: [crash_reporter.MAX_KEY_BYTES]u8 = undefined,
+    key_len: usize = 0,
+    value_buf: [crash_reporter.MAX_VALUE_BYTES]u8 = undefined,
+    value_len: usize = 0,
+
+    fn key(self: *const CrashParam) []const u8 {
+        return self.key_buf[0..self.key_len];
+    }
+
+    fn value(self: *const CrashParam) []const u8 {
+        return self.value_buf[0..self.value_len];
+    }
+};
+
+var g_crash_reporter_started: bool = false;
+var g_crash_reporter_upload_to_server: bool = true;
+var g_crash_params: [MAX_CRASH_PARAMS]CrashParam = [_]CrashParam{.{}} ** MAX_CRASH_PARAMS;
+var g_crash_param_count: usize = 0;
+
+fn crashParamIndex(key: []const u8) ?usize {
+    for (g_crash_params[0..g_crash_param_count], 0..) |p, i| {
+        if (std.mem.eql(u8, p.key(), key)) return i;
+    }
+    return null;
+}
+
+fn crashAddExtraParameter(key: []const u8, value: []const u8) bool {
+    if (!crash_reporter.isValidCrashKey(key)) return false;
+    if (value.len > crash_reporter.MAX_VALUE_BYTES) return false;
+
+    const idx = crashParamIndex(key) orelse blk: {
+        if (g_crash_param_count >= g_crash_params.len) return false;
+        const next = g_crash_param_count;
+        g_crash_param_count += 1;
+        break :blk next;
+    };
+
+    @memcpy(g_crash_params[idx].key_buf[0..key.len], key);
+    g_crash_params[idx].key_len = key.len;
+    @memcpy(g_crash_params[idx].value_buf[0..value.len], value);
+    g_crash_params[idx].value_len = value.len;
+
+    if (cef.crashReporterEnabled()) _ = cef.crashReporterSetKeyValue(key, value);
+    return true;
+}
+
+fn crashRemoveExtraParameter(key: []const u8) bool {
+    const idx = crashParamIndex(key) orelse return false;
+    if (cef.crashReporterEnabled()) _ = cef.crashReporterSetKeyValue(key, "");
+
+    var i = idx;
+    while (i + 1 < g_crash_param_count) : (i += 1) {
+        g_crash_params[i] = g_crash_params[i + 1];
+    }
+    g_crash_param_count -= 1;
+    g_crash_params[g_crash_param_count] = .{};
+    return true;
+}
+
+fn extractUnescapedField(req_clean: []const u8, key: []const u8, buf: []u8) ?[]const u8 {
+    const raw = util.extractJsonString(req_clean, key) orelse return null;
+    const n = util.unescapeJsonStr(raw, buf) orelse return null;
+    return buf[0..n];
+}
+
+fn crashApplyExtraObject(req_clean: []const u8) void {
+    var parse_buf: [util.MAX_REQUEST]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&parse_buf);
+    const parsed = std.json.parseFromSlice(std.json.Value, fba.allocator(), req_clean, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .object) return;
+    const extra_val = parsed.value.object.get("extra") orelse return;
+    if (extra_val != .object) return;
+    var it = extra_val.object.iterator();
+    while (it.next()) |entry| {
+        if (entry.value_ptr.* != .string) continue;
+        _ = crashAddExtraParameter(entry.key_ptr.*, entry.value_ptr.string);
+    }
+}
+
+fn crashParametersResponse(response_buf: []u8) ?[]const u8 {
+    var w: usize = 0;
+    const head = std.fmt.bufPrint(response_buf[w..], "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_parameters\",\"parameters\":{{", .{}) catch return null;
+    w += head.len;
+    for (g_crash_params[0..g_crash_param_count], 0..) |p, i| {
+        var key_buf: [128]u8 = undefined;
+        var val_buf: [2048]u8 = undefined;
+        const key_n = util.escapeJsonStrFull(p.key(), &key_buf) orelse return null;
+        const val_n = util.escapeJsonStrFull(p.value(), &val_buf) orelse return null;
+        const sep: []const u8 = if (i == 0) "" else ",";
+        const part = std.fmt.bufPrint(
+            response_buf[w..],
+            "{s}\"{s}\":\"{s}\"",
+            .{ sep, key_buf[0..key_n], val_buf[0..val_n] },
+        ) catch return null;
+        w += part.len;
+    }
+    const tail = std.fmt.bufPrint(response_buf[w..], "}}}}", .{}) catch return null;
+    w += tail.len;
+    return response_buf[0..w];
 }
 
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
@@ -2022,6 +2186,65 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"desktop_capturer_capture_thumbnail\",\"success\":{}}}",
             .{ok},
+        ) catch null;
+    }
+
+    // crashReporter — CEF Crashpad/Breakpad bridge. Runtime start() stores
+    // upload flag + extra parameters; full first-process enablement requires
+    // app.crashReporter so CEF can read crash_reporter.cfg before initialize.
+    if (std.mem.eql(u8, cmd, "crash_reporter_start")) {
+        const upload = util.extractJsonBool(req_clean, "uploadToServer") orelse true;
+        const submit = util.extractJsonString(req_clean, "submitURL");
+        if (upload and (submit == null or submit.?.len == 0)) {
+            return coreError(response_buf, "crash_reporter_start", "submitURL_required");
+        }
+        g_crash_reporter_started = true;
+        g_crash_reporter_upload_to_server = upload;
+        crashApplyExtraObject(req_clean);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_start\",\"success\":true,\"enabled\":{}}}",
+            .{cef.crashReporterEnabled()},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_get_parameters")) {
+        return crashParametersResponse(response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_add_extra_parameter")) {
+        var key_buf: [128]u8 = undefined;
+        var value_buf: [crash_reporter.MAX_VALUE_BYTES]u8 = undefined;
+        const key = extractUnescapedField(req_clean, "key", &key_buf) orelse "";
+        const value = extractUnescapedField(req_clean, "value", &value_buf) orelse "";
+        return respondSuccess(response_buf, "crash_reporter_add_extra_parameter", crashAddExtraParameter(key, value));
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_remove_extra_parameter")) {
+        var key_buf: [128]u8 = undefined;
+        const key = extractUnescapedField(req_clean, "key", &key_buf) orelse "";
+        return respondSuccess(response_buf, "crash_reporter_remove_extra_parameter", crashRemoveExtraParameter(key));
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_get_upload_to_server")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_upload_to_server\",\"uploadToServer\":{}}}",
+            .{g_crash_reporter_upload_to_server},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_set_upload_to_server")) {
+        g_crash_reporter_upload_to_server = util.extractJsonBool(req_clean, "uploadToServer") orelse false;
+        return respondSuccess(response_buf, "crash_reporter_set_upload_to_server", g_crash_reporter_started);
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_get_uploaded_reports")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_uploaded_reports\",\"reports\":[]}}",
+            .{},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "crash_reporter_get_last_crash_report")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_last_crash_report\",\"report\":null}}",
+            .{},
         ) catch null;
     }
 

@@ -120,6 +120,67 @@ describe("desktopCapturer.getSources", () => {
   });
 });
 
+describe("crashReporter", () => {
+  test("start(uploadToServer:false) + parameters round-trip", async () => {
+    const key = `suite_${Date.now()}`;
+    const start = await core<{ success: boolean; enabled: boolean }>({
+      cmd: "crash_reporter_start",
+      uploadToServer: false,
+      extra: { [key]: "e2e" },
+    });
+    expect(start.success).toBe(true);
+    expect(typeof start.enabled).toBe("boolean");
+
+    const params = await core<{ parameters: Record<string, string> }>({
+      cmd: "crash_reporter_get_parameters",
+    });
+    expect(params.parameters[key]).toBe("e2e");
+  });
+
+  test("add/remove extra parameter and upload flag wrappers", async () => {
+    const key = `mode_${Date.now()}`;
+    const add = await core<{ success: boolean }>({
+      cmd: "crash_reporter_add_extra_parameter",
+      key,
+      value: "manual",
+    });
+    expect(add.success).toBe(true);
+
+    let params = await core<{ parameters: Record<string, string> }>({
+      cmd: "crash_reporter_get_parameters",
+    });
+    expect(params.parameters[key]).toBe("manual");
+
+    const set = await core<{ success: boolean }>({
+      cmd: "crash_reporter_set_upload_to_server",
+      uploadToServer: false,
+    });
+    expect(set.success).toBe(true);
+    const upload = await core<{ uploadToServer: boolean }>({
+      cmd: "crash_reporter_get_upload_to_server",
+    });
+    expect(upload.uploadToServer).toBe(false);
+
+    const remove = await core<{ success: boolean }>({
+      cmd: "crash_reporter_remove_extra_parameter",
+      key,
+    });
+    expect(remove.success).toBe(true);
+    params = await core<{ parameters: Record<string, string> }>({
+      cmd: "crash_reporter_get_parameters",
+    });
+    expect(params.parameters[key]).toBeUndefined();
+  });
+
+  test("reports APIs return stable empty/null shape when no crash uploaded", async () => {
+    const reports = await core<{ reports: any[] }>({ cmd: "crash_reporter_get_uploaded_reports" });
+    expect(Array.isArray(reports.reports)).toBe(true);
+
+    const last = await core<{ report: any | null }>({ cmd: "crash_reporter_get_last_crash_report" });
+    expect(last.report).toBeNull();
+  });
+});
+
 describe("app.dock.setBadge", () => {
   test("set → get round-trip", async () => {
     await core({ cmd: "dock_set_badge", text: "42" });
@@ -1082,6 +1143,27 @@ describe("@suji/api SDK — round-trip", () => {
     expect(Array.isArray(r)).toBe(true);
     expect(r.some((s) => s.type === "screen")).toBe(true);
     expect(r[0].id).toMatch(/^screen:\d+:0$/);
+  });
+
+  test("crashReporter SDK wrappers round-trip parameters", async () => {
+    const key = `sdk_${Date.now()}`;
+    expect(await sdk<boolean>("crashReporter.start", {
+      uploadToServer: false,
+      extra: { [key]: "yes" },
+    })).toBe(true);
+
+    let params = await sdk<Record<string, string>>("crashReporter.getParameters");
+    expect(params[key]).toBe("yes");
+
+    expect(await sdk<boolean>("crashReporter.addExtraParameter", `${key}_2`, "ok")).toBe(true);
+    params = await sdk<Record<string, string>>("crashReporter.getParameters");
+    expect(params[`${key}_2`]).toBe("ok");
+
+    expect(await sdk<boolean>("crashReporter.removeExtraParameter", `${key}_2`)).toBe(true);
+    expect(await sdk<boolean>("crashReporter.setUploadToServer", false)).toBe(true);
+    expect(await sdk<boolean>("crashReporter.getUploadToServer")).toBe(false);
+    expect(await sdk<any[]>("crashReporter.getUploadedReports")).toEqual([]);
+    expect(await sdk<any | null>("crashReporter.getLastCrashReport")).toBeNull();
   });
 
   test("app.dock setBadge → getBadge round-trip", async () => {

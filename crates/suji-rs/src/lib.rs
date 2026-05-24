@@ -1848,6 +1848,71 @@ pub mod web_request {
     }
 }
 
+pub mod crash_reporter {
+    use crate::{invoke, serde_json};
+
+    pub(crate) fn start_request(upload_to_server: bool) -> String {
+        serde_json::json!({
+            "cmd": "crash_reporter_start",
+            "uploadToServer": upload_to_server,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn add_extra_parameter_request(key: &str, value: &str) -> String {
+        serde_json::json!({
+            "cmd": "crash_reporter_add_extra_parameter",
+            "key": key,
+            "value": value,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn remove_extra_parameter_request(key: &str) -> String {
+        serde_json::json!({
+            "cmd": "crash_reporter_remove_extra_parameter",
+            "key": key,
+        })
+        .to_string()
+    }
+
+    /// Runtime start. 첫 프로세스 Crashpad enable은 suji.json app.crashReporter 필요.
+    pub fn start(upload_to_server: bool) -> Option<String> {
+        invoke("__core__", &start_request(upload_to_server))
+    }
+
+    pub fn get_parameters() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"crash_reporter_get_parameters"}"#)
+    }
+
+    pub fn add_extra_parameter(key: &str, value: &str) -> Option<String> {
+        invoke("__core__", &add_extra_parameter_request(key, value))
+    }
+
+    pub fn remove_extra_parameter(key: &str) -> Option<String> {
+        invoke("__core__", &remove_extra_parameter_request(key))
+    }
+
+    pub fn get_upload_to_server() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"crash_reporter_get_upload_to_server"}"#)
+    }
+
+    pub fn set_upload_to_server(upload_to_server: bool) -> Option<String> {
+        invoke("__core__", &serde_json::json!({
+            "cmd": "crash_reporter_set_upload_to_server",
+            "uploadToServer": upload_to_server,
+        }).to_string())
+    }
+
+    pub fn get_uploaded_reports() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"crash_reporter_get_uploaded_reports"}"#)
+    }
+
+    pub fn get_last_crash_report() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"crash_reporter_get_last_crash_report"}"#)
+    }
+}
+
 pub mod power_save_blocker {
     use crate::{invoke, serde_json};
 
@@ -2483,6 +2548,27 @@ mod tests {
             serde_json::from_str(&crate::power_save_blocker::stop_request(7)).unwrap();
         assert_eq!(s["cmd"], "power_save_blocker_stop");
         assert_eq!(s["id"], 7);
+    }
+
+    #[test]
+    fn crash_reporter_requests_build_valid_json() {
+        let start: serde_json::Value =
+            serde_json::from_str(&crate::crash_reporter::start_request(false)).unwrap();
+        assert_eq!(start["cmd"], "crash_reporter_start");
+        assert_eq!(start["uploadToServer"], false);
+
+        let add: serde_json::Value =
+            serde_json::from_str(&crate::crash_reporter::add_extra_parameter_request("suite", "rs"))
+                .unwrap();
+        assert_eq!(add["cmd"], "crash_reporter_add_extra_parameter");
+        assert_eq!(add["key"], "suite");
+        assert_eq!(add["value"], "rs");
+
+        let remove: serde_json::Value =
+            serde_json::from_str(&crate::crash_reporter::remove_extra_parameter_request("suite"))
+                .unwrap();
+        assert_eq!(remove["cmd"], "crash_reporter_remove_extra_parameter");
+        assert_eq!(remove["key"], "suite");
     }
 
     #[test]

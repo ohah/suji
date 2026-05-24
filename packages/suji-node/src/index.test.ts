@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, type InvokeEvent } from './index';
+import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -223,6 +223,39 @@ describe('screen', () => {
     expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"screen_get_all_displays"}');
     expect(r.length).toBe(1);
     expect(r[0].isPrimary).toBe(true);
+  });
+});
+
+describe('crashReporter', () => {
+  it('start sends options and maps success', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await crashReporter.start({ uploadToServer: false, extra: { suite: 'unit' } })).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"crash_reporter_start","uploadToServer":false,"extra":{"suite":"unit"}}');
+  });
+
+  it('parameters and upload flag wrappers unwrap core responses', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"parameters":{"suite":"unit"}}');
+    expect(await crashReporter.getParameters()).toEqual({ suite: 'unit' });
+
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await crashReporter.addExtraParameter('mode', 'test')).toBe(true);
+
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await crashReporter.removeExtraParameter('mode')).toBe(true);
+
+    bridge.invoke.mockResolvedValueOnce('{"uploadToServer":false}');
+    expect(await crashReporter.getUploadToServer()).toBe(false);
+
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await crashReporter.setUploadToServer(false)).toBe(true);
+  });
+
+  it('report wrappers return array/null', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"reports":[]}');
+    expect(await crashReporter.getUploadedReports()).toEqual([]);
+
+    bridge.invoke.mockResolvedValueOnce('{"report":null}');
+    expect(await crashReporter.getLastCrashReport()).toBeNull();
   });
 });
 

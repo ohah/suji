@@ -1400,6 +1400,66 @@ export const desktopCapturer = {
   },
 };
 
+export interface CrashReporterStartOptions {
+  submitURL?: string;
+  productName?: string;
+  companyName?: string;
+  uploadToServer?: boolean;
+  ignoreSystemCrashHandler?: boolean;
+  rateLimit?: boolean;
+  compress?: boolean;
+  extra?: Record<string, string>;
+  globalExtra?: Record<string, string>;
+}
+
+export interface CrashReport {
+  date: string;
+  id: string;
+}
+
+export const crashReporter = {
+  /** Runtime state 등록. 첫 프로세스 Crashpad enable은 suji.json app.crashReporter 필요. */
+  async start(options: CrashReporterStartOptions = {}): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'crash_reporter_start', ...options });
+    return r.success === true;
+  },
+
+  async getParameters(): Promise<Record<string, string>> {
+    const r = await invoke<{ parameters: Record<string, string> }>('__core__', { cmd: 'crash_reporter_get_parameters' });
+    return r.parameters ?? {};
+  },
+
+  async addExtraParameter(key: string, value: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'crash_reporter_add_extra_parameter', key, value });
+    return r.success === true;
+  },
+
+  async removeExtraParameter(key: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'crash_reporter_remove_extra_parameter', key });
+    return r.success === true;
+  },
+
+  async getUploadToServer(): Promise<boolean> {
+    const r = await invoke<{ uploadToServer: boolean }>('__core__', { cmd: 'crash_reporter_get_upload_to_server' });
+    return r.uploadToServer === true;
+  },
+
+  async setUploadToServer(uploadToServer: boolean): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'crash_reporter_set_upload_to_server', uploadToServer });
+    return r.success === true;
+  },
+
+  async getUploadedReports(): Promise<CrashReport[]> {
+    const r = await invoke<{ reports: CrashReport[] }>('__core__', { cmd: 'crash_reporter_get_uploaded_reports' });
+    return r.reports ?? [];
+  },
+
+  async getLastCrashReport(): Promise<CrashReport | null> {
+    const r = await invoke<{ report: CrashReport | null }>('__core__', { cmd: 'crash_reporter_get_last_crash_report' });
+    return r.report ?? null;
+  },
+};
+
 export const webRequest = {
   /** URL glob blocklist 등록 (Electron `session.webRequest`). `*` wildcard만 지원.
    *  최대 32개/256자per. 빈 list 호출 시 모든 패턴 제거. */

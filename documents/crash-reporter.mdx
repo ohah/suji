@@ -1,0 +1,62 @@
+---
+title: crashReporter
+description: CEF Crashpad/Breakpad 기반 크래시 리포터 API
+---
+
+# crashReporter
+
+Electron `crashReporter`에 대응하는 1차 API. 런타임 API는 `extra` parameter와
+업로드 플래그 상태를 제공하고, CEF Crashpad/Breakpad가 실제로 첫 프로세스부터 켜지려면
+`suji.json`의 `app.crashReporter` 설정으로 시작 전에 `crash_reporter.cfg`를 생성해야 한다.
+
+## suji.json
+
+```json
+{
+  "app": {
+    "name": "My App",
+    "version": "1.0.0",
+    "crashReporter": {
+      "submitURL": "https://crash.example/submit",
+      "uploadToServer": true,
+      "extra": { "channel": "stable" }
+    }
+  }
+}
+```
+
+CEF 제약상 `crash_reporter.cfg`는 initialize 전에 존재해야 한다. macOS `.app` 번들은
+`Contents/Resources/crash_reporter.cfg`, Linux/Windows와 dev raw binary는 실행 파일 옆에 생성된다.
+
+## Frontend
+
+```ts
+import { crashReporter } from "@suji/api";
+
+await crashReporter.start({
+  uploadToServer: false,
+  extra: { suite: "e2e" },
+});
+
+await crashReporter.addExtraParameter("mode", "test");
+const params = await crashReporter.getParameters();
+await crashReporter.removeExtraParameter("mode");
+```
+
+## API
+
+| API | 설명 |
+|---|---|
+| `start(options)` | 런타임 상태와 `extra` 값을 등록. `uploadToServer:true`이면 `submitURL` 필요 |
+| `getParameters()` | 현재 등록된 extra parameter 객체 |
+| `addExtraParameter(key, value)` | crash key 추가/갱신. key는 ASCII `[A-Za-z0-9_-]`, 39바이트 이하 |
+| `removeExtraParameter(key)` | crash key 제거 |
+| `getUploadToServer()` / `setUploadToServer(bool)` | 업로드 플래그 조회/변경 |
+| `getUploadedReports()` | 현재 1차 구현에서는 빈 배열 |
+| `getLastCrashReport()` | 현재 1차 구현에서는 `null` |
+
+## 정직 경계
+
+- 실제 minidump 생성, Crashpad database 조회, 업로드 완료 목록은 아직 CI에서 검증하지 않는다.
+- `extra` 값은 CEF crash reporter가 켜져 있을 때 `cef_set_crash_key_value`로도 전달된다.
+- crash key 선언은 시작 전 cfg의 `[CrashKeys]`에 있어야 CEF가 dump에 안정적으로 포함한다.

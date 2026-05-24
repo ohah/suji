@@ -803,6 +803,32 @@ export declare const desktopCapturer: {
      */
     captureThumbnail(sourceId: string, path: string): Promise<boolean>;
 };
+export interface CrashReporterStartOptions {
+    submitURL?: string;
+    productName?: string;
+    companyName?: string;
+    uploadToServer?: boolean;
+    ignoreSystemCrashHandler?: boolean;
+    rateLimit?: boolean;
+    compress?: boolean;
+    extra?: Record<string, string>;
+    globalExtra?: Record<string, string>;
+}
+export interface CrashReport {
+    date: string;
+    id: string;
+}
+export declare const crashReporter: {
+    /** Runtime state 등록. 첫 프로세스 Crashpad enable은 suji.json app.crashReporter 필요. */
+    start(options?: CrashReporterStartOptions): Promise<boolean>;
+    getParameters(): Promise<Record<string, string>>;
+    addExtraParameter(key: string, value: string): Promise<boolean>;
+    removeExtraParameter(key: string): Promise<boolean>;
+    getUploadToServer(): Promise<boolean>;
+    setUploadToServer(uploadToServer: boolean): Promise<boolean>;
+    getUploadedReports(): Promise<CrashReport[]>;
+    getLastCrashReport(): Promise<CrashReport | null>;
+};
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
