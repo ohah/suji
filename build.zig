@@ -731,8 +731,11 @@ fn addInstallCefRuntimeStep(b: *std.Build, os_tag: std.Target.Os.Tag, cef_base: 
             "-NonInteractive",
             "-Command",
             \\$ErrorActionPreference = 'Stop'
-            \\$cefBase = $args[0]
-            \\$binDir = $args[1]
+            \\$cefBase = $env:SUJI_CEF_BASE
+            \\$binDir = $env:SUJI_BIN_DIR
+            \\if ([string]::IsNullOrWhiteSpace($cefBase) -or [string]::IsNullOrWhiteSpace($binDir)) {
+            \\  throw 'SUJI_CEF_BASE and SUJI_BIN_DIR must be set'
+            \\}
             \\New-Item -ItemType Directory -Force -Path $binDir | Out-Null
             \\New-Item -ItemType Directory -Force -Path (Join-Path $binDir 'locales') | Out-Null
             \\$releaseFiles = @(
@@ -767,9 +770,9 @@ fn addInstallCefRuntimeStep(b: *std.Build, os_tag: std.Target.Os.Tag, cef_base: 
             \\  Copy-Item (Join-Path $locales '*') (Join-Path $binDir 'locales') -Recurse -Force -ErrorAction SilentlyContinue
             \\}
             ,
-            cef_base,
-            bin_dir,
         });
+        copy.setEnvironmentVariable("SUJI_CEF_BASE", cef_base);
+        copy.setEnvironmentVariable("SUJI_BIN_DIR", bin_dir);
         return &copy.step;
     }
 
