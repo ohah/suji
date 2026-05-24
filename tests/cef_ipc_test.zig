@@ -787,6 +787,7 @@ test "CEF renderer IPC — native dispatch failure does not leave JS promise pen
         "sendToBrowserFromContext",
         "invoke failed before browser dispatch",
         "g_pending_contexts[slot] = null",
+        "br.get_main_frame.?(br)",
         "deliverRendererResponse(pending_ctx",
         "deliverRendererResponse(fallback_ctx",
     }) |needle| {

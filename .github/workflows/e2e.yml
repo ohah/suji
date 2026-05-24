@@ -278,6 +278,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/xdg-runtime"
           chmod 700 "$RUNNER_TEMP/xdg-runtime"
           export LD_LIBRARY_PATH="$HOME/.suji/cef/linux-x86_64/Release:${LD_LIBRARY_PATH:-}"
+          # Chromium's Linux close() wrapper uses RTLD_NEXT; preloading libcef keeps
+          # libc after libcef in the dynamic link map on GitHub's headless runner.
+          export LD_PRELOAD="$HOME/.suji/cef/linux-x86_64/Release/libcef.so${LD_PRELOAD:+:$LD_PRELOAD}"
           XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" \
             xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
             dbus-run-session -- bash tests/e2e/run-view-lifecycle.sh

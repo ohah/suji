@@ -6040,12 +6040,15 @@ fn handleBrowserInvoke(
     }
 
     // 응답 CefProcessMessage 생성
-    sendInvokeResponse(frame, seq_id, success, result);
+    sendInvokeResponse(browser, frame, seq_id, success, result);
     return 1;
 }
 
-fn sendInvokeResponse(frame: ?*c._cef_frame_t, seq_id: i32, success: bool, result: []const u8) void {
-    const f = frame orelse return;
+fn sendInvokeResponse(browser: ?*c._cef_browser_t, frame: ?*c._cef_frame_t, seq_id: i32, success: bool, result: []const u8) void {
+    const f = frame orelse blk: {
+        const br = browser orelse return;
+        break :blk asPtr(c.cef_frame_t, br.get_main_frame.?(br)) orelse return;
+    };
 
     var resp_name: c.cef_string_t = .{};
     setCefString(&resp_name, "suji:response");
