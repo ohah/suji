@@ -92,8 +92,10 @@ native child-window attach 경로가 없으므로 overlay child view가 기본 p
   host/sibling/recreate 생존을 검증한다.
 - Linux/Windows policy: `src/platform/cef_views_policy.zig` 단위 테스트가 CEF-free로
   default enable과 child path 선택(macOS child window, Linux/Windows overlay)을 고정한다.
-- Linux/Windows runtime: 실제 CEF runner에서 `createView`/bounds/visibility/destroy E2E가
-  아직 필요하다. 로컬 macOS E2E 결과로 이 항목을 완료 처리하지 않는다.
+- Linux/Windows runtime: GitHub Actions `webcontentsview-cross-platform` job이 실제 Linux/Windows
+  CEF runner에서 `createView`/bounds/visibility/destroy E2E를 실행한다. CI에서 초기
+  `about:blank` 커밋 후 요청 URL navigation이 유실될 수 있어 CEF Views top-level 초기 URL은
+  UI-thread delayed retry로 보강했다.
 
 ## SujiCore 확장
 

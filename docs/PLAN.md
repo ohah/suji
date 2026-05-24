@@ -1375,7 +1375,7 @@ suji build → 결과물:
 | Security-scoped bookmarks (sandbox 영속 권한) | `app.startAccessing...` | -- | ✅ `app.createSecurityScopedBookmark(path)` + `start/stopAccessingSecurityScopedResource`. NSURL bookmarkDataWithOptions(WithSecurityScope) → base64, URLByResolvingBookmarkData → accessId 풀(32) retain/release. Electron stop 클로저 대신 opaque accessId+stop cmd(IPC 모델). 4 SDK + e2e 8(create round-trip/resolve path/start·stop lifecycle/이중해제 가드/에러 분기) + sandbox/main.plist `files.bookmarks.app-scope` entitlement. ⚠️ 비-sandbox(기본)에선 일반 bookmark — API round-trip은 실증되나 sandbox escapement 실효는 MAS 환경 필요 = 로컬 미검증 |
 | iframe sandbox / origin allowlist | CSP `frame-src` 수동 + `<webview>` partition | `tauri.conf.json` `app.security.csp` | ✅ `security.iframeAllowedOrigins` config — CSP frame-src 자동 합성. default block (`'none'`) + `["*"]` escape |
 | contextBridge / preload script | preload로 Node API isolation | -- | N/A — Suji는 frontend에 Node API 자체 미노출 (V8 binding이 `__suji__.{invoke,emit}` 2개만 + JS helper). Electron의 isolation 목적은 Node integration 격리인데 Suji는 처음부터 격리됨 |
-| `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | 🟡 별도 창은 `windows.create({url})` ✅. 한 창 multi-content 합성은 `windows.createView` Phase 17-B CEF Views 경로로 macOS 기본 지원. dynamic `destroyView` 후 child target cleanup/host 생존/recreate E2E 검증 완료. Linux/Windows 동등 구현은 17-B.7 후속 |
+| `<webview>` tag (격리된 sub-content) | `<webview>` (별도 process 격리) + `WebContentsView` (한 창 multi-content 합성) | `WebviewWindow` (별도 창만 — 한 창 합성 X) | ✅ 별도 창은 `windows.create({url})` ✅. 한 창 multi-content 합성은 `windows.createView` Phase 17-B CEF Views 경로로 macOS/Linux/Windows 기본 지원. dynamic `destroyView` 후 child target cleanup/host 생존/recreate E2E 검증 완료. Linux/Windows overlay child view도 GitHub Actions runtime E2E로 검증 완료 |
 | webRequest 인터셉트 | `session.webRequest.onBeforeRequest` | -- | ✅ declarative URL glob blocklist (`webRequest.setBlockedUrls(patterns)` — `*` wildcard, 32개 max) + dynamic listener (RV_CONTINUE_ASYNC + pending callback storage) — `webRequest.onBeforeRequest({urls}, listener)`로 cancel/allow round-trip. 5 SDK 노출 + e2e 13 케이스 (cancel/allow round-trip 포함). **timeout fallback**: JS SDK `webRequest.onBeforeRequest` 가 listener 미응답/동기 throw 시 `options.timeoutMs`(기본 5000, ≤0=opt-out) 후 자동 통과(fail-open) — 네이티브 RV_CONTINUE_ASYNC hold 해제, 영구 hang 방지(cookie SDK 타임아웃 선례 동형, mock-bridge 단위 6 케이스). 네이티브측은 단일스레드·무 CEF-task 라 설계상 hold 유지(SDK 가 caller 책임 이행) |
 | safeStorage (Keychain 암호화) | `safeStorage.encryptString` | -- | 🟡 macOS만 (`safe_storage_set/get/delete` — Keychain Services). Win DPAPI / Linux libsecret 미구현 |
 
@@ -1525,16 +1525,18 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     - `powerMonitor` (NSWorkspace 옵저버 4 채널 — sleep 시뮬레이션 어려워 단위/grep만)
 
     Linux/Windows 후속: 모든 macOS-only 구현의 cross-platform 동등 구현 필요.
-17. 🟡 **`windows.createView` (Electron WebContentsView 동등) — Phase 17-B CEF Views 전환**.
+17. ✅ **`windows.createView` (Electron WebContentsView 동등) — Phase 17-B CEF Views 전환**.
     macOS/Linux/Windows 기본 경로는 CEF-managed `CefWindow + CefBrowserView` 기반. id 풀 공유 +
     모든 webContents API view 호환. 8 SDK 메서드 + view-created/view-destroyed 이벤트 +
     호스트 close 시 자동 정리. 17-A의 wrapper NSView + child NSView+CefBrowser 합성은
     dynamic `destroyView` 시 view render subprocess와 host main webContents가 함께 강종되는
     한계 때문에 제거했다. child NSWindow는 host에 attach해 macOS native input 차단을 피하고,
     dynamic `destroyView` 후 child target cleanup/host 생존/remaining view/recreate를
-    E2E로 검증했다. Linux/Windows는 CEF overlay child view 경로로 1차 배선했고
-    CEF-free platform/path policy 단위 테스트와 Rust/Go/Node backend SDK view API를 추가했다.
-    Linux/Windows 실 런타임 E2E는 17-B.7 잔여.
+    E2E로 검증했다. Linux/Windows는 CEF overlay child view 경로로 배선했고
+    CEF-free platform/path policy 단위 테스트, Rust/Go/Node backend SDK view API, GitHub Actions
+    Linux/Windows runtime E2E(`webcontentsview-cross-platform`)로 검증했다. CI에서 초기
+    `about:blank` 커밋 후 요청 URL navigation이 유실되는 CEF Views 레이스는 UI-thread delayed
+    retry로 고정했고, macOS/Linux/Windows E2E가 모두 통과한다.
     macOS CEF overlay child path는 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로 격리 — 자세한 plan:
     [docs/plans/17-B-cef-views-architecture.md](./plans/17-B-cef-views-architecture.md).
 18. ✅ **`webRequest` 인터셉트** — declarative URL glob blocklist + dynamic listener

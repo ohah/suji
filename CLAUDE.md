@@ -34,7 +34,7 @@ cd examples/node-backend && suji dev    # Node.js 단독
 # E2E 테스트 (puppeteer + bun) — 각 스크립트는 fresh suji dev 띄워 단독 실행
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
-bash tests/e2e/run-view-lifecycle.sh    # Phase 17-A WebContentsView (createView/z-order/lifecycle)
+bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView/z-order/lifecycle)
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
 bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows.create + isLoading polling)
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
@@ -312,7 +312,7 @@ suji.platform                                                // "macos" | "linux
 // await windows.openDevTools(id) / toggleDevTools(id) / isDevToolsOpened(id)  (Phase 4-C)
 // await windows.undo(id) / copy(id) / paste(id) / findInPage(id, "x", {})  (Phase 4-E)
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
-// await windows.createView({hostId, url, bounds}) → {viewId}              (Phase 17-A WebContentsView)
+// await windows.createView({hostId, url, bounds}) → {viewId}              (Phase 17-B WebContentsView)
 // await windows.addChildView(host, view, index?) / setTopView / removeChildView
 // await windows.setViewBounds(viewId, {...}) / setViewVisible(viewId, bool) / getChildViews(host)
 //   viewId는 windowId와 같은 풀 — windows.loadURL(viewId,...) / executeJavaScript / openDevTools

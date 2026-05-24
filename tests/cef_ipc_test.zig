@@ -778,6 +778,15 @@ fn readCefSource() ![]u8 {
     );
 }
 
+fn readProjectFile(path: []const u8, limit: usize) ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        path,
+        std.testing.allocator,
+        .limited(limit),
+    );
+}
+
 test "CEF renderer IPC — native dispatch failure does not leave JS promise pending" {
     const cef_src = try readCefSource();
     defer std.testing.allocator.free(cef_src);
@@ -814,6 +823,59 @@ test "CEF Views top-level initial navigation is forced after BrowserView materia
     const body = cef_src[create_window_start..create_window_end];
     try std.testing.expect(std.mem.indexOf(u8, body, force_needle) != null);
     try std.testing.expect(std.mem.indexOf(u8, body, retry_needle) != null);
+}
+
+test "Phase 17-B docs record Linux Windows runtime E2E completion" {
+    const plan = try readProjectFile("docs/PLAN.md", 2 * 1024 * 1024);
+    defer std.testing.allocator.free(plan);
+    const architecture = try readProjectFile("docs/plans/17-B-cef-views-architecture.md", 1024 * 1024);
+    defer std.testing.allocator.free(architecture);
+    const window_api = try readProjectFile("docs/WINDOW_API.md", 2 * 1024 * 1024);
+    defer std.testing.allocator.free(window_api);
+    const multi_webview = try readProjectFile("documents/multi-webview.mdx", 1024 * 1024);
+    defer std.testing.allocator.free(multi_webview);
+    const workflow = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow);
+
+    inline for (.{
+        "Linux/Windows 실 런타임 E2E는 17-B.7 잔여",
+        "Linux/Windows 실 런타임 E2E는 해당 플랫폼 runner에서 후속 확인 필요",
+        "Linux/Windows는 실 런타임 E2E가 남아 있다",
+        "실 플랫폼 E2E 검증이 남아 있다",
+        "Linux/Windows runtime: 실제 CEF runner에서 `createView`/bounds/visibility/destroy E2E가\n  아직 필요하다",
+        "### 17-B.7 — Linux/Windows (진행 중)",
+        "### 17-B.8 — Documentation & Migration Guide (진행 중)",
+        "Phase 17-A WebContentsView",
+    }) |stale| {
+        try std.testing.expect(std.mem.indexOf(u8, plan, stale) == null);
+        try std.testing.expect(std.mem.indexOf(u8, architecture, stale) == null);
+        try std.testing.expect(std.mem.indexOf(u8, window_api, stale) == null);
+        try std.testing.expect(std.mem.indexOf(u8, multi_webview, stale) == null);
+    }
+
+    inline for (.{
+        "17. ✅ **`windows.createView`",
+        "Linux/Windows runtime E2E(`webcontentsview-cross-platform`)로 검증",
+        "CI에서 초기\n    `about:blank` 커밋 후 요청 URL navigation이 유실되는 CEF Views 레이스",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, plan, needle) != null);
+    }
+
+    inline for (.{
+        "### 17-B.7 — Linux/Windows (완료)",
+        "### 17-B.8 — Documentation & Migration Guide (완료)",
+        "GitHub Actions `webcontentsview-cross-platform` matrix",
+        "CEF Views top-level 초기 URL 레이스",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, architecture, needle) != null);
+    }
+
+    try std.testing.expect(std.mem.indexOf(u8, window_api, "GitHub Actions `webcontentsview-cross-platform` job") != null);
+    try std.testing.expect(std.mem.indexOf(u8, multi_webview, "Linux/Windows overlay child path도 GitHub Actions") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "webcontentsview-cross-platform") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "ubuntu-24.04") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "windows-latest") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "bash tests/e2e/run-view-lifecycle.sh") != null);
 }
 
 test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
