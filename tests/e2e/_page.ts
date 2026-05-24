@@ -8,18 +8,29 @@ function isMainAppUrl(url: string): boolean {
 }
 
 async function hasSujiBridge(page: Page): Promise<boolean> {
-  try {
-    return await page.evaluate(() => Boolean((globalThis as any).__suji__?.core));
-  } catch {
-    return false;
-  }
+  return evaluateOr(page, () => Boolean((globalThis as any).__suji__?.core), false);
 }
 
 async function pageLocationHref(page: Page): Promise<string> {
+  return evaluateOr(page, () => location.href, "");
+}
+
+async function evaluateOr<T>(
+  page: Page,
+  fn: () => T,
+  fallback: T,
+  timeoutMs = 1000,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return await page.evaluate(() => location.href);
-  } catch {
-    return "";
+    return await Promise.race([
+      page.evaluate(fn).catch(() => fallback),
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -27,9 +38,9 @@ async function waitForStableSujiBridge(page: Page, timeoutMs = 10000, stableMs =
   const deadline = Date.now() + timeoutMs;
   let stableSince = 0;
   while (Date.now() < deadline) {
-    const ready = await page.evaluate(() => {
+    const ready = await evaluateOr(page, () => {
       return Boolean((globalThis as any).__suji__?.core) && document.readyState === "complete";
-    }).catch(() => false);
+    }, false);
 
     if (ready) {
       stableSince ||= Date.now();
@@ -42,7 +53,7 @@ async function waitForStableSujiBridge(page: Page, timeoutMs = 10000, stableMs =
   return false;
 }
 
-export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<Page> {
+export async function getMainPage(browser: Browser, timeoutMs = 25000): Promise<Page> {
   const deadline = Date.now() + timeoutMs;
   let lastUrls = "";
   while (Date.now() < deadline) {
