@@ -6513,36 +6513,52 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\  var raw_emit = window.__suji__.emit;
         \\  var s = window.__suji__;
         \\  s._pending = {};
+        \\  s._early = {};
+        \\  s._finishResolve = function(p, json) {
+        \\    try { p.resolve(JSON.parse(json)); } catch(e) { p.resolve(json); }
+        \\  };
+        \\  s._promiseFor = function(seq) {
+        \\    return new Promise(function(resolve, reject) {
+        \\      var early = s._early[seq];
+        \\      if (early) {
+        \\        delete s._early[seq];
+        \\        if (early.ok) s._finishResolve({ resolve: resolve }, early.value);
+        \\        else reject(new Error(early.value));
+        \\        return;
+        \\      }
+        \\      s._pending[seq] = { resolve: resolve, reject: reject };
+        \\    });
+        \\  };
         \\  s._nextResolve = function(seq, json) {
         \\    var p = s._pending[seq];
-        \\    if (p) { delete s._pending[seq]; try { p.resolve(JSON.parse(json)); } catch(e) { p.resolve(json); } }
+        \\    if (p) { delete s._pending[seq]; s._finishResolve(p, json); }
+        \\    else s._early[seq] = { ok: true, value: json };
         \\  };
         \\  s._nextReject = function(seq, err) {
         \\    var p = s._pending[seq];
         \\    if (p) { delete s._pending[seq]; p.reject(new Error(err)); }
+        \\    else s._early[seq] = { ok: false, value: err };
         \\  };
         \\  s.invoke = function(channel, data, options) {
         \\    var req = data ? Object.assign({cmd: channel}, data) : {cmd: channel};
         \\    var target = options && options.target;
         \\    var seq = raw_invoke(target || channel, JSON.stringify(req));
-        \\    return new Promise(function(resolve, reject) {
-        \\      s._pending[seq] = { resolve: resolve, reject: reject };
-        \\    });
+        \\    return s._promiseFor(seq);
         \\  };
         \\  s.emit = function(event, data, target) {
         \\    return raw_emit(event, JSON.stringify(data || {}), target);
         \\  };
         \\  s.chain = function(from, to, request) {
         \\    var seq = raw_invoke("__chain__", JSON.stringify({__chain:true,from:from,to:to,request:request}));
-        \\    return new Promise(function(resolve, reject) { s._pending[seq] = { resolve: resolve, reject: reject }; });
+        \\    return s._promiseFor(seq);
         \\  };
         \\  s.fanout = function(backends, request) {
         \\    var seq = raw_invoke("__fanout__", JSON.stringify({__fanout:true,backends:backends,request:request}));
-        \\    return new Promise(function(resolve, reject) { s._pending[seq] = { resolve: resolve, reject: reject }; });
+        \\    return s._promiseFor(seq);
         \\  };
         \\  s.core = function(request) {
         \\    var seq = raw_invoke("__core__", JSON.stringify({__core:true,request:request}));
-        \\    return new Promise(function(resolve, reject) { s._pending[seq] = { resolve: resolve, reject: reject }; });
+        \\    return s._promiseFor(seq);
         \\  };
         \\  s._listeners = {};
         \\  s.on = function(event, callback) {
