@@ -6,16 +6,13 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
-import { getMainPage } from "./_page";
+import { callCore, getMainPage } from "./_page";
 
 let browser: Browser;
 let page: Page;
 
 const core = <T = any>(request: Record<string, unknown>): Promise<T> =>
-  page.evaluate(
-    (req) => (window as any).__suji__.core(JSON.stringify(req)),
-    request as any,
-  ) as Promise<T>;
+  callCore<T>(page, request);
 
 const FIXTURE_BASE = `/tmp/suji-fs-e2e-${process.pid}`;
 const FIXTURE_DIR = `${FIXTURE_BASE}/nested`;
