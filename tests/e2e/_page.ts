@@ -15,6 +15,14 @@ async function hasSujiBridge(page: Page): Promise<boolean> {
   }
 }
 
+async function pageLocationHref(page: Page): Promise<string> {
+  try {
+    return await page.evaluate(() => location.href);
+  } catch {
+    return "";
+  }
+}
+
 async function waitForStableSujiBridge(page: Page, timeoutMs = 10000, stableMs = 2000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   let stableSince = 0;
@@ -39,12 +47,16 @@ export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<
   let lastUrls = "";
   while (Date.now() < deadline) {
     const pages = await browser.pages();
-    const appPages = pages.filter((p) => isMainAppUrl(p.url()));
-    for (const page of appPages) {
+    const snapshots: string[] = [];
+    for (const page of pages) {
+      const targetUrl = page.url() || "<empty>";
+      const href = await pageLocationHref(page);
+      snapshots.push(`${targetUrl} -> ${href || "<unreadable>"}`);
+      if (!isMainAppUrl(href)) continue;
       if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
     }
 
-    lastUrls = pages.map((p) => p.url() || "<empty>").join(", ");
+    lastUrls = snapshots.join(", ");
     await wait(100);
   }
   throw new Error(`main window not found in puppeteer pages; last urls: ${lastUrls || "<none>"}`);
