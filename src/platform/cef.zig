@@ -5204,6 +5204,11 @@ fn jsonToHexEscape(src: []const u8, buf: []u8) []const u8 {
     return buf[0..o];
 }
 
+fn traceIpcEnabled() bool {
+    const v = runtime.env("SUJI_TRACE_IPC") orelse return false;
+    return v.len > 0 and !std.mem.eql(u8, v, "0");
+}
+
 /// 현재 V8 컨텍스트의 프레임으로 ProcessMessage 전송 (렌더러 → 브라우저)
 fn sendToBrowser(msg: *c.cef_process_message_t) void {
     const ctx = asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context()) orelse return;
@@ -5965,6 +5970,9 @@ fn handleBrowserInvoke(
 
     var data_buf: [CEF_IPC_BUF_LEN]u8 = undefined;
     const data = getArgString(args, 2, &data_buf);
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] recv seq={d} channel={s} data_len={d}\n", .{ seq_id, channel, data.len });
+    }
 
     // Phase 2.5 — wire 레벨 sender 컨텍스트(__window/__window_name/__window_url/__window_main_frame)
     // 자동 주입. 이미 __window가 박혀있는 요청(cross-hop)은 보존.
@@ -6001,6 +6009,10 @@ fn handleBrowserInvoke(
         }
     }
 
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] resp seq={d} success={} result_len={d}\n", .{ seq_id, success, result.len });
+    }
+
     // 응답 CefProcessMessage 생성
     sendInvokeResponse(frame, seq_id, success, result);
     return 1;
@@ -6022,6 +6034,32 @@ fn sendInvokeResponse(frame: ?*c._cef_frame_t, seq_id: i32, success: bool, resul
     _ = resp_args.set_string.?(resp_args, 2, &result_str);
 
     f.send_process_message.?(f, c.PID_RENDERER, resp_msg);
+}
+
+fn callSujiResponseCallback(ctx: *c._cef_v8_context_t, seq_id: u32, success: bool, result: []const u8) bool {
+    _ = ctx.enter.?(ctx);
+    defer _ = ctx.exit.?(ctx);
+
+    const global = asPtr(c.cef_v8_value_t, ctx.get_global.?(ctx)) orelse return false;
+
+    var suji_key: c.cef_string_t = .{};
+    setCefString(&suji_key, "__suji__");
+    const suji_obj = asPtr(c.cef_v8_value_t, global.get_value_bykey.?(global, &suji_key)) orelse return false;
+
+    var fn_key: c.cef_string_t = .{};
+    setCefString(&fn_key, if (success) "_nextResolve" else "_nextReject");
+    const callback = asPtr(c.cef_v8_value_t, suji_obj.get_value_bykey.?(suji_obj, &fn_key)) orelse return false;
+
+    var result_str: c.cef_string_t = .{};
+    setCefString(&result_str, result);
+    var call_args = [_][*c]c.cef_v8_value_t{
+        c.cef_v8_value_create_int(@intCast(seq_id)),
+        c.cef_v8_value_create_string(&result_str),
+    };
+    if (call_args[0] == null or call_args[1] == null) return false;
+
+    _ = callback.execute_function.?(callback, suji_obj, call_args.len, &call_args);
+    return true;
 }
 
 /// 메인 프로세스: emit 처리 → EventBus
@@ -6802,35 +6840,12 @@ fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
     const ctx = g_pending_contexts[slot] orelse g_renderer_context orelse return 0;
     g_pending_contexts[slot] = null;
 
-    _ = ctx.enter.?(ctx);
+    const called = callSujiResponseCallback(ctx, seq_id, success, result);
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] renderer_resp seq={d} success={} result_len={d} delivered={}\n", .{ seq_id, success, result.len, called });
+    }
 
-    // JS에서 Promise resolve/reject
-    // result를 hex-escape하여 single-quote injection 방지
-    var hex_buf: [32768]u8 = undefined;
-    const hex = jsonToHexEscape(result, &hex_buf);
-
-    var js_buf: [33000]u8 = undefined;
-    const js = if (success)
-        std.fmt.bufPrint(&js_buf, "window.__suji__._nextResolve({d},decodeURIComponent('{s}'))", .{ seq_id, hex }) catch {
-            _ = ctx.exit.?(ctx);
-            return 0;
-        }
-    else
-        std.fmt.bufPrint(&js_buf, "window.__suji__._nextReject({d},decodeURIComponent('{s}'))", .{ seq_id, hex }) catch {
-            _ = ctx.exit.?(ctx);
-            return 0;
-        };
-
-    var code_str: c.cef_string_t = .{};
-    setCefString(&code_str, js);
-    var empty_url: c.cef_string_t = .{};
-    setCefString(&empty_url, "");
-    var retval: ?*c.cef_v8_value_t = null;
-    var exception: ?*c.cef_v8_exception_t = null;
-    _ = ctx.eval.?(ctx, &code_str, &empty_url, 0, &retval, &exception);
-
-    _ = ctx.exit.?(ctx);
-    return 1;
+    return if (called) 1 else 0;
 }
 
 /// 메인에서 푸시된 이벤트 → JS __dispatch__ 호출

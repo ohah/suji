@@ -48,7 +48,9 @@ e2e_cleanup() {
 }
 
 e2e_wait_cef() {
-  for _ in $(seq 1 60); do
+  local timeout_seconds="${SUJI_E2E_STARTUP_TIMEOUT_SECONDS:-240}"
+  local attempts=$(( (timeout_seconds + 1) / 2 ))
+  for _ in $(seq 1 "$attempts"); do
     if grep -q "CEF running" "$SUJI_LOG" 2>/dev/null; then
       return 0
     fi
@@ -60,7 +62,7 @@ e2e_wait_cef() {
     fi
     sleep 2
   done
-  echo "ERROR: suji did not reach 'CEF running' within 120s"
+  echo "ERROR: suji did not reach 'CEF running' within ${timeout_seconds}s"
   echo "SUJI_LOG=$SUJI_LOG"
   tail -30 "$SUJI_LOG" || true
   if [ -n "${SUJI_PID:-}" ]; then

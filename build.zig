@@ -807,6 +807,16 @@ fn addInstallCefRuntimeStep(b: *std.Build, os_tag: std.Target.Os.Tag, cef_base: 
         \\  icudtl.dat; do
         \\  copy_or_link "$cef_base/Resources/$file" "$bin_dir/$file"
         \\done
+        \\# libcef resolves ICU resources relative to its module directory before
+        \\# cef_settings_t resource paths are fully in play. Keep these beside
+        \\# Release/libcef.so as well as beside the app binary.
+        \\for file in \
+        \\  chrome_100_percent.pak \
+        \\  chrome_200_percent.pak \
+        \\  resources.pak \
+        \\  icudtl.dat; do
+        \\  copy_or_link "$cef_base/Resources/$file" "$cef_base/Release/$file"
+        \\done
         \\if [ -d "$cef_base/Resources/locales" ]; then
         \\  cp -R "$cef_base/Resources/locales/." "$bin_dir/locales/"
         \\fi

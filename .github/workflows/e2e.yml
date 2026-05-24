@@ -83,6 +83,8 @@ jobs:
 
       # 첫 단계: 가벼운 fs e2e만. 안정화되면 더 추가.
       - name: E2E — fs
+        env:
+          SUJI_TRACE_IPC: "1"
         run: bash tests/e2e/run-fs.sh
 
       - name: E2E — global shortcut
@@ -247,6 +249,11 @@ jobs:
             v8_context_snapshot.bin; do
             test -f "$bin/$file"
           done
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            for file in icudtl.dat resources.pak chrome_100_percent.pak chrome_200_percent.pak; do
+              test -e "$HOME/.suji/cef/linux-x86_64/Release/$file"
+            done
+          fi
           test -d "$bin/locales"
 
       - name: Install root e2e dependencies
