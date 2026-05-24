@@ -268,7 +268,9 @@ pub fn build(b: *std.Build) void {
         const sign_step = b.step("sign", "Ad-hoc codesign for macOS");
         sign_step.dependOn(&codesign.step);
     } else {
-        b.getInstallStep().dependOn(&install_artifact.step);
+        const copy_cef_runtime = addInstallCefRuntimeStep(b, os_tag, cef_base, b.getInstallPath(.bin, ""));
+        copy_cef_runtime.dependOn(&install_artifact.step);
+        b.getInstallStep().dependOn(copy_cef_runtime);
     }
 
     const run_cmd = b.addRunArtifact(exe);
@@ -714,6 +716,103 @@ pub fn build(b: *std.Build) void {
     });
     const cef_command_line_policy_test = b.addTest(.{ .root_module = cef_command_line_policy_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_command_line_policy_test).step);
+}
+
+/// Linux/Windows CEF expects required runtime assets in the executable
+/// directory for subprocess startup paths. Keep dev `zig build` output
+/// self-contained enough for E2E without requiring callers to mirror CEF's
+/// distribution layout manually.
+fn addInstallCefRuntimeStep(b: *std.Build, os_tag: std.Target.Os.Tag, cef_base: []const u8, bin_dir: []const u8) *std.Build.Step {
+    if (os_tag == .windows) {
+        const copy = b.addSystemCommand(&.{
+            "pwsh",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            \\$ErrorActionPreference = 'Stop'
+            \\$cefBase = $args[0]
+            \\$binDir = $args[1]
+            \\New-Item -ItemType Directory -Force -Path $binDir | Out-Null
+            \\New-Item -ItemType Directory -Force -Path (Join-Path $binDir 'locales') | Out-Null
+            \\$releaseFiles = @(
+            \\  'chrome_elf.dll',
+            \\  'd3dcompiler_47.dll',
+            \\  'dxcompiler.dll',
+            \\  'dxil.dll',
+            \\  'libcef.dll',
+            \\  'libEGL.dll',
+            \\  'libGLESv2.dll',
+            \\  'v8_context_snapshot.bin',
+            \\  'vk_swiftshader.dll',
+            \\  'vk_swiftshader_icd.json',
+            \\  'vulkan-1.dll'
+            \\)
+            \\foreach ($file in $releaseFiles) {
+            \\  $src = Join-Path (Join-Path $cefBase 'Release') $file
+            \\  if (Test-Path $src) { Copy-Item $src $binDir -Force }
+            \\}
+            \\$resourceFiles = @(
+            \\  'chrome_100_percent.pak',
+            \\  'chrome_200_percent.pak',
+            \\  'resources.pak',
+            \\  'icudtl.dat'
+            \\)
+            \\foreach ($file in $resourceFiles) {
+            \\  $src = Join-Path (Join-Path $cefBase 'Resources') $file
+            \\  if (Test-Path $src) { Copy-Item $src $binDir -Force }
+            \\}
+            \\$locales = Join-Path (Join-Path $cefBase 'Resources') 'locales'
+            \\if (Test-Path $locales) {
+            \\  Copy-Item (Join-Path $locales '*') (Join-Path $binDir 'locales') -Recurse -Force -ErrorAction SilentlyContinue
+            \\}
+            ,
+            cef_base,
+            bin_dir,
+        });
+        return &copy.step;
+    }
+
+    const copy = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\set -eu
+        \\cef_base="$1"
+        \\bin_dir="$2"
+        \\mkdir -p "$bin_dir/locales"
+        \\copy_or_link() {
+        \\  src="$1"
+        \\  dst="$2"
+        \\  [ -e "$src" ] || return 0
+        \\  ln -sf "$src" "$dst" 2>/dev/null || cp -f "$src" "$dst"
+        \\}
+        \\for file in \
+        \\  chrome-sandbox \
+        \\  libcef.so \
+        \\  libEGL.so \
+        \\  libGLESv2.so \
+        \\  libvk_swiftshader.so \
+        \\  libvulkan.so.1 \
+        \\  v8_context_snapshot.bin \
+        \\  vk_swiftshader_icd.json; do
+        \\  copy_or_link "$cef_base/Release/$file" "$bin_dir/$file"
+        \\done
+        \\for file in \
+        \\  chrome_100_percent.pak \
+        \\  chrome_200_percent.pak \
+        \\  resources.pak \
+        \\  icudtl.dat; do
+        \\  copy_or_link "$cef_base/Resources/$file" "$bin_dir/$file"
+        \\done
+        \\if [ -d "$cef_base/Resources/locales" ]; then
+        \\  cp -R "$cef_base/Resources/locales/." "$bin_dir/locales/"
+        \\fi
+        ,
+        "install-cef-runtime",
+        cef_base,
+        bin_dir,
+    });
+    return &copy.step;
 }
 
 /// 정적 검증 테스트(`std.Io.Dir.cwd().readFileAlloc`)는 cwd가 build root여야

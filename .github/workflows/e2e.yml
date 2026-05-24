@@ -222,6 +222,27 @@ jobs:
       - name: Build suji
         run: zig build
 
+      - name: Verify CEF runtime layout
+        shell: bash
+        run: |
+          bin="zig-out/bin"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            test -f "$bin/suji.exe"
+            test -f "$bin/libcef.dll"
+          else
+            test -x "$bin/suji"
+            test -f "$bin/libcef.so"
+          fi
+          for file in \
+            icudtl.dat \
+            resources.pak \
+            chrome_100_percent.pak \
+            chrome_200_percent.pak \
+            v8_context_snapshot.bin; do
+            test -f "$bin/$file"
+          done
+          test -d "$bin/locales"
+
       - name: Install root e2e dependencies
         run: bun install
 

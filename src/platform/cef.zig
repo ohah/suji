@@ -357,6 +357,7 @@ pub fn initialize(config: CefConfig) !void {
     //   Windows: %APPDATA%/<app_name>  (HOME 대용으로 USERPROFILE 사용 X — runtime.env가 emit)
     // 한 system에 여러 Suji 앱 설치 시 cookie/localStorage/IndexedDB 자동 격리.
     const cache_path = buildAppCachePath(&cache_buf, home, config.app_name) orelse return error.PathTooLong;
+    setCefString(&settings.cache_path, cache_path);
     setCefString(&settings.root_cache_path, cache_path);
 
     // macOS: NSApplication 초기화 (cef_initialize 전에 필수)
