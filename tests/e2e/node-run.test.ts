@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -21,10 +21,22 @@ async function makeNodeRunFixture(source: string): Promise<string> {
 
   const scopeDir = path.join(dir, "node_modules", "@suji");
   await mkdir(scopeDir, { recursive: true });
-  await symlink(
-    path.join(ROOT, "packages", "suji-node"),
-    path.join(scopeDir, "node"),
-    process.platform === "win32" ? "junction" : "dir",
+  const packageDir = path.join(scopeDir, "node");
+  await mkdir(packageDir, { recursive: true });
+  await writeFile(
+    path.join(packageDir, "package.json"),
+    JSON.stringify({ name: "@suji/node", main: "index.js" }),
+    "utf8",
+  );
+  await writeFile(
+    path.join(packageDir, "index.js"),
+    `
+      module.exports = {
+        platform() { return globalThis.suji.platform(); },
+        quit() { return globalThis.suji.quit(); },
+      };
+    `,
+    "utf8",
   );
 
   await writeFile(path.join(dir, "main.js"), source, "utf8");
