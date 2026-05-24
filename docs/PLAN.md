@@ -1533,7 +1533,8 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     한계 때문에 제거했다. child NSWindow는 host에 attach해 macOS native input 차단을 피하고,
     dynamic `destroyView` 후 child target cleanup/host 생존/remaining view/recreate를
     E2E로 검증했다. Linux/Windows는 CEF overlay child view 경로로 1차 배선했고
-    Rust/Go/Node backend SDK view API를 추가했다. Linux/Windows 실 런타임 E2E는 17-B.7 잔여.
+    CEF-free platform/path policy 단위 테스트와 Rust/Go/Node backend SDK view API를 추가했다.
+    Linux/Windows 실 런타임 E2E는 17-B.7 잔여.
     macOS CEF overlay child path는 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로 격리 — 자세한 plan:
     [docs/plans/17-B-cef-views-architecture.md](./plans/17-B-cef-views-architecture.md).
 18. ✅ **`webRequest` 인터셉트** — declarative URL glob blocklist + dynamic listener

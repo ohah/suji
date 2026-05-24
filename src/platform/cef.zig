@@ -1070,18 +1070,17 @@ pub const CefNative = struct {
             log.warn("create_view: CEF Views host required; native fallback does not support WebContentsView", .{});
             return error.NotSupportedOnPlatform;
         }
-        if (viewsChildOverlayEnabled()) {
-            return self.createViewWithOverlay(host_handle, host_entry, opts);
-        }
-        if (comptime is_macos) {
-            return self.createViewWithChildWindow(host_handle, host_entry, opts);
-        }
-        return self.createViewWithOverlay(host_handle, host_entry, opts);
-    }
-
-    fn viewsChildOverlayEnabled() bool {
-        const value = runtime.env("SUJI_CEF_VIEWS_CHILD_OVERLAY") orelse return false;
-        return !(std.mem.eql(u8, value, "0") or std.ascii.eqlIgnoreCase(value, "false"));
+        return switch (cef_views_policy.childViewPath(
+            cef_views_platform,
+            runtime.env("SUJI_CEF_VIEWS_CHILD_OVERLAY"),
+        )) {
+            .child_window => self.createViewWithChildWindow(host_handle, host_entry, opts),
+            .overlay => self.createViewWithOverlay(host_handle, host_entry, opts),
+            .unsupported => {
+                log.warn("create_view: CEF Views WebContentsView unsupported on this platform", .{});
+                return error.NotSupportedOnPlatform;
+            },
+        };
     }
 
     fn detachChildViewWindow(self: *CefNative, entry: *BrowserEntry) void {

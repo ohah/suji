@@ -40,6 +40,61 @@ Zig 코어가 모든 윈도우를 소유/관리하고, 각 언어 백엔드는 C
 | Node.js | `SujiWindowAPI.create()` → bridge.cc N-API | X | X |
 | Frontend JS | CEF ProcessMessage (`suji:window.*`) | O | O |
 
+## Phase 17-B WebContentsView
+
+`windows.createView`는 Electron `WebContentsView`에 대응한다. view는 host window의
+content area 안에 합성되는 별도 webContents이며, `viewId`는 `windowId`와 같은 id 풀을
+공유한다. 따라서 `loadURL`, `executeJavaScript`, `isLoading`, zoom, audio mute처럼
+`webContents`에 적용되는 `windows.*` API는 `viewId`에도 동일하게 동작한다.
+
+### API 표면
+
+| IPC cmd | 역할 |
+|---|---|
+| `create_view` | host 창 안에 child WebContentsView 생성 후 `viewId` 반환 |
+| `destroy_view` | 대상 view만 destroy. host와 sibling view는 유지 |
+| `add_child_view` | host의 z-order 목록에 view 추가. 같은 view 재추가는 top 이동 |
+| `remove_child_view` | host에서 view detach. view 자체는 destroy하지 않음 |
+| `set_top_view` | `add_child_view(host, view)`와 같은 top 이동 shorthand |
+| `set_view_bounds` | host content area 기준 child bounds 갱신 |
+| `set_view_visible` | child view visible toggle |
+| `get_child_views` | host의 ordered view id 목록 반환. 마지막 원소가 top |
+
+### CEF Views 구조
+
+17-A의 `cef_window_info_t.parent_view` + native NSView 합성은 폐기됐다. dynamic
+`destroyView` 시 child render subprocess와 host main webContents가 함께 종료될 수 있었기
+때문이다. 17-B는 CEF가 lifecycle을 관리하는 `CefWindow + CefBrowserView` 경로만 사용한다.
+
+| 플랫폼 | host top-level | child WebContentsView |
+|---|---|---|
+| macOS | CEF-managed `CefWindow + CefBrowserView` | borderless child `CefWindow + CefBrowserView`를 host `NSWindow`에 attach |
+| Linux | CEF-managed `CefWindow + CefBrowserView` | `CefWindow.add_overlay_view(..., CEF_DOCKING_MODE_CUSTOM)` |
+| Windows | CEF-managed `CefWindow + CefBrowserView` | `CefWindow.add_overlay_view(..., CEF_DOCKING_MODE_CUSTOM)` |
+
+`SUJI_CEF_VIEWS` 미지정 시 macOS/Linux/Windows 모두 CEF Views top-level path를 기본으로
+사용한다. `SUJI_CEF_VIEWS=0` 또는 `false`는 native top-level fallback을 강제하지만,
+그 fallback host에서는 `createView`가 `NotSupportedOnPlatform`으로 실패한다.
+
+macOS는 overlay child가 host input을 막는 회귀가 확인되어 기본값이 attached child window다.
+`SUJI_CEF_VIEWS_CHILD_OVERLAY=1`은 macOS overlay 회귀 probing 전용이다. Linux/Windows는
+native child-window attach 경로가 없으므로 overlay child view가 기본 path다.
+
+### 17-A에서 17-B로의 마이그레이션
+
+사용자-facing API는 그대로 유지된다. 앱 코드는 `windows.createView`,
+`setViewBounds`, `setViewVisible`, `destroyView`, `getChildViews`를 계속 사용하면 된다.
+변경된 것은 native backend 구현뿐이다.
+
+검증 경계:
+- macOS runtime: `tests/e2e/run-view-lifecycle.sh`와 `tests/e2e/run-window-lifecycle.sh`에서
+  기본 CEF Views path, dynamic destroy, hidden sibling reorder, CDP target cleanup,
+  host/sibling/recreate 생존을 검증한다.
+- Linux/Windows policy: `src/platform/cef_views_policy.zig` 단위 테스트가 CEF-free로
+  default enable과 child path 선택(macOS child window, Linux/Windows overlay)을 고정한다.
+- Linux/Windows runtime: 실제 CEF runner에서 `createView`/bounds/visibility/destroy E2E가
+  아직 필요하다. 로컬 macOS E2E 결과로 이 항목을 완료 처리하지 않는다.
+
 ## SujiCore 확장
 
 ```zig
