@@ -152,6 +152,21 @@ windows.StopFindInPage(2, /* clearSelection */ true)
 
 // Phase 4-D PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
 windows.PrintToPDF(2, "/tmp/report.pdf")
+
+// Phase 17-B WebContentsView
+hostID := uint32(2)
+windows.CreateView(windows.CreateViewArgs{
+    HostID: hostID,
+    Name: "sidebar",
+    URL: "https://example.com/",
+    Bounds: windows.SetBoundsArgs{X: 0, Y: 80, Width: 360, Height: 600},
+})
+windows.AddChildView(hostID, 3)
+windows.SetTopView(hostID, 3)
+windows.SetViewBounds(3, windows.SetBoundsArgs{X: 0, Y: 80, Width: 420, Height: 600})
+windows.SetViewVisible(3, false)
+windows.GetChildViews(hostID)
+windows.DestroyView(3)
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.

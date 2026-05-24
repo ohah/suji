@@ -56,7 +56,7 @@ pub const events = struct {
     /// `app.on('window-all-closed', ...)`와 동등. macOS는 보통 이 시점에도 종료하지
     /// 않고 dock에 남지만, Windows/Linux는 여기서 quit하는 것이 관습.
     pub const all_closed = "window:all-closed";
-    /// Phase 17-A WebContentsView 라이프사이클. payload: `{viewId, hostId}`.
+    /// Phase 17-B WebContentsView 라이프사이클. payload: `{viewId, hostId}`.
     /// view-created는 createView 성공 시, view-destroyed는 destroyView/host destroy/
     /// destroyAll 어느 경로에서든 view가 정리될 때 한 번씩 발화.
     pub const view_created = "window:view-created";
@@ -270,8 +270,8 @@ pub const Native = struct {
         // Phase 4-D: 인쇄 — fire-and-forget. 결과는 cef.zig가 EventBus로 emit.
         print_to_pdf: *const fn (ctx: ?*anyopaque, handle: u64, path: []const u8) void,
         capture_page: *const fn (ctx: ?*anyopaque, handle: u64, path: []const u8, clip: ?CaptureClip) void,
-        // Phase 17-A: WebContentsView (한 창 multi-content 합성).
-        // create_view는 host의 contentView 안에 child NSView+CefBrowser를 부착하고 view handle 반환.
+        // Phase 17-B: WebContentsView (한 창 multi-content 합성).
+        // create_view는 host content area 안에 child WebContentsView를 부착하고 view handle 반환.
         // destroy_view/set_view_bounds/set_view_visible는 view handle 단위. reorder_view는
         // host_handle + view_handle + index_in_host로 z-order 재정렬 (0=bottom, ∞=top).
         create_view: *const fn (ctx: ?*anyopaque, host_handle: u64, opts: *const CreateViewOptions) anyerror!u64,
@@ -586,7 +586,7 @@ pub const WindowManager = struct {
     windows: std.AutoHashMap(u32, *Window),
     /// name → id (소유: name_store). fromName lookup에만 사용
     by_name: std.StringHashMap(u32),
-    /// host window id → ordered view ids (마지막 원소 = top). Phase 17-A WebContentsView.
+    /// host window id → ordered view ids (마지막 원소 = top). Phase 17-B WebContentsView.
     /// addChildView가 entry를 생성/갱신, host destroy 시 entry 통째로 정리 + view 자동 destroy.
     /// view 자체는 `windows` HashMap에 동일 id 풀로 보관 — 이 맵은 z-order/소속만 추적.
     view_children: std.AutoHashMap(u32, std.ArrayListUnmanaged(u32)),
@@ -1357,7 +1357,7 @@ pub const WindowManager = struct {
         self.native.capturePage(win.native_handle, path, clip);
     }
 
-    // ==================== Phase 17-A: WebContentsView ====================
+    // ==================== Phase 17-B: WebContentsView ====================
     // 한 창의 contentView 안에 합성되는 sub webContents (Electron WebContentsView 동등).
     // id 풀과 webContents API(loadUrl/executeJavascript/openDevTools/...)는 .window와 공유 —
     // viewId를 그대로 이 메서드들에 넘기면 동작. .window 전용 메서드(setTitle/setBounds/
@@ -1477,9 +1477,9 @@ pub const WindowManager = struct {
 
         const was_visible = view.visible_in_host;
         view.visible_in_host = true;
-        // contentView.subviews에 우리 view들 + main browser CEF view가 함께 있어 우리 list의
-        // index와 contentView.subviews index가 다른 namespace. 단일 reorder API로는 정확한 z-order
-        // 유지 불가 — list 순서대로 모든 view를 sequential reorder하면 마지막 호출된 view가 top.
+        // native backend별 child view ordering namespace가 다를 수 있다. list 순서대로 모든
+        // view를 sequential reorder하면 마지막 호출된 view가 top이라는 WindowManager invariant를
+        // 유지할 수 있다.
         for (list_ptr.items) |item_view_id| {
             const item = self.windows.get(item_view_id) orelse continue;
             self.native.reorderView(host.native_handle, item.native_handle, 0);

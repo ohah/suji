@@ -146,6 +146,21 @@ let _ = windows::stop_find_in_page(2, /* clear_selection */ true);
 
 // Phase 4-D PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
 let _ = windows::print_to_pdf(2, "/tmp/report.pdf");
+
+// Phase 17-B WebContentsView
+let host_id = 2;
+let view = windows::create_view(windows::CreateViewOptions {
+    host_id,
+    name: Some("sidebar"),
+    url: Some("https://example.com/"),
+    bounds: windows::ViewBoundsArgs { x: 0, y: 80, width: 360, height: 600 },
+});
+let _ = windows::add_child_view(host_id, 3, None);
+let _ = windows::set_top_view(host_id, 3);
+let _ = windows::set_view_bounds(3, windows::ViewBoundsArgs { x: 0, y: 80, width: 420, height: 600 });
+let _ = windows::set_view_visible(3, false);
+let _ = windows::get_child_views(host_id);
+let _ = windows::destroy_view(3);
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.

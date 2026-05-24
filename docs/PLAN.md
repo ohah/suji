@@ -1525,15 +1525,16 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     - `powerMonitor` (NSWorkspace 옵저버 4 채널 — sleep 시뮬레이션 어려워 단위/grep만)
 
     Linux/Windows 후속: 모든 macOS-only 구현의 cross-platform 동등 구현 필요.
-17. 🟡 **`windows.createView` (Electron WebContentsView 동등) — Phase 17-B macOS 기본 경로 전환**.
-    macOS 기본 경로는 CEF-managed `CefWindow + CefBrowserView` 기반. id 풀 공유 +
+17. 🟡 **`windows.createView` (Electron WebContentsView 동등) — Phase 17-B CEF Views 전환**.
+    macOS/Linux/Windows 기본 경로는 CEF-managed `CefWindow + CefBrowserView` 기반. id 풀 공유 +
     모든 webContents API view 호환. 8 SDK 메서드 + view-created/view-destroyed 이벤트 +
     호스트 close 시 자동 정리. 17-A의 wrapper NSView + child NSView+CefBrowser 합성은
     dynamic `destroyView` 시 view render subprocess와 host main webContents가 함께 강종되는
     한계 때문에 제거했다. child NSWindow는 host에 attach해 macOS native input 차단을 피하고,
     dynamic `destroyView` 후 child target cleanup/host 생존/remaining view/recreate를
-    E2E로 검증했다. CEF overlay child path는 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로 격리.
-    Linux/Windows CEF Views 동등 구현은 17-B.7 후속 — 자세한 plan:
+    E2E로 검증했다. Linux/Windows는 CEF overlay child view 경로로 1차 배선했고
+    Rust/Go/Node backend SDK view API를 추가했다. Linux/Windows 실 런타임 E2E는 17-B.7 잔여.
+    macOS CEF overlay child path는 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로 격리 — 자세한 plan:
     [docs/plans/17-B-cef-views-architecture.md](./plans/17-B-cef-views-architecture.md).
 18. ✅ **`webRequest` 인터셉트** — declarative URL glob blocklist + dynamic listener
     (RV_CONTINUE_ASYNC + pending callback storage, 256개) cancel/allow round-trip.

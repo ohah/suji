@@ -54,6 +54,13 @@ async function _bwChecks() {
   const _url: string | null = u.url;     // GetUrlResponse.url 추론(nullable)
   const r = await win.setTitle("t");
   const _wid: number = r.windowId;       // WindowOpResponse.windowId 추론
+  const view = await win.createView({ url: "https://example.com", width: 320, height: 200 });
+  const _vid: number = view.viewId;
+  await win.setViewBounds(_vid, { x: 0, y: 0, width: 320, height: 200 });
+  await win.setViewVisible(_vid, true);
+  await win.removeChildView(_vid);
+  const children = await win.getChildViews();
+  const _childIds: number[] = children.viewIds;
 
   // @ts-expect-error - id 는 readonly getter.
   win.id = 9;
@@ -62,6 +69,6 @@ async function _bwChecks() {
   // @ts-expect-error - setTitle 은 string 필수.
   await win.setTitle(123);
 
-  void _id; void _url; void _wid;
+  void _id; void _url; void _wid; void _vid; void _childIds;
 }
 void _bwChecks;

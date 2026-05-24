@@ -197,6 +197,23 @@ await windows.stopFindInPage(2, /* clearSelection */ true);
 
 // Phase 4-D PDF 인쇄 — SDK가 `window:pdf-print-finished` 이벤트 path 매칭으로 Promise resolve
 const { success } = await windows.printToPDF(2, '/tmp/report.pdf');
+
+// Phase 17-B WebContentsView
+const { viewId } = await windows.createView({
+  hostId: 2,
+  name: 'sidebar',
+  url: 'https://example.com/',
+  x: 0,
+  y: 80,
+  width: 360,
+  height: 600,
+});
+await windows.addChildView(2, viewId);
+await windows.setTopView(2, viewId);
+await windows.setViewBounds(viewId, { x: 0, y: 80, width: 420, height: 600 });
+await windows.setViewVisible(viewId, false);
+await windows.getChildViews(2);
+await windows.destroyView(viewId);
 ```
 
 핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).

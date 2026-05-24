@@ -34,11 +34,18 @@ const window_ipc = @import("window_ipc");
 const logger = @import("logger");
 const util = @import("util");
 const drag_region = @import("cef_drag_region.zig");
+const cef_views_policy = @import("cef_views_policy.zig");
 
 const log = logger.module("cef");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
+const cef_views_platform: cef_views_policy.Platform = switch (builtin.os.tag) {
+    .macos => .macos,
+    .linux => .linux,
+    .windows => .windows,
+    else => .other,
+};
 
 // Zig 0.16 translate-c가 objc/runtime.h의 block pointer(^) 문법을 파싱하지 못해서
 // 필요한 심볼만 직접 extern 선언. 이 프로젝트에서 실제 사용하는 건 아래 4개뿐.
@@ -950,10 +957,7 @@ pub const CefNative = struct {
         var self: CefNative = .{
             .allocator = allocator,
             .browsers = std.AutoHashMap(u64, BrowserEntry).init(allocator),
-            .use_views = if (runtime.env("SUJI_CEF_VIEWS")) |v|
-                !std.mem.eql(u8, v, "0") and !std.mem.eql(u8, v, "false")
-            else
-                is_macos,
+            .use_views = cef_views_policy.enabled(cef_views_platform, runtime.env("SUJI_CEF_VIEWS")),
         };
         if (self.use_views) log.info("CEF Views path enabled", .{});
         initClient(&self.client);
@@ -1055,20 +1059,24 @@ pub const CefNative = struct {
 
     // ==================== Phase 17-B: WebContentsView ====================
     // macOS 기본 경로는 CEF Views-managed child CefWindow + CefBrowserView를 host
-    // NSWindow에 attach한다. 17-A의 NSView parent_view 합성은 destroy 안정성 문제로 제거.
+    // NSWindow에 attach한다. Linux/Windows는 CEF overlay child view로 같은 API를
+    // 제공한다. 17-A의 NSView parent_view 합성은 destroy 안정성 문제로 제거.
 
     fn createView(ctx: ?*anyopaque, host_handle: u64, opts: *const window_mod.CreateViewOptions) anyerror!u64 {
         const self = fromCtx(ctx);
         assertUiThread();
         const host_entry = self.browsers.getPtr(host_handle) orelse return error.HostNotFound;
         if (host_entry.views_window == null) {
-            log.warn("create_view: CEF Views host required; set SUJI_CEF_VIEWS=1 or use default macOS path", .{});
+            log.warn("create_view: CEF Views host required; native fallback does not support WebContentsView", .{});
             return error.NotSupportedOnPlatform;
         }
         if (viewsChildOverlayEnabled()) {
-            return self.createViewWithCefViews(host_handle, host_entry, opts);
+            return self.createViewWithOverlay(host_handle, host_entry, opts);
         }
-        return self.createViewWithChildWindow(host_handle, host_entry, opts);
+        if (comptime is_macos) {
+            return self.createViewWithChildWindow(host_handle, host_entry, opts);
+        }
+        return self.createViewWithOverlay(host_handle, host_entry, opts);
     }
 
     fn viewsChildOverlayEnabled() bool {
@@ -1188,7 +1196,7 @@ pub const CefNative = struct {
         return handle;
     }
 
-    fn createViewWithCefViews(
+    fn createViewWithOverlay(
         self: *CefNative,
         host_handle: u64,
         host_entry: *BrowserEntry,
@@ -1366,12 +1374,12 @@ pub const CefNative = struct {
         }
     }
 
-    /// view를 host z-order top으로 옮김. 17-B 기본 경로는 attached child NSWindow를
-    /// parent에서 detach/attach해서 AppKit child-window order를 갱신한다.
+    /// view를 host z-order top으로 옮김. macOS child-window 경로는 attached child
+    /// NSWindow를 parent에서 detach/attach해서 AppKit child-window order를 갱신한다.
+    /// Linux/Windows overlay 경로는 overlay controller를 재생성한다.
     fn reorderView(ctx: ?*anyopaque, host_handle: u64, view_handle: u64, index_in_host: u32) void {
         const self = fromCtx(ctx);
         assertUiThread();
-        if (!is_macos) return;
         _ = index_in_host;
         if (self.browsers.getPtr(view_handle)) |entry| {
             if (entry.child_ns_window) |child_window| {

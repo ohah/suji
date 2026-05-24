@@ -618,7 +618,7 @@ pub fn handleIsDevToolsOpened(window_id: u32, response_buf: []u8, wm: *window.Wi
 }
 
 // ============================================
-// Phase 17-A: WebContentsView (createView / addChildView / setTopView / ...)
+// Phase 17-B: WebContentsView (createView / addChildView / setTopView / ...)
 // view 전용 응답은 `viewId` 키 사용 (windowId와 같은 풀이지만 시맨틱 명확화).
 // 기존 webContents cmd(load_url/execute_javascript/...)는 windowId 키 그대로 — viewId가
 // 그 자리에 들어가 동작.

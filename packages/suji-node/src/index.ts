@@ -450,6 +450,35 @@ export interface SetBoundsArgs {
   height?: number;
 }
 
+export interface CreateViewOptions extends SetBoundsArgs {
+  hostId: number;
+  name?: string;
+  url?: string;
+}
+
+export type HostCreateViewOptions = Omit<CreateViewOptions, 'hostId'>;
+
+export interface CreateViewResponse {
+  cmd: 'create_view';
+  from: 'zig-core';
+  viewId: number;
+}
+
+export interface ViewOpResponse {
+  cmd: string;
+  from: 'zig-core';
+  viewId: number;
+  ok: boolean;
+}
+
+export interface GetChildViewsResponse {
+  cmd: 'get_child_views';
+  from: 'zig-core';
+  hostId: number;
+  ok: boolean;
+  viewIds: number[];
+}
+
 export const windows = {
   /** suji.json `windows[]`와 동일한 옵션 셋 — frame/transparent/parent/x/y/etc. 모두 런타임 지정 가능. */
   create(opts: WindowOptions = {}): Promise<CreateWindowResponse> {
@@ -484,6 +513,35 @@ export const windows = {
   },
   setBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'set_bounds', windowId, ...bounds });
+  },
+  createView(opts: CreateViewOptions): Promise<CreateViewResponse> {
+    return invoke<CreateViewResponse>('__core__', { cmd: 'create_view', ...opts });
+  },
+  destroyView(viewId: number): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', { cmd: 'destroy_view', viewId });
+  },
+  addChildView(hostId: number, viewId: number, index?: number): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', {
+      cmd: 'add_child_view',
+      hostId,
+      viewId,
+      ...(index === undefined ? {} : { index }),
+    });
+  },
+  removeChildView(hostId: number, viewId: number): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', { cmd: 'remove_child_view', hostId, viewId });
+  },
+  setTopView(hostId: number, viewId: number): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', { cmd: 'set_top_view', hostId, viewId });
+  },
+  setViewBounds(viewId: number, bounds: SetBoundsArgs): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', { cmd: 'set_view_bounds', viewId, ...bounds });
+  },
+  setViewVisible(viewId: number, visible: boolean): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', { cmd: 'set_view_visible', viewId, visible });
+  },
+  getChildViews(hostId: number): Promise<GetChildViewsResponse> {
+    return invoke<GetChildViewsResponse>('__core__', { cmd: 'get_child_views', hostId });
   },
 
   openDevTools(windowId: number): Promise<WindowOpResponse> {
@@ -677,6 +735,30 @@ export class BrowserWindow {
   }
   setBounds(bounds: SetBoundsArgs) {
     return windows.setBounds(this.#id, bounds);
+  }
+  createView(opts: HostCreateViewOptions = {}) {
+    return windows.createView({ hostId: this.#id, ...opts });
+  }
+  destroyView(viewId: number) {
+    return windows.destroyView(viewId);
+  }
+  addChildView(viewId: number, index?: number) {
+    return windows.addChildView(this.#id, viewId, index);
+  }
+  removeChildView(viewId: number) {
+    return windows.removeChildView(this.#id, viewId);
+  }
+  setTopView(viewId: number) {
+    return windows.setTopView(this.#id, viewId);
+  }
+  setViewBounds(viewId: number, bounds: SetBoundsArgs) {
+    return windows.setViewBounds(viewId, bounds);
+  }
+  setViewVisible(viewId: number, visible: boolean) {
+    return windows.setViewVisible(viewId, visible);
+  }
+  getChildViews() {
+    return windows.getChildViews(this.#id);
   }
   openDevTools() {
     return windows.openDevTools(this.#id);

@@ -123,6 +123,14 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
   - `BrowserEntry.view_wrapper`, `host_ns_view`, `SujiViewHostWrapper`, `allocChildNSView`,
     child `cef_window_info_t.parent_view` 합성 경로 제거.
   - 기본 runner(`run-view-lifecycle.sh`, `run-window-lifecycle.sh`)도 macOS에서 CEF Views path를 검증.
+- 🟡 17-B.7: Linux/Windows 1차 배선 진행.
+  - `SUJI_CEF_VIEWS` 미지정 시 macOS/Linux/Windows 모두 CEF Views top-level path를 기본 사용.
+  - Linux/Windows `createView`는 CEF `add_overlay_view(..., CEF_DOCKING_MODE_CUSTOM)` 기반 child
+    WebContentsView 경로로 연결. macOS는 기존 검증된 attached child `CefWindow` 경로 유지.
+  - Rust/Go/Node backend SDK에 `createView`/`destroyView`/child view ordering/visibility/bounds
+    wrapper 추가.
+  - 검증: CEF Views platform policy 단위, Rust/Go/Node SDK 단위, macOS WebContentsView E2E.
+    Linux/Windows 실 런타임 E2E는 해당 플랫폼 runner에서 후속 확인 필요.
 
 ### 17-B.2 — macOS 옵션 1차 매핑 (완료)
 - frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor — CefWindowDelegate 콜백 구현
@@ -148,10 +156,12 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - 17-A의 `cef_window_info_t.parent_view` + `host_ns_view` + wrapper 코드 제거
 - BrowserEntry 단순화
 
-### 17-B.7 — Linux/Windows (3-5일)
-- CefWindow는 cross-platform → Linux GTK/Win32에서도 같은 코드 경로
+### 17-B.7 — Linux/Windows (진행 중)
+- CefWindow는 cross-platform → Linux GTK/Win32에서도 CEF Views top-level path를 기본 사용
+- Linux/Windows child WebContentsView는 CEF overlay child view로 1차 배선
 - macOS-specific 옵션은 제외 (이미 그렇게 되어 있음)
-- 17-A에서 빠진 native 백엔드 SDK (Rust/Go/Node)도 같이 view API 노출
+- 17-A에서 빠진 native 백엔드 SDK (Rust/Go/Node) view API 노출 완료
+- 남은 확인: Linux/Windows 실제 CEF 런타임에서 `createView`/bounds/visibility/destroy E2E
 
 ### 17-B.8 — Documentation & Migration Guide (0.5일)
 - WINDOW_API.md에 CEF Views architecture 섹션

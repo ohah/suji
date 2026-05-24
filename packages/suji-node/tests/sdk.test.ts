@@ -14,6 +14,7 @@ import {
   PLATFORM_LINUX,
   PLATFORM_WINDOWS,
   BrowserWindow,
+  windows,
 } from "../src/index";
 
 beforeEach(() => {
@@ -80,7 +81,7 @@ describe("BrowserWindow (OO wrapper)", () => {
       quit: () => {}, platform: () => "macos", handle: () => {},
       invoke: async (backend: string, json: string) => {
         calls.push([backend, json]);
-        return JSON.stringify({ windowId: 7, url: "http://x" });
+        return JSON.stringify({ windowId: 7, viewId: 11, url: "http://x", ok: true, viewIds: [11] });
       },
       invokeSync: () => "", send: () => {}, on: () => 0, off: () => {}, register: () => {},
     };
@@ -105,6 +106,38 @@ describe("BrowserWindow (OO wrapper)", () => {
     const u = await win.getURL();
     expect(u.url).toBe("http://x");
     expect(JSON.parse(calls[1][1])).toEqual({ cmd: "get_url", windowId: 3 });
+  });
+
+  test("WebContentsView helpers route host/view ids", async () => {
+    const calls = stub();
+    const win = BrowserWindow.fromId(3);
+    const created = await win.createView({ url: "https://example.com", x: 10, y: 20, width: 300, height: 400 });
+    expect(created.viewId).toBe(11);
+    expect(JSON.parse(calls[0][1])).toEqual({
+      cmd: "create_view",
+      hostId: 3,
+      url: "https://example.com",
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 400,
+    });
+
+    await windows.addChildView(3, 11, 0);
+    expect(JSON.parse(calls[1][1])).toEqual({ cmd: "add_child_view", hostId: 3, viewId: 11, index: 0 });
+    await win.setTopView(11);
+    expect(JSON.parse(calls[2][1])).toEqual({ cmd: "set_top_view", hostId: 3, viewId: 11 });
+    await win.setViewVisible(11, false);
+    expect(JSON.parse(calls[3][1])).toEqual({ cmd: "set_view_visible", viewId: 11, visible: false });
+    await win.setViewBounds(11, { x: 1, y: 2, width: 3, height: 4 });
+    expect(JSON.parse(calls[4][1])).toEqual({ cmd: "set_view_bounds", viewId: 11, x: 1, y: 2, width: 3, height: 4 });
+    await win.removeChildView(11);
+    expect(JSON.parse(calls[5][1])).toEqual({ cmd: "remove_child_view", hostId: 3, viewId: 11 });
+    const children = await win.getChildViews();
+    expect(children.viewIds).toEqual([11]);
+    expect(JSON.parse(calls[6][1])).toEqual({ cmd: "get_child_views", hostId: 3 });
+    await win.destroyView(11);
+    expect(JSON.parse(calls[7][1])).toEqual({ cmd: "destroy_view", viewId: 11 });
   });
 });
 

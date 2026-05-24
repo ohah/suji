@@ -577,6 +577,127 @@ pub mod windows {
         invoke("__core__", &req)
     }
 
+    #[derive(Default, Clone, Copy)]
+    pub struct ViewBoundsArgs {
+        pub x: i32,
+        pub y: i32,
+        pub width: u32,
+        pub height: u32,
+    }
+
+    pub struct CreateViewOptions<'a> {
+        pub host_id: u32,
+        pub name: Option<&'a str>,
+        pub url: Option<&'a str>,
+        pub bounds: ViewBoundsArgs,
+    }
+
+    impl<'a> CreateViewOptions<'a> {
+        pub fn new(host_id: u32) -> Self {
+            Self {
+                host_id,
+                name: None,
+                url: None,
+                bounds: ViewBoundsArgs::default(),
+            }
+        }
+    }
+
+    pub fn create_view(opts: CreateViewOptions<'_>) -> Option<String> {
+        invoke("__core__", &create_view_request(opts))
+    }
+
+    pub fn destroy_view(view_id: u32) -> Option<String> {
+        invoke("__core__", &destroy_view_request(view_id))
+    }
+
+    pub fn add_child_view(host_id: u32, view_id: u32, index: Option<usize>) -> Option<String> {
+        invoke("__core__", &add_child_view_request(host_id, view_id, index))
+    }
+
+    pub fn remove_child_view(host_id: u32, view_id: u32) -> Option<String> {
+        invoke("__core__", &remove_child_view_request(host_id, view_id))
+    }
+
+    pub fn set_top_view(host_id: u32, view_id: u32) -> Option<String> {
+        invoke("__core__", &set_top_view_request(host_id, view_id))
+    }
+
+    pub fn set_view_bounds(view_id: u32, b: ViewBoundsArgs) -> Option<String> {
+        invoke("__core__", &set_view_bounds_request(view_id, b))
+    }
+
+    pub fn set_view_visible(view_id: u32, visible: bool) -> Option<String> {
+        invoke("__core__", &set_view_visible_request(view_id, visible))
+    }
+
+    pub fn get_child_views(host_id: u32) -> Option<String> {
+        invoke("__core__", &get_child_views_request(host_id))
+    }
+
+    fn create_view_request(opts: CreateViewOptions<'_>) -> String {
+        let mut req = format!(r#"{{"cmd":"create_view","hostId":{}"#, opts.host_id);
+        if let Some(name) = opts.name {
+            req.push_str(&format!(r#","name":"{}""#, escape_json(name)));
+        }
+        if let Some(url) = opts.url {
+            req.push_str(&format!(r#","url":"{}""#, escape_json(url)));
+        }
+        req.push_str(&format!(
+            r#","x":{},"y":{},"width":{},"height":{}}}"#,
+            opts.bounds.x, opts.bounds.y, opts.bounds.width, opts.bounds.height,
+        ));
+        req
+    }
+
+    fn add_child_view_request(host_id: u32, view_id: u32, index: Option<usize>) -> String {
+        let mut req = format!(
+            r#"{{"cmd":"add_child_view","hostId":{},"viewId":{}"#,
+            host_id, view_id
+        );
+        if let Some(i) = index {
+            req.push_str(&format!(r#","index":{}"#, i));
+        }
+        req.push('}');
+        req
+    }
+
+    fn destroy_view_request(view_id: u32) -> String {
+        format!(r#"{{"cmd":"destroy_view","viewId":{}}}"#, view_id)
+    }
+
+    fn remove_child_view_request(host_id: u32, view_id: u32) -> String {
+        format!(
+            r#"{{"cmd":"remove_child_view","hostId":{},"viewId":{}}}"#,
+            host_id, view_id
+        )
+    }
+
+    fn set_top_view_request(host_id: u32, view_id: u32) -> String {
+        format!(
+            r#"{{"cmd":"set_top_view","hostId":{},"viewId":{}}}"#,
+            host_id, view_id
+        )
+    }
+
+    fn set_view_bounds_request(view_id: u32, b: ViewBoundsArgs) -> String {
+        format!(
+            r#"{{"cmd":"set_view_bounds","viewId":{},"x":{},"y":{},"width":{},"height":{}}}"#,
+            view_id, b.x, b.y, b.width, b.height,
+        )
+    }
+
+    fn set_view_visible_request(view_id: u32, visible: bool) -> String {
+        format!(
+            r#"{{"cmd":"set_view_visible","viewId":{},"visible":{}}}"#,
+            view_id, visible
+        )
+    }
+
+    fn get_child_views_request(host_id: u32) -> String {
+        format!(r#"{{"cmd":"get_child_views","hostId":{}}}"#, host_id)
+    }
+
     /// JSON 문자열 escape — `"` `\\` 이스케이프 + control char drop.
     fn escape_json(s: &str) -> String {
         let mut out = String::with_capacity(s.len());
@@ -608,7 +729,9 @@ pub mod windows {
         /// 새 창 생성 후 인스턴스 반환. 코어 미연결/파싱 실패 시 None.
         pub fn create(opts_json: &str) -> Option<BrowserWindow> {
             let resp = create(opts_json)?;
-            Some(BrowserWindow { id: parse_window_id(&resp)? })
+            Some(BrowserWindow {
+                id: parse_window_id(&resp)?,
+            })
         }
         /// 기존 window_id(메인 창/이벤트 sender)를 인스턴스로 래핑.
         pub fn from_id(id: u32) -> BrowserWindow {
@@ -714,7 +837,14 @@ pub mod windows {
         pub fn capture_page(&self, path: &str) -> Option<String> {
             capture_page(self.id, path)
         }
-        pub fn capture_page_rect(&self, path: &str, x: f64, y: f64, width: f64, height: f64) -> Option<String> {
+        pub fn capture_page_rect(
+            &self,
+            path: &str,
+            x: f64,
+            y: f64,
+            width: f64,
+            height: f64,
+        ) -> Option<String> {
             capture_page_rect(self.id, path, x, y, width, height)
         }
         pub fn set_title(&self, title: &str) -> Option<String> {
@@ -723,16 +853,49 @@ pub mod windows {
         pub fn set_bounds(&self, b: SetBoundsArgs) -> Option<String> {
             set_bounds(self.id, b)
         }
+        pub fn create_view(&self, mut opts: CreateViewOptions<'_>) -> Option<String> {
+            opts.host_id = self.id;
+            create_view(opts)
+        }
+        pub fn destroy_view(&self, view_id: u32) -> Option<String> {
+            destroy_view(view_id)
+        }
+        pub fn add_child_view(&self, view_id: u32, index: Option<usize>) -> Option<String> {
+            add_child_view(self.id, view_id, index)
+        }
+        pub fn remove_child_view(&self, view_id: u32) -> Option<String> {
+            remove_child_view(self.id, view_id)
+        }
+        pub fn set_top_view(&self, view_id: u32) -> Option<String> {
+            set_top_view(self.id, view_id)
+        }
+        pub fn set_view_bounds(&self, view_id: u32, b: ViewBoundsArgs) -> Option<String> {
+            set_view_bounds(view_id, b)
+        }
+        pub fn set_view_visible(&self, view_id: u32, visible: bool) -> Option<String> {
+            set_view_visible(view_id, visible)
+        }
+        pub fn get_child_views(&self) -> Option<String> {
+            get_child_views(self.id)
+        }
     }
 
     #[cfg(test)]
     mod tests {
-        use super::{escape_json, parse_window_id, BrowserWindow};
+        use super::{
+            add_child_view_request, create_view_request, destroy_view_request, escape_json,
+            get_child_views_request, parse_window_id, remove_child_view_request,
+            set_top_view_request, set_view_bounds_request, set_view_visible_request,
+            BrowserWindow, CreateViewOptions, ViewBoundsArgs,
+        };
 
         #[test]
         fn parse_window_id_extracts() {
             assert_eq!(parse_window_id(r#"{"windowId":7}"#), Some(7));
-            assert_eq!(parse_window_id(r#"{"from":"x","windowId":42,"ok":true}"#), Some(42));
+            assert_eq!(
+                parse_window_id(r#"{"from":"x","windowId":42,"ok":true}"#),
+                Some(42)
+            );
             assert_eq!(parse_window_id(r#"{"no":1}"#), None);
             assert_eq!(parse_window_id("not json"), None);
         }
@@ -755,6 +918,73 @@ pub mod windows {
         #[test]
         fn passthrough_normal() {
             assert_eq!(escape_json("hello world!"), "hello world!");
+        }
+
+        #[test]
+        fn create_view_request_builds_core_json() {
+            let req = create_view_request(CreateViewOptions {
+                host_id: 7,
+                name: Some("side\"bar"),
+                url: Some("https://example.com/a"),
+                bounds: ViewBoundsArgs {
+                    x: 10,
+                    y: 20,
+                    width: 300,
+                    height: 400,
+                },
+            });
+            assert_eq!(
+                req,
+                r#"{"cmd":"create_view","hostId":7,"name":"side\"bar","url":"https://example.com/a","x":10,"y":20,"width":300,"height":400}"#
+            );
+        }
+
+        #[test]
+        fn add_child_view_request_omits_or_includes_index() {
+            assert_eq!(
+                add_child_view_request(1, 2, None),
+                r#"{"cmd":"add_child_view","hostId":1,"viewId":2}"#
+            );
+            assert_eq!(
+                add_child_view_request(1, 2, Some(0)),
+                r#"{"cmd":"add_child_view","hostId":1,"viewId":2,"index":0}"#
+            );
+        }
+
+        #[test]
+        fn view_operation_requests_build_core_json() {
+            assert_eq!(
+                destroy_view_request(2),
+                r#"{"cmd":"destroy_view","viewId":2}"#
+            );
+            assert_eq!(
+                remove_child_view_request(1, 2),
+                r#"{"cmd":"remove_child_view","hostId":1,"viewId":2}"#
+            );
+            assert_eq!(
+                set_top_view_request(1, 2),
+                r#"{"cmd":"set_top_view","hostId":1,"viewId":2}"#
+            );
+            assert_eq!(
+                set_view_bounds_request(
+                    2,
+                    ViewBoundsArgs {
+                        x: 1,
+                        y: 2,
+                        width: 3,
+                        height: 4,
+                    }
+                ),
+                r#"{"cmd":"set_view_bounds","viewId":2,"x":1,"y":2,"width":3,"height":4}"#
+            );
+            assert_eq!(
+                set_view_visible_request(2, false),
+                r#"{"cmd":"set_view_visible","viewId":2,"visible":false}"#
+            );
+            assert_eq!(
+                get_child_views_request(1),
+                r#"{"cmd":"get_child_views","hostId":1}"#
+            );
         }
     }
 }

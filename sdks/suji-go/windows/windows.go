@@ -220,6 +220,95 @@ func SetBounds(windowID uint32, b SetBoundsArgs) string {
 	))
 }
 
+type CreateViewArgs struct {
+	HostID uint32
+	Name   string
+	URL    string
+	Bounds SetBoundsArgs
+}
+
+func CreateView(args CreateViewArgs) string {
+	return suji.Invoke("__core__", createViewRequest(args))
+}
+
+func DestroyView(viewID uint32) string {
+	return suji.Invoke("__core__", destroyViewRequest(viewID))
+}
+
+func AddChildView(hostID, viewID uint32, index ...uint32) string {
+	return suji.Invoke("__core__", addChildViewRequest(hostID, viewID, index...))
+}
+
+func RemoveChildView(hostID, viewID uint32) string {
+	return suji.Invoke("__core__", removeChildViewRequest(hostID, viewID))
+}
+
+func SetTopView(hostID, viewID uint32) string {
+	return suji.Invoke("__core__", setTopViewRequest(hostID, viewID))
+}
+
+func SetViewBounds(viewID uint32, b SetBoundsArgs) string {
+	return suji.Invoke("__core__", setViewBoundsRequest(viewID, b))
+}
+
+func SetViewVisible(viewID uint32, visible bool) string {
+	return suji.Invoke("__core__", setViewVisibleRequest(viewID, visible))
+}
+
+func GetChildViews(hostID uint32) string {
+	return suji.Invoke("__core__", getChildViewsRequest(hostID))
+}
+
+func createViewRequest(args CreateViewArgs) string {
+	req := fmt.Sprintf(`{"cmd":"create_view","hostId":%d`, args.HostID)
+	if args.Name != "" {
+		req += fmt.Sprintf(`,"name":"%s"`, jsonesc.Full(args.Name))
+	}
+	if args.URL != "" {
+		req += fmt.Sprintf(`,"url":"%s"`, jsonesc.Full(args.URL))
+	}
+	req += fmt.Sprintf(
+		`,"x":%d,"y":%d,"width":%d,"height":%d}`,
+		args.Bounds.X, args.Bounds.Y, args.Bounds.Width, args.Bounds.Height,
+	)
+	return req
+}
+
+func addChildViewRequest(hostID, viewID uint32, index ...uint32) string {
+	req := fmt.Sprintf(`{"cmd":"add_child_view","hostId":%d,"viewId":%d`, hostID, viewID)
+	if len(index) > 0 {
+		req += fmt.Sprintf(`,"index":%d`, index[0])
+	}
+	return req + "}"
+}
+
+func destroyViewRequest(viewID uint32) string {
+	return fmt.Sprintf(`{"cmd":"destroy_view","viewId":%d}`, viewID)
+}
+
+func removeChildViewRequest(hostID, viewID uint32) string {
+	return fmt.Sprintf(`{"cmd":"remove_child_view","hostId":%d,"viewId":%d}`, hostID, viewID)
+}
+
+func setTopViewRequest(hostID, viewID uint32) string {
+	return fmt.Sprintf(`{"cmd":"set_top_view","hostId":%d,"viewId":%d}`, hostID, viewID)
+}
+
+func setViewBoundsRequest(viewID uint32, b SetBoundsArgs) string {
+	return fmt.Sprintf(
+		`{"cmd":"set_view_bounds","viewId":%d,"x":%d,"y":%d,"width":%d,"height":%d}`,
+		viewID, b.X, b.Y, b.Width, b.Height,
+	)
+}
+
+func setViewVisibleRequest(viewID uint32, visible bool) string {
+	return fmt.Sprintf(`{"cmd":"set_view_visible","viewId":%d,"visible":%t}`, viewID, visible)
+}
+
+func getChildViewsRequest(hostID uint32) string {
+	return fmt.Sprintf(`{"cmd":"get_child_views","hostId":%d}`, hostID)
+}
+
 // parseWindowID — create 응답 JSON 에서 windowId 추출 (순수 — 테스트 가능).
 // 포인터로 키 *존재* 검사 — 부재 시 error (id 0 정상값과 구별, Rust
 // parse_window_id 의 None 과 시맨틱 일치).
@@ -306,3 +395,20 @@ func (w *BrowserWindow) SetTitle(title string) string { return SetTitle(w.ID, ti
 func (w *BrowserWindow) SetBounds(b SetBoundsArgs) string {
 	return SetBounds(w.ID, b)
 }
+func (w *BrowserWindow) CreateView(args CreateViewArgs) string {
+	args.HostID = w.ID
+	return CreateView(args)
+}
+func (w *BrowserWindow) DestroyView(viewID uint32) string { return DestroyView(viewID) }
+func (w *BrowserWindow) AddChildView(viewID uint32, index ...uint32) string {
+	return AddChildView(w.ID, viewID, index...)
+}
+func (w *BrowserWindow) RemoveChildView(viewID uint32) string { return RemoveChildView(w.ID, viewID) }
+func (w *BrowserWindow) SetTopView(viewID uint32) string      { return SetTopView(w.ID, viewID) }
+func (w *BrowserWindow) SetViewBounds(viewID uint32, b SetBoundsArgs) string {
+	return SetViewBounds(viewID, b)
+}
+func (w *BrowserWindow) SetViewVisible(viewID uint32, visible bool) string {
+	return SetViewVisible(viewID, visible)
+}
+func (w *BrowserWindow) GetChildViews() string { return GetChildViews(w.ID) }

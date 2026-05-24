@@ -58,3 +58,52 @@ func TestFromID(t *testing.T) {
 		t.Errorf("FromID(5).ID = %d, want 5", w.ID)
 	}
 }
+
+func TestCreateViewRequest(t *testing.T) {
+	got := createViewRequest(CreateViewArgs{
+		HostID: 7,
+		Name:   `side"bar`,
+		URL:    "https://example.com/a",
+		Bounds: SetBoundsArgs{X: 10, Y: 20, Width: 300, Height: 400},
+	})
+	want := `{"cmd":"create_view","hostId":7,"name":"side\"bar","url":"https://example.com/a","x":10,"y":20,"width":300,"height":400}`
+	if got != want {
+		t.Errorf("createViewRequest() = %q, want %q", got, want)
+	}
+}
+
+func TestAddChildViewRequest(t *testing.T) {
+	if got := addChildViewRequest(1, 2); got != `{"cmd":"add_child_view","hostId":1,"viewId":2}` {
+		t.Errorf("addChildViewRequest() without index = %q", got)
+	}
+	if got := addChildViewRequest(1, 2, 0); got != `{"cmd":"add_child_view","hostId":1,"viewId":2,"index":0}` {
+		t.Errorf("addChildViewRequest() with index = %q", got)
+	}
+}
+
+func TestViewOperationRequests(t *testing.T) {
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"destroy", destroyViewRequest(2), `{"cmd":"destroy_view","viewId":2}`},
+		{"remove child", removeChildViewRequest(1, 2), `{"cmd":"remove_child_view","hostId":1,"viewId":2}`},
+		{"set top", setTopViewRequest(1, 2), `{"cmd":"set_top_view","hostId":1,"viewId":2}`},
+		{
+			"set bounds",
+			setViewBoundsRequest(2, SetBoundsArgs{X: 1, Y: 2, Width: 3, Height: 4}),
+			`{"cmd":"set_view_bounds","viewId":2,"x":1,"y":2,"width":3,"height":4}`,
+		},
+		{"set visible", setViewVisibleRequest(2, false), `{"cmd":"set_view_visible","viewId":2,"visible":false}`},
+		{"get children", getChildViewsRequest(1), `{"cmd":"get_child_views","hostId":1}`},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.got != c.want {
+				t.Errorf("%s request = %q, want %q", c.name, c.got, c.want)
+			}
+		})
+	}
+}
