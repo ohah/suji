@@ -798,6 +798,20 @@ test "CEF renderer IPC — native dispatch failure does not leave JS promise pen
     }
 }
 
+test "CEF Views top-level initial navigation is forced after BrowserView materialization" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "fn forceInitialLoadUrl") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "frame.load_url") != null);
+
+    const needle = "forceInitialLoadUrl(br, url_z)";
+    const create_window_start = std.mem.indexOf(u8, cef_src, "fn createWindowWithCefViews") orelse return error.CreateWindowWithCefViewsMissing;
+    const create_window_end = std.mem.indexOfPos(u8, cef_src, create_window_start, "\n    fn createWindow(") orelse return error.CreateWindowWithCefViewsEndMissing;
+    const body = cef_src[create_window_start..create_window_end];
+    try std.testing.expect(std.mem.indexOf(u8, body, needle) != null);
+}
+
 test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

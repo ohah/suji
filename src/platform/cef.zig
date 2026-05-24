@@ -1556,6 +1556,7 @@ pub const CefNative = struct {
                 }
             }
         }
+        forceInitialLoadUrl(br, url_z);
         return handle;
     }
 
@@ -5169,6 +5170,14 @@ fn setCefString(dest: *c.cef_string_t, src: []const u8) void {
 /// 사용자 코드가 필요하면 listener에서 필터.)
 fn setUrlOrBlank(dest: *c.cef_string_t, url_z: []const u8) void {
     setCefString(dest, if (url_z.len > 0) url_z else "about:blank");
+}
+
+fn forceInitialLoadUrl(browser: *c.cef_browser_t, url_z: [:0]const u8) void {
+    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
+    var cef_url: c.cef_string_t = .{};
+    setUrlOrBlank(&cef_url, url_z);
+    const load_url = frame.load_url orelse return;
+    load_url(frame, &cef_url);
 }
 
 /// JSON에서 "cmd":"value" 추출
