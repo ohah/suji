@@ -28,8 +28,12 @@ else
   SUJI_BIN="$ROOT/zig-out/bin/suji"
 fi
 EXAMPLE_DIR="$ROOT/examples/multi-backend"
+SUJI_PID=""
 
 e2e_cleanup() {
+  if [ -n "${SUJI_PID:-}" ]; then
+    kill "$SUJI_PID" >/dev/null 2>&1 || true
+  fi
   if [ "$SUJI_E2E_WINDOWS" = "1" ]; then
     powershell -NoProfile -ExecutionPolicy Bypass -Command \
       'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*zig-out*suji.exe*" -or $_.CommandLine -like "*node* vite*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' \
@@ -48,14 +52,34 @@ e2e_wait_cef() {
     if grep -q "CEF running" "$SUJI_LOG" 2>/dev/null; then
       return 0
     fi
+    if [ -n "${SUJI_PID:-}" ] && ! kill -0 "$SUJI_PID" >/dev/null 2>&1; then
+      echo "ERROR: suji exited before 'CEF running'"
+      wait "$SUJI_PID" || true
+      tail -60 "$SUJI_LOG" || true
+      return 1
+    fi
     sleep 2
   done
   echo "ERROR: suji did not reach 'CEF running' within 120s"
   echo "SUJI_LOG=$SUJI_LOG"
   tail -30 "$SUJI_LOG" || true
+  if [ -n "${SUJI_PID:-}" ]; then
+    echo "---- suji pid diagnostics: $SUJI_PID ----"
+    ps -p "$SUJI_PID" -o pid,ppid,stat,etime,command || true
+    if [ -r "/proc/$SUJI_PID/wchan" ]; then
+      echo "wchan: $(cat "/proc/$SUJI_PID/wchan" 2>/dev/null || true)"
+    fi
+    if [ -r "/proc/$SUJI_PID/status" ]; then
+      sed -n '1,80p' "/proc/$SUJI_PID/status" || true
+    fi
+  fi
   if command -v ps >/dev/null 2>&1; then
     echo "---- suji/vite process snapshot ----"
     ps -ef | grep -E '([s]uji|[v]ite|--type=|zygote|gpu-process|renderer)' || true
+  fi
+  if [ -n "${SUJI_E2E_STRACE_DIR:-}" ]; then
+    echo "---- strace tail ----"
+    find "$SUJI_E2E_STRACE_DIR" -maxdepth 1 -type f -print -exec tail -80 {} \; || true
   fi
   return 1
 }
@@ -79,11 +103,17 @@ e2e_run_test() {
   cd "$EXAMPLE_DIR"
   echo "Launching $SUJI_BIN dev in $EXAMPLE_DIR"
   echo "Writing suji log to $SUJI_LOG"
-  if [ "${SUJI_TRACE_IPC:-}" = "1" ]; then
-    SUJI_TRACE_IPC=1 "$SUJI_BIN" dev 2>&1 | tee "$SUJI_LOG" &
-  else
-    "$SUJI_BIN" dev 2>&1 | tee "$SUJI_LOG" &
+  launch_cmd=("$SUJI_BIN" dev)
+  if [ -n "${SUJI_E2E_STRACE_DIR:-}" ] && command -v strace >/dev/null 2>&1; then
+    mkdir -p "$SUJI_E2E_STRACE_DIR"
+    launch_cmd=(strace -ff -tt -T -s 256 -o "$SUJI_E2E_STRACE_DIR/suji" "${launch_cmd[@]}")
   fi
+  if [ "${SUJI_TRACE_IPC:-}" = "1" ]; then
+    SUJI_TRACE_IPC=1 "${launch_cmd[@]}" > >(tee "$SUJI_LOG") 2>&1 &
+  else
+    "${launch_cmd[@]}" > >(tee "$SUJI_LOG") 2>&1 &
+  fi
+  SUJI_PID=$!
 
   e2e_wait_cef || exit 1
   sleep 3 # vite/CEF 안정화
