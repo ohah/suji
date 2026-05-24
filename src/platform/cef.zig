@@ -2655,8 +2655,59 @@ pub fn appIsPackaged() bool {
 
 extern "c" fn CGEventSourceSecondsSinceLastEventType(state: c_int, event_type: u32) f64;
 
+const linux_xss = if (is_linux) struct {
+    const XScreenSaverInfo = extern struct {
+        window: c_ulong,
+        state: c_int,
+        kind: c_int,
+        til_or_since: c_ulong,
+        idle: c_ulong,
+        event_mask: c_ulong,
+    };
+
+    extern "c" fn XOpenDisplay(display_name: ?[*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn XDefaultRootWindow(display: ?*anyopaque) callconv(.c) c_ulong;
+    extern "c" fn XCloseDisplay(display: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn XFree(data: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn XScreenSaverAllocInfo() callconv(.c) ?*XScreenSaverInfo;
+    extern "c" fn XScreenSaverQueryInfo(display: ?*anyopaque, drawable: c_ulong, saver_info: *XScreenSaverInfo) callconv(.c) c_int;
+} else struct {};
+
+const win_idle = if (is_windows) struct {
+    const w = std.os.windows;
+    const LASTINPUTINFO = extern struct {
+        cbSize: u32,
+        dwTime: u32,
+    };
+
+    extern "user32" fn GetLastInputInfo(plii: *LASTINPUTINFO) callconv(.winapi) w.BOOL;
+    extern "kernel32" fn GetTickCount() callconv(.winapi) u32;
+} else struct {};
+
 /// 시스템 유휴 시간 (초). 활성 입력이 발생할 때마다 0으로 리셋.
 pub fn powerMonitorIdleSeconds() f64 {
+    if (comptime is_linux) {
+        const display = linux_xss.XOpenDisplay(null) orelse return 0;
+        defer _ = linux_xss.XCloseDisplay(display);
+
+        const info = linux_xss.XScreenSaverAllocInfo() orelse return 0;
+        defer _ = linux_xss.XFree(info);
+
+        const root = linux_xss.XDefaultRootWindow(display);
+        if (linux_xss.XScreenSaverQueryInfo(display, root, info) == 0) return 0;
+        return @as(f64, @floatFromInt(info.idle)) / 1000.0;
+    }
+
+    if (comptime is_windows) {
+        var info = win_idle.LASTINPUTINFO{
+            .cbSize = @sizeOf(win_idle.LASTINPUTINFO),
+            .dwTime = 0,
+        };
+        if (!win_idle.GetLastInputInfo(&info).toBool()) return 0;
+        const elapsed_ms = win_idle.GetTickCount() -% info.dwTime;
+        return @as(f64, @floatFromInt(elapsed_ms)) / 1000.0;
+    }
+
     if (!comptime is_macos) return 0;
     // kCGEventSourceStateHIDSystemState = 1, kCGAnyInputEventType = ~0 (uint32_max).
     return CGEventSourceSecondsSinceLastEventType(1, 0xFFFFFFFF);

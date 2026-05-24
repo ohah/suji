@@ -118,7 +118,8 @@ fn onAllClosed(_: suji.Event) void {
 //   / writeTiff(base64) / readTiff() — TIFF round-trip (NSPasteboard public.tiff, PNG 동형)
 //   / readRtf() / writeRtf("{\\rtf1...}")  — RTF round-trip (NSPasteboard public.rtf)
 //   / readBuffer(uti) / writeBuffer(uti, base64)  — 임의 UTI raw bytes (raw ~8KB)
-// suji.powerMonitor.getSystemIdleTime()  — 유휴 초 (CGEventSource)
+// suji.powerMonitor.getSystemIdleTime()  — 유휴 초
+//   (macOS CGEventSource / Linux XScreenSaver / Windows GetLastInputInfo)
 // suji.powerMonitor.getSystemIdleState(60)  — "active"|"idle"|"locked"
 //   (잠금 시 "locked" 우선, 아니면 idle_seconds ≥ threshold)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)

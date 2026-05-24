@@ -1547,8 +1547,42 @@ test "clipboard HTML + powerMonitor idle IPC + cef.zig 함수" {
         "pub fn powerMonitorScreenLocked",
         "PASTEBOARD_TYPE_HTML",
         "CGEventSourceSecondsSinceLastEventType",
+        "XScreenSaverQueryInfo",
+        "XScreenSaverAllocInfo",
+        "GetLastInputInfo",
+        "GetTickCount",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const build_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(build_src);
+    inline for (.{
+        "\"Xss\"",
+        "XScreenSaver",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, build_src, needle) != null);
+    }
+
+    const e2e_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "tests/e2e/power-monitor.test.ts",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "power_monitor_get_idle_time",
+        "power_monitor_get_idle_state",
+        "Linux: XScreenSaverQueryInfo",
+        "Windows: GetLastInputInfo",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
     }
 }
 

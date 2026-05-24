@@ -178,6 +178,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("gtk-3", .{});
         root_module.linkSystemLibrary("gdk-3.0", .{});
         root_module.linkSystemLibrary("X11", .{});
+        // XScreenSaver — powerMonitor idle time.
+        root_module.linkSystemLibrary("Xss", .{});
         // libsecret + GLib — safeStorage Linux backend.
         root_module.linkSystemLibrary("secret-1", .{});
         root_module.linkSystemLibrary("glib-2.0", .{});
