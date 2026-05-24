@@ -54,7 +54,6 @@ pub fn switches(platform: Platform, ci_env_value: ?[]const u8) SwitchSet {
 
         if (envTruthy(ci_env_value)) {
             set.add(.{ .name = "disable-dev-shm-usage" });
-            set.add(.{ .name = "no-zygote" });
             set.add(.{ .name = "ozone-platform", .value = "x11" });
         }
     }
@@ -90,7 +89,7 @@ test "CEF command switches add Linux CI headless guards only when requested" {
 
     const ci = switches(.linux, "true").slice();
     try std.testing.expect(containsSwitch(ci, "disable-dev-shm-usage"));
-    try std.testing.expect(containsSwitch(ci, "no-zygote"));
+    try std.testing.expect(!containsSwitch(ci, "no-zygote"));
     try std.testing.expectEqualStrings("x11", switchValue(ci, "ozone-platform").?);
 
     const disabled = switches(.linux, "false").slice();

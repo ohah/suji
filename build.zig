@@ -173,6 +173,7 @@ pub fn build(b: *std.Build) void {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
         root_module.addLibraryPath(.{ .cwd_relative = cef_lib_path });
+        root_module.addRPath(.{ .cwd_relative = cef_lib_path });
         root_module.linkSystemLibrary("cef", .{});
         root_module.linkSystemLibrary("gtk-3", .{});
         root_module.linkSystemLibrary("gdk-3.0", .{});

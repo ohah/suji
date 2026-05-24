@@ -145,11 +145,11 @@ var g_app_initialized: bool = false;
 /// CEF 네이티브 포맷으로 변환한다.
 fn makeMainArgs() c.cef_main_args_t {
     if (comptime builtin.os.tag == .windows) {
-        const win = std.os.windows;
+        const Instance = @TypeOf(@as(c.cef_main_args_t, undefined).instance);
         const k32 = struct {
-            extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.winapi) ?win.HMODULE;
+            extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.winapi) Instance;
         };
-        return .{ .instance = @ptrCast(k32.GetModuleHandleW(null)) };
+        return .{ .instance = k32.GetModuleHandleW(null) };
     }
     const vec = runtime.args_vector; // []const [*:0]const u8
     return .{
