@@ -13,15 +13,30 @@
 # Caller MAY set: SUJI_LOG (log path), SUJI_TRACE_IPC (1 to enable trace).
 
 : "${SUJI_LOG:=/tmp/suji-e2e.log}"
-SUJI_BIN="$ROOT/zig-out/bin/suji"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) SUJI_E2E_WINDOWS=1 ;;
+  *) SUJI_E2E_WINDOWS=0 ;;
+esac
+
+if [ "$SUJI_E2E_WINDOWS" = "1" ]; then
+  SUJI_BIN="$ROOT/zig-out/bin/suji.exe"
+else
+  SUJI_BIN="$ROOT/zig-out/bin/suji"
+fi
 EXAMPLE_DIR="$ROOT/examples/multi-backend"
 
 e2e_cleanup() {
-  pkill -TERM -f "zig-out/bin/suji" 2>/dev/null || true
-  pkill -TERM -f "node.*vite" 2>/dev/null || true
-  sleep 1
-  pkill -9 -f "zig-out/bin/suji" 2>/dev/null || true
-  pkill -9 -f "node.*vite" 2>/dev/null || true
+  if [ "$SUJI_E2E_WINDOWS" = "1" ]; then
+    powershell -NoProfile -ExecutionPolicy Bypass -Command \
+      'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*zig-out*suji.exe*" -or $_.CommandLine -like "*node* vite*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' \
+      >/dev/null 2>&1 || true
+  else
+    pkill -TERM -f "zig-out/bin/suji" 2>/dev/null || true
+    pkill -TERM -f "node.*vite" 2>/dev/null || true
+    sleep 1
+    pkill -9 -f "zig-out/bin/suji" 2>/dev/null || true
+    pkill -9 -f "node.*vite" 2>/dev/null || true
+  fi
 }
 
 e2e_wait_cef() {

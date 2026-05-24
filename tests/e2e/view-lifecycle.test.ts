@@ -17,6 +17,7 @@
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 
 let browser: Browser;
@@ -30,6 +31,11 @@ const coreCall = (request: object): Promise<CoreResponse> =>
     (req) => (window as any).__suji__.core(JSON.stringify(req)),
     request,
   ) as Promise<CoreResponse>;
+
+const isDesktopCefViewsRun = () =>
+  ["darwin", "linux", "win32"].includes(process.platform) &&
+  process.env.SUJI_CEF_VIEWS !== "0" &&
+  process.env.SUJI_CEF_VIEWS !== "false";
 
 const isCefViewsMac = () =>
   process.platform === "darwin" &&
@@ -171,6 +177,16 @@ async function mkView(
   const r = (await coreCall(req)) as { viewId: number };
   return r.viewId;
 }
+
+describe("runner mode guard", () => {
+  test("desktop runner/default actually enabled CEF Views path", () => {
+    if (!isDesktopCefViewsRun()) return;
+    const logPath = process.env.SUJI_LOG;
+    expect(logPath).toBeTruthy();
+    const log = readFileSync(logPath!, "utf8");
+    expect(log).toContain("CEF Views path enabled");
+  });
+});
 
 describe("WebContentsView: createView / destroyView", () => {
   test("createView returns viewId in monotonic id pool", async () => {
