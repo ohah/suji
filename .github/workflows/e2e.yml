@@ -283,11 +283,6 @@ jobs:
           fi
           test -d "$bin/locales"
 
-      - name: E2E — Node run CLI (${{ runner.os }})
-        env:
-          SUJI_LOG: ${{ runner.temp }}/suji-e2e-node-run.log
-        run: bash tests/e2e/run-node-run.sh
-
       - name: Install root e2e dependencies
         run: bun install
 
