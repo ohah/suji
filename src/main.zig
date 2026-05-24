@@ -574,8 +574,10 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         defer allocator.free(pkg_path);
         std.Io.Dir.cwd().access(runtime.io, pkg_path, .{}) catch return; // package.json 없으면 skip
         std.debug.print("[suji] installing npm packages...\n", .{});
-        const npm_cmd = if (release) &[_][]const u8{ "npm", "install", "--prefix", entry, "--production" } else &[_][]const u8{ "npm", "install", "--prefix", entry };
-        try runCmd(allocator, npm_cmd);
+        const abs_entry = try std.Io.Dir.cwd().realPathFileAlloc(runtime.io, entry, allocator);
+        defer allocator.free(abs_entry);
+        const npm_cmd = if (release) &[_][]const u8{ "npm", "install", "--production" } else &[_][]const u8{ "npm", "install" };
+        try runCmdInDir(npm_cmd, abs_entry);
     } else if (std.mem.eql(u8, lang, "zig")) {
         // Zig 백엔드는 자체 build.zig가 있어야 함
         // --prefix로 빌드 결과물을 entry 디렉토리에 설치
@@ -740,6 +742,17 @@ fn runTypes(allocator: std.mem.Allocator, types_args: []const [:0]const u8) !voi
 fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
     _ = allocator;
     try proc.run(argv);
+}
+
+fn runCmdInDir(argv: []const []const u8, cwd_path: []const u8) !void {
+    var child = try std.process.spawn(runtime.io, .{
+        .argv = argv,
+        .cwd = .{ .path = cwd_path },
+    });
+    switch (try child.wait(runtime.io)) {
+        .exited => |code| if (code != 0) return error.CommandFailed,
+        else => return error.CommandFailed,
+    }
 }
 
 fn runCmdEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pairs: []const [2][]const u8) !void {

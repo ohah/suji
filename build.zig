@@ -704,6 +704,15 @@ pub fn build(b: *std.Build) void {
     });
     const cef_views_policy_test = b.addTest(.{ .root_module = cef_views_policy_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_views_policy_test).step);
+
+    // CEF command-line policy tests (CEF 런타임/헤더 불필요).
+    const cef_command_line_policy_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/cef_command_line_policy.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cef_command_line_policy_test = b.addTest(.{ .root_module = cef_command_line_policy_test_mod });
+    test_step.dependOn(&b.addRunArtifact(cef_command_line_policy_test).step);
 }
 
 /// 정적 검증 테스트(`std.Io.Dir.cwd().readFileAlloc`)는 cwd가 build root여야

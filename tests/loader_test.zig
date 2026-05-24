@@ -322,6 +322,24 @@ test "onFileChanged: shouldIgnore covers npm/os-metadata feedback files" {
     if (std.mem.indexOf(u8, body2, "startsWith") == null) return error.PrefixMatchMissing;
 }
 
+test "node backend install runs from entry cwd instead of npm prefix" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    const marker = "fn buildBackendByLang(";
+    const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.BuildBackendFnNotFound;
+    const body_end = std.mem.indexOfPos(u8, source, fn_start + marker.len, "\nfn ") orelse source.len;
+    const body = source[fn_start..body_end];
+
+    if (std.mem.indexOf(u8, body, "runCmdInDir(npm_cmd, abs_entry)") == null) return error.NodeNpmCwdMissing;
+    if (std.mem.indexOf(u8, body, "\"--prefix\"") != null) return error.NodeNpmPrefixStillUsed;
+}
+
 // ============================================
 // registerEmbedRuntime — dupe+put leak 없음 (std.testing.allocator이 검출)
 // ============================================

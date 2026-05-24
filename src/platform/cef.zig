@@ -35,12 +35,19 @@ const logger = @import("logger");
 const util = @import("util");
 const drag_region = @import("cef_drag_region.zig");
 const cef_views_policy = @import("cef_views_policy.zig");
+const cef_command_line_policy = @import("cef_command_line_policy.zig");
 
 const log = logger.module("cef");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
 const cef_views_platform: cef_views_policy.Platform = switch (builtin.os.tag) {
+    .macos => .macos,
+    .linux => .linux,
+    .windows => .windows,
+    else => .other,
+};
+const cef_command_line_platform: cef_command_line_policy.Platform = switch (builtin.os.tag) {
     .macos => .macos,
     .linux => .linux,
     .windows => .windows,
@@ -138,7 +145,11 @@ var g_app_initialized: bool = false;
 /// CEF 네이티브 포맷으로 변환한다.
 fn makeMainArgs() c.cef_main_args_t {
     if (comptime builtin.os.tag == .windows) {
-        return .{ .instance = null }; // HINSTANCE = GetModuleHandle
+        const win = std.os.windows;
+        const k32 = struct {
+            extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.winapi) ?win.HMODULE;
+        };
+        return .{ .instance = @ptrCast(k32.GetModuleHandleW(null)) };
     }
     const vec = runtime.args_vector; // []const [*:0]const u8
     return .{
@@ -298,6 +309,13 @@ pub fn initialize(config: CefConfig) !void {
     zeroCefStruct(c.cef_settings_t, &settings);
     settings.log_severity = c.LOGSEVERITY_WARNING;
     settings.no_sandbox = 1;
+
+    if (runtime.env("SUJI_CEF_LOG")) |path| {
+        if (path.len > 0) {
+            setCefString(&settings.log_file, path);
+            settings.log_severity = c.LOGSEVERITY_INFO;
+        }
+    }
 
     if (config.remote_debugging_port > 0) {
         settings.remote_debugging_port = config.remote_debugging_port;
@@ -5260,39 +5278,29 @@ fn onBeforeCommandLineProcessing(
 ) callconv(.c) void {
     const cmd = command_line orelse return;
 
-    // macOS 키체인 접근 시 팝업 방지
-    var mock_keychain: c.cef_string_t = .{};
-    setCefString(&mock_keychain, "use-mock-keychain");
-    cmd.append_switch.?(cmd, &mock_keychain);
-
-    // Helper 프로세스가 Dock에 나타나지 않게
-    var disable_bg: c.cef_string_t = .{};
-    setCefString(&disable_bg, "disable-background-mode");
-    cmd.append_switch.?(cmd, &disable_bg);
-
-    // localhost DevTools 허용
-    var remote_origins: c.cef_string_t = .{};
-    setCefString(&remote_origins, "remote-allow-origins");
-    var wildcard: c.cef_string_t = .{};
-    setCefString(&wildcard, "*");
-    cmd.append_switch_with_value.?(cmd, &remote_origins, &wildcard);
-
-    // GPU 가속 정책:
-    // - macOS: 활성화. build.zig post-install + bundle_macos.zig가 libEGL/libGLESv2/
-    //   libvk_swiftshader + vk_swiftshader_icd.json을 실행파일 옆에 심링크로 배치.
-    //   ANGLE Metal 경로로 Apple GPU 가속 (WebGL 2.0 확인됨).
-    // - Linux/Windows: GPU asset 배치 로직 미구현. disable-gpu로 소프트웨어 렌더링
-    //   폴백 (CEF가 자체 SwiftShader로 crash 없이 실행). 향후 OS별 asset 배치 추가 시
-    //   아래 조건 블록 제거.
-    if (builtin.os.tag != .macos) {
-        var disable_gpu: c.cef_string_t = .{};
-        setCefString(&disable_gpu, "disable-gpu");
-        cmd.append_switch.?(cmd, &disable_gpu);
-
-        var disable_gpu_compositing: c.cef_string_t = .{};
-        setCefString(&disable_gpu_compositing, "disable-gpu-compositing");
-        cmd.append_switch.?(cmd, &disable_gpu_compositing);
+    const ci_env = runtime.env("SUJI_CEF_CI") orelse runtime.env("CI");
+    const switches = cef_command_line_policy.switches(cef_command_line_platform, ci_env);
+    for (switches.slice()) |sw| {
+        if (sw.value) |value| {
+            appendCefSwitchWithValue(cmd, sw.name, value);
+        } else {
+            appendCefSwitch(cmd, sw.name);
+        }
     }
+}
+
+fn appendCefSwitch(cmd: *c._cef_command_line_t, name: []const u8) void {
+    var key: c.cef_string_t = .{};
+    setCefString(&key, name);
+    cmd.append_switch.?(cmd, &key);
+}
+
+fn appendCefSwitchWithValue(cmd: *c._cef_command_line_t, name: []const u8, value: []const u8) void {
+    var key: c.cef_string_t = .{};
+    var val: c.cef_string_t = .{};
+    setCefString(&key, name);
+    setCefString(&val, value);
+    cmd.append_switch_with_value.?(cmd, &key, &val);
 }
 
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {
