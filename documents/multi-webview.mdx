@@ -1,6 +1,6 @@
 ---
 title: 멀티 webview / WebContentsView
-description: 한 창에 여러 web 콘텐츠 합성 — Electron WebContentsView · Tauri v2 Webview 비교 + Suji Phase 17-A 상태
+description: 한 창에 여러 web 콘텐츠 합성 — Electron WebContentsView · Tauri v2 Webview 비교 + Suji Phase 17-A/17-B 상태
 ---
 
 # 멀티 webview / BrowserView
@@ -12,7 +12,9 @@ origin) / OAuth 인-라인 / 위젯 임베드 같은 use case에 사용된다.
 > WebContentsView를 합성하고, viewId는 windowId와 같은 id 풀을 공유해 기존 `windows.*`
 > webContents API를 그대로 사용할 수 있다. 다만 dynamic `destroyView`는 CEF + macOS NSView
 > 합성 한계가 있어 권장하지 않으며, 탭 전환/임시 숨김은 `setViewVisible`을 사용하고 host
-> 창 close 시 자동 정리에 맡기는 패턴을 권장한다.
+> 창 close 시 자동 정리에 맡기는 패턴을 권장한다. Phase 17-B CEF Views probe path는
+> `SUJI_CEF_VIEWS=1`로 실행할 수 있으며, host window는 `CefWindow + CefBrowserView`,
+> child WebContentsView는 attached child window 경로로 검증 중이다.
 
 ## 다른 프레임워크는 어떻게 하나
 
@@ -104,7 +106,10 @@ await windows.setViewVisible(viewId, false);
 - **권장 패턴**: 탭 전환/임시 제거는 `setViewVisible(false)` 또는 `removeChildView`를
   사용하고, 최종 정리는 host 창 close에 맡긴다.
 - **17-B 계획**: CEF Views API(`CefWindow` + `CefBrowserView`)로 architecture migration해
-  multi-WebContentsView lifecycle을 안정화한다. 자세한 계획은
+  multi-WebContentsView lifecycle을 안정화한다. 17-B.1 probe path는 `SUJI_CEF_VIEWS=1`에서
+  top-level `CefWindow`와 attached child window 기반 WebContentsView로 동작한다. CEF overlay
+  child path는 macOS native input 차단 이슈 때문에 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로만
+  남겨두었다. 자세한 계획은
   [`docs/plans/17-B-cef-views-architecture.md`](../docs/plans/17-B-cef-views-architecture.md).
 
 ### 격리 강도

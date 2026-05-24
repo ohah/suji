@@ -377,7 +377,7 @@ function App() {
                 cmd: "create_view",
                 hostId: HOST_ID,
                 url: `data:text/html,${encodeURIComponent(html)}`,
-                x: 80, y: 240, width: 320, height: 200,
+                x: 640, y: 140, width: 340, height: 180,
               }) as { viewId?: number; error?: string };
               if (r.viewId) { setRedId(r.viewId); log(`red created: ${r.viewId}`); }
               else log(`red error: ${S(r)}`);
@@ -394,7 +394,7 @@ function App() {
                 cmd: "create_view",
                 hostId: HOST_ID,
                 url: `data:text/html,${encodeURIComponent(html)}`,
-                x: 220, y: 280, width: 320, height: 200,
+                x: 660, y: 220, width: 340, height: 180,
               }) as { viewId?: number; error?: string };
               if (r.viewId) { setBlueId(r.viewId); log(`blue created: ${r.viewId}`); }
               else log(`blue error: ${S(r)}`);

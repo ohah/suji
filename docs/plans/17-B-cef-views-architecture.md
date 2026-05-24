@@ -78,6 +78,26 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - 가장 단순 시나리오: 옵션 없는 CefWindow 1개 + CefBrowserView 1개
 - 빌드 + 화면에 뜨는 것까지
 
+#### 2026-05-24 진행 상태
+
+- ✅ CEF CAPI Views 헤더(`include/capi/views/*`) 확인 — C++ shim 없이 Zig `@cImport`로 접근 가능.
+- ✅ `SUJI_CEF_VIEWS=1` feature flag 뒤에 17-B.1 probe path 추가.
+  - top-level `CefWindow + CefBrowserView`
+  - child `WebContentsView`는 기본적으로 host에 attach한 borderless child `NSWindow + CefBrowser`로 합성
+  - `setViewBounds`, `setViewVisible`, `reorderView`, `destroyView`는 child window frame/order/close 경로 사용
+  - `CefWindow.add_overlay_view(..., CEF_DOCKING_MODE_CUSTOM)` 경로는 macOS native input 차단 재현용으로 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 뒤에 격리
+- ✅ 검증:
+  - `zig build`
+  - `zig build test`
+  - 기본 17-A 경로 `bash tests/e2e/run-view-lifecycle.sh` → 20/20 pass
+  - 17-B probe 경로 `SUJI_CEF_VIEWS=1 bash tests/e2e/run-view-lifecycle.sh` → 20/20 pass
+- 발견/결정:
+  - macOS `CefWindow.get_window_handle()`는 NSWindow가 아니라 CEF 내부 content view를 반환할 수 있어 `[view window]`로 NSWindow를 추출해야 함.
+  - CEF Views가 만든 NSWindow에는 기존 `NSWindow.delegate` wrapper를 붙이면 AppKit forwarding 경로에서 crash. 17-B lifecycle 이벤트는 기존 `window_lifecycle.m`이 아니라 `CefWindowDelegate` 콜백으로 구현해야 함.
+  - `CefWindow.add_overlay_view`는 child view가 보이더라도 host `CefBrowserView`의 native mouse input을 막을 수 있음. CDP click/IPC는 살아있지만 실제 버튼 클릭이 막히는 증상으로 재현.
+  - CEF Views host 위에 17-A `SujiViewHostWrapper` NSView를 직접 얹는 hybrid도 macOS event bridge와 충돌해 host input을 막을 수 있음. 17-B probe의 default child 합성은 attached child window로 제한.
+  - 아직 기본값은 17-A 유지. 17-B path는 feature flag로만 활성화해 옵션/라이프사이클 회귀를 더 검증한 뒤 기본 전환.
+
 ### 17-B.2 — macOS 옵션 1차 매핑 (2일)
 - frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor — CefWindowDelegate 콜백 구현
 - 단위/회귀 테스트 (Phase 3 옵션 풀 셋 회귀 보존)

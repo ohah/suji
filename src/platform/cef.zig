@@ -22,6 +22,9 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_task_capi.h");
     @cInclude("include/capi/cef_cookie_capi.h");
     @cInclude("include/capi/cef_print_handler_capi.h");
+    @cInclude("include/capi/views/cef_browser_view_capi.h");
+    @cInclude("include/capi/views/cef_window_capi.h");
+    @cInclude("include/capi/views/cef_overlay_controller_capi.h");
 });
 
 const builtin = @import("builtin");
@@ -373,6 +376,346 @@ fn ensureGlobalHandlers() void {
 }
 
 // ============================================
+// Phase 17-B: CEF Views delegates (probe path)
+// ============================================
+
+const ViewsBrowserViewDelegate = struct {
+    delegate: c.cef_browser_view_delegate_t = undefined,
+    allocator: std.mem.Allocator,
+    ref_count: std.atomic.Value(u32) = .init(1),
+    created_browser: ?*c.cef_browser_t = null,
+    created_handle: u64 = 0,
+};
+
+const ViewsWindowDelegate = struct {
+    delegate: c.cef_window_delegate_t = undefined,
+    allocator: std.mem.Allocator,
+    ref_count: std.atomic.Value(u32) = .init(1),
+    browser_view: ?*c.cef_browser_view_t,
+    cef_window: ?*c.cef_window_t = null,
+    title_buf: [512]u8 = undefined,
+    title_len: usize = 0,
+    bounds: window_mod.Bounds,
+    appearance: window_mod.Appearance,
+    constraints: window_mod.Constraints,
+};
+
+fn viewsBrowserFromBase(base: ?*c.cef_base_ref_counted_t) ?*ViewsBrowserViewDelegate {
+    return @ptrCast(@alignCast(base orelse return null));
+}
+
+fn viewsBrowserFromSelf(self: ?*c._cef_browser_view_delegate_t) ?*ViewsBrowserViewDelegate {
+    return @ptrCast(@alignCast(self orelse return null));
+}
+
+fn viewsWindowFromBase(base: ?*c.cef_base_ref_counted_t) ?*ViewsWindowDelegate {
+    return @ptrCast(@alignCast(base orelse return null));
+}
+
+fn viewsWindowFromSelf(self: ?*c._cef_window_delegate_t) ?*ViewsWindowDelegate {
+    return @ptrCast(@alignCast(self orelse return null));
+}
+
+fn viewsWindowFromViewDelegate(self: ?*c._cef_view_delegate_t) ?*ViewsWindowDelegate {
+    return @ptrCast(@alignCast(self orelse return null));
+}
+
+fn releaseCefBase(base: *c.cef_base_ref_counted_t) void {
+    if (base.release) |rel| _ = rel(base);
+}
+
+fn releaseBrowserViewRef(browser_view: ?*c.cef_browser_view_t) void {
+    const bv = browser_view orelse return;
+    releaseCefBase(&bv.base.base);
+}
+
+fn releaseWindowRef(window: ?*c.cef_window_t) void {
+    const win = window orelse return;
+    releaseCefBase(&win.base.base.base);
+}
+
+fn releaseOverlayRef(controller: ?*c.cef_overlay_controller_t) void {
+    const ctrl = controller orelse return;
+    releaseCefBase(&ctrl.base);
+}
+
+fn viewsBrowserAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
+    const d = viewsBrowserFromBase(base) orelse return;
+    _ = d.ref_count.fetchAdd(1, .acq_rel);
+}
+
+fn viewsBrowserRelease(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const d = viewsBrowserFromBase(base) orelse return 0;
+    if (d.ref_count.fetchSub(1, .acq_rel) != 1) return 0;
+    d.allocator.destroy(d);
+    return 1;
+}
+
+fn viewsBrowserHasOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const d = viewsBrowserFromBase(base) orelse return 0;
+    return if (d.ref_count.load(.acquire) == 1) 1 else 0;
+}
+
+fn viewsBrowserHasAtLeastOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const d = viewsBrowserFromBase(base) orelse return 0;
+    return if (d.ref_count.load(.acquire) >= 1) 1 else 0;
+}
+
+fn viewsBrowserOnCreated(
+    self: ?*c._cef_browser_view_delegate_t,
+    _: ?*c._cef_browser_view_t,
+    browser: ?*c._cef_browser_t,
+) callconv(.c) void {
+    const d = viewsBrowserFromSelf(self) orelse return;
+    const br = browser orelse return;
+    d.created_browser = @ptrCast(br);
+    d.created_handle = @intCast(br.get_identifier.?(br));
+}
+
+fn viewsBrowserOnDestroyed(
+    self: ?*c._cef_browser_view_delegate_t,
+    _: ?*c._cef_browser_view_t,
+    browser: ?*c._cef_browser_t,
+) callconv(.c) void {
+    const d = viewsBrowserFromSelf(self) orelse return;
+    if (browser) |br| {
+        const id: u64 = @intCast(br.get_identifier.?(br));
+        if (d.created_handle == id) {
+            d.created_browser = null;
+            d.created_handle = 0;
+        }
+    }
+}
+
+fn viewsBrowserRuntimeStyle(_: ?*c._cef_browser_view_delegate_t) callconv(.c) c.cef_runtime_style_t {
+    return c.CEF_RUNTIME_STYLE_ALLOY;
+}
+
+fn createViewsBrowserDelegate(allocator: std.mem.Allocator) !*ViewsBrowserViewDelegate {
+    const d = try allocator.create(ViewsBrowserViewDelegate);
+    d.* = .{ .allocator = allocator };
+    @memset(std.mem.asBytes(&d.delegate), 0);
+    d.delegate.base.base.size = @sizeOf(c.cef_browser_view_delegate_t);
+    d.delegate.base.base.add_ref = &viewsBrowserAddRef;
+    d.delegate.base.base.release = &viewsBrowserRelease;
+    d.delegate.base.base.has_one_ref = &viewsBrowserHasOneRef;
+    d.delegate.base.base.has_at_least_one_ref = &viewsBrowserHasAtLeastOneRef;
+    d.delegate.on_browser_created = &viewsBrowserOnCreated;
+    d.delegate.on_browser_destroyed = &viewsBrowserOnDestroyed;
+    d.delegate.get_browser_runtime_style = &viewsBrowserRuntimeStyle;
+    return d;
+}
+
+fn viewsWindowAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
+    const d = viewsWindowFromBase(base) orelse return;
+    _ = d.ref_count.fetchAdd(1, .acq_rel);
+}
+
+fn viewsWindowRelease(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const d = viewsWindowFromBase(base) orelse return 0;
+    if (d.ref_count.fetchSub(1, .acq_rel) != 1) return 0;
+    releaseBrowserViewRef(d.browser_view);
+    d.browser_view = null;
+    d.allocator.destroy(d);
+    return 1;
+}
+
+fn viewsWindowHasOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const d = viewsWindowFromBase(base) orelse return 0;
+    return if (d.ref_count.load(.acquire) == 1) 1 else 0;
+}
+
+fn viewsWindowHasAtLeastOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const d = viewsWindowFromBase(base) orelse return 0;
+    return if (d.ref_count.load(.acquire) >= 1) 1 else 0;
+}
+
+fn viewsWindowPreferredSize(
+    self: ?*c._cef_view_delegate_t,
+    view: ?*c._cef_view_t,
+) callconv(.c) c.cef_size_t {
+    const d = viewsWindowFromViewDelegate(self) orelse return .{ .width = 800, .height = 600 };
+    if (view) |v| releaseCefBase(&v.base);
+    return .{ .width = @intCast(d.bounds.width), .height = @intCast(d.bounds.height) };
+}
+
+fn viewsWindowInitialBounds(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) c.cef_rect_t {
+    const d = viewsWindowFromSelf(self) orelse return .{ .x = 0, .y = 0, .width = 800, .height = 600 };
+    releaseWindowRef(@ptrCast(window));
+    return .{
+        .x = d.bounds.x,
+        .y = d.bounds.y,
+        .width = @intCast(d.bounds.width),
+        .height = @intCast(d.bounds.height),
+    };
+}
+
+fn viewsWindowInitialShowState(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) c.cef_show_state_t {
+    _ = self;
+    releaseWindowRef(@ptrCast(window));
+    return c.CEF_SHOW_STATE_NORMAL;
+}
+
+fn viewsWindowIsFrameless(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) i32 {
+    const d = viewsWindowFromSelf(self) orelse return 0;
+    releaseWindowRef(@ptrCast(window));
+    return if (!d.appearance.frame or d.appearance.transparent) 1 else 0;
+}
+
+fn viewsWindowStandardButtons(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) i32 {
+    const d = viewsWindowFromSelf(self) orelse return 1;
+    releaseWindowRef(@ptrCast(window));
+    return if (d.appearance.frame) 1 else 0;
+}
+
+fn viewsWindowCanResize(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) i32 {
+    const d = viewsWindowFromSelf(self) orelse return 1;
+    releaseWindowRef(@ptrCast(window));
+    return if (d.constraints.resizable) 1 else 0;
+}
+
+fn viewsWindowCanMaximize(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) i32 {
+    const d = viewsWindowFromSelf(self) orelse return 1;
+    releaseWindowRef(@ptrCast(window));
+    return if (d.constraints.resizable) 1 else 0;
+}
+
+fn viewsWindowCanMinimize(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) i32 {
+    releaseWindowRef(@ptrCast(window));
+    return 1;
+}
+
+fn viewsWindowAcceptsFirstMouse(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) c.cef_state_t {
+    releaseWindowRef(@ptrCast(window));
+    return c.STATE_ENABLED;
+}
+
+fn viewsWindowCanClose(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+) callconv(.c) i32 {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return 1;
+    };
+    var can_close: i32 = 1;
+    if (d.browser_view) |bv| {
+        if (bv.get_browser) |get_browser| {
+            if (asPtr(c.cef_browser_t, get_browser(bv))) |browser| {
+                if (asPtr(c.cef_browser_host_t, browser.get_host.?(browser))) |host| {
+                    can_close = host.try_close_browser.?(host);
+                    releaseCefBase(&host.base);
+                }
+                releaseCefBase(&browser.base);
+            }
+        }
+    }
+    releaseWindowRef(@ptrCast(window));
+    return can_close;
+}
+
+fn viewsWindowRuntimeStyle(_: ?*c._cef_window_delegate_t) callconv(.c) c.cef_runtime_style_t {
+    return c.CEF_RUNTIME_STYLE_ALLOY;
+}
+
+fn viewsWindowOnCreated(self: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) void {
+    const d = viewsWindowFromSelf(self) orelse return;
+    const win: *c.cef_window_t = @ptrCast(window orelse return);
+
+    if (win.base.base.base.add_ref) |add_ref| add_ref(&win.base.base.base);
+    d.cef_window = win;
+
+    if (d.browser_view) |bv| {
+        if (bv.base.base.add_ref) |add_ref| add_ref(&bv.base.base);
+        if (win.base.set_to_fill_layout) |set_fill| _ = set_fill(&win.base);
+        win.base.add_child_view.?(&win.base, &bv.base);
+    }
+
+    if (d.title_len > 0) {
+        var title: c.cef_string_t = .{};
+        setCefString(&title, d.title_buf[0..d.title_len]);
+        win.set_title.?(win, &title);
+    }
+    if (d.constraints.always_on_top) win.set_always_on_top.?(win, 1);
+    win.show.?(win);
+    if (d.constraints.fullscreen) win.set_fullscreen.?(win, 1);
+
+    releaseWindowRef(win);
+}
+
+fn viewsWindowOnDestroyed(self: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) void {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return;
+    };
+    releaseWindowRef(d.cef_window);
+    d.cef_window = null;
+    releaseWindowRef(@ptrCast(window));
+}
+
+fn viewsWindowOnClosing(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) void {
+    releaseWindowRef(@ptrCast(window));
+}
+
+fn createViewsWindowDelegate(
+    allocator: std.mem.Allocator,
+    browser_view: *c.cef_browser_view_t,
+    opts: *const window_mod.CreateOptions,
+) !*ViewsWindowDelegate {
+    const d = try allocator.create(ViewsWindowDelegate);
+    d.* = .{
+        .allocator = allocator,
+        .browser_view = browser_view,
+        .bounds = opts.bounds,
+        .appearance = opts.appearance,
+        .constraints = opts.constraints,
+    };
+    @memset(std.mem.asBytes(&d.delegate), 0);
+    d.delegate.base.base.base.size = @sizeOf(c.cef_window_delegate_t);
+    d.delegate.base.base.base.add_ref = &viewsWindowAddRef;
+    d.delegate.base.base.base.release = &viewsWindowRelease;
+    d.delegate.base.base.base.has_one_ref = &viewsWindowHasOneRef;
+    d.delegate.base.base.base.has_at_least_one_ref = &viewsWindowHasAtLeastOneRef;
+    d.delegate.on_window_created = &viewsWindowOnCreated;
+    d.delegate.on_window_closing = &viewsWindowOnClosing;
+    d.delegate.on_window_destroyed = &viewsWindowOnDestroyed;
+    d.delegate.get_initial_bounds = &viewsWindowInitialBounds;
+    d.delegate.get_initial_show_state = &viewsWindowInitialShowState;
+    d.delegate.is_frameless = &viewsWindowIsFrameless;
+    d.delegate.with_standard_window_buttons = &viewsWindowStandardButtons;
+    d.delegate.can_resize = &viewsWindowCanResize;
+    d.delegate.can_maximize = &viewsWindowCanMaximize;
+    d.delegate.can_minimize = &viewsWindowCanMinimize;
+    d.delegate.accepts_first_mouse = &viewsWindowAcceptsFirstMouse;
+    d.delegate.can_close = &viewsWindowCanClose;
+    d.delegate.get_window_runtime_style = &viewsWindowRuntimeStyle;
+    d.delegate.base.base.get_preferred_size = &viewsWindowPreferredSize;
+
+    const n = @min(opts.title.len, d.title_buf.len);
+    @memcpy(d.title_buf[0..n], opts.title[0..n]);
+    d.title_len = n;
+    return d;
+}
+
+// ============================================
 // CefNative — WindowManager의 Native vtable 구현
 // ============================================
 //
@@ -402,6 +745,23 @@ pub const CefNative = struct {
         /// 일반 창은 항상 null, view만 set. setViewBounds/setViewVisible/reorderView가
         /// 이 NSView를 조작.
         host_ns_view: ?*anyopaque = null,
+        /// Phase 17-B macOS compatibility path: CEF Views owns the host content
+        /// view, so adding our pass-through wrapper NSView above it can still
+        /// block native input. Child WebContentsViews are represented as
+        /// borderless NSWindows attached to the host instead.
+        child_ns_window: ?*anyopaque = null,
+        child_window_parent_handle: ?u64 = null,
+        /// Phase 17-B probe path: CEF Views top-level window. Enabled only with
+        /// SUJI_CEF_VIEWS=1 while the migration is validated.
+        views_window: ?*c.cef_window_t = null,
+        /// Main or child CefBrowserView. Top-level ownership is held by the
+        /// window delegate; overlay views hold one entry-owned reference.
+        browser_view: ?*c.cef_browser_view_t = null,
+        /// Child WebContentsView overlay controller in a CefWindow host.
+        overlay_controller: ?*c.cef_overlay_controller_t = null,
+        views_window_delegate: ?*ViewsWindowDelegate = null,
+        views_browser_delegate: ?*ViewsBrowserViewDelegate = null,
+        views_parent_handle: ?u64 = null,
         /// 캐시된 main frame URL (OnAddressChange 콜백에서만 갱신).
         /// 매 invoke마다 frame.get_url alloc/free를 피하기 위함. len=0이면 미캐싱(폴백).
         url_cache_buf: [URL_CACHE_LEN]u8 = undefined,
@@ -425,6 +785,7 @@ pub const CefNative = struct {
     };
 
     allocator: std.mem.Allocator,
+    use_views: bool = false,
     /// 모든 윈도우가 공유하는 client (콜백이 전부 module-global이라 공유 안전)
     client: c.cef_client_t = undefined,
     /// WindowManager의 native_handle (= CEF browser identifier를 u64로 캐스팅) → (browser, NSWindow).
@@ -438,6 +799,10 @@ pub const CefNative = struct {
         var self: CefNative = .{
             .allocator = allocator,
             .browsers = std.AutoHashMap(u64, BrowserEntry).init(allocator),
+            .use_views = if (runtime.env("SUJI_CEF_VIEWS")) |v|
+                !std.mem.eql(u8, v, "0") and !std.mem.eql(u8, v, "false")
+            else
+                false,
         };
         initClient(&self.client);
         return self;
@@ -449,6 +814,7 @@ pub const CefNative = struct {
         while (it.next()) |entry| {
             self.allocator.free(entry.drag_regions);
             releaseDevToolsReg(entry);
+            releaseViewsEntry(entry);
         }
         self.browsers.deinit();
     }
@@ -466,8 +832,10 @@ pub const CefNative = struct {
     /// BrowserEntry 메모리만 회수.
     pub fn purge(self: *CefNative, handle: u64) void {
         if (self.browsers.fetchRemove(handle)) |kv| {
-            self.allocator.free(kv.value.drag_regions);
-            releaseReg(kv.value.devtools_reg); // 제거된 value — 포인터만 release(복사 X)
+            var entry = kv.value;
+            self.allocator.free(entry.drag_regions);
+            releaseReg(entry.devtools_reg); // 제거된 value — 포인터만 release(복사 X)
+            releaseViewsEntry(&entry);
         }
     }
 
@@ -542,12 +910,18 @@ pub const CefNative = struct {
     fn createView(ctx: ?*anyopaque, host_handle: u64, opts: *const window_mod.CreateViewOptions) anyerror!u64 {
         const self = fromCtx(ctx);
         assertUiThread();
+        const host_entry = self.browsers.getPtr(host_handle) orelse return error.HostNotFound;
+        if (host_entry.views_window != null) {
+            if (viewsChildOverlayEnabled()) {
+                return self.createViewWithCefViews(host_handle, host_entry, opts);
+            }
+            return self.createViewWithChildWindow(host_handle, host_entry, opts);
+        }
         if (!is_macos) {
             log.warn("create_view: Linux/Windows는 Phase 17-B에서 지원 예정", .{});
             return error.NotSupportedOnPlatform;
         }
 
-        const host_entry = self.browsers.getPtr(host_handle) orelse return error.HostNotFound;
         const host_ns_window = host_entry.ns_window orelse return error.HostHasNoNSWindow;
 
         // url 처리 (createWindow와 동일 패턴 — null이면 default_url).
@@ -615,10 +989,179 @@ pub const CefNative = struct {
         return handle;
     }
 
+    fn viewsChildOverlayEnabled() bool {
+        const value = runtime.env("SUJI_CEF_VIEWS_CHILD_OVERLAY") orelse return false;
+        return !(std.mem.eql(u8, value, "0") or std.ascii.eqlIgnoreCase(value, "false"));
+    }
+
+    fn createViewWithChildWindow(
+        self: *CefNative,
+        host_handle: u64,
+        host_entry: *BrowserEntry,
+        opts: *const window_mod.CreateViewOptions,
+    ) anyerror!u64 {
+        if (!is_macos) return error.NotSupportedOnPlatform;
+        const parent_window = host_entry.ns_window orelse return error.HostHasNoNSWindow;
+        const child_frame = childWindowFrameForBounds(parent_window, opts.bounds) orelse return error.NSViewAllocFailed;
+        const child_handles = createMacChildWindowForView(child_frame);
+        const child_window = child_handles.ns_window orelse return error.NSViewAllocFailed;
+        const child_content = child_handles.content_view orelse {
+            closeMacWindow(child_window);
+            return error.NSViewAllocFailed;
+        };
+        errdefer closeMacWindow(child_window);
+
+        var url_buf: [2048]u8 = undefined;
+        const url_z: [:0]const u8 = if (opts.url) |u| blk: {
+            if (u.len >= url_buf.len) return error.UrlTooLong;
+            @memcpy(url_buf[0..u.len], u);
+            url_buf[u.len] = 0;
+            break :blk url_buf[0..u.len :0];
+        } else self.default_url;
+
+        var window_info: c.cef_window_info_t = undefined;
+        zeroCefStruct(c.cef_window_info_t, &window_info);
+        window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
+        window_info.parent_view = child_content;
+        window_info.bounds = .{
+            .x = 0,
+            .y = 0,
+            .width = @intCast(opts.bounds.width),
+            .height = @intCast(opts.bounds.height),
+        };
+
+        var cef_url: c.cef_string_t = .{};
+        setUrlOrBlank(&cef_url, url_z);
+
+        var browser_settings: c.cef_browser_settings_t = undefined;
+        zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
+
+        const browser = c.cef_browser_host_create_browser_sync(
+            &window_info,
+            &self.client,
+            &cef_url,
+            &browser_settings,
+            null,
+            null,
+        );
+        if (browser == null) return error.BrowserCreationFailed;
+        const br: *c.cef_browser_t = @ptrCast(browser);
+        const handle: u64 = @intCast(br.get_identifier.?(br));
+
+        self.browsers.put(handle, .{
+            .browser = br,
+            .ns_window = null,
+            .child_ns_window = child_window,
+            .child_window_parent_handle = host_handle,
+        }) catch {
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            if (host) |h| h.close_browser.?(h, 1);
+            return error.OutOfMemory;
+        };
+
+        attachMacChildWindow(parent_window, child_window);
+        orderMacWindowFront(child_window);
+        return handle;
+    }
+
+    fn createViewWithCefViews(
+        self: *CefNative,
+        host_handle: u64,
+        host_entry: *BrowserEntry,
+        opts: *const window_mod.CreateViewOptions,
+    ) anyerror!u64 {
+        const host_window = host_entry.views_window orelse return error.HostHasNoViewsWindow;
+
+        var url_buf: [2048]u8 = undefined;
+        const url_z: [:0]const u8 = if (opts.url) |u| blk: {
+            if (u.len >= url_buf.len) return error.UrlTooLong;
+            @memcpy(url_buf[0..u.len], u);
+            url_buf[u.len] = 0;
+            break :blk url_buf[0..u.len :0];
+        } else self.default_url;
+
+        var cef_url: c.cef_string_t = .{};
+        setUrlOrBlank(&cef_url, url_z);
+
+        var browser_settings: c.cef_browser_settings_t = undefined;
+        zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
+
+        const browser_delegate = try createViewsBrowserDelegate(self.allocator);
+        errdefer releaseCefBase(&browser_delegate.delegate.base.base);
+
+        const browser_view = asPtr(
+            c.cef_browser_view_t,
+            c.cef_browser_view_create(&self.client, &cef_url, &browser_settings, null, null, &browser_delegate.delegate),
+        ) orelse return error.BrowserCreationFailed;
+        errdefer releaseBrowserViewRef(browser_view);
+
+        var rect: c.cef_rect_t = .{
+            .x = opts.bounds.x,
+            .y = opts.bounds.y,
+            .width = @intCast(opts.bounds.width),
+            .height = @intCast(opts.bounds.height),
+        };
+        if (browser_view.base.base.add_ref) |add_ref| add_ref(&browser_view.base.base);
+        errdefer releaseBrowserViewRef(browser_view);
+        const overlay = asPtr(
+            c.cef_overlay_controller_t,
+            host_window.add_overlay_view.?(host_window, &browser_view.base, c.CEF_DOCKING_MODE_CUSTOM, 0),
+        ) orelse return error.BrowserCreationFailed;
+        errdefer releaseOverlayRef(overlay);
+        overlay.set_bounds.?(overlay, &rect);
+        overlay.set_visible.?(overlay, 1);
+
+        const br = browser_delegate.created_browser orelse blk: {
+            const get_browser = browser_view.get_browser orelse return error.BrowserCreationFailed;
+            break :blk asPtr(c.cef_browser_t, get_browser(browser_view)) orelse return error.BrowserCreationFailed;
+        };
+        const handle: u64 = @intCast(br.get_identifier.?(br));
+
+        self.browsers.put(handle, .{
+            .browser = br,
+            .ns_window = null,
+            .browser_view = browser_view,
+            .overlay_controller = overlay,
+            .views_browser_delegate = browser_delegate,
+            .views_parent_handle = host_handle,
+        }) catch return error.OutOfMemory;
+        return handle;
+    }
+
     fn destroyView(ctx: ?*anyopaque, view_handle: u64) void {
         const self = fromCtx(ctx);
         assertUiThread();
         const entry = self.browsers.get(view_handle) orelse return;
+        if (entry.child_ns_window) |child_window| {
+            const br = entry.browser;
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            if (host) |h| h.close_browser.?(h, 1);
+            closeMacWindow(child_window);
+            return;
+        }
+        if (entry.overlay_controller) |overlay| {
+            overlay.set_visible.?(overlay, 0);
+            overlay.destroy.?(overlay);
+            const br = entry.browser;
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            if (host) |h| h.close_browser.?(h, 1);
+            return;
+        }
+        if (entry.views_parent_handle != null) {
+            if (entry.views_parent_handle) |parent_handle| {
+                if (self.browsers.get(parent_handle)) |parent_entry| {
+                    if (parent_entry.views_window) |host_window| {
+                        if (entry.browser_view) |browser_view| {
+                            host_window.base.remove_child_view.?(&host_window.base, &browser_view.base);
+                        }
+                    }
+                }
+            }
+            const br = entry.browser;
+            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
+            if (host) |h| h.close_browser.?(h, 1);
+            return;
+        }
         // 17-A 한계 우회: close_browser, NSView dealloc cascade, NSView ops defer 모두 view
         // CefBrowser의 render subprocess race를 못 잡음 (CEF + macOS multi-WebContentsView 합성
         // 알려진 instability). **메모리 leak 허용하고 시각만 분리** — view CefBrowser는 host
@@ -633,6 +1176,37 @@ pub const CefNative = struct {
     fn setViewBounds(ctx: ?*anyopaque, view_handle: u64, bounds: window_mod.Bounds) void {
         const self = fromCtx(ctx);
         assertUiThread();
+        if (self.browsers.get(view_handle)) |entry| {
+            if (entry.child_ns_window) |child_window| {
+                const parent_handle = entry.child_window_parent_handle orelse return;
+                const parent_entry = self.browsers.get(parent_handle) orelse return;
+                const parent_window = parent_entry.ns_window orelse return;
+                const frame = childWindowFrameForBounds(parent_window, bounds) orelse return;
+                setMacWindowFrameRaw(child_window, frame);
+                return;
+            }
+            if (entry.overlay_controller) |overlay| {
+                var rect: c.cef_rect_t = .{
+                    .x = bounds.x,
+                    .y = bounds.y,
+                    .width = @intCast(bounds.width),
+                    .height = @intCast(bounds.height),
+                };
+                overlay.set_bounds.?(overlay, &rect);
+                return;
+            }
+            if (entry.views_parent_handle != null) {
+                const browser_view = entry.browser_view orelse return;
+                var rect: c.cef_rect_t = .{
+                    .x = bounds.x,
+                    .y = bounds.y,
+                    .width = @intCast(bounds.width),
+                    .height = @intCast(bounds.height),
+                };
+                browser_view.base.set_bounds.?(&browser_view.base, &rect);
+                return;
+            }
+        }
         if (!is_macos) return;
         const entry = self.browsers.get(view_handle) orelse return;
         const view = entry.host_ns_view orelse return;
@@ -645,6 +1219,31 @@ pub const CefNative = struct {
     fn setViewVisible(ctx: ?*anyopaque, view_handle: u64, visible: bool) void {
         const self = fromCtx(ctx);
         assertUiThread();
+        if (self.browsers.get(view_handle)) |entry| {
+            if (entry.child_ns_window) |child_window| {
+                if (visible) {
+                    orderMacWindowFront(child_window);
+                } else {
+                    orderMacWindowOut(child_window);
+                }
+                const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser));
+                if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
+                return;
+            }
+            if (entry.overlay_controller) |overlay| {
+                overlay.set_visible.?(overlay, if (visible) 1 else 0);
+                const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser));
+                if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
+                return;
+            }
+            if (entry.views_parent_handle != null) {
+                const browser_view = entry.browser_view orelse return;
+                browser_view.base.set_visible.?(&browser_view.base, if (visible) 1 else 0);
+                const host = asPtr(c.cef_browser_host_t, entry.browser.get_host.?(entry.browser));
+                if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
+                return;
+            }
+        }
         if (!is_macos) return;
         const entry = self.browsers.get(view_handle) orelse return;
         const view = entry.host_ns_view orelse return;
@@ -668,9 +1267,54 @@ pub const CefNative = struct {
         const self = fromCtx(ctx);
         assertUiThread();
         if (!is_macos) return;
-        _ = host_handle;
         _ = index_in_host;
+        if (self.browsers.getPtr(view_handle)) |entry| {
+            if (entry.child_ns_window) |child_window| {
+                const host_entry = self.browsers.get(host_handle) orelse return;
+                const parent_window = host_entry.ns_window orelse return;
+                detachMacChildWindow(parent_window, child_window);
+                attachMacChildWindow(parent_window, child_window);
+                orderMacWindowFront(child_window);
+                return;
+            }
+            if (entry.overlay_controller) |overlay| {
+                const host_entry = self.browsers.get(host_handle) orelse return;
+                const host_window = host_entry.views_window orelse return;
+                const browser_view = entry.browser_view orelse return;
+                const bounds = overlay.get_bounds.?(overlay);
+                const visible = overlay.is_visible.?(overlay);
+
+                overlay.destroy.?(overlay);
+                releaseOverlayRef(overlay);
+                entry.overlay_controller = null;
+
+                if (browser_view.base.base.add_ref) |add_ref| add_ref(&browser_view.base.base);
+                const replacement = asPtr(
+                    c.cef_overlay_controller_t,
+                    host_window.add_overlay_view.?(host_window, &browser_view.base, c.CEF_DOCKING_MODE_CUSTOM, 0),
+                ) orelse {
+                    releaseBrowserViewRef(browser_view);
+                    return;
+                };
+                entry.overlay_controller = replacement;
+                var rect = bounds;
+                replacement.set_bounds.?(replacement, &rect);
+                replacement.set_visible.?(replacement, visible);
+                return;
+            }
+            if (entry.views_parent_handle != null) {
+                const host_entry = self.browsers.get(host_handle) orelse return;
+                const host_window = host_entry.views_window orelse return;
+                const browser_view = entry.browser_view orelse return;
+                host_window.base.remove_child_view.?(&host_window.base, &browser_view.base);
+                host_window.base.add_child_view.?(&host_window.base, &browser_view.base);
+                return;
+            }
+        }
         const entry = self.browsers.get(view_handle) orelse return;
+        if (entry.overlay_controller != null) {
+            return;
+        }
         const view = entry.host_ns_view orelse return;
         const super = msgSend(view, "superview") orelse return;
         msgSendVoid1(super, "addSubview:", view);
@@ -686,9 +1330,81 @@ pub const CefNative = struct {
         return asPtr(c.cef_browser_host_t, br.get_host.?(br));
     }
 
+    fn createWindowWithCefViews(self: *CefNative, opts: *const window_mod.CreateOptions) anyerror!u64 {
+        var url_buf: [2048]u8 = undefined;
+        const url_z: [:0]const u8 = if (opts.url) |u| blk: {
+            if (u.len >= url_buf.len) return error.UrlTooLong;
+            @memcpy(url_buf[0..u.len], u);
+            url_buf[u.len] = 0;
+            break :blk url_buf[0..u.len :0];
+        } else self.default_url;
+
+        var cef_url: c.cef_string_t = .{};
+        setUrlOrBlank(&cef_url, url_z);
+
+        var browser_settings: c.cef_browser_settings_t = undefined;
+        zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
+        if (opts.appearance.transparent) browser_settings.background_color = 0;
+
+        const browser_delegate = try createViewsBrowserDelegate(self.allocator);
+        errdefer releaseCefBase(&browser_delegate.delegate.base.base);
+
+        const browser_view = asPtr(
+            c.cef_browser_view_t,
+            c.cef_browser_view_create(&self.client, &cef_url, &browser_settings, null, null, &browser_delegate.delegate),
+        ) orelse return error.BrowserCreationFailed;
+        // Ownership is transferred to the window delegate; it will keep one
+        // independent reference after add_child_view.
+        var browser_view_owned_by_delegate = false;
+        errdefer if (!browser_view_owned_by_delegate) releaseBrowserViewRef(browser_view);
+
+        const window_delegate = try createViewsWindowDelegate(self.allocator, browser_view, opts);
+        browser_view_owned_by_delegate = true;
+        errdefer releaseCefBase(&window_delegate.delegate.base.base.base);
+
+        const views_window = asPtr(c.cef_window_t, c.cef_window_create_top_level(&window_delegate.delegate)) orelse
+            return error.BrowserCreationFailed;
+        errdefer releaseWindowRef(views_window);
+
+        const br = browser_delegate.created_browser orelse blk: {
+            const get_browser = browser_view.get_browser orelse return error.BrowserCreationFailed;
+            break :blk asPtr(c.cef_browser_t, get_browser(browser_view)) orelse return error.BrowserCreationFailed;
+        };
+        const handle: u64 = @intCast(br.get_identifier.?(br));
+        const ns_window: ?*anyopaque = if (comptime is_macos)
+            cefViewsHandleToNSWindow(@ptrCast(views_window.get_window_handle.?(views_window)))
+        else
+            null;
+
+        self.browsers.put(handle, .{
+            .browser = br,
+            .ns_window = ns_window,
+            .views_window = views_window,
+            .browser_view = browser_view,
+            .views_window_delegate = window_delegate,
+            .views_browser_delegate = browser_delegate,
+        }) catch return error.OutOfMemory;
+
+        // Do not attach Suji's NSWindowDelegate to CefWindow-owned windows.
+        // CEF Views installs its own delegate/forwarding chain; replacing it
+        // crashes during AppKit cursor/event forwarding. 17-B lifecycle events
+        // must be emitted from CefWindowDelegate callbacks instead.
+        if (opts.parent_id) |pid| {
+            if (comptime is_macos) {
+                if (resolveParentNSWindow(self, pid)) |parent_ns| {
+                    if (ns_window) |child_ns| attachMacChildWindow(parent_ns, child_ns);
+                }
+            }
+        }
+        return handle;
+    }
+
     fn createWindow(ctx: ?*anyopaque, opts: *const window_mod.CreateOptions) anyerror!u64 {
         const self = fromCtx(ctx);
         assertUiThread();
+        if (self.use_views) {
+            return self.createWindowWithCefViews(opts);
+        }
 
         // title/url을 null-terminated로 복사 (CEF API 요구)
         var title_buf: [512]u8 = undefined;
@@ -790,6 +1506,10 @@ pub const CefNative = struct {
             log.warn("CefNative.destroyWindow: handle={d} not in table", .{handle});
             return;
         };
+        if (entry.views_window) |views_window| {
+            views_window.close.?(views_window);
+            return;
+        }
         // delegate 매핑 제거 (NSWindow dealloc 후엔 lookup이 무의미).
         detachWindowLifecycle(entry.ns_window);
         if (comptime is_macos) {
@@ -807,6 +1527,12 @@ pub const CefNative = struct {
     fn setVisible(ctx: ?*anyopaque, handle: u64, visible: bool) void {
         const self = fromCtx(ctx);
         assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                if (visible) views_window.show.?(views_window) else views_window.hide.?(views_window);
+                return;
+            }
+        }
         const host = self.getHost(handle) orelse return;
         host.was_hidden.?(host, if (visible) 0 else 1);
     }
@@ -814,6 +1540,12 @@ pub const CefNative = struct {
     fn focus(ctx: ?*anyopaque, handle: u64) void {
         const self = fromCtx(ctx);
         assertUiThread();
+        if (self.browsers.get(handle)) |entry| {
+            if (entry.views_window) |views_window| {
+                views_window.activate.?(views_window);
+                return;
+            }
+        }
         const host = self.getHost(handle) orelse return;
         host.set_focus.?(host, 1);
     }
@@ -823,18 +1555,36 @@ pub const CefNative = struct {
     // GtkWindow* 접근. 지금은 macOS만 구현, 나머지는 no-op (빌드되지만 동작 X).
     fn setTitle(ctx: ?*anyopaque, handle: u64, title: []const u8) void {
         assertUiThread();
-        if (!is_macos) return;
         const self = fromCtx(ctx);
         const entry = self.browsers.get(handle) orelse return;
+        if (entry.views_window) |views_window| {
+            var title_buf: [512]u8 = undefined;
+            const title_z = nullTerminateOrTruncate(title, &title_buf) orelse return;
+            var cef_title: c.cef_string_t = .{};
+            setCefString(&cef_title, title_z);
+            views_window.set_title.?(views_window, &cef_title);
+            return;
+        }
+        if (!is_macos) return;
         const ns_window = entry.ns_window orelse return;
         setMacWindowTitle(ns_window, title);
     }
 
     fn setBounds(ctx: ?*anyopaque, handle: u64, bounds: window_mod.Bounds) void {
         assertUiThread();
-        if (!is_macos) return;
         const self = fromCtx(ctx);
         const entry = self.browsers.get(handle) orelse return;
+        if (entry.views_window) |views_window| {
+            var rect: c.cef_rect_t = .{
+                .x = bounds.x,
+                .y = bounds.y,
+                .width = @intCast(bounds.width),
+                .height = @intCast(bounds.height),
+            };
+            views_window.base.base.set_bounds.?(&views_window.base.base, &rect);
+            return;
+        }
+        if (!is_macos) return;
         const ns_window = entry.ns_window orelse return;
         setMacWindowBounds(ns_window, bounds);
     }
@@ -1295,6 +2045,28 @@ fn releaseReg(reg_opt: ?*c.cef_registration_t) void {
 fn releaseDevToolsReg(entry: *CefNative.BrowserEntry) void {
     releaseReg(entry.devtools_reg);
     entry.devtools_reg = null;
+}
+
+fn releaseViewsEntry(entry: *CefNative.BrowserEntry) void {
+    if (entry.overlay_controller) |overlay| {
+        releaseOverlayRef(overlay);
+        entry.overlay_controller = null;
+    }
+    if (entry.views_window) |views_window| {
+        releaseWindowRef(views_window);
+        entry.views_window = null;
+    }
+    if (entry.views_window_delegate) |delegate| {
+        releaseCefBase(&delegate.delegate.base.base.base);
+        entry.views_window_delegate = null;
+    } else if (entry.browser_view) |browser_view| {
+        releaseBrowserViewRef(browser_view);
+    }
+    entry.browser_view = null;
+    if (entry.views_browser_delegate) |delegate| {
+        releaseCefBase(&delegate.delegate.base.base);
+        entry.views_browser_delegate = null;
+    }
 }
 
 fn devtoolsObserverNoopMsg(_: [*c]c.cef_dev_tools_message_observer_t, _: [*c]c.cef_browser_t, _: ?*const anyopaque, _: usize) callconv(.c) c_int {
@@ -2949,7 +3721,9 @@ pub fn appGetLocale(out_buf: []u8) []const u8 {
     const id_obj = msgSend(locale, "localeIdentifier") orelse return out_buf[0..0];
     const raw = nsStringToUtf8Buf(id_obj, out_buf);
     // POSIX → BCP 47 (en_US → en-US).
-    for (out_buf[0..raw.len]) |*c2| if (c2.* == '_') { c2.* = '-'; };
+    for (out_buf[0..raw.len]) |*c2| if (c2.* == '_') {
+        c2.* = '-';
+    };
     return raw;
 }
 
@@ -4903,6 +5677,14 @@ fn onDraggableRegionsChanged(
     const handle: u64 = @intCast(br.get_identifier.?(br));
     const entry = native.browsers.getPtr(handle) orelse return;
 
+    if (entry.views_window) |views_window| {
+        if (regions_count == 0 or regions_ptr == null) {
+            views_window.set_draggable_regions.?(views_window, 0, null);
+        } else {
+            views_window.set_draggable_regions.?(views_window, regions_count, regions_ptr);
+        }
+    }
+
     native.allocator.free(entry.drag_regions);
     entry.drag_regions = &.{};
 
@@ -6099,7 +6881,7 @@ const DEFAULT_CSP_TEMPLATE =
 /// `suji://` 응답에 적용되는 CSP. config.security.csp가 `"disabled"`면 CSP 헤더 자체를
 /// 안 보냄. 그 외는 user-supplied policy로 override. iframeAllowedOrigins는 default
 /// CSP의 frame-src에 합성 (사용자 csp override 시 그것을 우선 — 사용자가 직접 frame-src 명시 책임).
-pub var g_csp_value: []const u8 = "";  // setIframeAllowedOrigins / setCspValue가 process init 시 set.
+pub var g_csp_value: []const u8 = ""; // setIframeAllowedOrigins / setCspValue가 process init 시 set.
 pub var g_csp_enabled: bool = true;
 
 /// 사용자가 csp 미지정 시 default CSP를 빌드. iframe allowed origins는 frame-src에 합성.
@@ -6113,7 +6895,10 @@ pub fn buildDefaultCsp(allocator: std.mem.Allocator, iframe_allowed_origins: []c
     } else {
         // ["*"] = unrestricted (escape hatch)
         var unrestricted = false;
-        for (iframe_allowed_origins) |o| if (std.mem.eql(u8, o, "*")) { unrestricted = true; break; };
+        for (iframe_allowed_origins) |o| if (std.mem.eql(u8, o, "*")) {
+            unrestricted = true;
+            break;
+        };
         if (unrestricted) {
             try frame_src_buf.appendSlice(allocator, "*");
         } else {
@@ -6304,6 +7089,27 @@ fn msgSend(target: anytype, sel_name: [:0]const u8) ?*anyopaque {
     const sel = objc.sel_registerName(sel_name.ptr);
     const func: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     return func(@ptrCast(target), @ptrCast(sel));
+}
+
+fn msgSendRespondsToSelector(target: ?*anyopaque, sel_name: [:0]const u8) bool {
+    const sel_responds = objc.sel_registerName("respondsToSelector:");
+    const sel_arg = objc.sel_registerName(sel_name.ptr);
+    const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
+    return func(target, @ptrCast(sel_responds), @ptrCast(sel_arg)) != 0;
+}
+
+fn msgSendIsKindOfClass(target: ?*anyopaque, cls: ?*anyopaque) bool {
+    const sel = objc.sel_registerName("isKindOfClass:");
+    const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
+    return func(target, @ptrCast(sel), cls) != 0;
+}
+
+fn cefViewsHandleToNSWindow(handle: ?*anyopaque) ?*anyopaque {
+    if (!comptime is_macos) return null;
+    const raw = handle orelse return null;
+    if (msgSendIsKindOfClass(raw, getClass("NSWindow"))) return raw;
+    if (msgSendRespondsToSelector(raw, "window")) return msgSend(raw, "window");
+    return null;
 }
 
 fn getClass(name: [:0]const u8) ?*anyopaque {
@@ -6775,6 +7581,71 @@ fn attachMacChildWindow(parent: *anyopaque, child: *anyopaque) void {
     const sel = objc.sel_registerName("addChildWindow:ordered:");
     const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, c_long) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     fn_ptr(parent, @ptrCast(sel), child, 1); // NSWindowAbove = 1
+}
+
+fn detachMacChildWindow(parent: *anyopaque, child: *anyopaque) void {
+    const sel = objc.sel_registerName("removeChildWindow:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    fn_ptr(parent, @ptrCast(sel), child);
+}
+
+fn orderMacWindowFront(window: *anyopaque) void {
+    msgSendVoid1(window, "orderFront:", null);
+}
+
+fn orderMacWindowOut(window: *anyopaque) void {
+    msgSendVoid1(window, "orderOut:", null);
+}
+
+fn setMacWindowFrameRaw(window: *anyopaque, frame: NSRect) void {
+    const setFrameSel = objc.sel_registerName("setFrame:display:");
+    const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setFrameFn(window, @ptrCast(setFrameSel), frame, 1);
+}
+
+fn nsViewConvertRectToWindow(view: *anyopaque, rect: NSRect) NSRect {
+    const sel = objc.sel_registerName("convertRect:toView:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, NSRect, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    return fn_ptr(view, @ptrCast(sel), rect, null);
+}
+
+fn nsWindowConvertRectToScreen(window: *anyopaque, rect: NSRect) NSRect {
+    const sel = objc.sel_registerName("convertRectToScreen:");
+    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    return fn_ptr(window, @ptrCast(sel), rect);
+}
+
+fn childWindowFrameForBounds(parent_window: *anyopaque, bounds: window_mod.Bounds) ?NSRect {
+    const content_view = msgSend(parent_window, "contentView") orelse return null;
+    const content_bounds = nsViewBounds(content_view);
+    const content_window_rect = nsViewConvertRectToWindow(content_view, content_bounds);
+    const content_screen_rect = nsWindowConvertRectToScreen(parent_window, content_window_rect);
+    return .{
+        .x = content_screen_rect.x + @as(f64, @floatFromInt(bounds.x)),
+        .y = content_screen_rect.y + content_screen_rect.height -
+            @as(f64, @floatFromInt(bounds.y)) -
+            @as(f64, @floatFromInt(bounds.height)),
+        .width = @floatFromInt(bounds.width),
+        .height = @floatFromInt(bounds.height),
+    };
+}
+
+fn createMacChildWindowForView(frame: NSRect) MacWindowHandles {
+    const title: [:0]const u8 = "Suji WebContentsView";
+    const opts: WindowInitOpts = .{
+        .title = title,
+        .width = @intFromFloat(frame.width),
+        .height = @intFromFloat(frame.height),
+        .x = @intFromFloat(frame.x),
+        .y = @intFromFloat(frame.y),
+        .appearance = .{ .frame = false },
+        .constraints = .{ .resizable = false },
+    };
+    const window = allocMacWindow(opts) orelse return .{ .content_view = null, .ns_window = null };
+    applyMacWindowOptions(window, opts);
+    msgSendVoidBool(window, "setHasShadow:", false);
+    setMacWindowTitle(window, title);
+    return .{ .content_view = msgSend(window, "contentView"), .ns_window = window };
 }
 
 /// macOS: 투명 창 설정 — opaque=NO + clearColor 배경 + 그림자 제거.
