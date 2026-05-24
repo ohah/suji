@@ -858,6 +858,10 @@ fn runDev(allocator: std.mem.Allocator) !void {
     // embed.init이 이 순서를 보장.
     const event_bus = embed.eventBus();
 
+    var url_buf: [2048]u8 = undefined;
+    const main_url = try prepareWindowUrl(allocator, &config, .dev, &url_buf);
+    try initializeCefProcess(&config);
+
     try loadPluginsFromConfig(allocator, &config, registry, false);
     try loadBackendsFromConfig(allocator, &config, registry, false);
 
@@ -870,7 +874,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] starting frontend dev server...\n", .{});
     var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
-        try openWindow(allocator, &config, event_bus, .dev);
+        try openWindow(allocator, &config, event_bus, .dev, main_url);
         return;
     };
     defer frontend_proc.kill(runtime.io);
@@ -878,7 +882,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     std.debug.print("[suji] waiting for {s}...\n", .{config.frontend.dev_url});
     runtime.io.sleep(.fromSeconds(2), .awake) catch {};
 
-    try openWindow(allocator, &config, event_bus, .dev);
+    try openWindow(allocator, &config, event_bus, .dev, main_url);
 }
 
 // ============================================
@@ -1039,19 +1043,72 @@ fn runProd(allocator: std.mem.Allocator) !void {
     // embed.init이 이 순서를 보장.
     const event_bus = embed.eventBus();
 
+    var url_buf: [2048]u8 = undefined;
+    const main_url = try prepareWindowUrl(allocator, &config, .dist, &url_buf);
+    try initializeCefProcess(&config);
+
     try loadPluginsFromConfig(allocator, &config, registry, true);
     try loadBackendsFromConfig(allocator, &config, registry, true);
 
-    try openWindow(allocator, &config, event_bus, .dist);
+    try openWindow(allocator, &config, event_bus, .dist, main_url);
 }
 
 const WindowMode = enum { dev, dist };
+
+fn prepareWindowUrl(
+    allocator: std.mem.Allocator,
+    config: *const suji.Config,
+    mode: WindowMode,
+    url_buf: *[2048]u8,
+) !?[:0]const u8 {
+    const url: ?[:0]const u8 = switch (mode) {
+        .dev => config.frontend.dev_url,
+        .dist => blk: {
+            const dist_path = findDistPath(allocator, config.frontend.dist_dir) orelse {
+                std.debug.print("[suji] frontend dist not found: {s}\n", .{config.frontend.dist_dir});
+                break :blk null;
+            };
+            defer allocator.free(dist_path);
+
+            const url_str = switch (config.windows[0].protocol) {
+                .suji => s: {
+                    cef.setDistPath(dist_path);
+                    break :s std.fmt.bufPrint(url_buf, "suji://app/index.html", .{}) catch break :blk null;
+                },
+                .file => s: {
+                    break :s std.fmt.bufPrint(url_buf, "file://{s}/index.html", .{dist_path}) catch break :blk null;
+                },
+            };
+            url_buf[url_str.len] = 0;
+            break :blk url_buf[0..url_str.len :0];
+        },
+    };
+
+    if (url) |u| {
+        std.debug.print("[suji] CEF URL: {s}\n", .{u});
+    } else {
+        std.debug.print("[suji] CEF URL: (null)\n", .{});
+    }
+    return url;
+}
+
+fn initializeCefProcess(config: *const suji.Config) !void {
+    const main_win = config.windows[0];
+    try cef.initialize(.{
+        .title = main_win.title,
+        .width = @intCast(main_win.width),
+        .height = @intCast(main_win.height),
+        .debug = main_win.debug,
+        .app_name = config.app.name,
+    });
+}
 
 fn openWindow(
     allocator: std.mem.Allocator,
     config: *const suji.Config,
     event_bus: *suji.EventBus,
     mode: WindowMode,
+    url: ?[:0]const u8,
 ) !void {
     // EventBus → JS 이벤트 전달 (CEF evalJs 사용)
     event_bus.webview_eval = &cef.evalJs;
@@ -1067,52 +1124,6 @@ fn openWindow(
     // CEF IPC 콜백 연결
     cef.setInvokeHandler(&cefInvokeHandler);
     cef.setEmitHandler(&cefEmitHandler);
-
-    // URL 결정
-    var url_buf: [2048]u8 = undefined;
-    const url: ?[:0]const u8 = switch (mode) {
-        .dev => config.frontend.dev_url, // dev 모드: protocol 설정 무관, 항상 HTTP dev 서버
-        .dist => blk: {
-            // dist 디렉토리 경로 탐색
-            const dist_path = findDistPath(allocator, config.frontend.dist_dir) orelse {
-                std.debug.print("[suji] frontend dist not found: {s}\n", .{config.frontend.dist_dir});
-                break :blk null;
-            };
-            defer allocator.free(dist_path);
-
-            // 메인(첫) 창의 protocol을 dist URL 결정 기준으로 사용. 추가 창은 명시적 url 권장.
-            const url_str = switch (config.windows[0].protocol) {
-                .suji => s: {
-                    // suji:// 커스텀 프로토콜 (CORS/fetch/cookie/ServiceWorker 정상 동작)
-                    cef.setDistPath(dist_path);
-                    break :s std.fmt.bufPrint(&url_buf, "suji://app/index.html", .{}) catch break :blk null;
-                },
-                .file => s: {
-                    break :s std.fmt.bufPrint(&url_buf, "file://{s}/index.html", .{dist_path}) catch break :blk null;
-                },
-            };
-            url_buf[url_str.len] = 0;
-            break :blk url_buf[0..url_str.len :0];
-        },
-    };
-
-    if (url) |u| {
-        std.debug.print("[suji] CEF URL: {s}\n", .{u});
-    } else {
-        std.debug.print("[suji] CEF URL: (null)\n", .{});
-    }
-
-    // CEF 초기화 (첫 창 사이즈/타이틀 사용 — CEF는 process-level 설정).
-    const main_win = config.windows[0];
-    const cef_config: cef.CefConfig = .{
-        .title = main_win.title,
-        .width = @intCast(main_win.width),
-        .height = @intCast(main_win.height),
-        .url = url,
-        .debug = main_win.debug,
-        .app_name = config.app.name,
-    };
-    try cef.initialize(cef_config);
 
     // WindowManager 배선 (CefNative + EventBusSink)
     var cef_native = cef.CefNative.init(allocator);
@@ -3380,12 +3391,12 @@ fn parseApplicationMenuItems(arena: std.mem.Allocator, values: []const std.json.
 fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) MenuParseError!cef.ApplicationMenuItem {
     if (value != .object) return error.InvalidMenuItem;
     const obj = value.object;
-    const typ = util.jsonObjectGetString(obj,"type") orelse "";
+    const typ = util.jsonObjectGetString(obj, "type") orelse "";
     if (std.mem.eql(u8, typ, "separator")) return .separator;
 
-    const label = util.jsonObjectGetString(obj,"label") orelse "";
-    const click = util.jsonObjectGetString(obj,"click") orelse "";
-    const enabled = util.jsonObjectGetBool(obj,"enabled") orelse true;
+    const label = util.jsonObjectGetString(obj, "label") orelse "";
+    const click = util.jsonObjectGetString(obj, "click") orelse "";
+    const enabled = util.jsonObjectGetBool(obj, "enabled") orelse true;
 
     if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
         const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
@@ -3400,7 +3411,7 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
         return .{ .checkbox = .{
             .label = label,
             .click = click,
-            .checked = util.jsonObjectGetBool(obj,"checked") orelse false,
+            .checked = util.jsonObjectGetBool(obj, "checked") orelse false,
             .enabled = enabled,
         } };
     }
