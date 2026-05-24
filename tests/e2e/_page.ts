@@ -3,6 +3,10 @@ import type { Browser, Page } from "puppeteer-core";
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let coreSeq = 0;
 
+function isMainAppUrl(url: string): boolean {
+  return url.startsWith("http://localhost:5173") || url.startsWith("http://127.0.0.1:5173");
+}
+
 async function hasSujiBridge(page: Page): Promise<boolean> {
   try {
     return await page.evaluate(() => Boolean((globalThis as any).__suji__?.core));
@@ -35,13 +39,15 @@ export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<
   let lastUrls = "";
   while (Date.now() < deadline) {
     const pages = await browser.pages();
-    const localhostPages = pages.filter((p) => p.url().startsWith("http://localhost"));
-    for (const page of localhostPages) {
+    const appPages = pages.filter((p) => isMainAppUrl(p.url()));
+    for (const page of appPages) {
       if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
     }
 
     for (const page of pages) {
-      if (localhostPages.includes(page)) continue;
+      if (appPages.includes(page)) continue;
+      const url = page.url();
+      if (url.startsWith("http://localhost:9222") || url.startsWith("http://127.0.0.1:9222")) continue;
       if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
     }
 
@@ -100,6 +106,7 @@ export async function callCore<T = any>(
       const w = window as any;
       const s = w.__suji__ || {};
       return {
+        url: location.href,
         slot: w[key] || null,
         pending: Object.keys(s._pending || {}),
         early: Object.keys(s._early || {}),
