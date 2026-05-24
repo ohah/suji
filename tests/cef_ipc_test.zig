@@ -989,10 +989,47 @@ test "powerSaveBlocker IPC — start/stop + 두 type 모두 노출" {
         "pub fn powerSaveBlockerStop",
         "IOPMAssertionCreateWithName",
         "IOPMAssertionRelease",
+        "XScreenSaverSuspend",
+        "PowerCreateRequest",
+        "PowerSetRequest",
+        "PowerClearRequest",
         "PreventUserIdleSystemSleep",
         "PreventUserIdleDisplaySleep",
+        "powerSaveInsertLocked",
+        "powerSaveRemoveLocked",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const build_src = try readProjectFile("build.zig", 1024 * 1024);
+    defer std.testing.allocator.free(build_src);
+    inline for (.{ "\"Xss\"", "\"kernel32\"" }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, build_src, needle) != null);
+    }
+
+    const e2e_src = try readProjectFile("tests/e2e/power-save-blocker.test.ts", 1024 * 1024);
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "power_save_blocker_start",
+        "power_save_blocker_stop",
+        "prevent_display_sleep",
+        "prevent_app_suspension",
+        "stopping the same id twice is false",
+        "Linux: XScreenSaverSuspend",
+        "Windows: PowerCreateRequest",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    inline for (.{
+        "E2E — powerSaveBlocker",
+        "E2E — powerSaveBlocker (Linux)",
+        "E2E — powerSaveBlocker (Windows)",
+        "run-power-save-blocker.sh",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
 }
 

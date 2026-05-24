@@ -154,7 +154,8 @@ fn onAllClosed(_: suji.Event) void {
 //   (CG capture + ImageIO 인코딩, base64 IPC 한도 우회). ⚠️ Screen Recording
 //   TCC 권한 필요 — 미부여 시 success:false. 인코딩 경로는 권한 실기기에서만
 //   실행(헤드리스=컴파일/링크+graceful-fail 만 검증, 정직 경계)
-// suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)   (macOS IOPMAssertion)
+// suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)
+//   (macOS IOPMAssertion, Linux XScreenSaverSuspend, Windows Power Request API)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain, Linux libsecret, Windows Credential Manager)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
@@ -340,7 +341,7 @@ suji.platform                                                // "macos" | "linux
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest } from '@suji/api';
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
 // const id = await powerSaveBlocker.start("prevent_display_sleep")
-// await powerSaveBlocker.stop(id)                                         (macOS IOPMAssertion)
+// await powerSaveBlocker.stop(id)                                         (macOS/Linux/Windows)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                                                         (macOS Keychain, Linux libsecret, Windows Credential Manager)
 // await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)
@@ -419,7 +420,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, session } from '@suji/node'
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen)
-// const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)
+// const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)  (macOS/Linux/Windows)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 // await app.dock.setBadge("99") / app.dock.getBadge()
 // await app.getPath("userData") — Electron app.getPath

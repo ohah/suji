@@ -193,6 +193,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("shell32", .{});
         // Credential Manager — safeStorage persistent OS-protected secrets.
         root_module.linkSystemLibrary("advapi32", .{});
+        // Power Request API — powerSaveBlocker sleep/display inhibition handles.
+        root_module.linkSystemLibrary("kernel32", .{});
     }
 
     // libnode (Node.js 임베딩) — 선택적
