@@ -15,8 +15,8 @@
  *   - 로그 파일이 `~/.suji/logs/` 아래 실제로 생성되는지
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import puppeteer, { type Browser, type Page } from "puppeteer-core";
-import { readdirSync, statSync } from "node:fs";
+import puppeteer, { type Browser, type Page, type Target } from "puppeteer-core";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -30,6 +30,21 @@ const coreCall = (request: object): Promise<CoreResponse> =>
     (req) => (window as any).__suji__.core(JSON.stringify(req)),
     request,
   ) as Promise<CoreResponse>;
+
+const isCefViewsRun = () =>
+  process.env.SUJI_CEF_VIEWS !== undefined &&
+  process.env.SUJI_CEF_VIEWS !== "0" &&
+  process.env.SUJI_CEF_VIEWS !== "false";
+
+async function waitForNewPageTarget(excluded: Set<Target>, timeoutMs = 5000): Promise<Target> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const cand = browser.targets().find((t) => t.type() === "page" && !excluded.has(t));
+    if (cand) return cand;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`new page target not discovered within ${timeoutMs}ms`);
+}
 
 beforeAll(async () => {
   browser = await puppeteer.connect({
@@ -51,6 +66,16 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await browser?.disconnect();
+});
+
+describe("runner mode guard", () => {
+  test("SUJI_CEF_VIEWS runner actually enabled native CEF Views path", () => {
+    if (!isCefViewsRun()) return;
+    const logPath = process.env.SUJI_LOG;
+    expect(logPath).toBeTruthy();
+    const log = readFileSync(logPath!, "utf8");
+    expect(log).toContain("CEF Views probe path enabled");
+  });
 });
 
 // ============================================
@@ -195,6 +220,53 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
       resizable: false,
     });
     expect(r.windowId).toBeGreaterThan(0);
+  });
+
+  test("frameless drag region 안의 no-drag 컨트롤은 클릭 가능", async () => {
+    const html = `<!doctype html>
+      <meta charset="utf-8" />
+      <style>
+        body { margin: 0; font-family: system-ui; }
+        .drag { height: 56px; display: flex; align-items: center; padding: 8px; -webkit-app-region: drag; app-region: drag; background: #1f2937; }
+        button { -webkit-app-region: no-drag; app-region: no-drag; }
+      </style>
+      <div class="drag">
+        <button id="probe" onclick="document.body.dataset.clicked='yes'">probe</button>
+      </div>`;
+    const excluded = new Set<Target>(browser.targets().filter((t) => t.type() === "page"));
+    const r = await coreCall({
+      cmd: "create_window",
+      title: "drag-region-probe",
+      url: "http://localhost:5173",
+      width: 360,
+      height: 180,
+      frame: false,
+    });
+    expect(r.windowId).toBeGreaterThan(0);
+
+    const target = await waitForNewPageTarget(excluded);
+    const session = await target.createCDPSession();
+    await session.send("Runtime.evaluate", {
+      expression: `document.open();document.write(${JSON.stringify(html)});document.close();`,
+      awaitPromise: true,
+    });
+    const rectResult = await session.send("Runtime.evaluate", {
+      expression: `JSON.stringify(document.querySelector("#probe").getBoundingClientRect())`,
+      returnByValue: true,
+    });
+    const rect = JSON.parse(rectResult.result.value as string);
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    await session.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    await session.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await session.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    const clickedResult = await session.send("Runtime.evaluate", {
+      expression: `document.body.dataset.clicked`,
+      returnByValue: true,
+    });
+    const clicked = clickedResult.result.value;
+    await session.detach();
+    expect(clicked).toBe("yes");
   });
 
   test("x/y 음수 (화면 왼쪽 밖 배치) 수락", async () => {
@@ -660,8 +732,9 @@ describe("DevTools API (Phase 4-C)", () => {
     const r: any = await page.evaluate(() =>
       (window as any).__suji__.core(JSON.stringify({ cmd: "open_dev_tools_extra", windowId: 1 })),
     );
-    expect(r.cmd).toBeUndefined(); // open_dev_tools 응답이 아님
-    expect(r.msg).toBe("hello from zig"); // default fallback
+    expect(r.cmd).not.toBe("open_dev_tools"); // open_dev_tools 응답이 아님
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("unknown_cmd");
   });
 
   test("회귀: 옵션 필드에 'cmd' substring 포함돼도 잘못 라우팅 안 됨", async () => {

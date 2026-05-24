@@ -91,6 +91,15 @@ jobs:
       - name: E2E — window lifecycle events
         run: bash tests/e2e/run-window-lifecycle-events.sh
 
+      - name: E2E — CEF Views window lifecycle/options
+        run: bash tests/e2e/run-window-lifecycle-cef-views.sh
+
+      - name: E2E — CEF Views window lifecycle events
+        run: bash tests/e2e/run-window-lifecycle-events-cef-views.sh
+
+      - name: E2E — CEF Views WebContentsView lifecycle
+        run: bash tests/e2e/run-view-lifecycle-cef-views.sh
+
       - name: Upload suji logs on failure
         if: failure()
         uses: actions/upload-artifact@v4

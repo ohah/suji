@@ -489,6 +489,18 @@ fn viewsWindowIsFullscreen(window: *c.cef_window_t) bool {
     return is_fullscreen(window) != 0;
 }
 
+fn cefColorFromHex(hex: []const u8) ?c.cef_color_t {
+    if (hex.len < 7 or hex[0] != '#' or (hex.len != 7 and hex.len != 9)) return null;
+    const r = std.fmt.parseInt(u8, hex[1..3], 16) catch return null;
+    const g = std.fmt.parseInt(u8, hex[3..5], 16) catch return null;
+    const b = std.fmt.parseInt(u8, hex[5..7], 16) catch return null;
+    const a: u8 = if (hex.len == 9) std.fmt.parseInt(u8, hex[7..9], 16) catch return null else 255;
+    return (@as(c.cef_color_t, a) << 24) |
+        (@as(c.cef_color_t, r) << 16) |
+        (@as(c.cef_color_t, g) << 8) |
+        @as(c.cef_color_t, b);
+}
+
 fn viewsBrowserAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
     const d = viewsBrowserFromBase(base) orelse return;
     _ = d.ref_count.fetchAdd(1, .acq_rel);
@@ -589,6 +601,30 @@ fn viewsWindowPreferredSize(
     return .{ .width = @intCast(d.bounds.width), .height = @intCast(d.bounds.height) };
 }
 
+fn viewsWindowMinimumSize(
+    self: ?*c._cef_view_delegate_t,
+    view: ?*c._cef_view_t,
+) callconv(.c) c.cef_size_t {
+    const d = viewsWindowFromViewDelegate(self) orelse return .{ .width = 0, .height = 0 };
+    if (view) |v| releaseCefBase(&v.base);
+    return .{
+        .width = @intCast(d.constraints.min_width),
+        .height = @intCast(d.constraints.min_height),
+    };
+}
+
+fn viewsWindowMaximumSize(
+    self: ?*c._cef_view_delegate_t,
+    view: ?*c._cef_view_t,
+) callconv(.c) c.cef_size_t {
+    const d = viewsWindowFromViewDelegate(self) orelse return .{ .width = 0, .height = 0 };
+    if (view) |v| releaseCefBase(&v.base);
+    return .{
+        .width = @intCast(d.constraints.max_width),
+        .height = @intCast(d.constraints.max_height),
+    };
+}
+
 fn viewsWindowInitialBounds(
     self: ?*c._cef_window_delegate_t,
     window: ?*c._cef_window_t,
@@ -629,7 +665,7 @@ fn viewsWindowStandardButtons(
 ) callconv(.c) i32 {
     const d = viewsWindowFromSelf(self) orelse return 1;
     releaseWindowRef(@ptrCast(window));
-    return if (d.appearance.frame) 1 else 0;
+    return if (d.appearance.frame and !d.appearance.transparent) 1 else 0;
 }
 
 fn viewsWindowCanResize(
@@ -753,8 +789,19 @@ fn viewsWindowOnCreated(self: ?*c._cef_window_delegate_t, window: ?*c._cef_windo
     d.cef_window = win;
     d.last_fullscreen = viewsWindowIsFullscreen(win);
 
+    if (d.appearance.background_color) |hex| {
+        if (cefColorFromHex(hex)) |color| {
+            if (win.base.base.set_background_color) |set_bg| set_bg(&win.base.base, color);
+        }
+    }
+
     if (d.browser_view) |bv| {
         if (bv.base.base.add_ref) |add_ref| add_ref(&bv.base.base);
+        if (d.appearance.background_color) |hex| {
+            if (cefColorFromHex(hex)) |color| {
+                if (bv.base.set_background_color) |set_bg| set_bg(&bv.base, color);
+            }
+        }
         if (win.base.set_to_fill_layout) |set_fill| _ = set_fill(&win.base);
         win.base.add_child_view.?(&win.base, &bv.base);
     }
@@ -821,6 +868,8 @@ fn createViewsWindowDelegate(
     d.delegate.can_close = &viewsWindowCanClose;
     d.delegate.get_window_runtime_style = &viewsWindowRuntimeStyle;
     d.delegate.base.base.get_preferred_size = &viewsWindowPreferredSize;
+    d.delegate.base.base.get_minimum_size = &viewsWindowMinimumSize;
+    d.delegate.base.base.get_maximum_size = &viewsWindowMaximumSize;
 
     const n = @min(opts.title.len, d.title_buf.len);
     @memcpy(d.title_buf[0..n], opts.title[0..n]);
@@ -918,6 +967,7 @@ pub const CefNative = struct {
             else
                 false,
         };
+        if (self.use_views) log.info("CEF Views probe path enabled", .{});
         initClient(&self.client);
         return self;
     }
@@ -1501,6 +1551,7 @@ pub const CefNative = struct {
             cefViewsHandleToNSWindow(@ptrCast(views_window.get_window_handle.?(views_window)))
         else
             null;
+        applyCefViewsMacWindowOptions(ns_window, opts);
         window_delegate.handle = handle;
         if (views_window.base.base.get_bounds) |get_bounds| {
             viewsWindowRememberBounds(window_delegate, get_bounds(&views_window.base.base));
@@ -7770,6 +7821,19 @@ fn advanceCascade(window: *anyopaque) void {
 fn applyMacWindowOptions(window: *anyopaque, opts: WindowInitOpts) void {
     const ap = opts.appearance;
     const cs = opts.constraints;
+    if (ap.transparent) applyTransparency(window);
+    if (cs.always_on_top) setAlwaysOnTop(window);
+    if (ap.background_color) |hex| applyBackgroundColor(window, hex);
+    setMacContentSizeLimits(window, cs.min_width, cs.min_height, cs.max_width, cs.max_height);
+    if (ap.title_bar_style != .default) applyTitleBarStyle(window, ap.title_bar_style);
+}
+
+fn applyCefViewsMacWindowOptions(ns_window: ?*anyopaque, opts: *const window_mod.CreateOptions) void {
+    if (!comptime is_macos) return;
+    const window = ns_window orelse return;
+    const ap = opts.appearance;
+    const cs = opts.constraints;
+
     if (ap.transparent) applyTransparency(window);
     if (cs.always_on_top) setAlwaysOnTop(window);
     if (ap.background_color) |hex| applyBackgroundColor(window, hex);
