@@ -53,6 +53,10 @@ e2e_wait_cef() {
   echo "ERROR: suji did not reach 'CEF running' within 120s"
   echo "SUJI_LOG=$SUJI_LOG"
   tail -30 "$SUJI_LOG" || true
+  if command -v ps >/dev/null 2>&1; then
+    echo "---- suji/vite process snapshot ----"
+    ps -ef | grep -E '([s]uji|[v]ite|--type=|zygote|gpu-process|renderer)' || true
+  fi
   return 1
 }
 

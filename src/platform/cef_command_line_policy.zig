@@ -12,7 +12,7 @@ pub const Switch = struct {
     value: ?[]const u8 = null,
 };
 
-pub const MAX_SWITCHES = 12;
+pub const MAX_SWITCHES = 16;
 
 pub const SwitchSet = struct {
     items: [MAX_SWITCHES]Switch = undefined,
@@ -55,6 +55,10 @@ pub fn switches(platform: Platform, ci_env_value: ?[]const u8) SwitchSet {
         if (envTruthy(ci_env_value)) {
             set.add(.{ .name = "disable-dev-shm-usage" });
             set.add(.{ .name = "disable-crash-reporter" });
+            set.add(.{ .name = "disable-gpu-sandbox" });
+            set.add(.{ .name = "disable-setuid-sandbox" });
+            set.add(.{ .name = "enable-logging", .value = "stderr" });
+            set.add(.{ .name = "v", .value = "1" });
             set.add(.{ .name = "ozone-platform", .value = "x11" });
         }
     }
@@ -91,6 +95,10 @@ test "CEF command switches add Linux CI headless guards only when requested" {
     const ci = switches(.linux, "true").slice();
     try std.testing.expect(containsSwitch(ci, "disable-dev-shm-usage"));
     try std.testing.expect(containsSwitch(ci, "disable-crash-reporter"));
+    try std.testing.expect(containsSwitch(ci, "disable-gpu-sandbox"));
+    try std.testing.expect(containsSwitch(ci, "disable-setuid-sandbox"));
+    try std.testing.expectEqualStrings("stderr", switchValue(ci, "enable-logging").?);
+    try std.testing.expectEqualStrings("1", switchValue(ci, "v").?);
     try std.testing.expect(!containsSwitch(ci, "single-process"));
     try std.testing.expect(!containsSwitch(ci, "no-zygote"));
     try std.testing.expectEqualStrings("x11", switchValue(ci, "ozone-platform").?);
