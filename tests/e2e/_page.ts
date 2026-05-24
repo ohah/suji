@@ -65,18 +65,36 @@ export async function callCore<T = any>(
     JSON.stringify(request),
   );
 
-  await page.waitForFunction(
-    (key) => Boolean((window as any)[key]?.done),
-    { timeout: timeoutMs },
-    slot,
-  );
+  let result: { value?: T; error?: string } | null = null;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    result = await page.evaluate((key) => {
+      const value = (window as any)[key];
+      return value?.done ? value : null;
+    }, slot).catch(() => null) as { value?: T; error?: string } | null;
+    if (result) break;
+    await wait(50);
+  }
 
-  const result = await page.evaluate((key) => {
-    const w = window as any;
-    const value = w[key];
-    delete w[key];
-    return value;
-  }, slot) as { value?: T; error?: string };
+  if (!result) {
+    const debug = await page.evaluate((key) => {
+      const w = window as any;
+      const s = w.__suji__ || {};
+      return {
+        slot: w[key] || null,
+        pending: Object.keys(s._pending || {}),
+        early: Object.keys(s._early || {}),
+      };
+    }, slot).catch((error) => ({ error: String(error?.message || error) }));
+    await page.evaluate((key) => {
+      delete (window as any)[key];
+    }, slot).catch(() => {});
+    throw new Error(`core timeout cmd=${String(request.cmd || "<unknown>")} debug=${JSON.stringify(debug)}`);
+  }
+
+  await page.evaluate((key) => {
+    delete (window as any)[key];
+  }, slot).catch(() => {});
 
   if (result?.error) throw new Error(result.error);
   return result?.value as T;
