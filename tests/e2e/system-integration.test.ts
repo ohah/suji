@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { getMainPage } from "./_page";
 
 let browser: Browser;
 let page: Page;
@@ -25,9 +26,7 @@ beforeAll(async () => {
     protocolTimeout: 30000,
     defaultViewport: null,
   });
-  const pages = await browser.pages();
-  expect(pages.length).toBeGreaterThan(0);
-  page = pages[0];
+  page = await getMainPage(browser);
   page.setDefaultTimeout(30000);
 
   // @suji/api dist Blob URL 주입 — wrapper logic을 페이지 안에서 직접 호출해 round-trip 검증.

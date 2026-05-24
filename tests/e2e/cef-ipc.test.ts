@@ -10,6 +10,7 @@
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { getMainPage } from "./_page";
 
 let browser: Browser;
 let page: Page;
@@ -29,9 +30,7 @@ beforeAll(async () => {
     // CEF 실제 창 크기를 그대로 사용 (puppeteer 기본 800x600 emulation 비활성).
     defaultViewport: null,
   });
-  const pages = await browser.pages();
-  expect(pages.length).toBeGreaterThan(0);
-  page = pages[0];
+  page = await getMainPage(browser);
   page.setDefaultTimeout(10000);
 });
 
