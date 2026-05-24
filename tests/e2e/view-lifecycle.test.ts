@@ -109,12 +109,17 @@ async function cdpCommand<T = Record<string, unknown>>(
 
 function visibleSujiChildWindowCount(): number {
   const script = `
+import Foundation
 import CoreGraphics
-let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[CFString: Any]] ?? []
-let count = windows.filter {
-    ($0[kCGWindowOwnerName] as? String) == "suji" &&
-    ($0[kCGWindowName] as? String) == "Suji WebContentsView"
-}.count
+let rawWindows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+let windows = (rawWindows as NSArray?) ?? []
+var count = 0
+for case let window as NSDictionary in windows {
+    if (window[kCGWindowOwnerName] as? String) == "suji" &&
+       (window[kCGWindowName] as? String) == "Suji WebContentsView" {
+        count += 1
+    }
+}
 print(count)
 `;
   const out = execFileSync("swift", ["-"], { input: script, encoding: "utf8" }).trim();
