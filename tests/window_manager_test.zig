@@ -4783,6 +4783,43 @@ test "17-A.8: destroyView가 같은 host의 다른 view에 영향 X" {
     try std.testing.expectEqualSlices(u32, &.{v2}, ids);
 }
 
+test "17-B.5: destroyView preserves host and permits recreate after hide/reorder" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    const host = try wm.create(.{});
+    const v1 = try wm.createView(.{ .host_window_id = host });
+    const v2 = try wm.createView(.{ .host_window_id = host });
+
+    try wm.setViewVisible(v1, false);
+    try std.testing.expect(!wm.get(v1).?.visible_in_host);
+    try std.testing.expectEqual(@as(?bool, false), native.last_set_view_visible);
+
+    try wm.setTopView(host, v1);
+    var ids = try wm.getChildViews(host, std.testing.allocator);
+    defer std.testing.allocator.free(ids);
+    try std.testing.expectEqualSlices(u32, &.{ v2, v1 }, ids);
+
+    try wm.destroyView(v1);
+    try std.testing.expect(!wm.get(host).?.destroyed);
+    try std.testing.expect(wm.get(v1).?.destroyed);
+    try std.testing.expect(!wm.get(v2).?.destroyed);
+    try std.testing.expectEqual(@as(usize, 1), native.destroy_view_calls);
+
+    std.testing.allocator.free(ids);
+    ids = try wm.getChildViews(host, std.testing.allocator);
+    try std.testing.expectEqualSlices(u32, &.{v2}, ids);
+
+    const v3 = try wm.createView(.{ .host_window_id = host });
+    try std.testing.expect(v3 > v2);
+    std.testing.allocator.free(ids);
+    ids = try wm.getChildViews(host, std.testing.allocator);
+    try std.testing.expectEqualSlices(u32, &.{ v2, v3 }, ids);
+
+    try wm.executeJavascript(v2, "1+1");
+    try std.testing.expectEqual(@as(usize, 1), native.execute_js_calls);
+}
+
 test "17-A.8: removeChildView 후 addChildView 다시 부착하면 visible 복원" {
     var native = TestNative{};
     var wm = newManager(&native);
@@ -5270,4 +5307,3 @@ test "Phase 5 채널 중복 없음" {
         }
     }
 }
-

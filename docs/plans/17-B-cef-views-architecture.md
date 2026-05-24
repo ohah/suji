@@ -98,22 +98,43 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
   - CEF Views host 위에 17-A `SujiViewHostWrapper` NSView를 직접 얹는 hybrid도 macOS event bridge와 충돌해 host input을 막을 수 있음. 17-B probe의 default child 합성은 attached child window로 제한.
   - 아직 기본값은 17-A 유지. 17-B path는 feature flag로만 활성화해 옵션/라이프사이클 회귀를 더 검증한 뒤 기본 전환.
 
-### 17-B.2 — macOS 옵션 1차 매핑 (2일)
+#### 2026-05-24 추가 진행 상태
+
+- ✅ 17-B.2~17-B.4: CEF Views host 옵션 매핑 1차 완료.
+  - `frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor`는 CEF Views delegate/NSWindow handle 보정으로 매핑.
+  - `titleBarStyle/transparent`는 CEF Views가 만든 NSWindow handle 추출 후 기존 macOS 옵션 함수를 재사용.
+  - frameless drag region은 `set_draggable_regions` 경로와 `no-drag` 버튼 클릭 E2E로 회귀 검증.
+  - CEF Views 전용 E2E runner 3개를 CI에 추가:
+    `run-window-lifecycle-cef-views.sh`, `run-window-lifecycle-events-cef-views.sh`,
+    `run-view-lifecycle-cef-views.sh`.
+- ✅ 17-B.5: multi-WebContentsView destroy 안정성 1차 검증 완료.
+  - E2E가 기존 attached child-window 구현에서 `destroyView` 후 CDP target leak을 잡음.
+  - 수정: child WebContentsView도 CEF-managed `CefWindow + CefBrowserView`로 생성하고,
+    해당 NSWindow를 host NSWindow에 attach. `destroyView`는 child `CefWindow.close()` 경로를 타서
+    CEF `OnBeforeClose`/target cleanup까지 완료.
+  - 검증:
+    - 단위: `17-B.5: destroyView preserves host and permits recreate after hide/reorder`
+    - E2E: `17-B.5: CEF Views multi-view destroy 안정성`
+      (`destroyView` 대상 child window만 닫힘, CDP target 제거, host renderer 생존,
+      남은 view 생존, 새 view 재생성, host 버튼 클릭 가능)
+
+### 17-B.2 — macOS 옵션 1차 매핑 (완료)
 - frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor — CefWindowDelegate 콜백 구현
 - 단위/회귀 테스트 (Phase 3 옵션 풀 셋 회귀 보존)
 
-### 17-B.3 — titleBarStyle / transparent (2-3일, 위험)
+### 17-B.3 — titleBarStyle / transparent (완료)
 - CefWindowDelegate 직접 노출 안 하면 GetWindowHandle()로 NSWindow 추출 후 macOS API 직접 호출
 - 또는 NSWindow subclass 주입 (CefWindow가 내부 만든 NSWindow에 method swizzling)
 - **이 단계가 17-B 성패 분기점**
 
-### 17-B.4 — Frameless drag region (2일)
+### 17-B.4 — Frameless drag region (완료)
 - 현재 SujiKeyableWindow.sendEvent: override는 NSWindow 직접 관리 전제
 - CefWindow가 만든 NSWindow에 같은 override 주입 가능한지 검증
 - 안 되면 CEF의 drag handler 콜백 활용 우회
 
-### 17-B.5 — multi-WebContentsView 검증 (1일)
-- host CefWindow에 secondary CefBrowserView 추가
+### 17-B.5 — multi-WebContentsView 검증 (완료)
+- host는 `CefWindow + CefBrowserView`, child WebContentsView는 CEF-managed child
+  `CefWindow + CefBrowserView`를 host NSWindow에 attach
 - **dynamic destroy 시각 검증** (17-A 한계 해결됐는지 — 핵심 목표)
 - E2E `view-lifecycle.test.ts` 그대로 재사용 가능 (IPC 인터페이스 동일)
 

@@ -25,6 +25,7 @@ let browser: Browser;
 let page: Page;
 
 type CoreResponse = Record<string, unknown> & { from: string; cmd: string };
+type CdpTarget = { id: string; type: string; url: string; webSocketDebuggerUrl?: string };
 
 const coreCall = (request: object): Promise<CoreResponse> =>
   page.evaluate(
@@ -40,6 +41,69 @@ const isCefViewsMac = () =>
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const dataUrl = (html: string) => `data:text/html,${encodeURIComponent(html)}`;
+
+async function fetchCdpTargets(): Promise<CdpTarget[]> {
+  const r = await fetch("http://localhost:9222/json");
+  return (await r.json()) as CdpTarget[];
+}
+
+async function waitForCdpTarget(
+  predicate: (target: CdpTarget) => boolean,
+  label: string,
+  timeoutMs = 5000,
+): Promise<CdpTarget> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const target = (await fetchCdpTargets()).find(predicate);
+    if (target) return target;
+    await wait(100);
+  }
+  throw new Error(`CDP target not found: ${label}`);
+}
+
+async function waitForCdpTargetGone(
+  predicate: (target: CdpTarget) => boolean,
+  label: string,
+  timeoutMs = 5000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const target = (await fetchCdpTargets()).find(predicate);
+    if (!target) return;
+    await wait(100);
+  }
+  throw new Error(`CDP target still present: ${label}`);
+}
+
+async function cdpCommand<T = Record<string, unknown>>(
+  webSocketDebuggerUrl: string,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<T> {
+  const ws = new WebSocket(webSocketDebuggerUrl);
+  await new Promise<void>((resolve, reject) => {
+    ws.addEventListener("open", () => resolve());
+    ws.addEventListener("error", () => reject(new Error(`CDP websocket open failed for ${method}`)));
+  });
+
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new Error(`CDP command timeout: ${method}`));
+    }, 5000);
+    ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(String(event.data));
+      if (msg.id !== 1) return;
+      clearTimeout(timer);
+      ws.close();
+      if (msg.error) reject(new Error(`${method} failed: ${JSON.stringify(msg.error)}`));
+      else resolve(msg.result as T);
+    });
+    ws.send(JSON.stringify({ id: 1, method, params }));
+  });
+}
+
 function visibleSujiChildWindowCount(): number {
   const script = `
 import CoreGraphics
@@ -52,6 +116,17 @@ print(count)
 `;
   const out = execFileSync("swift", ["-"], { input: script, encoding: "utf8" }).trim();
   return Number(out);
+}
+
+async function waitForVisibleSujiChildWindowCount(expected: number, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let last = visibleSujiChildWindowCount();
+  while (Date.now() < deadline) {
+    if (last === expected) return;
+    await wait(100);
+    last = visibleSujiChildWindowCount();
+  }
+  expect(last).toBe(expected);
 }
 
 beforeAll(async () => {
@@ -85,16 +160,18 @@ async function freshHost(): Promise<number> {
 /** view 생성 + viewId 추출 — `(await coreCall({...})) as {viewId}` 보일러를 한 줄로. */
 async function mkView(
   hostId: number,
-  bounds: { x?: number; y?: number; width?: number; height?: number } = {},
+  bounds: { x?: number; y?: number; width?: number; height?: number; url?: string } = {},
 ): Promise<number> {
-  const r = (await coreCall({
+  const req: Record<string, unknown> = {
     cmd: "create_view",
     hostId,
     x: bounds.x ?? 0,
     y: bounds.y ?? 0,
     width: bounds.width ?? 100,
     height: bounds.height ?? 100,
-  })) as { viewId: number };
+  };
+  if (bounds.url) req.url = bounds.url;
+  const r = (await coreCall(req)) as { viewId: number };
   return r.viewId;
 }
 
@@ -343,6 +420,145 @@ describe("17-A.9: destroyView 후 getChildViews 감소", () => {
     const after = (await coreCall({ cmd: "get_child_views", hostId: host })) as { viewIds: number[] };
     expect(after.viewIds).toEqual([a, c]);
   });
+});
+
+describe("17-B.5: CEF Views multi-view destroy 안정성", () => {
+  test("destroyView는 대상 child window만 닫고 host/남은 view/recreate를 유지", async () => {
+    if (!isCefViewsMac()) return;
+
+    const baseline = visibleSujiChildWindowCount();
+    const hostMarker = `HOST_17B5_${Date.now()}`;
+    const viewAMarker = `VIEW_17B5_A_${Date.now()}`;
+    const viewBMarker = `VIEW_17B5_B_${Date.now()}`;
+    const viewCMarker = `VIEW_17B5_C_${Date.now()}`;
+    const hostHtml = `<!doctype html>
+      <meta charset="utf-8" />
+      <body data-marker="${hostMarker}">
+        <button id="probe" style="position:absolute;left:24px;top:24px;width:140px;height:52px"
+          onclick="document.body.dataset.clicked='yes'">probe</button>
+      </body>`;
+    const hostRes = (await coreCall({
+      cmd: "create_window",
+      title: "17-B.5 host",
+      url: dataUrl(hostHtml),
+      width: 520,
+      height: 360,
+    })) as { windowId: number };
+    const host = hostRes.windowId;
+    expect(typeof host).toBe("number");
+
+    let viewA: number | undefined;
+    let viewB: number | undefined;
+    let viewC: number | undefined;
+    try {
+      const hostTarget = await waitForCdpTarget(
+        (t) => t.type === "page" && t.url.includes(hostMarker),
+        "17-B.5 host",
+      );
+      expect(hostTarget.webSocketDebuggerUrl).toBeTruthy();
+
+      viewA = await mkView(host, {
+        x: 0,
+        y: 0,
+        width: 220,
+        height: 160,
+        url: dataUrl(`<body data-marker="${viewAMarker}"><h1>${viewAMarker}</h1></body>`),
+      });
+      viewB = await mkView(host, {
+        x: 240,
+        y: 0,
+        width: 220,
+        height: 160,
+        url: dataUrl(`<body data-marker="${viewBMarker}"><h1>${viewBMarker}</h1></body>`),
+      });
+      await waitForVisibleSujiChildWindowCount(baseline + 2);
+      await waitForCdpTarget((t) => t.type === "page" && t.url.includes(viewAMarker), "view A");
+      await waitForCdpTarget((t) => t.type === "page" && t.url.includes(viewBMarker), "view B");
+
+      const topRes = (await coreCall({ cmd: "set_top_view", hostId: host, viewId: viewA })) as { ok: boolean };
+      expect(topRes.ok).toBe(true);
+      const hideRes = (await coreCall({ cmd: "set_view_visible", viewId: viewB, visible: false })) as { ok: boolean };
+      expect(hideRes.ok).toBe(true);
+      await waitForVisibleSujiChildWindowCount(baseline + 1);
+      const showRes = (await coreCall({ cmd: "set_view_visible", viewId: viewB, visible: true })) as { ok: boolean };
+      expect(showRes.ok).toBe(true);
+      await waitForVisibleSujiChildWindowCount(baseline + 2);
+
+      const destroyA = (await coreCall({ cmd: "destroy_view", viewId: viewA })) as { ok: boolean };
+      expect(destroyA.ok).toBe(true);
+      viewA = undefined;
+      await waitForVisibleSujiChildWindowCount(baseline + 1);
+      await waitForCdpTargetGone((t) => t.type === "page" && t.url.includes(viewAMarker), "destroyed view A");
+
+      const remainingTarget = await waitForCdpTarget(
+        (t) => t.type === "page" && t.url.includes(viewBMarker),
+        "remaining view B",
+      );
+      expect(remainingTarget.webSocketDebuggerUrl).toBeTruthy();
+      const remainingEval = await cdpCommand<{ result: { value?: string } }>(
+        remainingTarget.webSocketDebuggerUrl!,
+        "Runtime.evaluate",
+        { expression: "document.body.dataset.marker", returnByValue: true },
+      );
+      expect(remainingEval.result.value).toBe(viewBMarker);
+
+      const childrenAfterDestroy = (await coreCall({ cmd: "get_child_views", hostId: host })) as {
+        viewIds: number[];
+      };
+      expect(childrenAfterDestroy.viewIds).toEqual([viewB]);
+
+      const hostAfterDestroy = await waitForCdpTarget(
+        (t) => t.type === "page" && t.url.includes(hostMarker),
+        "host after child destroy",
+      );
+      expect(hostAfterDestroy.webSocketDebuggerUrl).toBeTruthy();
+      const hostEval = await cdpCommand<{ result: { value?: string } }>(
+        hostAfterDestroy.webSocketDebuggerUrl!,
+        "Runtime.evaluate",
+        { expression: "document.body.dataset.marker", returnByValue: true },
+      );
+      expect(hostEval.result.value).toBe(hostMarker);
+      await cdpCommand(hostAfterDestroy.webSocketDebuggerUrl!, "Input.dispatchMouseEvent", {
+        type: "mousePressed",
+        x: 94,
+        y: 50,
+        button: "left",
+        clickCount: 1,
+      });
+      await cdpCommand(hostAfterDestroy.webSocketDebuggerUrl!, "Input.dispatchMouseEvent", {
+        type: "mouseReleased",
+        x: 94,
+        y: 50,
+        button: "left",
+        clickCount: 1,
+      });
+      const clickEval = await cdpCommand<{ result: { value?: string } }>(
+        hostAfterDestroy.webSocketDebuggerUrl!,
+        "Runtime.evaluate",
+        { expression: "document.body.dataset.clicked", returnByValue: true },
+      );
+      expect(clickEval.result.value).toBe("yes");
+
+      viewC = await mkView(host, {
+        x: 0,
+        y: 170,
+        width: 220,
+        height: 140,
+        url: dataUrl(`<body data-marker="${viewCMarker}"><h1>${viewCMarker}</h1></body>`),
+      });
+      await waitForVisibleSujiChildWindowCount(baseline + 2);
+      await waitForCdpTarget((t) => t.type === "page" && t.url.includes(viewCMarker), "recreated view C");
+      const childrenAfterRecreate = (await coreCall({ cmd: "get_child_views", hostId: host })) as {
+        viewIds: number[];
+      };
+      expect(childrenAfterRecreate.viewIds).toEqual([viewB, viewC]);
+    } finally {
+      for (const id of [viewA, viewB, viewC]) {
+        if (id !== undefined) await coreCall({ cmd: "destroy_view", viewId: id });
+      }
+      await waitForVisibleSujiChildWindowCount(baseline).catch(() => undefined);
+    }
+  }, 30000);
 });
 
 describe("17-A.9: webContents API view 호환 — executeJavaScript", () => {

@@ -978,6 +978,7 @@ pub const CefNative = struct {
         while (it.next()) |entry| {
             self.allocator.free(entry.drag_regions);
             releaseDevToolsReg(entry);
+            self.closeChildViewWindow(entry);
             releaseViewsEntry(entry);
         }
         self.browsers.deinit();
@@ -999,6 +1000,7 @@ pub const CefNative = struct {
             var entry = kv.value;
             self.allocator.free(entry.drag_regions);
             releaseReg(entry.devtools_reg); // 제거된 value — 포인터만 release(복사 X)
+            self.closeChildViewWindow(&entry);
             releaseViewsEntry(&entry);
         }
     }
@@ -1158,6 +1160,30 @@ pub const CefNative = struct {
         return !(std.mem.eql(u8, value, "0") or std.ascii.eqlIgnoreCase(value, "false"));
     }
 
+    fn detachChildViewWindow(self: *CefNative, entry: *BrowserEntry) void {
+        if (!comptime is_macos) return;
+        const child_window = entry.child_ns_window orelse return;
+        if (entry.child_window_parent_handle) |parent_handle| {
+            if (self.browsers.get(parent_handle)) |parent_entry| {
+                if (parent_entry.ns_window) |parent_window| {
+                    detachMacChildWindow(parent_window, child_window);
+                }
+            }
+        }
+        orderMacWindowOut(child_window);
+        entry.child_window_visible = false;
+    }
+
+    fn closeChildViewWindow(self: *CefNative, entry: *BrowserEntry) void {
+        if (!comptime is_macos) return;
+        if (entry.views_window != null) return;
+        const child_window = entry.child_ns_window orelse return;
+        self.detachChildViewWindow(entry);
+        closeMacWindow(child_window);
+        entry.child_ns_window = null;
+        entry.child_window_parent_handle = null;
+    }
+
     fn createViewWithChildWindow(
         self: *CefNative,
         host_handle: u64,
@@ -1167,13 +1193,6 @@ pub const CefNative = struct {
         if (!is_macos) return error.NotSupportedOnPlatform;
         const parent_window = host_entry.ns_window orelse return error.HostHasNoNSWindow;
         const child_frame = childWindowFrameForBounds(parent_window, opts.bounds) orelse return error.NSViewAllocFailed;
-        const child_handles = createMacChildWindowForView(child_frame);
-        const child_window = child_handles.ns_window orelse return error.NSViewAllocFailed;
-        const child_content = child_handles.content_view orelse {
-            closeMacWindow(child_window);
-            return error.NSViewAllocFailed;
-        };
-        errdefer closeMacWindow(child_window);
 
         var url_buf: [2048]u8 = undefined;
         const url_z: [:0]const u8 = if (opts.url) |u| blk: {
@@ -1183,43 +1202,68 @@ pub const CefNative = struct {
             break :blk url_buf[0..u.len :0];
         } else self.default_url;
 
-        var window_info: c.cef_window_info_t = undefined;
-        zeroCefStruct(c.cef_window_info_t, &window_info);
-        window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
-        window_info.parent_view = child_content;
-        window_info.bounds = .{
-            .x = 0,
-            .y = 0,
-            .width = @intCast(opts.bounds.width),
-            .height = @intCast(opts.bounds.height),
-        };
-
         var cef_url: c.cef_string_t = .{};
         setUrlOrBlank(&cef_url, url_z);
 
         var browser_settings: c.cef_browser_settings_t = undefined;
         zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
 
-        const browser = c.cef_browser_host_create_browser_sync(
-            &window_info,
-            &self.client,
-            &cef_url,
-            &browser_settings,
-            null,
-            null,
-        );
-        if (browser == null) return error.BrowserCreationFailed;
-        const br: *c.cef_browser_t = @ptrCast(browser);
+        const browser_delegate = try createViewsBrowserDelegate(self.allocator);
+        errdefer releaseCefBase(&browser_delegate.delegate.base.base);
+
+        const browser_view = asPtr(
+            c.cef_browser_view_t,
+            c.cef_browser_view_create(&self.client, &cef_url, &browser_settings, null, null, &browser_delegate.delegate),
+        ) orelse return error.BrowserCreationFailed;
+        var browser_view_owned_by_delegate = false;
+        errdefer if (!browser_view_owned_by_delegate) releaseBrowserViewRef(browser_view);
+
+        const child_opts: window_mod.CreateOptions = .{
+            .title = "Suji WebContentsView",
+            .url = opts.url,
+            .bounds = .{
+                .x = @intFromFloat(child_frame.x),
+                .y = @intFromFloat(child_frame.y),
+                .width = @intFromFloat(child_frame.width),
+                .height = @intFromFloat(child_frame.height),
+            },
+            .appearance = .{ .frame = false },
+            .constraints = .{ .resizable = false },
+        };
+        const window_delegate = try createViewsWindowDelegate(self.allocator, browser_view, &child_opts);
+        browser_view_owned_by_delegate = true;
+        errdefer releaseCefBase(&window_delegate.delegate.base.base.base);
+
+        const views_window = asPtr(c.cef_window_t, c.cef_window_create_top_level(&window_delegate.delegate)) orelse
+            return error.BrowserCreationFailed;
+        errdefer releaseWindowRef(views_window);
+
+        const br = browser_delegate.created_browser orelse blk: {
+            const get_browser = browser_view.get_browser orelse return error.BrowserCreationFailed;
+            break :blk asPtr(c.cef_browser_t, get_browser(browser_view)) orelse return error.BrowserCreationFailed;
+        };
         const handle: u64 = @intCast(br.get_identifier.?(br));
+        const child_window = cefViewsHandleToNSWindow(@ptrCast(views_window.get_window_handle.?(views_window))) orelse
+            return error.HostHasNoNSWindow;
+        setMacWindowFrameRaw(child_window, child_frame);
+        msgSendVoidBool(child_window, "setHasShadow:", false);
+        setMacWindowTitle(child_window, "Suji WebContentsView");
+        window_delegate.handle = handle;
+        if (views_window.base.base.get_bounds) |get_bounds| {
+            viewsWindowRememberBounds(window_delegate, get_bounds(&views_window.base.base));
+        }
 
         self.browsers.put(handle, .{
             .browser = br,
             .ns_window = null,
             .child_ns_window = child_window,
             .child_window_parent_handle = host_handle,
+            .views_window = views_window,
+            .browser_view = browser_view,
+            .views_window_delegate = window_delegate,
+            .views_browser_delegate = browser_delegate,
         }) catch {
-            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
-            if (host) |h| h.close_browser.?(h, 1);
+            views_window.close.?(views_window);
             return error.OutOfMemory;
         };
 
@@ -1295,11 +1339,15 @@ pub const CefNative = struct {
     fn destroyView(ctx: ?*anyopaque, view_handle: u64) void {
         const self = fromCtx(ctx);
         assertUiThread();
-        const entry = self.browsers.get(view_handle) orelse return;
+        const entry = self.browsers.getPtr(view_handle) orelse return;
         if (entry.child_ns_window) |child_window| {
-            const br = entry.browser;
-            const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
-            if (host) |h| h.close_browser.?(h, 1);
+            self.detachChildViewWindow(entry);
+            if (entry.views_window) |views_window| {
+                views_window.close.?(views_window);
+                return;
+            }
+            entry.child_ns_window = null;
+            entry.child_window_parent_handle = null;
             closeMacWindow(child_window);
             return;
         }
@@ -7894,24 +7942,6 @@ fn childWindowFrameForBounds(parent_window: *anyopaque, bounds: window_mod.Bound
         .width = @floatFromInt(bounds.width),
         .height = @floatFromInt(bounds.height),
     };
-}
-
-fn createMacChildWindowForView(frame: NSRect) MacWindowHandles {
-    const title: [:0]const u8 = "Suji WebContentsView";
-    const opts: WindowInitOpts = .{
-        .title = title,
-        .width = @intFromFloat(frame.width),
-        .height = @intFromFloat(frame.height),
-        .x = @intFromFloat(frame.x),
-        .y = @intFromFloat(frame.y),
-        .appearance = .{ .frame = false },
-        .constraints = .{ .resizable = false },
-    };
-    const window = allocMacWindow(opts) orelse return .{ .content_view = null, .ns_window = null };
-    applyMacWindowOptions(window, opts);
-    msgSendVoidBool(window, "setHasShadow:", false);
-    setMacWindowTitle(window, title);
-    return .{ .content_view = msgSend(window, "contentView"), .ns_window = window };
 }
 
 /// macOS: 투명 창 설정 — opaque=NO + clearColor 배경 + 그림자 제거.

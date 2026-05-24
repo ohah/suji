@@ -13,8 +13,9 @@ origin) / OAuth 인-라인 / 위젯 임베드 같은 use case에 사용된다.
 > webContents API를 그대로 사용할 수 있다. 다만 dynamic `destroyView`는 CEF + macOS NSView
 > 합성 한계가 있어 권장하지 않으며, 탭 전환/임시 숨김은 `setViewVisible`을 사용하고 host
 > 창 close 시 자동 정리에 맡기는 패턴을 권장한다. Phase 17-B CEF Views probe path는
-> `SUJI_CEF_VIEWS=1`로 실행할 수 있으며, host window는 `CefWindow + CefBrowserView`,
-> child WebContentsView는 attached child window 경로로 검증 중이다.
+> `SUJI_CEF_VIEWS=1`로 실행할 수 있으며, host와 child WebContentsView 모두
+> CEF-managed `CefWindow + CefBrowserView` 기반으로 동작한다. child NSWindow는 host에
+> attach되며, `destroyView` 후 target cleanup/host 생존/recreate가 E2E로 검증됐다.
 
 ## 다른 프레임워크는 어떻게 하나
 
@@ -100,16 +101,17 @@ await windows.setViewVisible(viewId, false);
 
 ### 알려진 한계
 
-- **dynamic `destroyView` 불안정**: view CefBrowser render subprocess와 host main
+- **기본 17-A dynamic `destroyView` 불안정**: view CefBrowser render subprocess와 host main
   webContents까지 함께 강종되는 CEF + macOS NSView 합성 한계가 있다. wrapper 격리,
   graceful close, NSView ops defer, `setHidden` only 모두 근본 해결은 못 했다.
-- **권장 패턴**: 탭 전환/임시 제거는 `setViewVisible(false)` 또는 `removeChildView`를
+- **권장 패턴(기본 17-A)**: 탭 전환/임시 제거는 `setViewVisible(false)` 또는 `removeChildView`를
   사용하고, 최종 정리는 host 창 close에 맡긴다.
 - **17-B 계획**: CEF Views API(`CefWindow` + `CefBrowserView`)로 architecture migration해
   multi-WebContentsView lifecycle을 안정화한다. 17-B.1 probe path는 `SUJI_CEF_VIEWS=1`에서
-  top-level `CefWindow`와 attached child window 기반 WebContentsView로 동작한다. CEF overlay
-  child path는 macOS native input 차단 이슈 때문에 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로만
-  남겨두었다. 자세한 계획은
+  top-level `CefWindow`와 CEF-managed attached child window 기반 WebContentsView로 동작한다.
+  17-B.5에서 dynamic `destroyView` 후 child target 제거, host 생존, 남은 view 생존, recreate를
+  E2E로 검증했다. CEF overlay child path는 macOS native input 차단 이슈 때문에
+  `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로만 남겨두었다. 자세한 계획은
   [`docs/plans/17-B-cef-views-architecture.md`](../docs/plans/17-B-cef-views-architecture.md).
 
 ### 격리 강도

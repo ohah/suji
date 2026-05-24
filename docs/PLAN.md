@@ -1533,10 +1533,11 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     WebContentsView 합성의 known instability — Electron #46203 유사). wrapper 격리 / graceful
     close / NSView ops defer / setHidden only 모두 root 못 잡음. 권장 패턴: setViewVisible
     토글 + host close 시 자동 정리. 17-B CEF Views API probe path는 `SUJI_CEF_VIEWS=1`로
-    활성화 가능하며, host는 `CefWindow + CefBrowserView`, child WebContentsView는 macOS native
-    input 차단을 피하기 위해 attached child window 경로를 사용. CEF overlay child path는
-    `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로 격리. 아직 기본값은 17-A이고,
-    lifecycle/options 회귀 검증 후 기본 전환 예정 — 자세한 plan:
+    활성화 가능하며, host와 child WebContentsView 모두 CEF-managed `CefWindow + CefBrowserView`
+    기반으로 동작한다. child NSWindow는 host에 attach해 macOS native input 차단을 피하고,
+    dynamic `destroyView` 후 child target cleanup/host 생존/remaining view/recreate를
+    E2E로 검증했다. CEF overlay child path는 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 실험 경로로 격리.
+    아직 기본값은 17-A이고, lifecycle/options 회귀 검증 후 기본 전환 예정 — 자세한 plan:
     [docs/plans/17-B-cef-views-architecture.md](./plans/17-B-cef-views-architecture.md).
 18. ✅ **`webRequest` 인터셉트** — declarative URL glob blocklist + dynamic listener
     (RV_CONTINUE_ASYNC + pending callback storage, 256개) cancel/allow round-trip.
