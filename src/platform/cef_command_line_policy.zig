@@ -44,6 +44,11 @@ pub fn switches(platform: Platform, ci_env_value: ?[]const u8) SwitchSet {
     set.add(.{ .name = "disable-background-mode" });
     set.add(.{ .name = "remote-allow-origins", .value = "*" });
 
+    if (envTruthy(ci_env_value)) {
+        set.add(.{ .name = "enable-features", .value = "NetworkService,NetworkServiceInProcess" });
+        set.add(.{ .name = "disable-background-networking" });
+    }
+
     if (platform != .macos) {
         set.add(.{ .name = "disable-gpu" });
         set.add(.{ .name = "disable-gpu-compositing" });
@@ -75,6 +80,12 @@ test "CEF command switches preserve baseline browser flags" {
     try std.testing.expectEqualStrings("*", set[2].value.?);
 }
 
+test "CEF command switches force in-process network service in CI" {
+    const macos = switches(.macos, "true").slice();
+    try std.testing.expectEqualStrings("NetworkService,NetworkServiceInProcess", switchValue(macos, "enable-features").?);
+    try std.testing.expect(containsSwitch(macos, "disable-background-networking"));
+}
+
 test "CEF command switches disable GPU on non-macOS platforms" {
     const linux = switches(.linux, null).slice();
     const windows = switches(.windows, null).slice();
@@ -93,6 +104,7 @@ test "CEF command switches add Linux CI headless guards only when requested" {
     try std.testing.expect(!containsSwitch(normal, "ozone-platform"));
 
     const ci = switches(.linux, "true").slice();
+    try std.testing.expect(containsSwitch(ci, "disable-background-networking"));
     try std.testing.expect(containsSwitch(ci, "disable-dev-shm-usage"));
     try std.testing.expect(containsSwitch(ci, "disable-crash-reporter"));
     try std.testing.expect(containsSwitch(ci, "disable-gpu-sandbox"));
