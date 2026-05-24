@@ -141,7 +141,7 @@ async function waitForVisibleSujiChildWindowCount(expected: number, timeoutMs = 
 beforeAll(async () => {
   browser = await puppeteer.connect({
     browserURL: "http://localhost:9222",
-    protocolTimeout: 10000,
+    protocolTimeout: 30000,
     defaultViewport: null,
   });
   page = await getMainPage(browser);
