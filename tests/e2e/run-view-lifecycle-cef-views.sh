@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WebContentsView lifecycle E2E — CEF Views probe path.
+# WebContentsView lifecycle E2E — explicit CEF Views path.
 #
 # 사용:
 #   ./tests/e2e/run-view-lifecycle-cef-views.sh

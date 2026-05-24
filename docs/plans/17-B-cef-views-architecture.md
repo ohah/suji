@@ -83,7 +83,7 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - ✅ CEF CAPI Views 헤더(`include/capi/views/*`) 확인 — C++ shim 없이 Zig `@cImport`로 접근 가능.
 - ✅ `SUJI_CEF_VIEWS=1` feature flag 뒤에 17-B.1 probe path 추가.
   - top-level `CefWindow + CefBrowserView`
-  - child `WebContentsView`는 기본적으로 host에 attach한 borderless child `NSWindow + CefBrowser`로 합성
+  - 당시 child `WebContentsView`는 host에 attach한 borderless child `NSWindow + CefBrowser`로 합성
   - `setViewBounds`, `setViewVisible`, `reorderView`, `destroyView`는 child window frame/order/close 경로 사용
   - `CefWindow.add_overlay_view(..., CEF_DOCKING_MODE_CUSTOM)` 경로는 macOS native input 차단 재현용으로 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 뒤에 격리
 - ✅ 검증:
@@ -95,8 +95,8 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
   - macOS `CefWindow.get_window_handle()`는 NSWindow가 아니라 CEF 내부 content view를 반환할 수 있어 `[view window]`로 NSWindow를 추출해야 함.
   - CEF Views가 만든 NSWindow에는 기존 `NSWindow.delegate` wrapper를 붙이면 AppKit forwarding 경로에서 crash. 17-B lifecycle 이벤트는 기존 `window_lifecycle.m`이 아니라 `CefWindowDelegate` 콜백으로 구현해야 함.
   - `CefWindow.add_overlay_view`는 child view가 보이더라도 host `CefBrowserView`의 native mouse input을 막을 수 있음. CDP click/IPC는 살아있지만 실제 버튼 클릭이 막히는 증상으로 재현.
-  - CEF Views host 위에 17-A `SujiViewHostWrapper` NSView를 직접 얹는 hybrid도 macOS event bridge와 충돌해 host input을 막을 수 있음. 17-B probe의 default child 합성은 attached child window로 제한.
-  - 아직 기본값은 17-A 유지. 17-B path는 feature flag로만 활성화해 옵션/라이프사이클 회귀를 더 검증한 뒤 기본 전환.
+  - CEF Views host 위에 17-A `SujiViewHostWrapper` NSView를 직접 얹는 hybrid도 macOS event bridge와 충돌해 host input을 막을 수 있음. child 합성은 attached child window로 제한.
+  - 이 시점에는 기본값은 17-A 유지. 17-B path는 feature flag로만 활성화해 옵션/라이프사이클 회귀를 더 검증한 뒤 기본 전환 예정.
 
 #### 2026-05-24 추가 진행 상태
 
@@ -117,6 +117,12 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
     - E2E: `17-B.5: CEF Views multi-view destroy 안정성`
       (`destroyView` 대상 child window만 닫힘, CDP target 제거, host renderer 생존,
       남은 view 생존, 새 view 재생성, host 버튼 클릭 가능)
+- ✅ 17-B.6: macOS 기본 경로를 CEF Views로 전환하고 17-A NSView 합성 코드 폐기.
+  - `SUJI_CEF_VIEWS` 미지정 시 macOS는 CEF Views path를 기본 사용.
+  - `SUJI_CEF_VIEWS=0`은 native top-level fallback을 남기지만 `createView`는 CEF Views host에서만 지원.
+  - `BrowserEntry.view_wrapper`, `host_ns_view`, `SujiViewHostWrapper`, `allocChildNSView`,
+    child `cef_window_info_t.parent_view` 합성 경로 제거.
+  - 기본 runner(`run-view-lifecycle.sh`, `run-window-lifecycle.sh`)도 macOS에서 CEF Views path를 검증.
 
 ### 17-B.2 — macOS 옵션 1차 매핑 (완료)
 - frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor — CefWindowDelegate 콜백 구현
@@ -138,7 +144,7 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - **dynamic destroy 시각 검증** (17-A 한계 해결됐는지 — 핵심 목표)
 - E2E `view-lifecycle.test.ts` 그대로 재사용 가능 (IPC 인터페이스 동일)
 
-### 17-B.6 — 기존 NSView 합성 코드 폐기 (1일)
+### 17-B.6 — 기존 NSView 합성 코드 폐기 (완료)
 - 17-A의 `cef_window_info_t.parent_view` + `host_ns_view` + wrapper 코드 제거
 - BrowserEntry 단순화
 

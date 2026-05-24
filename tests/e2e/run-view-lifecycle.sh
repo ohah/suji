@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 17-A.7 — WebContentsView 생명주기 E2E 단독 실행.
+# WebContentsView 생명주기 E2E 단독 실행.
 # (tests/e2e/_common.sh가 fresh suji dev 세션 라이프사이클을 처리.)
 #
 # 사용:

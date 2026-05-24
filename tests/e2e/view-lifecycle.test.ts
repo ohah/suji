@@ -1,5 +1,5 @@
 /**
- * WebContentsView Lifecycle E2E Tests (Phase 17-A.7)
+ * WebContentsView Lifecycle E2E Tests (Phase 17-B)
  *
  * host 창에 child view들을 합성하고 z-order/lifecycle/webContents 호환을 검증.
  *
@@ -7,15 +7,13 @@
  *   bash tests/e2e/run-view-lifecycle.sh
  *
  * 범위:
- *   - createView → host 안에 child NSView + CefBrowser 합성
+ *   - createView → host 안에 child WebContentsView 합성
  *   - addChildView/setTopView/getChildViews — z-order 매트릭스
  *   - setViewBounds/setViewVisible — 위치/표시 제어
  *   - destroyView → window:view-destroyed 이벤트 도달
- *   - 기존 webContents API(loadURL/setTitle)에 viewId 전달 시 정상 동작 (17-A.5 회귀)
+ *   - 기존 webContents API(loadURL/setTitle)에 viewId 전달 시 정상 동작
  *
- * NOTE: host 창은 close_window IPC가 아직 노출되지 않아 테스트 간 누적된다 (puppeteer
- *       세션 종료 시 함께 정리). host destroy → child auto-destroy 검증은 17-B에서
- *       close_window 노출 후 추가.
+ * NOTE: runner가 fresh suji dev 세션을 띄우고 종료 시 전체 앱 프로세스를 정리한다.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { execFileSync } from "node:child_process";
@@ -35,7 +33,6 @@ const coreCall = (request: object): Promise<CoreResponse> =>
 
 const isCefViewsMac = () =>
   process.platform === "darwin" &&
-  process.env.SUJI_CEF_VIEWS !== undefined &&
   process.env.SUJI_CEF_VIEWS !== "0" &&
   process.env.SUJI_CEF_VIEWS !== "false";
 
@@ -175,7 +172,7 @@ async function mkView(
   return r.viewId;
 }
 
-describe("17-A.7: createView / destroyView", () => {
+describe("WebContentsView: createView / destroyView", () => {
   test("createView returns viewId in monotonic id pool", async () => {
     const host = await freshHost();
     const r = (await coreCall({
@@ -213,7 +210,7 @@ describe("17-A.7: createView / destroyView", () => {
   });
 });
 
-describe("17-A.7: z-order (addChildView / setTopView / getChildViews)", () => {
+describe("WebContentsView: z-order (addChildView / setTopView / getChildViews)", () => {
   test("addChildView re-call moves view to top", async () => {
     const host = await freshHost();
     const v1 = await mkView(host);
@@ -237,7 +234,7 @@ describe("17-A.7: z-order (addChildView / setTopView / getChildViews)", () => {
   });
 });
 
-describe("17-A.7: setViewBounds / setViewVisible", () => {
+describe("WebContentsView: setViewBounds / setViewVisible", () => {
   test("setViewBounds returns ok:true", async () => {
     const host = await freshHost();
     const view = await mkView(host);
@@ -286,7 +283,7 @@ describe("17-A.7: setViewBounds / setViewVisible", () => {
   });
 });
 
-describe("17-A.7: 17-A.5 회귀 — webContents API view 호환", () => {
+describe("WebContentsView: webContents API view 호환", () => {
   test("loadURL on viewId returns ok:true (windowId 자리에 viewId)", async () => {
     const host = await freshHost();
     const view = await mkView(host, { width: 200, height: 200 });
@@ -302,7 +299,7 @@ describe("17-A.7: 17-A.5 회귀 — webContents API view 호환", () => {
   });
 });
 
-describe("17-A.7: getChildViews", () => {
+describe("WebContentsView: getChildViews", () => {
   test("getChildViews returns ordered viewIds (z-order, 0=bottom, last=top)", async () => {
     const host = await freshHost();
     const a = await mkView(host, { width: 50, height: 50 });
@@ -322,10 +319,10 @@ describe("17-A.7: getChildViews", () => {
 });
 
 // ============================================
-// Phase 17-A.9: 보강 — 이벤트 frontend 도달 + 멀티 host 격리 + remove/re-add
+// WebContentsView 보강 — 이벤트 frontend 도달 + 멀티 host 격리 + remove/re-add
 // ============================================
 
-describe("17-A.9: lifecycle 이벤트 frontend 도달", () => {
+describe("WebContentsView: lifecycle 이벤트 frontend 도달", () => {
   test("createView 시 window:view-created 이벤트가 frontend listener에 도달", async () => {
     const host = await freshHost();
     // listener 등록 — 다음 createView가 trigger.
@@ -370,7 +367,7 @@ describe("17-A.9: lifecycle 이벤트 frontend 도달", () => {
   });
 });
 
-describe("17-A.9: multiple hosts isolation", () => {
+describe("WebContentsView: multiple hosts isolation", () => {
   test("두 host에 각각 view 만들면 cross-affect 없음", async () => {
     const host_a = await freshHost();
     const host_b = await freshHost();
@@ -391,7 +388,7 @@ describe("17-A.9: multiple hosts isolation", () => {
   });
 });
 
-describe("17-A.9: removeChildView 후 재부착", () => {
+describe("WebContentsView: removeChildView 후 재부착", () => {
   test("removeChildView → getChildViews에서 사라짐 → addChildView로 복원", async () => {
     const host = await freshHost();
     const view = await mkView(host);
@@ -406,7 +403,7 @@ describe("17-A.9: removeChildView 후 재부착", () => {
   });
 });
 
-describe("17-A.9: destroyView 후 getChildViews 감소", () => {
+describe("WebContentsView: destroyView 후 getChildViews 감소", () => {
   test("3 view 중 1 destroy → getChildViews 길이 2", async () => {
     const host = await freshHost();
     const a = await mkView(host);
@@ -561,7 +558,7 @@ describe("17-B.5: CEF Views multi-view destroy 안정성", () => {
   }, 30000);
 });
 
-describe("17-A.9: webContents API view 호환 — executeJavaScript", () => {
+describe("WebContentsView: webContents API view 호환 — executeJavaScript", () => {
   test("executeJavaScript on viewId returns ok:true (실제 JS 실행)", async () => {
     const host = await freshHost();
     const view = await mkView(host, { width: 200, height: 200 });
@@ -580,20 +577,20 @@ describe("17-A.9: webContents API view 호환 — executeJavaScript", () => {
       ok: boolean;
       loading: boolean;
     };
-    // ok:true는 핸들러가 view를 .window와 똑같이 dispatch했다는 시그널 (17-A.5 회귀 가드).
+    // ok:true는 핸들러가 view를 .window와 똑같이 dispatch했다는 시그널.
     // (getURL은 OnAddressChange가 view에 대해 cache 채우는 시점이 비결정적이라 별도 검증 X)
     expect(r.ok).toBe(true);
   });
 });
 
 // ============================================
-// Phase 17-A.10: 시각 검증 — view CefBrowser는 별도 DevTools target으로 puppeteer에 노출.
+// WebContentsView 시각 검증 — view CefBrowser는 별도 DevTools target으로 puppeteer에 노출.
 // 그 page에서 직접 컨텐츠 읽기/screenshot으로 "view가 실제 살아있고 렌더링되고 있다"는
-// 픽셀 단계 증거 확보. 단 host NSWindow 안에서의 합성 시각(z-order/위치/투명도)은 OS
-// 차원 캡처가 필요해 별도 — 사용자 수동 검증 또는 examples/multi-backend의 view 데모 패널.
+// 픽셀 단계 증거 확보. host NSWindow 안에서의 합성 시각(z-order/위치/투명도)은
+// 별도 OS-level child window 카운트와 manual demo로 보강.
 // ============================================
 
-describe("17-A.10: view CefBrowser endpoint + 픽셀 캡처", () => {
+describe("WebContentsView: view CefBrowser endpoint + 픽셀 캡처", () => {
   /** CDP /json endpoint에서 raw target 목록 — puppeteer browser.pages()는 main browser가
    *  발견한 page만 캐시. view CefBrowser는 별도 prefix /devtools/page/<id> 로 노출되지만
    *  puppeteer 내부 캐시 갱신 시점에 따라 안 잡힐 수 있음. /json은 항상 최신. */

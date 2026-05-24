@@ -376,7 +376,7 @@ fn ensureGlobalHandlers() void {
 }
 
 // ============================================
-// Phase 17-B: CEF Views delegates (probe path)
+// Phase 17-B: CEF Views delegates
 // ============================================
 
 const ViewsBrowserViewDelegate = struct {
@@ -895,27 +895,15 @@ pub const CefNative = struct {
         browser: *c.cef_browser_t,
         /// macOS: NSWindow 포인터 (destroyWindow에서 close 메시지 송신용).
         /// Linux/Windows: null (CEF가 자체 창 관리).
-        /// `ns_window`와 `host_ns_view`는 **상호배타** — 일반 창은 ns_window만, Phase 17-A
-        /// WebContentsView는 host_ns_view만 set. WindowManager가 같은 invariant를
-        /// `Window.kind`로 표현 (`.window`/`.view`).
+        /// CEF Views child WebContentsView는 별도 attached NSWindow라 child_ns_window에 set.
         ns_window: ?*anyopaque,
-        /// Phase 17-A: host용 view 합성 wrapper NSView. createView 첫 호출 시 lazy init.
-        /// contentView 안에 영구 부착되어 우리 view들의 부모 — main browser CEF view와
-        /// 격리해 destroy/reorder 시 main browser 영향 X. host BrowserEntry만 set.
-        view_wrapper: ?*anyopaque = null,
-        /// Phase 17-A: WebContentsView. wrapper NSView 안에 부착된 child NSView 포인터.
-        /// 일반 창은 항상 null, view만 set. setViewBounds/setViewVisible/reorderView가
-        /// 이 NSView를 조작.
-        host_ns_view: ?*anyopaque = null,
-        /// Phase 17-B macOS compatibility path: CEF Views owns the host content
-        /// view, so adding our pass-through wrapper NSView above it can still
-        /// block native input. Child WebContentsViews are represented as
-        /// borderless NSWindows attached to the host instead.
+        /// Phase 17-B: CEF Views가 만든 child WebContentsView NSWindow.
+        /// host NSWindow에 attach해서 한 창처럼 보이게 하되, browser lifecycle은
+        /// child CefWindow가 관리한다.
         child_ns_window: ?*anyopaque = null,
         child_window_parent_handle: ?u64 = null,
         child_window_visible: bool = true,
-        /// Phase 17-B probe path: CEF Views top-level window. Enabled only with
-        /// SUJI_CEF_VIEWS=1 while the migration is validated.
+        /// Phase 17-B: CEF Views top-level/child window.
         views_window: ?*c.cef_window_t = null,
         /// Main or child CefBrowserView. Top-level ownership is held by the
         /// window delegate; overlay views hold one entry-owned reference.
@@ -965,9 +953,9 @@ pub const CefNative = struct {
             .use_views = if (runtime.env("SUJI_CEF_VIEWS")) |v|
                 !std.mem.eql(u8, v, "0") and !std.mem.eql(u8, v, "false")
             else
-                false,
+                is_macos,
         };
-        if (self.use_views) log.info("CEF Views probe path enabled", .{});
+        if (self.use_views) log.info("CEF Views path enabled", .{});
         initClient(&self.client);
         return self;
     }
@@ -993,8 +981,7 @@ pub const CefNative = struct {
     }
 
     /// CEF가 OnBeforeClose에서 확정 파괴를 알렸을 때 테이블에서 제거.
-    /// NSView 정리는 destroyView가 이미 처리(removeFromSuperview + release) — purge는
-    /// BrowserEntry 메모리만 회수.
+    /// BrowserEntry가 보유한 CEF Views refs와 auxiliary NSWindow 포인터를 정리한다.
     pub fn purge(self: *CefNative, handle: u64) void {
         if (self.browsers.fetchRemove(handle)) |kv| {
             var entry = kv.value;
@@ -1046,8 +1033,7 @@ pub const CefNative = struct {
         .stop_find_in_page = stopFindInPageImpl,
         .print_to_pdf = printToPDFImpl,
         .capture_page = captureePageImpl,
-        // Phase 17-A: WebContentsView. 실제 구현은 17-A.3 (NSView + cef_window_info_t.parent_view).
-        // 일단 컴파일 통과용 placeholder — 호출되면 not-implemented 또는 no-op.
+        // Phase 17-B: WebContentsView via CEF Views-managed child CefWindow.
         .create_view = createView,
         .destroy_view = destroyView,
         .set_view_bounds = setViewBounds,
@@ -1067,92 +1053,22 @@ pub const CefNative = struct {
         return @ptrCast(@alignCast(ctx.?));
     }
 
-    // ==================== Phase 17-A: WebContentsView ====================
-    // host 창의 contentView 안에 child NSView를 부착하고 그 NSView를 cef_window_info_t.
-    // parent_view로 넘겨 별도 CefBrowser를 임베드. id 풀(handle = browser identifier)과 같은
-    // client를 공유하므로 모든 webContents API(load_url/executeJavascript/...) 가 view에도
-    // 자동 동작. 17-A.3은 macOS만 — Linux/Windows는 17-B.
+    // ==================== Phase 17-B: WebContentsView ====================
+    // macOS 기본 경로는 CEF Views-managed child CefWindow + CefBrowserView를 host
+    // NSWindow에 attach한다. 17-A의 NSView parent_view 합성은 destroy 안정성 문제로 제거.
 
     fn createView(ctx: ?*anyopaque, host_handle: u64, opts: *const window_mod.CreateViewOptions) anyerror!u64 {
         const self = fromCtx(ctx);
         assertUiThread();
         const host_entry = self.browsers.getPtr(host_handle) orelse return error.HostNotFound;
-        if (host_entry.views_window != null) {
-            if (viewsChildOverlayEnabled()) {
-                return self.createViewWithCefViews(host_handle, host_entry, opts);
-            }
-            return self.createViewWithChildWindow(host_handle, host_entry, opts);
-        }
-        if (!is_macos) {
-            log.warn("create_view: Linux/Windows는 Phase 17-B에서 지원 예정", .{});
+        if (host_entry.views_window == null) {
+            log.warn("create_view: CEF Views host required; set SUJI_CEF_VIEWS=1 or use default macOS path", .{});
             return error.NotSupportedOnPlatform;
         }
-
-        const host_ns_window = host_entry.ns_window orelse return error.HostHasNoNSWindow;
-
-        // url 처리 (createWindow와 동일 패턴 — null이면 default_url).
-        var url_buf: [2048]u8 = undefined;
-        const url_z: [:0]const u8 = if (opts.url) |u| blk: {
-            if (u.len >= url_buf.len) return error.UrlTooLong;
-            @memcpy(url_buf[0..u.len], u);
-            url_buf[u.len] = 0;
-            break :blk url_buf[0..u.len :0];
-        } else self.default_url;
-
-        // host용 view wrapper 보장 — main browser CEF view와 격리할 영구 NSView.
-        const wrapper = ensureViewWrapper(host_entry, host_ns_window) orelse return error.WrapperAllocFailed;
-        // child NSView를 wrapper 안에 부착 (contentView 직접 X).
-        const new_view = allocChildNSView(wrapper, opts.bounds) orelse return error.NSViewAllocFailed;
-        // 에러 경로 cleanup: removeFromSuperview(super retain 풀림) + release(alloc retain 풀림 → dealloc).
-        errdefer {
-            _ = msgSend(new_view, "removeFromSuperview");
-            _ = msgSend(new_view, "release");
+        if (viewsChildOverlayEnabled()) {
+            return self.createViewWithCefViews(host_handle, host_entry, opts);
         }
-
-        // CEF browser를 child NSView 안에 합성. parent_view는 NSView*. bounds는 super 좌표계로
-        // (0, 0) + width/height — child NSView 자체가 이미 위치 고정되어 있어 CEF 내부 view는
-        // 그 안에서 (0,0)부터 채움.
-        var window_info: c.cef_window_info_t = undefined;
-        zeroCefStruct(c.cef_window_info_t, &window_info);
-        window_info.runtime_style = c.CEF_RUNTIME_STYLE_ALLOY;
-        window_info.parent_view = new_view;
-        window_info.bounds = .{
-            .x = 0,
-            .y = 0,
-            .width = @intCast(opts.bounds.width),
-            .height = @intCast(opts.bounds.height),
-        };
-
-        var cef_url: c.cef_string_t = .{};
-        setUrlOrBlank(&cef_url, url_z);
-
-        var browser_settings: c.cef_browser_settings_t = undefined;
-        zeroCefStruct(c.cef_browser_settings_t, &browser_settings);
-
-        const browser = c.cef_browser_host_create_browser_sync(
-            &window_info,
-            &self.client,
-            &cef_url,
-            &browser_settings,
-            null,
-            null,
-        );
-        if (browser == null) return error.BrowserCreationFailed;
-        const br: *c.cef_browser_t = @ptrCast(browser);
-        const handle: u64 = @intCast(br.get_identifier.?(br));
-
-        self.browsers.put(handle, .{
-            .browser = br,
-            .ns_window = null,
-            .host_ns_view = new_view,
-        }) catch {
-            // browsers.put 실패 시 CEF browser는 살아있음 → close_browser로 정리
-            // (errdefer가 NSView removeFromSuperview는 따로 처리).
-            const host_obj = asPtr(c.cef_browser_host_t, br.get_host.?(br));
-            if (host_obj) |h| h.close_browser.?(h, 1);
-            return error.OutOfMemory;
-        };
-        return handle;
+        return self.createViewWithChildWindow(host_handle, host_entry, opts);
     }
 
     fn viewsChildOverlayEnabled() bool {
@@ -1374,15 +1290,6 @@ pub const CefNative = struct {
             if (host) |h| h.close_browser.?(h, 1);
             return;
         }
-        // 17-A 한계 우회: close_browser, NSView dealloc cascade, NSView ops defer 모두 view
-        // CefBrowser의 render subprocess race를 못 잡음 (CEF + macOS multi-WebContentsView 합성
-        // 알려진 instability). **메모리 leak 허용하고 시각만 분리** — view CefBrowser는 host
-        // close까지 alive 유지. host close 시 NSWindow dealloc cascade가 wrapper → 모든 view를
-        // 한꺼번에 정리 (process 종료 직전이라 강종 인지 X). WindowManager는 view를 destroyed
-        // 마킹해 같은 viewId 재사용 X.
-        if (entry.host_ns_view) |view| {
-            msgSendVoidBool(view, "setHidden:", true);
-        }
     }
 
     fn setViewBounds(ctx: ?*anyopaque, view_handle: u64, bounds: window_mod.Bounds) void {
@@ -1419,13 +1326,6 @@ pub const CefNative = struct {
                 return;
             }
         }
-        if (!is_macos) return;
-        const entry = self.browsers.get(view_handle) orelse return;
-        const view = entry.host_ns_view orelse return;
-        const super = msgSend(view, "superview") orelse return;
-        // 매 호출마다 super 현재 bounds로 Cocoa Y 재계산 — host 창 resize 후에도 정확히 매핑.
-        const rect = computeChildViewRect(super, bounds);
-        _ = msgSendNSRect(view, "setFrame:", rect);
     }
 
     fn setViewVisible(ctx: ?*anyopaque, view_handle: u64, visible: bool) void {
@@ -1464,25 +1364,10 @@ pub const CefNative = struct {
                 return;
             }
         }
-        if (!is_macos) return;
-        const entry = self.browsers.get(view_handle) orelse return;
-        const view = entry.host_ns_view orelse return;
-        // NSView setHidden: + CEF browser host.was_hidden — Cocoa는 시각, CEF는 렌더링/입력 일시정지.
-        msgSendVoidBool(view, "setHidden:", !visible);
-        const br = entry.browser;
-        const host = asPtr(c.cef_browser_host_t, br.get_host.?(br));
-        if (host) |h| h.was_hidden.?(h, if (visible) 0 else 1);
     }
 
-    /// view를 host contentView에서 top(끝)으로 옮김. addSubview는 view가 이미 super의
-    /// subview면 자동 removeFromSuperview 후 끝에 다시 부착 — 시각적/메모리 상 안전.
-    ///
-    /// **`index_in_host` 무시**: contentView.subviews에는 우리 view들 + main browser CEF view가
-    /// 함께 있어 우리 list index와 contentView.subviews index가 다른 namespace. 이전엔
-    /// `addSubview:positioned:relativeTo: subviews[index-1]`로 잘못된 reference(main browser view)
-    /// 에 부착해 NSView tree corruption + 후속 destroy crash. WindowManager가 list 순서대로
-    /// 모든 view를 sequential 호출하면 마지막 호출된 view가 top — 우리 list 순서와 일치 +
-    /// main browser view는 항상 우리 view들 below 유지.
+    /// view를 host z-order top으로 옮김. 17-B 기본 경로는 attached child NSWindow를
+    /// parent에서 detach/attach해서 AppKit child-window order를 갱신한다.
     fn reorderView(ctx: ?*anyopaque, host_handle: u64, view_handle: u64, index_in_host: u32) void {
         const self = fromCtx(ctx);
         assertUiThread();
@@ -1535,13 +1420,6 @@ pub const CefNative = struct {
                 return;
             }
         }
-        const entry = self.browsers.get(view_handle) orelse return;
-        if (entry.overlay_controller != null) {
-            return;
-        }
-        const view = entry.host_ns_view orelse return;
-        const super = msgSend(view, "superview") orelse return;
-        msgSendVoid1(super, "addSubview:", view);
     }
 
     fn assertUiThread() void {
@@ -8059,89 +7937,6 @@ fn setMacWindowTitle(ns_window: *anyopaque, title: []const u8) void {
     const ns_title = strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), @ptrCast(&buf)) orelse return;
 
     msgSendVoid1(ns_window, "setTitle:", ns_title);
-}
-
-/// macOS: hit testing pass-through NSView subclass — wrapper의 빈 영역(자식 view 없는 곳) 클릭이
-/// main browser webContents에 통과되도록 self일 때 nil 반환. 그러지 않으면 wrapper가 contentView
-/// 전체를 덮어 main browser webContents의 사용자 입력을 가로채.
-var g_view_host_wrapper_class: ?*anyopaque = null;
-
-fn sujiViewHostWrapperHitTest(self: ?*anyopaque, _: ?*anyopaque, point: NSPoint) callconv(.c) ?*anyopaque {
-    const NSView = getClass("NSView") orelse return null;
-    const sel = objc.sel_registerName("hitTest:");
-    const imp = objc.class_getMethodImplementation(NSView, sel);
-    const f: *const fn (?*anyopaque, ?*anyopaque, NSPoint) callconv(.c) ?*anyopaque = @ptrCast(imp);
-    const hit = f(self, @ptrCast(sel), point);
-    if (hit == self) return null;
-    return hit;
-}
-
-fn ensureSujiViewHostWrapperClass() ?*anyopaque {
-    if (g_view_host_wrapper_class) |existing| return existing;
-    const ns_view = getClass("NSView") orelse return null;
-    const cls = objc.objc_allocateClassPair(ns_view, "SujiViewHostWrapper", 0) orelse {
-        return getClass("SujiViewHostWrapper");
-    };
-    const sel = objc.sel_registerName("hitTest:");
-    _ = objc.class_addMethod(cls, @ptrCast(sel), @ptrCast(&sujiViewHostWrapperHitTest), "@@:{CGPoint=dd}");
-    objc.objc_registerClassPair(cls);
-    g_view_host_wrapper_class = cls;
-    return cls;
-}
-
-/// host용 view 합성 wrapper NSView를 lazy init. 첫 createView에서 호출되고 host_entry에
-/// 영구 보관. contentView resize 따라 자동 리사이즈 (autoresizingMask). hitTest pass-through.
-fn ensureViewWrapper(host_entry: *CefNative.BrowserEntry, ns_window: *anyopaque) ?*anyopaque {
-    if (host_entry.view_wrapper) |w| return w;
-
-    const content_view = msgSend(ns_window, "contentView") orelse return null;
-    const cv_bounds = nsViewBounds(content_view);
-
-    const cls = ensureSujiViewHostWrapperClass() orelse return null;
-    const view_alloc = msgSend(cls, "alloc") orelse return null;
-    const wrapper = msgSendNSRect(view_alloc, "initWithFrame:", cv_bounds) orelse return null;
-
-    // NSViewWidthSizable(2) | NSViewHeightSizable(16) — host contentView resize 따라 자동.
-    const sel_autoresize = objc.sel_registerName("setAutoresizingMask:");
-    const f_auto: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    f_auto(wrapper, @ptrCast(sel_autoresize), 18);
-
-    msgSendVoid1(content_view, "addSubview:", wrapper);
-    // alloc retain 정리 — superview retain만 남김. host close 시 contentView dealloc → wrapper dealloc.
-    _ = msgSend(wrapper, "release");
-
-    host_entry.view_wrapper = wrapper;
-    return wrapper;
-}
-
-/// macOS: host contentView 안에 부착될 child NSView를 alloc + init + addSubview까지 처리.
-/// `super`는 NSView (host의 contentView), `bounds`는 super 좌표계 top-left 기준.
-/// **alloc retain 유지** — reorderSubview의 removeFromSuperview가 super의 retain을 풀 때
-/// 우리 alloc retain만 남아 view가 alive. release 없이 super retain만 의존하면 reorder
-/// 첫 단계에서 retain count 0 → dealloc → 다음 addSubview 시 dangling pointer crash.
-/// destroyView가 마지막 release 호출하여 균형.
-fn allocChildNSView(super: *anyopaque, bounds: window_mod.Bounds) ?*anyopaque {
-    const NSViewClass = getClass("NSView") orelse return null;
-    const view_alloc = msgSend(NSViewClass, "alloc") orelse return null;
-    const view_rect = computeChildViewRect(super, bounds);
-    const view = msgSendNSRect(view_alloc, "initWithFrame:", view_rect) orelse return null;
-    msgSendVoid1(super, "addSubview:", view);
-    return view;
-}
-
-/// top-left `bounds` → Cocoa bottom-left NSRect (super 좌표계).
-/// super.bounds.height에서 y와 height만큼 빼서 Cocoa Y 계산.
-fn computeChildViewRect(super: *anyopaque, bounds: window_mod.Bounds) NSRect {
-    const super_bounds = nsViewBounds(super);
-    const cocoa_y = super_bounds.height -
-        @as(f64, @floatFromInt(bounds.y)) -
-        @as(f64, @floatFromInt(bounds.height));
-    return .{
-        .x = @floatFromInt(bounds.x),
-        .y = cocoa_y,
-        .width = @floatFromInt(bounds.width),
-        .height = @floatFromInt(bounds.height),
-    };
 }
 
 /// macOS: NSWindow.setFrame:display:. NSRect는 Cocoa 좌표(bottom-left origin)를 쓰지만

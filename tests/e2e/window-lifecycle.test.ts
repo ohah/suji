@@ -32,7 +32,7 @@ const coreCall = (request: object): Promise<CoreResponse> =>
   ) as Promise<CoreResponse>;
 
 const isCefViewsRun = () =>
-  process.env.SUJI_CEF_VIEWS !== undefined &&
+  process.platform === "darwin" &&
   process.env.SUJI_CEF_VIEWS !== "0" &&
   process.env.SUJI_CEF_VIEWS !== "false";
 
@@ -69,12 +69,12 @@ afterAll(async () => {
 });
 
 describe("runner mode guard", () => {
-  test("SUJI_CEF_VIEWS runner actually enabled native CEF Views path", () => {
+  test("macOS runner/default actually enabled native CEF Views path", () => {
     if (!isCefViewsRun()) return;
     const logPath = process.env.SUJI_LOG;
     expect(logPath).toBeTruthy();
     const log = readFileSync(logPath!, "utf8");
-    expect(log).toContain("CEF Views probe path enabled");
+    expect(log).toContain("CEF Views path enabled");
   });
 });
 

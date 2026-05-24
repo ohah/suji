@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Window API lifecycle/options E2E — CEF Views probe path.
+# Window API lifecycle/options E2E — explicit CEF Views path.
 #
 # 사용:
 #   ./tests/e2e/run-window-lifecycle-cef-views.sh
