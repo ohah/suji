@@ -44,13 +44,6 @@ export async function getMainPage(browser: Browser, timeoutMs = 30000): Promise<
       if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
     }
 
-    for (const page of pages) {
-      if (appPages.includes(page)) continue;
-      const url = page.url();
-      if (url.startsWith("http://localhost:9222") || url.startsWith("http://127.0.0.1:9222")) continue;
-      if ((await hasSujiBridge(page)) && (await waitForStableSujiBridge(page))) return page;
-    }
-
     lastUrls = pages.map((p) => p.url() || "<empty>").join(", ");
     await wait(100);
   }
