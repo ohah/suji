@@ -803,13 +803,17 @@ test "CEF Views top-level initial navigation is forced after BrowserView materia
     defer std.testing.allocator.free(cef_src);
 
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "fn forceInitialLoadUrl") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "fn scheduleInitialLoadRetries") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "initial_load_pending") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "frame.load_url") != null);
 
-    const needle = "forceInitialLoadUrl(br, url_z)";
+    const force_needle = "forceInitialLoadUrl(br, url_z)";
+    const retry_needle = "scheduleInitialLoadRetries(self.allocator, handle, url_z)";
     const create_window_start = std.mem.indexOf(u8, cef_src, "fn createWindowWithCefViews") orelse return error.CreateWindowWithCefViewsMissing;
     const create_window_end = std.mem.indexOfPos(u8, cef_src, create_window_start, "\n    fn createWindow(") orelse return error.CreateWindowWithCefViewsEndMissing;
     const body = cef_src[create_window_start..create_window_end];
-    try std.testing.expect(std.mem.indexOf(u8, body, needle) != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, force_needle) != null);
+    try std.testing.expect(std.mem.indexOf(u8, body, retry_needle) != null);
 }
 
 test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {

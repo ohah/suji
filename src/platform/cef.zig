@@ -969,6 +969,13 @@ pub const CefNative = struct {
         /// 매 invoke마다 frame.get_url alloc/free를 피하기 위함. len=0이면 미캐싱(폴백).
         url_cache_buf: [URL_CACHE_LEN]u8 = undefined,
         url_cache_len: usize = 0,
+        /// CEF Views BrowserView can briefly commit about:blank before the
+        /// requested startup URL is accepted. Keep the requested URL while the
+        /// initial navigation is pending so delayed UI-thread retries do not
+        /// overwrite a later, legitimate navigation.
+        initial_url_buf: [2048]u8 = undefined,
+        initial_url_len: usize = 0,
+        initial_load_pending: bool = false,
         /// set_user_agent 로 적용한 UA override 보관(get_user_agent 가 반환).
         /// CEF 는 per-browser UA getter 미제공 → 설정값을 inline 추적
         /// (url_cache 와 동일 패턴 — alloc/free 불필요). len=0=미설정(기본).
@@ -1221,7 +1228,7 @@ pub const CefNative = struct {
             viewsWindowRememberBounds(window_delegate, get_bounds(&views_window.base.base));
         }
 
-        self.browsers.put(handle, .{
+        var entry: BrowserEntry = .{
             .browser = br,
             .ns_window = null,
             .child_ns_window = child_window,
@@ -1230,7 +1237,10 @@ pub const CefNative = struct {
             .browser_view = browser_view,
             .views_window_delegate = window_delegate,
             .views_browser_delegate = browser_delegate,
-        }) catch {
+        };
+        rememberInitialUrl(&entry, url_z);
+
+        self.browsers.put(handle, entry) catch {
             views_window.close.?(views_window);
             return error.OutOfMemory;
         };
@@ -1293,14 +1303,17 @@ pub const CefNative = struct {
         };
         const handle: u64 = @intCast(br.get_identifier.?(br));
 
-        self.browsers.put(handle, .{
+        var entry: BrowserEntry = .{
             .browser = br,
             .ns_window = null,
             .browser_view = browser_view,
             .overlay_controller = overlay,
             .views_browser_delegate = browser_delegate,
             .views_parent_handle = host_handle,
-        }) catch return error.OutOfMemory;
+        };
+        rememberInitialUrl(&entry, url_z);
+
+        self.browsers.put(handle, entry) catch return error.OutOfMemory;
         return handle;
     }
 
@@ -1536,14 +1549,17 @@ pub const CefNative = struct {
         }
         window_delegate.last_fullscreen = viewsWindowIsFullscreen(views_window);
 
-        self.browsers.put(handle, .{
+        var entry: BrowserEntry = .{
             .browser = br,
             .ns_window = ns_window,
             .views_window = views_window,
             .browser_view = browser_view,
             .views_window_delegate = window_delegate,
             .views_browser_delegate = browser_delegate,
-        }) catch return error.OutOfMemory;
+        };
+        rememberInitialUrl(&entry, url_z);
+
+        self.browsers.put(handle, entry) catch return error.OutOfMemory;
 
         // Do not attach Suji's NSWindowDelegate to CefWindow-owned windows.
         // CEF Views installs its own delegate/forwarding chain; replacing it
@@ -1557,6 +1573,7 @@ pub const CefNative = struct {
             }
         }
         forceInitialLoadUrl(br, url_z);
+        scheduleInitialLoadRetries(self.allocator, handle, url_z);
         return handle;
     }
 
@@ -5172,12 +5189,130 @@ fn setUrlOrBlank(dest: *c.cef_string_t, url_z: []const u8) void {
     setCefString(dest, if (url_z.len > 0) url_z else "about:blank");
 }
 
+fn isAboutBlankUrl(url: []const u8) bool {
+    return std.mem.eql(u8, url, "about:blank");
+}
+
+fn rememberInitialUrl(entry: *CefNative.BrowserEntry, url_z: [:0]const u8) void {
+    if (url_z.len == 0 or isAboutBlankUrl(url_z) or url_z.len >= entry.initial_url_buf.len) return;
+    @memcpy(entry.initial_url_buf[0..url_z.len], url_z);
+    entry.initial_url_len = url_z.len;
+    entry.initial_load_pending = true;
+}
+
+fn entryInitialUrl(entry: *const CefNative.BrowserEntry) []const u8 {
+    return entry.initial_url_buf[0..entry.initial_url_len];
+}
+
+fn currentMainFrameUrl(browser: *c.cef_browser_t, buf: []u8) ?[]const u8 {
+    const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return null;
+    const get_url = frame.get_url orelse return null;
+    const userfree = get_url(frame);
+    if (userfree == null) return null;
+    const url = cefUserfreeToUtf8(userfree, buf);
+    if (url.len == 0) return null;
+    return url;
+}
+
 fn forceInitialLoadUrl(browser: *c.cef_browser_t, url_z: [:0]const u8) void {
     const frame = asPtr(c.cef_frame_t, browser.get_main_frame.?(browser)) orelse return;
     var cef_url: c.cef_string_t = .{};
     setUrlOrBlank(&cef_url, url_z);
     const load_url = frame.load_url orelse return;
     load_url(frame, &cef_url);
+}
+
+const InitialLoadTask = struct {
+    task: c.cef_task_t = undefined,
+    allocator: std.mem.Allocator,
+    ref_count: std.atomic.Value(u32) = .init(1),
+    handle: u64,
+    url_buf: [2048]u8 = undefined,
+    url_len: usize = 0,
+};
+
+fn initialLoadTaskFromBase(base: ?*c.cef_base_ref_counted_t) ?*InitialLoadTask {
+    return @ptrCast(@alignCast(base orelse return null));
+}
+
+fn initialLoadTaskFromSelf(self: ?*c._cef_task_t) ?*InitialLoadTask {
+    return @ptrCast(@alignCast(self orelse return null));
+}
+
+fn initialLoadTaskAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
+    const task = initialLoadTaskFromBase(base) orelse return;
+    _ = task.ref_count.fetchAdd(1, .acq_rel);
+}
+
+fn initialLoadTaskRelease(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const task = initialLoadTaskFromBase(base) orelse return 0;
+    if (task.ref_count.fetchSub(1, .acq_rel) != 1) return 0;
+    task.allocator.destroy(task);
+    return 1;
+}
+
+fn initialLoadTaskHasOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const task = initialLoadTaskFromBase(base) orelse return 0;
+    return if (task.ref_count.load(.acquire) == 1) 1 else 0;
+}
+
+fn initialLoadTaskHasAtLeastOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const task = initialLoadTaskFromBase(base) orelse return 0;
+    return if (task.ref_count.load(.acquire) >= 1) 1 else 0;
+}
+
+fn initialLoadTaskExecute(self: ?*c._cef_task_t) callconv(.c) void {
+    const task = initialLoadTaskFromSelf(self) orelse return;
+    const native = g_cef_native orelse return;
+    const entry = native.browsers.getPtr(task.handle) orelse return;
+    if (!entry.initial_load_pending) return;
+
+    const requested = entryInitialUrl(entry);
+    if (requested.len == 0 or !std.mem.eql(u8, requested, task.url_buf[0..task.url_len])) return;
+
+    var url_buf: [2048]u8 = undefined;
+    if (currentMainFrameUrl(entry.browser, &url_buf)) |current| {
+        if (std.mem.eql(u8, current, requested)) {
+            entry.initial_load_pending = false;
+            return;
+        }
+        if (!isAboutBlankUrl(current)) {
+            entry.initial_load_pending = false;
+            return;
+        }
+    }
+
+    const requested_z = task.url_buf[0..task.url_len :0];
+    forceInitialLoadUrl(entry.browser, requested_z);
+}
+
+fn scheduleInitialLoadRetry(allocator: std.mem.Allocator, handle: u64, url_z: [:0]const u8, delay_ms: i64) void {
+    if (url_z.len == 0 or isAboutBlankUrl(url_z) or url_z.len >= 2048) return;
+    const task = allocator.create(InitialLoadTask) catch return;
+    task.* = .{
+        .allocator = allocator,
+        .handle = handle,
+        .url_len = url_z.len,
+    };
+    @memset(std.mem.asBytes(&task.task), 0);
+    task.task.base.size = @sizeOf(c.cef_task_t);
+    task.task.base.add_ref = &initialLoadTaskAddRef;
+    task.task.base.release = &initialLoadTaskRelease;
+    task.task.base.has_one_ref = &initialLoadTaskHasOneRef;
+    task.task.base.has_at_least_one_ref = &initialLoadTaskHasAtLeastOneRef;
+    task.task.execute = &initialLoadTaskExecute;
+    @memcpy(task.url_buf[0..url_z.len], url_z);
+    task.url_buf[url_z.len] = 0;
+
+    if (c.cef_post_delayed_task(c.TID_UI, &task.task, delay_ms) != 1) {
+        releaseCefBase(&task.task.base);
+    }
+}
+
+fn scheduleInitialLoadRetries(allocator: std.mem.Allocator, handle: u64, url_z: [:0]const u8) void {
+    scheduleInitialLoadRetry(allocator, handle, url_z, 250);
+    scheduleInitialLoadRetry(allocator, handle, url_z, 1500);
+    scheduleInitialLoadRetry(allocator, handle, url_z, 4000);
 }
 
 /// JSON에서 "cmd":"value" 추출
@@ -5461,6 +5596,10 @@ fn onAddressChange(
     const utf8_len = cefStringToUtf8(u, &entry.url_cache_buf).len;
     // 256 byte 초과 URL은 캐시 무효화 → 폴백 (frame.get_url) 사용.
     entry.url_cache_len = if (utf8_len > 0 and utf8_len < entry.url_cache_buf.len) utf8_len else 0;
+    const current = entry.url_cache_buf[0..utf8_len];
+    if (current.len > 0 and !isAboutBlankUrl(current)) {
+        entry.initial_load_pending = false;
+    }
 }
 
 /// 문서 `<title>` 최대 길이 (UTF-8 바이트). 초과 시 cefStringToUtf8가 truncate.
