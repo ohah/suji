@@ -1659,6 +1659,18 @@ pub fn setProgressBar(progress: f64) ?[]const u8 {
     return coreCmd("app_set_progress_bar", fields);
 }
 
+/// Electron `app.setBadgeCount(count)` 동등. 0 이하면 제거. 응답: `{"success":bool}`.
+pub fn setBadgeCount(count: i64) ?[]const u8 {
+    var fields_buf: [64]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"count\":{d}", .{count}) catch return null;
+    return coreCmd("app_set_badge_count", fields);
+}
+
+/// Electron `app.getBadgeCount()` 동등. 응답: `{"count":N}`.
+pub fn getBadgeCount() ?[]const u8 {
+    return coreCmd("app_get_badge_count", "");
+}
+
 /// 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시.
 pub fn exit() ?[]const u8 {
     return coreCmd("app_exit", "");

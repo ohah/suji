@@ -58,6 +58,21 @@ func SetProgressBar(progress float64) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_progress_bar","progress":%g}`, progress))
 }
 
+// SetBadgeCount sets the app badge count. 0 이하이면 제거.
+// Response: `{"success":bool}`.
+func SetBadgeCount(count int64) string {
+	return suji.Invoke("__core__", buildSetBadgeCountRequest(count))
+}
+
+func buildSetBadgeCountRequest(count int64) string {
+	return fmt.Sprintf(`{"cmd":"app_set_badge_count","count":%d}`, count)
+}
+
+// GetBadgeCount returns the current app badge count. Response: `{"count":N}`.
+func GetBadgeCount() string {
+	return suji.Invoke("__core__", `{"cmd":"app_get_badge_count"}`)
+}
+
 // Exit force-quits the app (Electron `app.exit(code)`). exit code는 무시.
 // Response: `{"success":bool}` (process는 응답 직후 종료).
 func Exit() string {

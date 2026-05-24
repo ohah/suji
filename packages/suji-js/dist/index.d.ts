@@ -858,6 +858,10 @@ export declare const app: {
     getAppPath(): Promise<string>;
     /** 시스템 locale BCP 47 형식 (e.g. "en-US", "ko-KR"). Electron `app.getLocale()`. */
     getLocale(): Promise<string>;
+    /** Electron `app.setBadgeCount(count)` 동등. 0 이하면 배지 제거. */
+    setBadgeCount(count: number): Promise<boolean>;
+    /** Electron `app.getBadgeCount()` 동등. */
+    getBadgeCount(): Promise<number>;
     /** dock 진행률 표시. progress<0=hide, 0~1=ratio, >1=100%로 clamp.
      *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
     setProgressBar(progress: number): Promise<boolean>;

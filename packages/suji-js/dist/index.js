@@ -1160,6 +1160,16 @@ export const app = {
         const r = await coreCall({ cmd: "app_get_locale" });
         return r.locale;
     },
+    /** Electron `app.setBadgeCount(count)` 동등. 0 이하면 배지 제거. */
+    async setBadgeCount(count) {
+        const r = await coreCall({ cmd: "app_set_badge_count", count });
+        return r.success === true;
+    },
+    /** Electron `app.getBadgeCount()` 동등. */
+    async getBadgeCount() {
+        const r = await coreCall({ cmd: "app_get_badge_count" });
+        return r.count ?? 0;
+    },
     /** dock 진행률 표시. progress<0=hide, 0~1=ratio, >1=100%로 clamp.
      *  Electron `BrowserWindow.setProgressBar` 동등 (macOS는 NSApp.dockTile 공유). */
     async setProgressBar(progress) {

@@ -1699,6 +1699,18 @@ export const app = {
     return r.locale;
   },
 
+  /** Electron `app.setBadgeCount(count)` 동등. 0 이하면 배지 제거. */
+  async setBadgeCount(count: number): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_set_badge_count', count });
+    return r.success === true;
+  },
+
+  /** Electron `app.getBadgeCount()` 동등. */
+  async getBadgeCount(): Promise<number> {
+    const r = await invoke<{ count: number }>('__core__', { cmd: 'app_get_badge_count' });
+    return r.count ?? 0;
+  },
+
   /** dock 진행률. progress<0=hide, 0~1=ratio, >1=clamp to 1. */
   async setProgressBar(progress: number): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_set_progress_bar', progress });

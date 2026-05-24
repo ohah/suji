@@ -1454,6 +1454,12 @@ var g_crash_reporter_started: bool = false;
 var g_crash_reporter_upload_to_server: bool = true;
 var g_crash_params: [MAX_CRASH_PARAMS]CrashParam = [_]CrashParam{.{}} ** MAX_CRASH_PARAMS;
 var g_crash_param_count: usize = 0;
+var g_app_badge_count: u32 = 0;
+
+fn badgeCountFromLabel(label: []const u8) u32 {
+    if (label.len == 0) return 0;
+    return std.fmt.parseInt(u32, label, 10) catch 0;
+}
 
 fn crashParamIndex(key: []const u8) ?usize {
     for (g_crash_params[0..g_crash_param_count], 0..) |p, i| {
@@ -2255,7 +2261,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const raw = util.extractJsonString(req_clean, "text") orelse "";
         var unesc_buf: [256]u8 = undefined;
         const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |n| blk: {
-            cef.dockSetBadge(unesc_buf[0..n]);
+            const label = unesc_buf[0..n];
+            cef.dockSetBadge(label);
+            g_app_badge_count = badgeCountFromLabel(label);
             break :blk true;
         } else false;
         const result = std.fmt.bufPrint(
@@ -2276,6 +2284,24 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{esc_buf[0..esc_n]},
         ) catch return null;
         return result;
+    }
+    if (std.mem.eql(u8, cmd, "app_set_badge_count")) {
+        const count = util.nonNegU32(util.extractJsonInt(req_clean, "count") orelse 0);
+        g_app_badge_count = count;
+        var label_buf: [32]u8 = undefined;
+        const label = if (count == 0)
+            ""
+        else
+            std.fmt.bufPrint(&label_buf, "{d}", .{count}) catch return coreError(response_buf, "app_set_badge_count", "encode");
+        cef.dockSetBadge(label);
+        return respondSuccess(response_buf, "app_set_badge_count", true);
+    }
+    if (std.mem.eql(u8, cmd, "app_get_badge_count")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"app_get_badge_count\",\"count\":{d}}}",
+            .{g_app_badge_count},
+        ) catch null;
     }
 
     // Power save blocker.

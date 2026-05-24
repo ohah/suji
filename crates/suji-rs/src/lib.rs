@@ -2131,6 +2131,20 @@ pub fn set_progress_bar(progress: f64) -> Option<String> {
     )
 }
 
+pub(crate) fn set_badge_count_request(count: i64) -> String {
+    serde_json::json!({ "cmd": "app_set_badge_count", "count": count }).to_string()
+}
+
+/// Electron `app.setBadgeCount(count)` 동등. 0 이하면 제거.
+pub fn set_badge_count(count: i64) -> Option<String> {
+    invoke("__core__", &set_badge_count_request(count))
+}
+
+/// Electron `app.getBadgeCount()` 동등. raw JSON: `{"count":N}`.
+pub fn get_badge_count() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_badge_count"}"#)
+}
+
 /// 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시.
 pub fn exit() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_exit"}"#)
@@ -2595,6 +2609,14 @@ mod tests {
             serde_json::from_str(&crate::dock::set_badge_request("a\"b")).unwrap();
         assert_eq!(v["cmd"], "dock_set_badge");
         assert_eq!(v["text"], "a\"b");
+    }
+
+    #[test]
+    fn app_set_badge_count_request() {
+        let v: serde_json::Value =
+            serde_json::from_str(&crate::set_badge_count_request(7)).unwrap();
+        assert_eq!(v["cmd"], "app_set_badge_count");
+        assert_eq!(v["count"], 7);
     }
 
     #[test]

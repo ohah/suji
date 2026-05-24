@@ -401,6 +401,16 @@ describe("app", () => {
     expect(id).toBe(42);
   });
 
+  it("setBadgeCount/getBadgeCount route through app badge count core commands", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    expect(await app.setBadgeCount(7)).toBe(true);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "app_set_badge_count", count: 7 });
+
+    mockBridge.core.mockResolvedValueOnce({ count: 7 });
+    expect(await app.getBadgeCount()).toBe(7);
+    expect(JSON.parse(mockBridge.core.mock.calls[1][0])).toEqual({ cmd: "app_get_badge_count" });
+  });
+
   it("requestUserAttention informational", async () => {
     mockBridge.core.mockResolvedValueOnce({ id: 1 });
     await app.requestUserAttention(false);

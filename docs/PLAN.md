@@ -1424,7 +1424,7 @@ suji build → 결과물:
 | 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | 🟡 `desktopCapturer.getSources({types})` ✅ — macOS CGGetActiveDisplayList(screen) + CGWindowListCopyWindowInfo(window, layer 0 + ExcludeDesktopElements). `{id,name,type,x,y,width,height,displayId?}`. 5 SDK + e2e 4(screen/window/types 필터/SDK round-trip) + 단위 회귀. CG 심볼 Cocoa/Carbon transitive. **썸네일**: `captureThumbnail(sourceId, path)` ✅ — getSources 의 base64 IPC 한도를 capture_page 동형 파일경로로 우회. 동기 CGDisplayCreateImage/CGWindowListCreateImage → ImageIO(CGImageDestination) PNG 인코딩(ImageIO linkFramework 추가). 5 SDK + IPC + source-grep 회귀. ⚠️ **정직 경계(미검증)**: 실 캡처는 Screen Recording TCC 권한 필요 — 헤드리스/CI 는 CG\*CreateImage 가 null → graceful false. 따라서 zig build(컴파일/링크: ImageIO 심볼 해소 실증)+graceful-fail+source-grep 만 검증, **ImageIO 인코딩 경로는 권한 실기기에서만 실행 = 미실행·미검증**(F1~F3 검증격과 다름, 명시) |
 | 크래시 리포터 | `crashReporter.start` | -- | 🟡 `crashReporter.start/getParameters/addExtraParameter/removeExtraParameter/getUploadToServer/setUploadToServer/getUploadedReports/getLastCrashReport` 1차. CEF `cef_crash_util_capi.h` 연동(`cef_crash_reporting_enabled`, `cef_set_crash_key_value`) + `app.crashReporter` startup config → `crash_reporter.cfg` 생성(macOS `.app` Resources, raw exe 옆). 5 SDK 노출 + 단위(cfg renderer/config parse/SDK request/source-grep) + e2e runtime parameter/upload flag/report shape. ⚠️ 정직 경계: 실제 minidump 생성·Crashpad DB 조회·업로드 완료 목록은 CI에서 crash 유발/서버 검증 불가라 미구현/미검증. 첫 프로세스 reporter enable은 CEF initialize 전 cfg가 필요하므로 런타임 `start()`만으로는 현재 프로세스 Crashpad를 새로 켤 수 없음 |
 | 인앱 결제 | `inAppPurchase` (Mac App Store) | -- | ❌ (분량 대 — App Store 의존) |
-| Mac dock badge | `app.dock.setBadge` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape/멀티바이트(이모지+한글) round-trip 4 e2e |
+| Mac dock badge / app badge count | `app.dock.setBadge`, `app.setBadgeCount` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape/멀티바이트(이모지+한글) round-trip + `app_set_badge_count`/`app_get_badge_count` Electron식 숫자 badge count(0/음수=clear, dock label sync). 5 SDK + e2e |
 | dock 바운스 (사용자 주의 환기) | `app.requestUserAttention` | -- | ✅ macOS NSApp `requestUserAttention:` / `cancelUserAttentionRequest:` — `app_attention_request`/`app_attention_cancel` IPC, critical/informational + cancel guard 4 e2e (active app 시 id=0 lenient) |
 | 표준 디렉토리 경로 | `app.getPath(name)` | `path` 플러그인 | ✅ Electron 표준 7 키 (home/appData/userData/temp/desktop/documents/downloads) — `app_get_path` IPC + `resolveAppDataDir` OS 분기 (macOS/Linux/Windows/fallback). `buildAppCachePath`와 분기 공유. 5 SDK + e2e |
 | 휴지통 (trashItem) | `shell.trashItem` | `fs` 플러그인 | ✅ macOS NSFileManager `trashItemAtURL:resultingItemURL:error:` — `shell_trash_item` IPC, 임시 파일 trash + 비존재 경로 false 2 e2e |
@@ -1512,7 +1512,7 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 11. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. **자동 업데이트** — 배포 후 유지보수에 필수
-14. 🟡 **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite plugin만 후속.
+14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.
 15. ✅ **`safeStorage` (OS secure store) — macOS + Linux + Windows 완료**.
     `safe_storage_set/get/delete` IPC 3개. macOS는 Keychain Services
     (SecItemAdd/CopyMatching/Delete), Linux는 libsecret Secret Service simple API
@@ -1520,9 +1520,10 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     credential(CredWriteW/CredReadW/CredDeleteW, DPAPI-backed) 기반. idempotent
     set/delete + escape-safe value + multi-service 격리 e2e. Linux는 GitHub Actions에서
     gnome-keyring을 세션 D-Bus 안에서 unlock해 실제 libsecret 왕복 검증.
-16. 🟡 **시스템 통합 (macOS 거의 완료)** — `tests/e2e/system-integration.test.ts` 33 e2e. 구현된 항목:
+16. 🟡 **시스템 통합 (macOS 거의 완료)** — `tests/e2e/system-integration.test.ts` 중심 검증. 구현된 항목:
     - `screen.getAllDisplays` (NSScreen)
     - `app.dock.setBadge`/`getBadge` (NSDockTile, 멀티바이트 round-trip 포함)
+    - `app.setBadgeCount`/`getBadgeCount` (Electron식 숫자 badge count, dock label sync)
     - `powerSaveBlocker.start`/`stop` (macOS IOPMAssertion, Linux
       XScreenSaverSuspend, Windows Power Request API, idempotent guard)
     - `safeStorage.setItem`/`getItem`/`deleteItem` (macOS Keychain Services,
@@ -1560,7 +1561,7 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     Node(`@suji/node`) SujiHandlers augment + invoke conditional generic, Zig comptime
     `typeToTs` + App.schema chain, Rust specta v2 re-export. `suji types` CLI는 후속.
 21. 🟡 **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (crashReporter 1차 runtime API + CEF cfg, 실제 crash upload/DB는 후속)
-22. **SQLite plugin** — 흔한 DB use case. 위 #14의 "SQLite SDK" 잔여 부분.
+22. ✅ **SQLite plugin** — `plugins/sqlite` 공식 플러그인 완료. 벤더 SQLite 3.51.0 + Zig/Rust/Go/JS/Node 래퍼 + `zig build test-sqlite` + 모바일 host harness.
 23. ✅ **session 쿠키 풀 셋** — `setCookie` / `getCookies` / `removeCookies` 추가
     (`session:cookies-result` 이벤트 + visitor 패턴 + race-safe pending buffer + 1초
     timeout). CEF refcount 모델이 표준 RefPtr scope과 안 맞아 visit fn count==total-1

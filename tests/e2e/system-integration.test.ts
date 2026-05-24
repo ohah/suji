@@ -211,6 +211,38 @@ describe("app.dock.setBadge", () => {
   });
 });
 
+describe("app.setBadgeCount", () => {
+  test("set → get round-trip and dock label sync", async () => {
+    const set = await core<{ success: boolean }>({ cmd: "app_set_badge_count", count: 7 });
+    expect(set.success).toBe(true);
+
+    const count = await core<{ count: number }>({ cmd: "app_get_badge_count" });
+    expect(count.count).toBe(7);
+
+    const label = await core<{ text: string }>({ cmd: "dock_get_badge" });
+    expect(label.text).toBe("7");
+  });
+
+  test("0 clears badge count and dock label", async () => {
+    await core({ cmd: "app_set_badge_count", count: 3 });
+    const set = await core<{ success: boolean }>({ cmd: "app_set_badge_count", count: 0 });
+    expect(set.success).toBe(true);
+
+    const count = await core<{ count: number }>({ cmd: "app_get_badge_count" });
+    expect(count.count).toBe(0);
+
+    const label = await core<{ text: string }>({ cmd: "dock_get_badge" });
+    expect(label.text).toBe("");
+  });
+
+  test("negative count clamps to 0", async () => {
+    const set = await core<{ success: boolean }>({ cmd: "app_set_badge_count", count: -5 });
+    expect(set.success).toBe(true);
+    const count = await core<{ count: number }>({ cmd: "app_get_badge_count" });
+    expect(count.count).toBe(0);
+  });
+});
+
 describe("powerSaveBlocker", () => {
   test("start → stop round-trip — display sleep 차단", async () => {
     const start = await core<{ id: number }>({
@@ -1171,6 +1203,12 @@ describe("@suji/api SDK — round-trip", () => {
     const t = await sdk<string>("app.dock.getBadge");
     expect(t).toBe("z");
     await sdk("app.dock.setBadge", "");
+  });
+
+  test("app.setBadgeCount → getBadgeCount round-trip", async () => {
+    expect(await sdk<boolean>("app.setBadgeCount", 8)).toBe(true);
+    expect(await sdk<number>("app.getBadgeCount")).toBe(8);
+    await sdk("app.setBadgeCount", 0);
   });
 
   test("powerSaveBlocker.start → stop", async () => {

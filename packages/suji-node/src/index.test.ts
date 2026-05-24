@@ -312,6 +312,16 @@ describe('app', () => {
     expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_attention_request","critical":true}');
   });
 
+  it('setBadgeCount/getBadgeCount route through app badge count core commands', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    expect(await app.setBadgeCount(7)).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_set_badge_count","count":7}');
+
+    bridge.invoke.mockResolvedValueOnce('{"count":7}');
+    expect(await app.getBadgeCount()).toBe(7);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_get_badge_count"}');
+  });
+
   it('requestUserAttention informational', async () => {
     bridge.invoke.mockResolvedValueOnce('{"id":1}');
     await app.requestUserAttention(false);

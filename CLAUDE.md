@@ -164,6 +164,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain, Linux libsecret, Windows Credential Manager)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
+// suji.setBadgeCount(5) / getBadgeCount()      — Electron app badge count (macOS dock label)
 // suji.getName() / suji.getVersion()           — config.app.name/version (Electron 동등)
 // suji.isPackaged()                              — `.app` 번들 여부 (dev=false, prod=true)
 // suji.getAppPath()                              — NSBundle.mainBundle.bundlePath
@@ -353,6 +354,7 @@ suji.platform                                                // "macos" | "linux
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                                                         (macOS Keychain, Linux libsecret, Windows Credential Manager)
 // await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)
+// await app.setBadgeCount(5) / app.getBadgeCount()                        (Electron app badge count)
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
@@ -432,6 +434,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // const id = await powerSaveBlocker.start("prevent_display_sleep") / stop(id)  (macOS/Linux/Windows)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 // await app.dock.setBadge("99") / app.dock.getBadge()
+// await app.setBadgeCount(5) / app.getBadgeCount()
 // await app.getPath("userData") — Electron app.getPath
 // await app.exit()                                                       — 앱 강제 종료 (code 무시)
 // const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
