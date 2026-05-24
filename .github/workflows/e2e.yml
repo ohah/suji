@@ -98,6 +98,11 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-power-save-blocker.log
         run: bash tests/e2e/run-power-save-blocker.sh
 
+      - name: E2E — powerMonitor
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-power-monitor.log
+        run: bash tests/e2e/run-power-monitor.sh
+
       - name: E2E — global shortcut
         run: bash tests/e2e/run-global-shortcut.sh
 

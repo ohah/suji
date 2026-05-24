@@ -180,6 +180,13 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("X11", .{});
         // XScreenSaver — powerMonitor idle time.
         root_module.linkSystemLibrary("Xss", .{});
+        // power_monitor_linux.c — DBus power/session events via dlopen(libdbus-1.so.3).
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/power_monitor_linux.c"),
+            .flags = &[_][]const u8{},
+        });
+        root_module.linkSystemLibrary("pthread", .{});
+        root_module.linkSystemLibrary("dl", .{});
         // libsecret + GLib — safeStorage Linux backend.
         root_module.linkSystemLibrary("secret-1", .{});
         root_module.linkSystemLibrary("glib-2.0", .{});
@@ -195,6 +202,12 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("advapi32", .{});
         // Power Request API — powerSaveBlocker sleep/display inhibition handles.
         root_module.linkSystemLibrary("kernel32", .{});
+        // power_monitor_win.c — WM_POWERBROADCAST + WTS session lock/unlock events.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/power_monitor_win.c"),
+            .flags = &[_][]const u8{},
+        });
+        root_module.linkSystemLibrary("wtsapi32", .{});
     }
 
     // libnode (Node.js 임베딩) — 선택적

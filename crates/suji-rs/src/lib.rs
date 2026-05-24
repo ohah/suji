@@ -1144,7 +1144,8 @@ pub mod power_monitor {
         invoke("__core__", r#"{"cmd":"power_monitor_get_idle_time"}"#)
     }
 
-    /// 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". raw JSON: `{"state":"active"|"idle"}`.
+    /// 화면 잠금이면 "locked", 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
+    /// raw JSON: `{"state":"active"|"idle"|"locked"}`.
     pub fn get_system_idle_state(threshold: i64) -> Option<String> {
         invoke(
             "__core__",

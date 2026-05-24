@@ -766,14 +766,15 @@ describe("powerMonitor.getSystemIdleState", () => {
     expect(r.state).toBe("idle");
   });
 
-  // 동적 threshold — 현재 idle_seconds + 1000초면 항상 그 미만이라 active 보장.
-  test("threshold > 현재 idle_seconds → 'active'", async () => {
+  // 동적 threshold — 현재 idle_seconds + 1000초면 보통 active. 화면 잠금 이벤트가
+  // 선행되면 Electron 동등하게 locked가 우선이다.
+  test("threshold > 현재 idle_seconds → 'active' unless locked", async () => {
     const cur = await core<{ seconds: number }>({ cmd: "power_monitor_get_idle_time" });
     const r = await core<{ state: string }>({
       cmd: "power_monitor_get_idle_state",
       threshold: Math.ceil(cur.seconds) + 1000,
     });
-    expect(r.state).toBe("active");
+    expect(["active", "locked"]).toContain(r.state);
   });
 
   test("threshold 미지정 → 0 fallback → 'idle'", async () => {

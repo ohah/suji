@@ -173,7 +173,8 @@ fn onAllClosed(_: suji.Event) void {
 //   Resource(bm) → {id,path,stale} / stopAccessingSecurityScopedResource(id)
 //                                       — App Sandbox 영속 파일 접근 (NSURL bookmark,
 //                                       비-sandbox=일반 bookmark / MAS 만 실 격상)
-// powerMonitor 이벤트 — 자동 install (NSWorkspace 옵저버), 4 채널 발신:
+// powerMonitor 이벤트 — 자동 install (macOS NSWorkspace, Linux logind/ScreenSaver DBus,
+//   Windows WM_POWERBROADCAST/WTS), 4 채널 발신:
 //   `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen`
 //   → suji.on("power:suspend", cb) / 다른 SDK도 동일 채널명으로 listen
 // suji.process.run(allocator, suji.io(), &.{ "echo", "hi" })  — std.process.run wrap (백엔드 only)

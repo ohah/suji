@@ -712,17 +712,17 @@ export class BrowserWindow {
 // 현재 macOS만 지원 (NSPasteboard). Linux/Windows는 graceful no-op (read는 빈 문자열).
 
 export const powerMonitor = {
-  /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋 (CGEventSource).
+  /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋.
    *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
   async getSystemIdleTime(): Promise<number> {
     const r = await coreCall<{ seconds: number }>({ cmd: "power_monitor_get_idle_time" });
     return r.seconds;
   },
 
-  /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
-   *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등 (lock 상태는 미트래킹). */
-  async getSystemIdleState(threshold: number): Promise<"active" | "idle"> {
-    const r = await coreCall<{ state: "active" | "idle" }>({
+  /** 화면 잠금이면 "locked", 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
+   *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등. */
+  async getSystemIdleState(threshold: number): Promise<"active" | "idle" | "locked"> {
+    const r = await coreCall<{ state: "active" | "idle" | "locked" }>({
       cmd: "power_monitor_get_idle_state",
       threshold,
     });

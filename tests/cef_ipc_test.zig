@@ -1209,6 +1209,10 @@ test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
         "cef.powerMonitorInstall",
         "powerMonitorEmitHandler",
         "\"power:{s}\"",
+        "\"power_monitor_test_emit\"",
+        "SUJI_E2E_POWER_MONITOR_TEST_HOOK",
+        "cef.powerMonitorSetScreenLocked(true)",
+        "cef.powerMonitorSetScreenLocked(false)",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
@@ -1219,6 +1223,10 @@ test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
         "pub fn powerMonitorInstall",
         "pub fn powerMonitorUninstall",
         "suji_power_monitor_install",
+        "suji_power_monitor_linux_install",
+        "suji_power_monitor_windows_install",
+        "logind/ScreenSaver DBus signals",
+        "WM_POWERBROADCAST + WTS session messages",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
@@ -1241,6 +1249,89 @@ test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
         "\"unlock-screen\"",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, m_src, needle) != null);
+    }
+
+    const linux_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "src/platform/power_monitor_linux.c",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(linux_src);
+    inline for (.{
+        "libdbus-1.so.3",
+        "org.freedesktop.login1.Manager",
+        "PrepareForSleep",
+        "org.freedesktop.ScreenSaver",
+        "ActiveChanged",
+        "\"suspend\"",
+        "\"resume\"",
+        "\"lock-screen\"",
+        "\"unlock-screen\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, linux_src, needle) != null);
+    }
+
+    const win_src = try std.Io.Dir.cwd().readFileAlloc(
+        std_io,
+        "src/platform/power_monitor_win.c",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(win_src);
+    inline for (.{
+        "WM_POWERBROADCAST",
+        "PBT_APMSUSPEND",
+        "PBT_APMRESUMEAUTOMATIC",
+        "WM_WTSSESSION_CHANGE",
+        "WTS_SESSION_LOCK",
+        "WTS_SESSION_UNLOCK",
+        "\"suspend\"",
+        "\"resume\"",
+        "\"lock-screen\"",
+        "\"unlock-screen\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, win_src, needle) != null);
+    }
+
+    const build_src = try readProjectFile("build.zig", 1024 * 1024);
+    defer std.testing.allocator.free(build_src);
+    inline for (.{
+        "src/platform/power_monitor_linux.c",
+        "src/platform/power_monitor_win.c",
+        "\"pthread\"",
+        "\"dl\"",
+        "\"wtsapi32\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, build_src, needle) != null);
+    }
+
+    const e2e_src = try readProjectFile("tests/e2e/power-monitor.test.ts", 1024 * 1024);
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "power_monitor_test_emit",
+        "power:${event}",
+        "\"suspend\"",
+        "\"resume\"",
+        "\"lock-screen\"",
+        "\"unlock-screen\"",
+        "locked.state",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const run_src = try readProjectFile("tests/e2e/run-power-monitor.sh", 1024 * 1024);
+    defer std.testing.allocator.free(run_src);
+    try std.testing.expect(std.mem.indexOf(u8, run_src, "SUJI_E2E_POWER_MONITOR_TEST_HOOK=1") != null);
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    inline for (.{
+        "E2E — powerMonitor",
+        "E2E — powerMonitor idle (Linux)",
+        "E2E — powerMonitor idle (Windows)",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
 }
 

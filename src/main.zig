@@ -1847,6 +1847,30 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{state},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "power_monitor_test_emit")) {
+        const hook_enabled = if (runtime.env("SUJI_E2E_POWER_MONITOR_TEST_HOOK")) |v|
+            std.mem.eql(u8, v, "1")
+        else
+            false;
+        if (!hook_enabled) return respondSuccess(response_buf, cmd, false);
+
+        const raw = util.extractJsonString(req_clean, "event") orelse "";
+        var event_buf: [32]u8 = undefined;
+        const event_n = util.unescapeJsonStr(raw, &event_buf) orelse 0;
+        const event = event_buf[0..event_n];
+        const valid =
+            std.mem.eql(u8, event, "suspend") or
+            std.mem.eql(u8, event, "resume") or
+            std.mem.eql(u8, event, "lock-screen") or
+            std.mem.eql(u8, event, "unlock-screen");
+        if (!valid) return respondSuccess(response_buf, cmd, false);
+
+        var event_z_buf: [32:0]u8 = undefined;
+        @memcpy(event_z_buf[0..event.len], event);
+        event_z_buf[event.len] = 0;
+        powerMonitorEmitHandler(event_z_buf[0..event.len :0].ptr);
+        return respondSuccess(response_buf, cmd, true);
+    }
 
     // Shell API — NSWorkspace 기본 핸들러 / NSBeep.
     if (std.mem.eql(u8, cmd, "shell_open_external")) {

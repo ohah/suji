@@ -385,12 +385,12 @@ export declare class BrowserWindow {
     }>;
 }
 export declare const powerMonitor: {
-    /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋 (CGEventSource).
+    /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋.
      *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
     getSystemIdleTime(): Promise<number>;
-    /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
-     *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등 (lock 상태는 미트래킹). */
-    getSystemIdleState(threshold: number): Promise<"active" | "idle">;
+    /** 화면 잠금이면 "locked", 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
+     *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등. */
+    getSystemIdleState(threshold: number): Promise<"active" | "idle" | "locked">;
 };
 export declare const clipboard: {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */

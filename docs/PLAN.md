@@ -1419,7 +1419,7 @@ suji build → 결과물:
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 디스플레이 정보 | `screen.getAllDisplays` / `getPrimaryDisplay` | -- | ✅ macOS NSScreen — `screen_get_all_displays` IPC, frame/visibleFrame/scaleFactor + isPrimary 3 e2e |
-| 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | 🟡 macOS만 — `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen` 4 채널 자동 발신 (NSWorkspace 옵저버). Linux/Windows 후속 |
+| 전원 모니터 (suspend/resume/lock) | `powerMonitor` 이벤트 | `os-info` 플러그인 부분 | ✅ macOS/Linux/Windows — `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen` 4 채널 자동 발신. macOS NSWorkspace, Linux logind `PrepareForSleep` + ScreenSaver DBus `ActiveChanged`, Windows `WM_POWERBROADCAST` + WTS session lock/unlock. CI는 실제 suspend/lock 강제 불가라 동일 native callback 경로를 `SUJI_E2E_POWER_MONITOR_TEST_HOOK`로 E2E 검증 + 플랫폼 bridge source/링크 회귀로 고정 |
 | 슬립 차단 | `powerSaveBlocker.start` | -- | ✅ macOS/Linux/Windows — `power_save_blocker_start/stop` IPC, prevent_app_suspension / prevent_display_sleep + idempotent guard. macOS IOPMAssertion, Linux XScreenSaverSuspend(live X11 display connection), Windows Power Request API. Linux/Windows runtime E2E 추가 |
 | 데스크톱 캡처 (스크린샷/녹화) | `desktopCapturer.getSources` | -- | 🟡 `desktopCapturer.getSources({types})` ✅ — macOS CGGetActiveDisplayList(screen) + CGWindowListCopyWindowInfo(window, layer 0 + ExcludeDesktopElements). `{id,name,type,x,y,width,height,displayId?}`. 5 SDK + e2e 4(screen/window/types 필터/SDK round-trip) + 단위 회귀. CG 심볼 Cocoa/Carbon transitive. **썸네일**: `captureThumbnail(sourceId, path)` ✅ — getSources 의 base64 IPC 한도를 capture_page 동형 파일경로로 우회. 동기 CGDisplayCreateImage/CGWindowListCreateImage → ImageIO(CGImageDestination) PNG 인코딩(ImageIO linkFramework 추가). 5 SDK + IPC + source-grep 회귀. ⚠️ **정직 경계(미검증)**: 실 캡처는 Screen Recording TCC 권한 필요 — 헤드리스/CI 는 CG\*CreateImage 가 null → graceful false. 따라서 zig build(컴파일/링크: ImageIO 심볼 해소 실증)+graceful-fail+source-grep 만 검증, **ImageIO 인코딩 경로는 권한 실기기에서만 실행 = 미실행·미검증**(F1~F3 검증격과 다름, 명시) |
 | 크래시 리포터 | `crashReporter.start` | -- | ❌ (분량 중 — Apple Crashpad/Breakpad 연동) |
@@ -1530,7 +1530,8 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     - `app.requestUserAttention`/`cancelUserAttentionRequest` (NSApp dock bounce)
     - `app.getPath` (7 표준 키: home/appData/userData/temp/desktop/documents/downloads)
     - `shell.trashItem` (NSFileManager)
-    - `powerMonitor` (NSWorkspace 옵저버 4 채널 — sleep 시뮬레이션 어려워 단위/grep만)
+    - `powerMonitor` (macOS NSWorkspace, Linux logind/ScreenSaver DBus, Windows
+      WM_POWERBROADCAST/WTS — 4 채널 callback→EventBus E2E + 플랫폼 bridge 회귀)
 
     Linux/Windows 후속: 남은 macOS-only 구현의 cross-platform 동등 구현 필요.
 17. ✅ **`windows.createView` (Electron WebContentsView 동등) — Phase 17-B CEF Views 전환**.

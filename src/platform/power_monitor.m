@@ -7,7 +7,7 @@
 //   - NSWorkspaceScreensDidWakeNotification    → "unlock-screen"
 //
 // 옵저버는 process-global 1개 + C 콜백으로 dispatch (Zig 측이 EventBus emit).
-// Linux/Windows는 후속.
+// Linux/Windows는 power_monitor_linux.c / power_monitor_win.c가 동일 C 콜백 ABI를 제공.
 
 #import <AppKit/AppKit.h>
 

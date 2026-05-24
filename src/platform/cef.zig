@@ -3805,22 +3805,30 @@ pub fn powerSaveBlockerStop(id: u32) bool {
 }
 
 // ============================================
-// powerMonitor — NSWorkspace 알림 옵저버 (Electron `powerMonitor` 동등).
+// powerMonitor — OS 전원/잠금 이벤트 옵저버 (Electron `powerMonitor` 동등).
 // ============================================
-// power_monitor.m이 옵저버를 install하고 (suspend/resume/lock-screen/unlock-screen)
-// C 콜백으로 dispatch. Zig 측에서는 callback을 받아 EventBus emit.
+// macOS: NSWorkspace notification observer (power_monitor.m).
+// Linux: logind/ScreenSaver DBus signals (power_monitor_linux.c).
+// Windows: WM_POWERBROADCAST + WTS session messages (power_monitor_win.c).
+// 각 플랫폼 bridge가 C 콜백으로 dispatch하고 Zig 측에서는 EventBus emit.
 
 extern "c" fn suji_power_monitor_install(cb: *const fn (event: [*:0]const u8) callconv(.c) void) void;
 extern "c" fn suji_power_monitor_uninstall() void;
+extern "c" fn suji_power_monitor_linux_install(cb: *const fn (event: [*:0]const u8) callconv(.c) void) void;
+extern "c" fn suji_power_monitor_linux_uninstall() void;
+extern "c" fn suji_power_monitor_windows_install(cb: *const fn (event: [*:0]const u8) callconv(.c) void) void;
+extern "c" fn suji_power_monitor_windows_uninstall() void;
 
 pub fn powerMonitorInstall(cb: *const fn (event: [*:0]const u8) callconv(.c) void) void {
-    if (!comptime is_macos) return;
-    suji_power_monitor_install(cb);
+    if (comptime is_linux) return suji_power_monitor_linux_install(cb);
+    if (comptime is_windows) return suji_power_monitor_windows_install(cb);
+    if (comptime is_macos) return suji_power_monitor_install(cb);
 }
 
 pub fn powerMonitorUninstall() void {
-    if (!comptime is_macos) return;
-    suji_power_monitor_uninstall();
+    if (comptime is_linux) return suji_power_monitor_linux_uninstall();
+    if (comptime is_windows) return suji_power_monitor_windows_uninstall();
+    if (comptime is_macos) return suji_power_monitor_uninstall();
 }
 
 /// 화면 잠금 상태 — lock-screen/unlock-screen 이벤트로 갱신(main.zig power

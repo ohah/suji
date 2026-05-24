@@ -943,9 +943,9 @@ export const powerMonitor = {
     return r.seconds;
   },
 
-  /** 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". (lock 상태는 미트래킹) */
-  async getSystemIdleState(threshold: number): Promise<'active' | 'idle'> {
-    const r = await invoke<{ state: 'active' | 'idle' }>('__core__', {
+  /** 화면 잠금이면 "locked", 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active". */
+  async getSystemIdleState(threshold: number): Promise<'active' | 'idle' | 'locked'> {
+    const r = await invoke<{ state: 'active' | 'idle' | 'locked' }>('__core__', {
       cmd: 'power_monitor_get_idle_state',
       threshold,
     });
