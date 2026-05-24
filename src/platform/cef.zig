@@ -5216,7 +5216,21 @@ fn currentOrLastRendererContext() ?*c.cef_v8_context_t {
 /// V8 컨텍스트의 프레임으로 ProcessMessage 전송 (렌더러 → 브라우저)
 fn sendToBrowserFromContext(ctx: ?*c.cef_v8_context_t, msg: *c.cef_process_message_t) bool {
     const cctx = ctx orelse return false;
-    const frame = asPtr(c.cef_frame_t, cctx.get_frame.?(cctx)) orelse return false;
+    if (cctx.is_valid) |is_valid| {
+        if (is_valid(cctx) != 1) return false;
+    }
+    const frame = blk: {
+        if (cctx.get_browser) |get_browser| {
+            if (asPtr(c.cef_browser_t, get_browser(cctx))) |browser| {
+                if (browser.get_main_frame) |get_main_frame| {
+                    if (asPtr(c.cef_frame_t, get_main_frame(browser))) |main_frame| {
+                        break :blk main_frame;
+                    }
+                }
+            }
+        }
+        break :blk asPtr(c.cef_frame_t, cctx.get_frame.?(cctx)) orelse return false;
+    };
     frame.send_process_message.?(frame, c.PID_BROWSER, msg);
     return true;
 }
@@ -5971,6 +5985,9 @@ fn onBrowserProcessMessageReceived(
     const name_userfree = msg.get_name.?(msg);
     var name_buf: [64]u8 = undefined;
     const msg_name = cefUserfreeToUtf8(name_userfree, &name_buf);
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] browser_msg name={s}\n", .{msg_name});
+    }
 
     if (std.mem.eql(u8, msg_name, "suji:invoke")) {
         return handleBrowserInvoke(browser, frame, msg);
@@ -6781,6 +6798,9 @@ fn v8HandleInvoke(
         traceRendererInvokeSendFailed(channel);
         return 0;
     }
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] renderer_invoke_sent seq={d} channel={s}\n", .{ seq_id, channel });
+    }
 
     // Promise 반환
     // seq_id를 JS에 반환 (JS가 이걸로 Promise를 _pending에 등록)
@@ -6843,6 +6863,9 @@ fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
     if (!sendToBrowser(msg)) {
         traceRendererEmitSendFailed(event);
         return 0;
+    }
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] renderer_emit_sent event={s}\n", .{event});
     }
     return 1;
 }
