@@ -578,7 +578,10 @@ fn runNodeScript(allocator: std.mem.Allocator, entry_arg: []const u8) !void {
     if (node_mod.bridge.suji_node_init(1, @constCast(&argv)) != 0) {
         return error.NodeInitFailed;
     }
-    defer node_mod.bridge.suji_node_shutdown();
+    // One-shot CLI process: after suji_node_run returns the process is exiting, so
+    // avoid full V8 platform teardown here. Some libnode builds abort during
+    // TearDownOncePerProcess after an embedded process.exit/quit path.
+    defer node_mod.bridge.suji_node_stop();
 
     std.debug.print("[suji-node] run: {s}\n", .{abs_entry});
     if (node_mod.bridge.suji_node_run(entry_z.ptr) != 0) {

@@ -223,9 +223,20 @@ pub fn build(b: *std.Build) void {
 
     // libnode (Node.js 임베딩) — 선택적
     const node_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/node/24.14.1", .{home}) catch @panic("OOM");
+    const node_link_lib = switch (os_tag) {
+        .windows => "libnode",
+        else => "node",
+    };
+    const node_probe_lib = switch (os_tag) {
+        .macos => "libnode.dylib",
+        .linux => "libnode.so",
+        .windows => "libnode.lib",
+        else => "",
+    };
     const node_available = blk: {
-        const dylib = std.fmt.allocPrint(b.allocator, "{s}/libnode.dylib", .{node_path}) catch break :blk false;
-        std.Io.Dir.accessAbsolute(b.graph.io, dylib, .{}) catch break :blk false;
+        if (node_probe_lib.len == 0) break :blk false;
+        const lib = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ node_path, node_probe_lib }) catch break :blk false;
+        std.Io.Dir.accessAbsolute(b.graph.io, lib, .{}) catch break :blk false;
         break :blk true;
     };
     // Node.js 지원 (libnode가 설치된 경우만)
@@ -250,7 +261,7 @@ pub fn build(b: *std.Build) void {
             .flags = &.{"-std=c++20"},
         });
         root_module.addLibraryPath(.{ .cwd_relative = node_path });
-        root_module.linkSystemLibrary("node", .{});
+        root_module.linkSystemLibrary(node_link_lib, .{});
     }
 
     if (os_tag == .macos) {

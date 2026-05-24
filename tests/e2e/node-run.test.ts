@@ -7,6 +7,7 @@ const ROOT = path.resolve(import.meta.dir, "../..");
 const SUJI_BIN = process.platform === "win32"
   ? path.join(ROOT, "zig-out", "bin", "suji.exe")
   : path.join(ROOT, "zig-out", "bin", "suji");
+const NODE_DIR = path.join(os.homedir(), ".suji", "node", "24.14.1");
 
 const tempDirs: string[] = [];
 
@@ -33,7 +34,13 @@ async function makeNodeRunFixture(source: string): Promise<string> {
 async function runSuji(args: string[]) {
   const proc = Bun.spawn([SUJI_BIN, ...args], {
     cwd: ROOT,
-    env: { ...process.env, SUJI_LOG_LEVEL: "error" },
+    env: {
+      ...process.env,
+      SUJI_LOG_LEVEL: "error",
+      PATH: `${NODE_DIR}${path.delimiter}${process.env.PATH ?? ""}`,
+      LD_LIBRARY_PATH: `${NODE_DIR}${path.delimiter}${process.env.LD_LIBRARY_PATH ?? ""}`,
+      DYLD_LIBRARY_PATH: `${NODE_DIR}${path.delimiter}${process.env.DYLD_LIBRARY_PATH ?? ""}`,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -54,6 +61,12 @@ async function runSuji(args: string[]) {
   return { stdout, stderr, exitCode, timedOut, combined: `${stdout}\n${stderr}` };
 }
 
+function expectCleanExit(result: Awaited<ReturnType<typeof runSuji>>) {
+  if (result.timedOut || result.exitCode !== 0) {
+    throw new Error(`suji run failed: timedOut=${result.timedOut} exit=${result.exitCode}\n${result.combined}`);
+  }
+}
+
 test("suji run main.js executes embedded Node.js with @suji/node bridge", async () => {
   const dir = await makeNodeRunFixture(`
     const { platform, quit } = require('@suji/node');
@@ -62,8 +75,7 @@ test("suji run main.js executes embedded Node.js with @suji/node bridge", async 
   `);
 
   const result = await runSuji(["run", path.join(dir, "main.js")]);
-  expect(result.timedOut).toBe(false);
-  expect(result.exitCode).toBe(0);
+  expectCleanExit(result);
   expect(result.combined).toContain("[suji-node] run:");
   expect(result.combined).toMatch(/NODE_RUN_OK:(macos|linux|windows)/);
 });
@@ -76,7 +88,6 @@ test("suji run <dir> resolves <dir>/main.js", async () => {
   `);
 
   const result = await runSuji(["run", dir]);
-  expect(result.timedOut).toBe(false);
-  expect(result.exitCode).toBe(0);
+  expectCleanExit(result);
   expect(result.combined).toMatch(/NODE_RUN_DIR_OK:(macos|linux|windows)/);
 });
