@@ -1,6 +1,6 @@
 ---
-title: 멀티 webview / BrowserView (설계 메모)
-description: 한 창에 여러 web 콘텐츠 합성 — Electron BrowserView · Tauri v2 Webview 비교 + Suji 구현 방향
+title: 멀티 webview / WebContentsView
+description: 한 창에 여러 web 콘텐츠 합성 — Electron WebContentsView · Tauri v2 Webview 비교 + Suji Phase 17-A 상태
 ---
 
 # 멀티 webview / BrowserView
@@ -8,8 +8,11 @@ description: 한 창에 여러 web 콘텐츠 합성 — Electron BrowserView · 
 한 OS 창 안에 여러 web 콘텐츠를 합성하는 패턴. 멀티탭 브라우저 / 사이드바 + 메인 (다른
 origin) / OAuth 인-라인 / 위젯 임베드 같은 use case에 사용된다.
 
-> **현 상태**: Suji는 미구현. 일반 데스크톱 앱은 `windows.create({ url })` (별도 창)으로
-> 충분해서 우선순위는 낮음. 멀티탭 브라우저 같은 use case 명확할 때 도입 검토.
+> **현 상태**: Phase 17-A로 macOS `windows.createView`가 부분 구현됨. 한 창 안에 child
+> WebContentsView를 합성하고, viewId는 windowId와 같은 id 풀을 공유해 기존 `windows.*`
+> webContents API를 그대로 사용할 수 있다. 다만 dynamic `destroyView`는 CEF + macOS NSView
+> 합성 한계가 있어 권장하지 않으며, 탭 전환/임시 숨김은 `setViewVisible`을 사용하고 host
+> 창 close 시 자동 정리에 맡기는 패턴을 권장한다.
 
 ## 다른 프레임워크는 어떻게 하나
 
@@ -54,36 +57,55 @@ OS-level 별도 process. 각자 history/cookies/JS context 분리.
 
 **한계**: 절대 좌표 기반 (CSS layout 아님). 부모 창 resize 시 사용자가 좌표 갱신 필요.
 
-## Suji 구현 방향 (제안)
+## Suji 구현 상태 (Phase 17-A)
 
 ### API
 
 ```ts
 import { windows } from '@suji/api';
 
-const viewId = await windows.createView(parentWindowId, {
+const { viewId } = await windows.createView({
+  hostId: parentWindowId,
   url: 'page.html',
   bounds: { x: 0, y: 100, width: 800, height: 500 },
 });
 
 await windows.setViewBounds(viewId, { x: 0, y: 100, width: 1024, height: 600 });
 await windows.setViewVisible(viewId, false);  // 탭 전환에 활용
+await windows.addChildView(parentWindowId, viewId);
+await windows.setTopView(parentWindowId, viewId);
+const { viewIds } = await windows.getChildViews(parentWindowId);
 await windows.loadURL(viewId, 'https://example.com');  // 기존 windows.* 동일
 await windows.executeJavaScript(viewId, "document.title");
-await windows.destroyView(viewId);
+
+// known limitation: 동적 destroy는 17-B 안정화 전까지 피하고 setViewVisible을 사용.
+await windows.setViewVisible(viewId, false);
 ```
 
-### 구현 — CEF 기반
+### 구현 — CEF 기반 (17-A)
 
-CEF는 한 NSWindow의 contentView에 여러 `cef_browser_t`를 자식 NSView로 attach 가능.
+현재 구현은 한 NSWindow의 contentView 안에 wrapper NSView + child NSView/CefBrowser를
+합성한다.
 
 | 단계 | 동작 |
 |---|---|
-| 1 | `cef_browser_host_create_browser_sync` 추가 호출 — parent의 contentView를 `window_info.parent_view`로 |
-| 2 | CEF가 자동으로 자식 NSView 만들고 webContents 별도 생성 |
-| 3 | viewId 발급 — windowId namespace에 통합 (`windows.*` 모든 API가 windowId 또는 viewId 받음) |
-| 4 | bounds 변경은 NSView setFrame: |
-| 5 | 부모 창 close 시 자식 view들 자동 destroy (NSWindow contentView dealloc → 자식 NSView dealloc → cef_browser OnBeforeClose) |
+| 1 | `cef_browser_host_create_browser_sync` 추가 호출 — host contentView를 `window_info.parent_view`로 |
+| 2 | wrapper NSView 아래 child NSView + CefBrowser 생성 |
+| 3 | viewId 발급 — windowId namespace에 통합 (`windows.*` 모든 webContents API가 windowId 또는 viewId 받음) |
+| 4 | `setViewBounds`는 wrapper NSView frame 변경 |
+| 5 | z-order는 `addChildView` / `setTopView` / `removeChildView`로 관리 |
+| 6 | host 창 close 시 child view 자동 정리 |
+
+### 알려진 한계
+
+- **dynamic `destroyView` 불안정**: view CefBrowser render subprocess와 host main
+  webContents까지 함께 강종되는 CEF + macOS NSView 합성 한계가 있다. wrapper 격리,
+  graceful close, NSView ops defer, `setHidden` only 모두 근본 해결은 못 했다.
+- **권장 패턴**: 탭 전환/임시 제거는 `setViewVisible(false)` 또는 `removeChildView`를
+  사용하고, 최종 정리는 host 창 close에 맡긴다.
+- **17-B 계획**: CEF Views API(`CefWindow` + `CefBrowserView`)로 architecture migration해
+  multi-WebContentsView lifecycle을 안정화한다. 자세한 계획은
+  [`docs/plans/17-B-cef-views-architecture.md`](../docs/plans/17-B-cef-views-architecture.md).
 
 ### 격리 강도
 
@@ -91,9 +113,10 @@ CEF는 한 NSWindow의 contentView에 여러 `cef_browser_t`를 자식 NSView로
 |---|---|---|---|
 | Electron BrowserView | webContents | 별도 (또는 공유 — `partition` 옵션) | 별도 |
 | Tauri v2 Webview | OS process (WKWebView/WV2) | 별도 | 별도 |
-| **Suji 제안** | CEF browser (single process) | 별도 (each browser has own request context) | 별도 |
+| **Suji 17-A** | CEF browser (single process) | 별도 (each browser has own request context) | 별도 |
 
-CEF는 default가 single process로 multiple browser 운영. 격리는 webContents 단위 — Electron BrowserView와 동등. Tauri의 OS process 격리보단 약간 약하지만 일반 데스크톱 앱 충분.
+CEF는 default가 single process로 multiple browser 운영. 격리는 webContents 단위 — Electron
+WebContentsView와 유사하다. Tauri의 OS process 격리보단 약간 약하지만 일반 데스크톱 앱에는 충분하다.
 
 ## Use case 판단 기준
 
@@ -107,5 +130,5 @@ CEF는 default가 single process로 multiple browser 운영. 격리는 webConten
 | 광고/위젯 임베드 (격리 강함) | `windows.createView` |
 | 외부 untrusted iframe | iframe + `sandbox` 속성 (Phase 7+ origin allowlist도) |
 
-대부분의 데스크톱 앱은 multi-window로 충분하므로 `windows.createView`는 use case가
-명확할 때만 추가하는 것이 PLAN.md의 입장.
+대부분의 데스크톱 앱은 multi-window로 충분하다. `windows.createView`는 Phase 17-A에서
+쓸 수 있지만, dynamic destroy가 필요한 멀티탭/브라우저형 앱은 17-B 안정화 이후를 권장한다.

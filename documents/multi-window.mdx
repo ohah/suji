@@ -220,7 +220,9 @@ _ = suji.windows.copy(2);
 _ = suji.windows.findInPage(2, "hello", .{ .forward = true });
 ```
 
-**find 결과 보고**: `cef_find_handler_t.OnFindResult`는 현재 미노출 — 추후 `windows:find-result` 이벤트로 추가 예정. 지금은 ok 응답만.
+**find 결과 보고**: `cef_find_handler_t.OnFindResult`를 `window:find-result`
+이벤트(`{windowId, identifier, count, activeMatchOrdinal}`)로 발신한다. 현재는
+`finalUpdate=true` 결과만 노출한다.
 
 **미노출**: `set_user_agent` 동적 변경은 CEF가 창 settings에 한 번만 노출 → Phase 7 보안과 함께 백로그.
 
