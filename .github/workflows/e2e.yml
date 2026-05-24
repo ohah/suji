@@ -80,6 +80,11 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-node-run.log
         run: bash tests/e2e/run-node-run.sh
 
+      - name: E2E — Types CLI
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-types-cli.log
+        run: bash tests/e2e/run-types-cli.sh
+
       - name: Install root e2e dependencies (puppeteer-core)
         run: bun install
 

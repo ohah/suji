@@ -1563,7 +1563,10 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     조합. e2e (`tests/e2e/run-splash.sh`).
 20. 🟡 **TypeScript 타입 자동 생성 (옵션 A 1차 + B 부분)** — frontend(`@suji/api`) /
     Node(`@suji/node`) SujiHandlers augment + invoke conditional generic, Zig comptime
-    `typeToTs` + App.schema chain, Rust specta v2 re-export. `suji types` CLI는 후속.
+    `typeToTs` + App.schema chain, Rust specta v2 re-export. `suji types` CLI는
+    Zig backend `.schema()` stdout/`--out` 생성까지 완료했고
+    `tests/e2e/run-types-cli.sh` + GitHub Actions macOS E2E로 고정.
+    Rust=specta 수동 / Go·Node=수동 augment 는 후속(런타임 타입메타 부재).
 21. 🟡 **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (crashReporter 1차 runtime API + CEF cfg, 실제 crash upload/DB는 후속)
 22. ✅ **SQLite plugin** — `plugins/sqlite` 공식 플러그인 완료. 벤더 SQLite 3.51.0 + Zig/Rust/Go/JS/Node 래퍼 + `zig build test-sqlite` + 모바일 host harness.
 23. ✅ **session 쿠키 풀 셋** — `setCookie` / `getCookies` / `removeCookies` 추가

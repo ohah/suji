@@ -34,6 +34,7 @@ suji run backends/node/main.js          # CEF 없이 embedded Node.js 파일 직
 
 # E2E 테스트 (puppeteer + bun) — 대부분 fresh suji dev, CLI 테스트는 단독 실행
 bash tests/e2e/run-node-run.sh          # suji run main.js embedded Node.js CLI
+bash tests/e2e/run-types-cli.sh         # suji types stdout/--out schema generation
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView/z-order/lifecycle)
