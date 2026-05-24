@@ -916,7 +916,10 @@ func backend_handle_ipc(request *C.char) *C.char {
 - [x] Node.js 이벤트 수신 (suji.on/once/off)
 - [x] Node.js 예제 (node-backend 단독 + multi-backend 포함)
 - [x] Node.js SDK 패키지 — `@suji/node` (`packages/suji-node`, TypeScript, require 기반)
-- [ ] `suji run main.js` CLI
+- [x] `suji run main.js` CLI — CEF/window 없이 libnode embed로 JS 파일 직접 실행.
+      `@suji/node`의 `platform()/quit()` bridge까지 headless core에 연결.
+      단위: `nodeRunEntryCandidate` 파일/디렉터리 해석. E2E:
+      `tests/e2e/run-node-run.sh` + GitHub Actions macOS/Linux/Windows.
 - [ ] Node 바이너리 번들링 (배포 시)
 - [ ] Electron 마이그레이션 가이드
 

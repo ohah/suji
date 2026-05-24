@@ -109,6 +109,18 @@ cd backends/node && npm install
 suji dev  # main.js에서 require('lodash') 정상 동작
 ```
 
+CEF 앱을 띄우지 않고 embedded Node.js 파일만 직접 실행할 수도 있다.
+`path`가 디렉터리면 `<path>/main.js`를 실행한다.
+
+```bash
+suji run backends/node/main.js
+suji run backends/node
+```
+
+이 경로도 `@suji/node` bridge를 주입하므로 `platform()`과 `quit()` 같은
+headless-safe API는 동작한다. 창/렌더러가 필요한 API는 일반 `suji dev`/`suji run`
+앱 모드에서 사용한다.
+
 ## InvokeEvent (Phase 2.5)
 
 handler가 2-arity `(data, event) => ...`이면 wire의 `__window`/`__window_name`에서

@@ -94,7 +94,11 @@ pub fn main(init: std.process.Init) !void {
     } else if (std.mem.eql(u8, command, "build")) {
         try runBuild(allocator, args[2..]);
     } else if (std.mem.eql(u8, command, "run")) {
-        try runProd(allocator);
+        if (args.len >= 3) {
+            try runNodeScript(allocator, args[2]);
+        } else {
+            try runProd(allocator);
+        }
     } else if (std.mem.eql(u8, command, "types")) {
         try runTypes(allocator, args[2..]);
     } else {
@@ -160,7 +164,7 @@ fn printUsage() void {
         \\         [--frontend=react|vue|svelte|solid|preact|vanilla]
         \\  suji dev                                     Development mode
         \\  suji build                                   Production build
-        \\  suji run                                     Run production build
+        \\  suji run [main.js]                           Run production build or embedded Node.js file
         \\  suji types [--out <path>]                    Gen SujiHandlers .d.ts (zig .schema())
         \\
         \\Example:
@@ -527,6 +531,75 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
             std.debug.print("[suji] node embed registration failed: {}\n", .{err});
         };
     }
+}
+
+fn nodeRunEntryCandidate(allocator: std.mem.Allocator, entry_arg: []const u8) ![]u8 {
+    if (entry_arg.len == 0) return error.InvalidNodeEntry;
+    if (std.mem.endsWith(u8, entry_arg, ".js")) {
+        return allocator.dupe(u8, entry_arg);
+    }
+    return std.fs.path.join(allocator, &.{ entry_arg, "main.js" });
+}
+
+fn standaloneNodeQuit() void {
+    if (node_enabled) {
+        node_mod.bridge.suji_node_stop();
+    }
+}
+
+fn runNodeScript(allocator: std.mem.Allocator, entry_arg: []const u8) !void {
+    if (!node_enabled) {
+        std.debug.print("[suji-node] libnode not available. Install the Suji libnode runtime first.\n", .{});
+        return;
+    }
+
+    const candidate = nodeRunEntryCandidate(allocator, entry_arg) catch {
+        std.debug.print("Usage: suji run <main.js|dir>\n", .{});
+        return;
+    };
+    defer allocator.free(candidate);
+
+    const abs_entry = std.Io.Dir.cwd().realPathFileAlloc(runtime.io, candidate, allocator) catch |err| {
+        std.debug.print("[suji-node] entry not found: {s} ({s})\n", .{ candidate, @errorName(err) });
+        return;
+    };
+    defer allocator.free(abs_entry);
+
+    const entry_z = allocator.dupeZ(u8, abs_entry) catch return error.OutOfMemory;
+    defer allocator.free(entry_z);
+
+    try embed.init(allocator, runtime.io);
+    defer embed.deinit();
+    const registry = embed.registry();
+    registry.setQuitHandler(&standaloneNodeQuit);
+    NodeRuntime.setCore(&registry.core_api);
+
+    const argv = [_][*c]u8{@constCast("suji-node")};
+    if (node_mod.bridge.suji_node_init(1, @constCast(&argv)) != 0) {
+        return error.NodeInitFailed;
+    }
+    defer node_mod.bridge.suji_node_shutdown();
+
+    std.debug.print("[suji-node] run: {s}\n", .{abs_entry});
+    if (node_mod.bridge.suji_node_run(entry_z.ptr) != 0) {
+        return error.NodeRunFailed;
+    }
+}
+
+test "nodeRunEntryCandidate resolves file and directory forms" {
+    const allocator = std.testing.allocator;
+
+    const file = try nodeRunEntryCandidate(allocator, "main.js");
+    defer allocator.free(file);
+    try std.testing.expectEqualStrings("main.js", file);
+
+    const dir = try nodeRunEntryCandidate(allocator, "backends/node");
+    defer allocator.free(dir);
+    try std.testing.expect(std.mem.endsWith(u8, dir, "main.js"));
+    try std.testing.expect(std.mem.indexOf(u8, dir, "backends") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dir, "node") != null);
+
+    try std.testing.expectError(error.InvalidNodeEntry, nodeRunEntryCandidate(allocator, ""));
 }
 
 fn buildBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {
