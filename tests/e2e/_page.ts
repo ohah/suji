@@ -42,7 +42,7 @@ export async function callCore<T = any>(
     (key, reqJson) => {
       const w = window as any;
       w[key] = { done: false };
-      window.setTimeout(() => {
+      try {
         Promise.resolve(w.__suji__.core(reqJson)).then(
           (value) => {
             w[key] = { done: true, value };
@@ -54,7 +54,12 @@ export async function callCore<T = any>(
             };
           },
         );
-      }, 0);
+      } catch (error) {
+        w[key] = {
+          done: true,
+          error: String(error?.stack || error?.message || error),
+        };
+      }
     },
     slot,
     JSON.stringify(request),
