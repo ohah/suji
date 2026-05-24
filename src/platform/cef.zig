@@ -5209,11 +5209,37 @@ fn traceIpcEnabled() bool {
     return v.len > 0 and !std.mem.eql(u8, v, "0");
 }
 
-/// 현재 V8 컨텍스트의 프레임으로 ProcessMessage 전송 (렌더러 → 브라우저)
-fn sendToBrowser(msg: *c.cef_process_message_t) void {
-    const ctx = asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context()) orelse return;
-    const frame = asPtr(c.cef_frame_t, ctx.get_frame.?(ctx)) orelse return;
+fn currentOrLastRendererContext() ?*c.cef_v8_context_t {
+    return asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context()) orelse g_renderer_context;
+}
+
+/// V8 컨텍스트의 프레임으로 ProcessMessage 전송 (렌더러 → 브라우저)
+fn sendToBrowserFromContext(ctx: ?*c.cef_v8_context_t, msg: *c.cef_process_message_t) bool {
+    const cctx = ctx orelse return false;
+    const frame = asPtr(c.cef_frame_t, cctx.get_frame.?(cctx)) orelse return false;
     frame.send_process_message.?(frame, c.PID_BROWSER, msg);
+    return true;
+}
+
+fn sendToBrowser(msg: *c.cef_process_message_t) bool {
+    return sendToBrowserFromContext(currentOrLastRendererContext(), msg);
+}
+
+fn traceRendererInvokeSendFailed(channel: []const u8) void {
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] renderer_invoke_send_failed channel={s}\n", .{channel});
+    }
+}
+
+fn traceRendererEmitSendFailed(event: []const u8) void {
+    if (traceIpcEnabled()) {
+        std.debug.print("[suji:ipc] renderer_emit_send_failed event={s}\n", .{event});
+    }
+}
+
+fn deliverRendererResponse(ctx: ?*c.cef_v8_context_t, seq_id: u32, success: bool, result: []const u8) bool {
+    const cctx = ctx orelse return false;
+    return callSujiResponseCallback(cctx, seq_id, success, result);
 }
 
 /// CEF 문자열 → UTF-8 (스택 버퍼에 복사)
@@ -6557,6 +6583,10 @@ fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\  };
         \\  s._promiseFor = function(seq) {
         \\    return new Promise(function(resolve, reject) {
+        \\      if (typeof seq !== "number") {
+        \\        reject(new Error("invoke failed before browser dispatch"));
+        \\        return;
+        \\      }
         \\      var early = s._early[seq];
         \\      if (early) {
         \\        delete s._early[seq];
@@ -6714,15 +6744,14 @@ fn v8HandleInvoke(
         }
     }
     if (channel.len == 0) return 0;
+    const ctx = currentOrLastRendererContext() orelse {
+        traceRendererInvokeSendFailed(channel);
+        return 0;
+    };
 
     // 시퀀스 ID 할당 (JS에서 Promise 관리)
     const seq_id = g_seq_counter;
     g_seq_counter +%= 1;
-
-    // 컨텍스트 저장 (응답 시 eval에 필요)
-    const slot = seq_id % MAX_PENDING;
-    const ctx = asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context());
-    g_pending_contexts[slot] = ctx;
 
     // CefProcessMessage 생성하여 메인 프로세스에 전송
     var msg_name: c.cef_string_t = .{};
@@ -6741,7 +6770,14 @@ fn v8HandleInvoke(
     setCefString(&req_str, request);
     _ = args.set_string.?(args, 2, &req_str);
 
-    sendToBrowser(msg);
+    // 컨텍스트 저장 (응답 시 callback delivery에 필요)
+    const slot = seq_id % MAX_PENDING;
+    g_pending_contexts[slot] = ctx;
+    if (!sendToBrowserFromContext(ctx, msg)) {
+        g_pending_contexts[slot] = null;
+        traceRendererInvokeSendFailed(channel);
+        return 0;
+    }
 
     // Promise 반환
     // seq_id를 JS에 반환 (JS가 이걸로 Promise를 _pending에 등록)
@@ -6801,7 +6837,10 @@ fn v8HandleEmit(argc: usize, argv: [*c]const ?*c.cef_v8_value_t) i32 {
         _ = args.set_int.?(args, 2, target);
     }
 
-    sendToBrowser(msg);
+    if (!sendToBrowser(msg)) {
+        traceRendererEmitSendFailed(event);
+        return 0;
+    }
     return 1;
 }
 
@@ -6837,10 +6876,16 @@ fn handleRendererResponse(msg: *c._cef_process_message_t) i32 {
     const result = getArgString(args, 2, &result_buf);
 
     const slot = seq_id % MAX_PENDING;
-    const ctx = g_pending_contexts[slot] orelse g_renderer_context orelse return 0;
+    const pending_ctx = g_pending_contexts[slot];
     g_pending_contexts[slot] = null;
 
-    const called = callSujiResponseCallback(ctx, seq_id, success, result);
+    var called = deliverRendererResponse(pending_ctx, seq_id, success, result);
+    if (!called) {
+        const fallback_ctx = g_renderer_context;
+        if (pending_ctx == null or fallback_ctx != pending_ctx) {
+            called = deliverRendererResponse(fallback_ctx, seq_id, success, result);
+        }
+    }
     if (traceIpcEnabled()) {
         std.debug.print("[suji:ipc] renderer_resp seq={d} success={} result_len={d} delivered={}\n", .{ seq_id, success, result.len, called });
     }

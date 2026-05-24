@@ -44,7 +44,10 @@ fn extractJsonString(json: []const u8, pattern: []const u8) ?[]const u8 {
     const start = idx + pattern.len;
     var i = start;
     while (i < json.len) : (i += 1) {
-        if (json[i] == '\\') { i += 1; continue; }
+        if (json[i] == '\\') {
+            i += 1;
+            continue;
+        }
         if (json[i] == '"') return json[start..i];
     }
     return null;
@@ -773,6 +776,22 @@ fn readCefSource() ![]u8 {
         std.testing.allocator,
         .limited(4 * 1024 * 1024),
     );
+}
+
+test "CEF renderer IPC — native dispatch failure does not leave JS promise pending" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+
+    inline for (.{
+        "currentOrLastRendererContext",
+        "sendToBrowserFromContext",
+        "invoke failed before browser dispatch",
+        "g_pending_contexts[slot] = null",
+        "deliverRendererResponse(pending_ctx",
+        "deliverRendererResponse(fallback_ctx",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
 }
 
 test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {

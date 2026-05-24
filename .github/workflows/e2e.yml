@@ -273,7 +273,6 @@ jobs:
           SUJI_CEF_CI: "1"
           SUJI_CEF_LOG: ${{ github.workspace }}/e2e-logs/cef-debug.log
           SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-view-lifecycle.log
-          SUJI_E2E_STRACE_DIR: ${{ github.workspace }}/e2e-logs/strace
         run: |
           mkdir -p e2e-logs
           mkdir -p "$RUNNER_TEMP/xdg-runtime"
