@@ -2542,18 +2542,72 @@ pub fn evalJs(target: ?u32, js: [:0]const u8) void {
 }
 
 // ============================================
-// Clipboard API — NSPasteboard (macOS) / Win32 Clipboard (Windows)
+// Clipboard API — NSPasteboard (macOS) / GTK Clipboard (Linux) / Win32 Clipboard (Windows)
 // ============================================
 // macOS: NSPasteboard generalPasteboard, UTI 기반 (public.utf8-plain-text 등).
+// Linux: GTK clipboard plain text (X11/Wayland backend는 GTK가 선택).
 // Windows: OpenClipboard/SetClipboardData/GetClipboardData + GlobalAlloc/Lock.
 //   plain text → CF_UNICODETEXT (UTF-16LE). UTI ↔ CF format 매핑은 cfFormatFor*.
-// Linux/기타: no-op (readText는 빈 문자열, write/clear는 false 반환).
+// 기타: no-op (readText는 빈 문자열, write/clear는 false 반환).
 
 const PASTEBOARD_TYPE_STRING: [*:0]const u8 = "public.utf8-plain-text";
 
 /// 클립보드 텍스트 최대 길이 (null terminator 포함). main.zig IPC handler가 동일 cap을
 /// 사용하므로 여기 한도를 넘는 입력은 caller 단에서 이미 잘려 있음.
 const CLIPBOARD_MAX_TEXT: usize = 16384;
+
+const linux_clip = if (is_linux) struct {
+    const GDK_SELECTION_CLIPBOARD: usize = 69;
+
+    extern "c" fn gtk_clipboard_get(selection: ?*anyopaque) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_clipboard_set_text(clipboard: ?*anyopaque, text: [*]const u8, len: c_int) callconv(.c) void;
+    extern "c" fn gtk_clipboard_wait_for_text(clipboard: ?*anyopaque) callconv(.c) ?[*:0]u8;
+    extern "c" fn gtk_clipboard_clear(clipboard: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_clipboard_store(clipboard: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_clipboard_wait_is_text_available(clipboard: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn g_free(mem: ?*anyopaque) callconv(.c) void;
+
+    fn selectionAtom() ?*anyopaque {
+        return @as(?*anyopaque, @ptrFromInt(GDK_SELECTION_CLIPBOARD));
+    }
+
+    fn clipboard() ?*anyopaque {
+        return gtk_clipboard_get(selectionAtom());
+    }
+
+    fn supportsType(type_cstr: [*:0]const u8) bool {
+        return std.mem.eql(u8, std.mem.span(type_cstr), "public.utf8-plain-text");
+    }
+
+    fn readText(buf: []u8) []const u8 {
+        const cb = clipboard() orelse return buf[0..0];
+        const raw = gtk_clipboard_wait_for_text(cb) orelse return buf[0..0];
+        defer g_free(@ptrCast(raw));
+        const text = std.mem.span(raw);
+        const n = @min(text.len, buf.len);
+        @memcpy(buf[0..n], text[0..n]);
+        return buf[0..n];
+    }
+
+    fn writeText(text: []const u8) bool {
+        if (text.len > std.math.maxInt(c_int)) return false;
+        const cb = clipboard() orelse return false;
+        gtk_clipboard_set_text(cb, text.ptr, @intCast(text.len));
+        gtk_clipboard_store(cb);
+        return true;
+    }
+
+    fn clear() void {
+        const cb = clipboard() orelse return;
+        gtk_clipboard_clear(cb);
+        gtk_clipboard_store(cb);
+    }
+
+    fn hasText() bool {
+        const cb = clipboard() orelse return false;
+        return gtk_clipboard_wait_is_text_available(cb) != 0;
+    }
+} else struct {};
 
 // ============================================
 // Win32 Clipboard FFI (Windows only)
@@ -2660,6 +2714,10 @@ fn clipboardReadType(buf: []u8, type_cstr: [*:0]const u8) []const u8 {
         if (win_clip.cfFormatForUti(type_cstr) != win_clip.CF_UNICODETEXT) return buf[0..0];
         return win_clip.readUnicodeText(buf);
     }
+    if (comptime is_linux) {
+        if (!linux_clip.supportsType(type_cstr)) return buf[0..0];
+        return linux_clip.readText(buf);
+    }
     if (!comptime is_macos) return buf[0..0];
     const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return buf[0..0];
@@ -2676,12 +2734,16 @@ fn clipboardWriteType(text: []const u8, type_cstr: [*:0]const u8) bool {
         if (win_clip.cfFormatForUti(type_cstr) != win_clip.CF_UNICODETEXT) return false;
         return win_clip.writeUnicodeText(text);
     }
+    if (comptime is_linux) {
+        if (!linux_clip.supportsType(type_cstr)) return false;
+        return linux_clip.writeText(text);
+    }
     if (!comptime is_macos) return false;
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
     _ = msgSend(pb, "clearContents");
 
-    const ns_text = nsStringFromSlice(text) orelse return false;
+    const ns_text = nsStringFromClipboardText(text) orelse return false;
     const ns_type = nsStringFromCstr(type_cstr) orelse return false;
     const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
         @ptrCast(&objc.objc_msgSend);
@@ -2703,6 +2765,10 @@ pub fn clipboardWriteText(text: []const u8) bool {
 pub fn clipboardClear() void {
     if (comptime builtin.os.tag == .windows) {
         win_clip.emptyClipboard();
+        return;
+    }
+    if (comptime is_linux) {
+        linux_clip.clear();
         return;
     }
     if (!comptime is_macos) return;
@@ -2737,6 +2803,7 @@ pub fn clipboardReadTiff(out_buf: []u8) []const u8 {
 /// type_cstr는 NSPasteboard UTI ("public.utf8-plain-text" / "public.html" 등).
 pub fn clipboardHas(type_cstr: [*:0]const u8) bool {
     if (comptime builtin.os.tag == .windows) return win_clip.hasFormat(type_cstr);
+    if (comptime is_linux) return linux_clip.supportsType(type_cstr) and linux_clip.hasText();
     if (!comptime is_macos) return false;
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
@@ -2749,6 +2816,12 @@ pub fn clipboardHas(type_cstr: [*:0]const u8) bool {
 /// 클립보드에 등록된 모든 type을 JSON 배열로 빌드 (Electron `clipboard.availableFormats`).
 /// macOS는 UTI 이름을 그대로 반환 (e.g. "public.utf8-plain-text", "public.html").
 pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
+    if (comptime is_linux) {
+        const formats = if (linux_clip.hasText()) "[\"public.utf8-plain-text\"]" else "[]";
+        const n = @min(formats.len, out_buf.len);
+        @memcpy(out_buf[0..n], formats[0..n]);
+        return out_buf[0..n];
+    }
     if (!comptime is_macos) {
         const empty = "[]";
         const n = @min(empty.len, out_buf.len);
@@ -2942,10 +3015,10 @@ pub fn powerMonitorIdleSeconds() f64 {
 const SHELL_MAX_PATH: usize = 4096;
 
 /// `[ns_obj utf8String]`을 caller 스택 버퍼에 복사 — 공통 패턴(NSString-from-Zig-slice).
-/// 성공 시 NSString*, 실패 시 null. text 길이가 한도 초과면 null.
-fn nsStringFromSlice(text: []const u8) ?*anyopaque {
-    if (text.len + 1 > SHELL_MAX_PATH) return null;
-    var stack_buf: [SHELL_MAX_PATH]u8 = undefined;
+/// 성공 시 NSString*, 실패 시 null. text 길이가 capacity(null terminator 포함)를 넘으면 null.
+fn nsStringFromSliceWithCapacity(text: []const u8, comptime capacity: usize) ?*anyopaque {
+    if (text.len + 1 > capacity) return null;
+    var stack_buf: [capacity]u8 = undefined;
     @memcpy(stack_buf[0..text.len], text);
     stack_buf[text.len] = 0;
     const cstr: [*:0]const u8 = @ptrCast(&stack_buf);
@@ -2953,6 +3026,16 @@ fn nsStringFromSlice(text: []const u8) ?*anyopaque {
     const strFn: *const fn (?*anyopaque, ?*anyopaque, [*:0]const u8) callconv(.c) ?*anyopaque =
         @ptrCast(&objc.objc_msgSend);
     return strFn(NSString, @ptrCast(objc.sel_registerName("stringWithUTF8String:")), cstr);
+}
+
+/// Shell/path용 NSString helper. URL/path는 4KB cap 유지.
+fn nsStringFromSlice(text: []const u8) ?*anyopaque {
+    return nsStringFromSliceWithCapacity(text, SHELL_MAX_PATH);
+}
+
+/// Clipboard text는 request/response cap인 16KB까지 허용한다.
+fn nsStringFromClipboardText(text: []const u8) ?*anyopaque {
+    return nsStringFromSliceWithCapacity(text, CLIPBOARD_MAX_TEXT + 1);
 }
 
 var g_empty_ns_string: ?*anyopaque = null;

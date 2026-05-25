@@ -1689,6 +1689,11 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
     const cef_src = try readCefSource();
     defer std.testing.allocator.free(cef_src);
     inline for (.{
+        "const linux_clip",
+        "gtk_clipboard_get",
+        "gtk_clipboard_set_text",
+        "gtk_clipboard_wait_for_text",
+        "gtk_clipboard_wait_is_text_available",
         "pub fn clipboardHas",
         "pub fn clipboardAvailableFormats",
         "pub fn appFocus",

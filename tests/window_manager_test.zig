@@ -3795,6 +3795,9 @@ test "회귀: Clipboard API — cef.zig pub fn + main.zig 라우팅 + JSON escap
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "public.utf8-plain-text") != null);
     // NSPasteboard generalPasteboard 사용.
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "generalPasteboard") != null);
+    // Clipboard text는 shell/path 4KB cap이 아니라 clipboard 16KB cap helper를 사용.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "nsStringFromClipboardText(text)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "CLIPBOARD_MAX_TEXT + 1") != null);
 
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

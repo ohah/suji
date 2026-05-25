@@ -126,7 +126,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.windows.capturePage(id, "/tmp/s.png", rect?)  — 스크린샷 PNG (CDP,
 //   결과는 window:page-captured; rect{x,y,width,height} 지정 시 부분 영역만)
-// suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard
+// suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard / Linux GTK / Windows CF_UNICODETEXT
 //   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip
 //   / has("public.html") / availableFormats()  — format 검사 (UTI)
 //   / writeImage(base64) / readImage() — PNG round-trip (raw ~8KB 1차)
@@ -351,7 +351,7 @@ suji.platform                                                // "macos" | "linux
 //   동적 hide/show는 setViewVisible 사용. 17-B에서 안정화.
 
 // import { clipboard, shell, dialog } from '@suji/api';
-// await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard)
+// await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard / Linux GTK / Windows CF_UNICODETEXT)
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)   (macOS NSWorkspace + NSFileManager)
 // await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert)
 // await dialog.showMessageBox(windowId, options)  — sheet (부모 창 attach, dialog.m)
