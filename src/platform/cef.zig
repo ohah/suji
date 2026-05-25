@@ -4989,11 +4989,20 @@ extern "c" fn suji_native_theme_install(cb: *const fn () callconv(.c) void) void
 extern "c" fn suji_native_theme_uninstall() void;
 
 pub fn nativeThemeInstall(cb: *const fn () callconv(.c) void) void {
+    if (comptime builtin.os.tag == .windows) {
+        g_native_theme_cb_windows = cb;
+        win_pump.ensureRunning();
+        return;
+    }
     if (!comptime is_macos) return;
     suji_native_theme_install(cb);
 }
 
 pub fn nativeThemeUninstall() void {
+    if (comptime builtin.os.tag == .windows) {
+        g_native_theme_cb_windows = null;
+        return;
+    }
     if (!comptime is_macos) return;
     suji_native_theme_uninstall();
 }
@@ -5845,9 +5854,8 @@ pub fn setTrayEmitHandler(handler: TrayEmitHandler) void {
 }
 
 // ============================================
-// Win32 Shell_NotifyIcon — tray PoC (createTray/destroyTray only).
-// Menu/click/balloon notification 은 hidden hwnd + WindowProc + message pump
-// thread 가 필요해 별도 후속 PR. 현재는 icon 표시 + tooltip 만.
+// Win32 Shell_NotifyIcon — tray icon + click + popup menu.
+// pump 스레드의 hidden message-only window 가 NIN_* 콜백 수신 + TrackPopupMenu 실행.
 // ============================================
 const win_tray = if (builtin.os.tag == .windows) struct {
     const NIM_ADD: u32 = 0;
@@ -5856,6 +5864,7 @@ const win_tray = if (builtin.os.tag == .windows) struct {
     const NIF_MESSAGE: u32 = 0x01;
     const NIF_ICON: u32 = 0x02;
     const NIF_TIP: u32 = 0x04;
+    const WM_TRAY_CALLBACK: u32 = 0x0400 + 1; // win_pump.WM_TRAY 와 동일
 
     const NOTIFYICONDATAW = extern struct {
         cbSize: u32 = 0,
@@ -5877,22 +5886,21 @@ const win_tray = if (builtin.os.tag == .windows) struct {
 
     extern "shell32" fn Shell_NotifyIconW(dwMessage: u32, lpData: *NOTIFYICONDATAW) callconv(.winapi) i32;
     extern "user32" fn LoadIconW(hInstance: ?*anyopaque, lpIconName: usize) callconv(.winapi) ?*anyopaque;
-    extern "user32" fn GetActiveWindow() callconv(.winapi) ?*anyopaque;
-    extern "user32" fn GetDesktopWindow() callconv(.winapi) ?*anyopaque;
     const IDI_APPLICATION: usize = 32512;
 
-    /// id 별 NOTIFYICONDATAW 저장 — destroy 시 같은 hwnd/uID 로 NIM_DELETE.
-    const Entry = struct {
+    /// id 별 entry — pump hwnd 가 모든 콜백을 받으므로 hwnd 동일. hmenu 는
+    /// 옵션(setMenu 호출 후 set, destroyIcon/setMenu rebuild 시 DestroyMenu).
+    pub const Entry = struct {
         used: bool = false,
         id: u32 = 0,
         hwnd: ?*anyopaque = null,
+        hmenu: ?*anyopaque = null,
     };
-    var entries: [16]Entry = [_]Entry{.{}} ** 16;
+    pub var entries: [16]Entry = [_]Entry{.{}} ** 16;
     var next_id: u32 = 1;
 
     fn createIcon(tooltip: []const u8) u32 {
-        // hwnd 는 desktop window (사용자 click 콜백 없음, icon 만 표시).
-        const hwnd = GetActiveWindow() orelse GetDesktopWindow() orelse return 0;
+        const hwnd = win_pump.pumpHwnd() orelse return 0;
         var slot_idx: usize = 0;
         var found = false;
         for (&entries, 0..) |*e, i| {
@@ -5908,7 +5916,8 @@ const win_tray = if (builtin.os.tag == .windows) struct {
         nid.cbSize = @sizeOf(NOTIFYICONDATAW);
         nid.hWnd = hwnd;
         nid.uID = next_id;
-        nid.uFlags = NIF_ICON | NIF_TIP;
+        nid.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE;
+        nid.uCallbackMessage = WM_TRAY_CALLBACK;
         nid.hIcon = LoadIconW(null, IDI_APPLICATION);
         if (tooltip.len > 0) {
             const max_tip = nid.szTip.len - 1;
@@ -5930,11 +5939,97 @@ const win_tray = if (builtin.os.tag == .windows) struct {
                 nid.hWnd = e.hwnd;
                 nid.uID = tray_id;
                 _ = Shell_NotifyIconW(NIM_DELETE, &nid);
-                e.used = false;
+                // hmenu 가 있으면 pump 스레드에서 DestroyMenu (메뉴 lifecycle 격리).
+                if (e.hmenu) |hm| {
+                    _ = win_pump.submitSync(.{ .kind = @intFromEnum(win_pump.ReqKind.tray_destroy_menu), .hmenu = hm });
+                }
+                win_pump.clearMenuIdsForTray(tray_id);
+                e.* = .{};
                 return true;
             }
         }
         return false;
+    }
+
+    /// caller (main thread) 가 호출 → pump 스레드로 proxy. pump executeReq 가
+    /// applyTooltipOnPump 호출.
+    fn setTooltip(tray_id: u32, tooltip: []const u8) bool {
+        const rc = win_pump.submitSync(.{
+            .kind = @intFromEnum(win_pump.ReqKind.tray_set_tooltip),
+            .tray_id = tray_id,
+            .ptr = if (tooltip.len > 0) @constCast(@ptrCast(tooltip.ptr)) else null,
+            .len = tooltip.len,
+        });
+        return rc != 0;
+    }
+
+    pub fn applyTooltipOnPump(tray_id: u32, ptr: ?*anyopaque, len: usize) bool {
+        for (&entries) |*e| {
+            if (e.used and e.id == tray_id) {
+                var nid: NOTIFYICONDATAW = .{};
+                nid.cbSize = @sizeOf(NOTIFYICONDATAW);
+                nid.hWnd = e.hwnd;
+                nid.uID = tray_id;
+                nid.uFlags = NIF_TIP;
+                if (ptr != null and len > 0) {
+                    const max_tip = nid.szTip.len - 1;
+                    const slice: []const u8 = @as([*]const u8, @ptrCast(ptr.?))[0..len];
+                    const src = if (slice.len > max_tip) slice[0..max_tip] else slice;
+                    _ = std.unicode.utf8ToUtf16Le(nid.szTip[0..max_tip], src) catch {};
+                }
+                return Shell_NotifyIconW(NIM_MODIFY, &nid) != 0;
+            }
+        }
+        return false;
+    }
+
+    /// caller 가 메뉴 items 로 HMENU 빌드 + click_id 매핑 등록 후, pump 가 entry.hmenu swap.
+    /// 기존 hmenu 는 pump 가 DestroyMenu.
+    fn setMenu(tray_id: u32, items: []const TrayMenuItem) bool {
+        win_pump.ensureRunning();
+        // 기존 click_id 모두 해제 (rebuild 시 새 id 재할당).
+        win_pump.clearMenuIdsForTray(tray_id);
+        const hmenu = win_pump.CreatePopupMenu() orelse return false;
+        for (items) |it| switch (it) {
+            .separator => {
+                _ = win_pump.AppendMenuW(hmenu, win_pump.MF_SEPARATOR, 0, null);
+            },
+            .item => |entry| {
+                const cmd_id = win_pump.assignMenuId(tray_id, entry.click) orelse continue;
+                var label_buf: [256]u16 = undefined;
+                const label_z = utf8ToZ16Local(&label_buf, entry.label) orelse continue;
+                _ = win_pump.AppendMenuW(hmenu, win_pump.MF_STRING, @as(usize, cmd_id), label_z);
+            },
+        };
+        const rc = win_pump.submitSync(.{
+            .kind = @intFromEnum(win_pump.ReqKind.tray_set_menu),
+            .tray_id = tray_id,
+            .hmenu = hmenu,
+        });
+        if (rc == 0) {
+            _ = win_pump.DestroyMenu(hmenu);
+            return false;
+        }
+        return true;
+    }
+
+    pub fn applyMenuOnPump(tray_id: u32, new_hmenu: ?*anyopaque) bool {
+        for (&entries) |*e| {
+            if (e.used and e.id == tray_id) {
+                if (e.hmenu) |old| _ = win_pump.DestroyMenu(old);
+                e.hmenu = new_hmenu;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn utf8ToZ16Local(buf: []u16, src: []const u8) ?[*:0]const u16 {
+        const len = std.unicode.calcUtf16LeLen(src) catch return null;
+        if (len + 1 > buf.len) return null;
+        const written = std.unicode.utf8ToUtf16Le(buf[0..len], src) catch return null;
+        buf[written] = 0;
+        return @ptrCast(buf[0..written :0].ptr);
     }
 } else struct {};
 
@@ -5989,6 +6084,9 @@ fn applyTrayTooltip(item: *anyopaque, tooltip: []const u8) void {
 }
 
 pub fn setTrayTitle(tray_id: u32, title: []const u8) bool {
+    // Windows system tray 는 icon-only — title 은 tooltip 으로 대체 (Electron 패리티
+    // 한계: Windows 는 NSStatusItem 의 button title 같은 개념 없음).
+    if (comptime builtin.os.tag == .windows) return win_tray.setTooltip(tray_id, title);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry = g_trays.get(tray_id) orelse return false;
@@ -5997,6 +6095,7 @@ pub fn setTrayTitle(tray_id: u32, title: []const u8) bool {
 }
 
 pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
+    if (comptime builtin.os.tag == .windows) return win_tray.setTooltip(tray_id, tooltip);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry = g_trays.get(tray_id) orelse return false;
@@ -6007,6 +6106,7 @@ pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
 /// items 배열로 NSMenu 빌드 + tray에 attach. 기존 menu가 있으면 NSMenuItem.representedObject
 /// (NSString) 자동 release (NSMenu deinit 연쇄).
 pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
+    if (comptime builtin.os.tag == .windows) return win_tray.setMenu(tray_id, items);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry_ptr = g_trays.getPtr(tray_id) orelse return false;
@@ -6497,14 +6597,25 @@ pub const GlobalShortcutStatus = enum(i32) {
 // PoC 만으로도 100% 통과 가능.
 // ============================================
 // Win32 message pump thread — RegisterHotKey 가 호출-스레드 큐에 WM_HOTKEY 를
-// post 하므로, hotkey 등록/수신 둘 다 같은 스레드여야 한다. CEF UI 스레드는
-// 우리가 점유 못 하니 별도 thread 를 띄우고 모든 win_gs 작업을 그 스레드로
-// proxy한다. WM_HOTKEY 도 그 스레드 큐에서 받아 globalShortcut 이벤트로 emit.
+// post 하므로 hotkey 등록/수신 둘 다 같은 스레드여야 한다. CEF UI 스레드는 우리가
+// 점유 못 하니 별도 thread + hidden message-only window 를 띄우고:
+//   - WM_HOTKEY → globalShortcut emit
+//   - WM_TRAY (Shell_NotifyIcon uCallbackMessage) → tray click / right-click 메뉴
+//   - WM_COMMAND → tray menu item click
+//   - WM_SETTINGCHANGE("ImmersiveColorSet") → nativeTheme:updated emit
 // ============================================
 const win_pump = if (builtin.os.tag == .windows) struct {
     const WM_HOTKEY: u32 = 0x0312;
     const WM_APP_REQ: u32 = 0x8000 + 1;
+    const WM_TRAY: u32 = 0x0400 + 1; // WM_USER + 1
+    const WM_COMMAND: u32 = 0x0111;
+    const WM_SETTINGCHANGE: u32 = 0x001A;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_RBUTTONUP: u32 = 0x0205;
+    const WM_LBUTTONDBLCLK: u32 = 0x0203;
     const INFINITE: u32 = 0xFFFFFFFF;
+
+    const TPM_RIGHTBUTTON: u32 = 0x0002;
 
     extern "kernel32" fn CreateThread(lpThreadAttributes: ?*anyopaque, dwStackSize: usize, lpStartAddress: *const anyopaque, lpParameter: ?*anyopaque, dwCreationFlags: u32, lpThreadId: ?*u32) callconv(.winapi) ?*anyopaque;
     extern "kernel32" fn CreateEventW(lpEventAttributes: ?*anyopaque, bManualReset: i32, bInitialState: i32, lpName: ?[*:0]const u16) callconv(.winapi) ?*anyopaque;
@@ -6512,11 +6623,27 @@ const win_pump = if (builtin.os.tag == .windows) struct {
     extern "kernel32" fn ResetEvent(hEvent: ?*anyopaque) callconv(.winapi) i32;
     extern "kernel32" fn WaitForSingleObject(hHandle: ?*anyopaque, dwMilliseconds: u32) callconv(.winapi) u32;
     extern "kernel32" fn CloseHandle(hObject: ?*anyopaque) callconv(.winapi) i32;
+    extern "kernel32" fn GetModuleHandleW(lpModuleName: ?[*:0]const u16) callconv(.winapi) ?*anyopaque;
     extern "user32" fn PostThreadMessageW(idThread: u32, Msg: u32, wParam: usize, lParam: isize) callconv(.winapi) i32;
     extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?*anyopaque, wMsgFilterMin: u32, wMsgFilterMax: u32) callconv(.winapi) i32;
     extern "user32" fn TranslateMessage(lpMsg: *const MSG) callconv(.winapi) i32;
     extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(.winapi) isize;
     extern "user32" fn PeekMessageW(lpMsg: *MSG, hWnd: ?*anyopaque, wMsgFilterMin: u32, wMsgFilterMax: u32, wRemoveMsg: u32) callconv(.winapi) i32;
+    extern "user32" fn RegisterClassExW(lpwcx: *const WNDCLASSEXW) callconv(.winapi) u16;
+    extern "user32" fn CreateWindowExW(dwExStyle: u32, lpClassName: [*:0]const u16, lpWindowName: [*:0]const u16, dwStyle: u32, X: i32, Y: i32, nWidth: i32, nHeight: i32, hWndParent: ?*anyopaque, hMenu: ?*anyopaque, hInstance: ?*anyopaque, lpParam: ?*anyopaque) callconv(.winapi) ?*anyopaque;
+    extern "user32" fn DefWindowProcW(hwnd: ?*anyopaque, msg: u32, wparam: usize, lparam: isize) callconv(.winapi) isize;
+    extern "user32" fn GetCursorPos(lpPoint: *POINT) callconv(.winapi) i32;
+    extern "user32" fn SetForegroundWindow(hWnd: ?*anyopaque) callconv(.winapi) i32;
+    extern "user32" fn TrackPopupMenu(hMenu: ?*anyopaque, uFlags: u32, x: i32, y: i32, nReserved: i32, hWnd: ?*anyopaque, prcRect: ?*anyopaque) callconv(.winapi) i32;
+    extern "user32" fn CreatePopupMenu() callconv(.winapi) ?*anyopaque;
+    extern "user32" fn AppendMenuW(hMenu: ?*anyopaque, uFlags: u32, uIDNewItem: usize, lpNewItem: ?[*:0]const u16) callconv(.winapi) i32;
+    extern "user32" fn DestroyMenu(hMenu: ?*anyopaque) callconv(.winapi) i32;
+
+    const MF_STRING: u32 = 0x0;
+    const MF_SEPARATOR: u32 = 0x800;
+
+    // HWND_MESSAGE = (HWND)-3
+    const HWND_MESSAGE: ?*anyopaque = @ptrFromInt(@as(usize, @bitCast(@as(isize, -3))));
 
     const POINT = extern struct { x: i32 = 0, y: i32 = 0 };
     const MSG = extern struct {
@@ -6528,13 +6655,39 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         pt: POINT = .{},
         lPrivate: u32 = 0,
     };
+    const WNDCLASSEXW = extern struct {
+        cbSize: u32,
+        style: u32,
+        lpfnWndProc: *const anyopaque,
+        cbClsExtra: i32,
+        cbWndExtra: i32,
+        hInstance: ?*anyopaque,
+        hIcon: ?*anyopaque,
+        hCursor: ?*anyopaque,
+        hbrBackground: ?*anyopaque,
+        lpszMenuName: ?[*:0]const u16,
+        lpszClassName: [*:0]const u16,
+        hIconSm: ?*anyopaque,
+    };
 
-    const ReqKind = enum(u32) { register, unregister, unregister_all };
-    const Req = extern struct {
+    pub const ReqKind = enum(u32) {
+        register,
+        unregister,
+        unregister_all,
+        tray_set_tooltip,
+        tray_set_menu,
+        tray_destroy_menu,
+    };
+    pub const Req = extern struct {
         kind: u32 = 0,
         id: i32 = 0,
         mods: u32 = 0,
         vk: u32 = 0,
+        tray_id: u32 = 0,
+        // Slice-by-pointer; caller-owned, valid until response_event signaled.
+        ptr: ?*anyopaque = null,
+        len: usize = 0,
+        hmenu: ?*anyopaque = null,
         result: i32 = 0,
     };
 
@@ -6542,7 +6695,7 @@ const win_pump = if (builtin.os.tag == .windows) struct {
     var thread_id: u32 = 0;
     var ready_event: ?*anyopaque = null;
     var response_event: ?*anyopaque = null;
-    // request mutex — 직렬화 (등록/해제 동시 호출 금지). lock_flag = atomic spinlock.
+    var pump_hwnd: ?*anyopaque = null;
     var req_lock: std.atomic.Value(bool) = .init(false);
     var current_req: Req = .{};
     var started: std.atomic.Value(bool) = .init(false);
@@ -6554,14 +6707,149 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         req_lock.store(false, .release);
     }
 
+    pub fn pumpHwnd() ?*anyopaque {
+        ensureRunning();
+        return pump_hwnd;
+    }
+
+    // ============================================
+    // 트레이 메뉴 click_id → (tray_id, click) 매핑. WM_COMMAND 의 wParam 으로
+    // dispatch. Menu rebuild 시 win_tray.setMenuFromPump 가 호출.
+    // ============================================
+    const MenuClickEntry = struct {
+        used: bool = false,
+        cmd_id: u32 = 0,
+        tray_id: u32 = 0,
+        click_buf: [64]u8 = undefined,
+        click_len: usize = 0,
+    };
+    var menu_click_map: [256]MenuClickEntry = [_]MenuClickEntry{.{}} ** 256;
+    var next_menu_cmd_id: u32 = 0x1000;
+
+    fn assignMenuId(tray_id: u32, click: []const u8) ?u32 {
+        if (click.len > 64) return null;
+        for (&menu_click_map) |*m| {
+            if (!m.used) {
+                m.used = true;
+                m.cmd_id = next_menu_cmd_id;
+                next_menu_cmd_id += 1;
+                if (next_menu_cmd_id >= 0x7000) next_menu_cmd_id = 0x1000;
+                m.tray_id = tray_id;
+                @memcpy(m.click_buf[0..click.len], click);
+                m.click_len = click.len;
+                return m.cmd_id;
+            }
+        }
+        return null;
+    }
+
+    fn clearMenuIdsForTray(tray_id: u32) void {
+        for (&menu_click_map) |*m| {
+            if (m.used and m.tray_id == tray_id) m.* = .{};
+        }
+    }
+
+    fn wndProc(hwnd: ?*anyopaque, msg: u32, wparam: usize, lparam: isize) callconv(.winapi) isize {
+        switch (msg) {
+            WM_TRAY => {
+                const uid: u32 = @truncate(wparam);
+                const mouse_msg: u32 = @truncate(@as(usize, @bitCast(lparam)));
+                handleTrayCallback(uid, mouse_msg);
+                return 0;
+            },
+            WM_COMMAND => {
+                const cmd_id: u32 = @truncate(wparam & 0xFFFF);
+                handleMenuCommand(cmd_id);
+                return 0;
+            },
+            WM_SETTINGCHANGE => {
+                if (lparam != 0) {
+                    const param: [*:0]const u16 = @ptrFromInt(@as(usize, @bitCast(lparam)));
+                    const param_slice = std.mem.span(param);
+                    const target = std.unicode.utf8ToUtf16LeStringLiteral("ImmersiveColorSet");
+                    if (param_slice.len == target.len) {
+                        var matches = true;
+                        for (param_slice, 0..) |ch, i| {
+                            if (ch != target[i]) {
+                                matches = false;
+                                break;
+                            }
+                        }
+                        if (matches) {
+                            if (g_native_theme_cb_windows) |cb| cb();
+                        }
+                    }
+                }
+                return 0;
+            },
+            else => return DefWindowProcW(hwnd, msg, wparam, lparam),
+        }
+    }
+
+    fn handleTrayCallback(uid: u32, mouse_msg: u32) void {
+        var entry: ?*win_tray.Entry = null;
+        for (&win_tray.entries) |*e| {
+            if (e.used and e.id == uid) {
+                entry = e;
+                break;
+            }
+        }
+        const e = entry orelse return;
+        switch (mouse_msg) {
+            WM_RBUTTONUP => {
+                if (e.hmenu) |hmenu| {
+                    var pt: POINT = .{};
+                    _ = GetCursorPos(&pt);
+                    _ = SetForegroundWindow(pump_hwnd);
+                    _ = TrackPopupMenu(hmenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, pump_hwnd, null);
+                }
+            },
+            WM_LBUTTONUP, WM_LBUTTONDBLCLK => {
+                if (g_tray_emit_handler) |emit| emit(uid, "");
+            },
+            else => {},
+        }
+    }
+
+    fn handleMenuCommand(cmd_id: u32) void {
+        if (cmd_id == 0) return;
+        for (&menu_click_map) |*m| {
+            if (m.used and m.cmd_id == cmd_id) {
+                if (g_tray_emit_handler) |emit| emit(m.tray_id, m.click_buf[0..m.click_len]);
+                return;
+            }
+        }
+    }
+
     fn pumpEntry(_: ?*anyopaque) callconv(.winapi) u32 {
+        // Window class 등록 + hidden message-only window 생성.
+        const class_name = std.unicode.utf8ToUtf16LeStringLiteral("SujiPumpWindow");
+        const inst = GetModuleHandleW(null);
+        var wc: WNDCLASSEXW = .{
+            .cbSize = @sizeOf(WNDCLASSEXW),
+            .style = 0,
+            .lpfnWndProc = &wndProc,
+            .cbClsExtra = 0,
+            .cbWndExtra = 0,
+            .hInstance = inst,
+            .hIcon = null,
+            .hCursor = null,
+            .hbrBackground = null,
+            .lpszMenuName = null,
+            .lpszClassName = class_name,
+            .hIconSm = null,
+        };
+        _ = RegisterClassExW(&wc);
+        pump_hwnd = CreateWindowExW(0, class_name, class_name, 0, 0, 0, 0, 0, HWND_MESSAGE, null, inst, null);
+
         // 첫 msg 받기 전에 thread message queue 가 형성되도록 PeekMessage 강제.
         var dummy: MSG = .{};
         _ = PeekMessageW(&dummy, null, WM_APP_REQ, WM_APP_REQ, 0);
         _ = SetEvent(ready_event);
         var msg: MSG = .{};
         while (GetMessageW(&msg, null, 0, 0) > 0) {
-            if (msg.message == WM_HOTKEY) {
+            // WM_HOTKEY / WM_APP_REQ 는 thread-queued (hwnd == null).
+            if (msg.hwnd == null and msg.message == WM_HOTKEY) {
                 const hkid: i32 = @intCast(msg.wParam);
                 for (&win_gs.slots) |*s| {
                     if (s.used and s.id == hkid) {
@@ -6571,13 +6859,15 @@ const win_pump = if (builtin.os.tag == .windows) struct {
                         break;
                     }
                 }
-            } else if (msg.message == WM_APP_REQ) {
+                continue;
+            }
+            if (msg.hwnd == null and msg.message == WM_APP_REQ) {
                 executeReq();
                 _ = SetEvent(response_event);
-            } else {
-                _ = TranslateMessage(&msg);
-                _ = DispatchMessageW(&msg);
+                continue;
             }
+            _ = TranslateMessage(&msg);
+            _ = DispatchMessageW(&msg);
         }
         return 0;
     }
@@ -6597,14 +6887,27 @@ const win_pump = if (builtin.os.tag == .windows) struct {
                 }
                 current_req.result = 1;
             },
+            .tray_set_tooltip => {
+                current_req.result = if (win_tray.applyTooltipOnPump(current_req.tray_id, current_req.ptr, current_req.len)) 1 else 0;
+            },
+            .tray_set_menu => {
+                current_req.result = if (win_tray.applyMenuOnPump(current_req.tray_id, current_req.hmenu)) 1 else 0;
+            },
+            .tray_destroy_menu => {
+                if (current_req.hmenu) |hm| _ = DestroyMenu(hm);
+                current_req.result = 1;
+            },
         }
     }
 
-    /// Idempotent — 첫 호출에 thread + events 생성 후 ready 까지 wait.
+    /// Idempotent — 첫 호출에 thread + events + window 생성 후 ready 까지 wait.
     pub fn ensureRunning() void {
         if (started.load(.acquire)) return;
-        // Double-check + take ownership via cmpxchg.
-        if (started.cmpxchgStrong(false, true, .acq_rel, .monotonic) != null) return;
+        if (started.cmpxchgStrong(false, true, .acq_rel, .monotonic) != null) {
+            // 누군가 이미 시작 — ready event 가 signal 될 때까지 wait.
+            if (ready_event) |ev| _ = WaitForSingleObject(ev, 2000);
+            return;
+        }
         ready_event = CreateEventW(null, 1, 0, null) orelse return;
         response_event = CreateEventW(null, 1, 0, null) orelse return;
         thread_handle = CreateThread(null, 0, &pumpEntry, null, 0, &thread_id);
@@ -6624,6 +6927,9 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         return current_req.result;
     }
 } else struct {};
+
+// nativeTheme:updated callback — Windows pump WM_SETTINGCHANGE 가 호출.
+var g_native_theme_cb_windows: ?*const fn () callconv(.c) void = null;
 
 const win_gs = if (builtin.os.tag == .windows) struct {
     const MOD_ALT: u32 = 1;
