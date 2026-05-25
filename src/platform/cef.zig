@@ -6320,10 +6320,14 @@ fn notificationClickC(id_cstr: [*:0]const u8) callconv(.c) void {
 
 /// main.zig가 등록 — 알림 클릭 → EventBus 라우팅.
 pub fn setNotificationEmitHandler(handler: NotificationEmitHandler) void {
-    if (!comptime is_macos) return;
-    if (!notificationIsSupported()) return;
     g_notification_emit_handler = handler;
-    suji_notification_set_click_callback(&notificationClickC);
+    if (comptime is_macos) {
+        if (!notificationIsSupported()) return;
+        suji_notification_set_click_callback(&notificationClickC);
+    }
+    // Windows / Linux: handler 만 set, native click delivery 는 각 OS path 에서
+    // g_notification_emit_handler 직접 호출 (Windows = win_pump balloon click,
+    // Linux = D-Bus ActionInvoked signal — 후자는 후속 PR).
 }
 
 // ============================================
@@ -6375,6 +6379,23 @@ const win_notify = if (builtin.os.tag == .windows) struct {
                 const tid = m.tray_id;
                 m.* = .{};
                 return tid;
+            }
+        }
+        return null;
+    }
+
+    pub fn lookupIdByTrayId(tray_id: u32) ?[]const u8 {
+        for (&id_map) |*m| {
+            if (m.used and m.tray_id == tray_id) return m.id[0..m.id_len];
+        }
+        return null;
+    }
+
+    pub fn lookupAndForgetByTrayId(tray_id: u32) ?[]const u8 {
+        for (&id_map) |*m| {
+            if (m.used and m.tray_id == tray_id) {
+                m.* = .{};
+                return null;
             }
         }
         return null;
@@ -6758,6 +6779,10 @@ const win_pump = if (builtin.os.tag == .windows) struct {
     const WM_LBUTTONUP: u32 = 0x0202;
     const WM_RBUTTONUP: u32 = 0x0205;
     const WM_LBUTTONDBLCLK: u32 = 0x0203;
+    // Shell_NotifyIcon balloon click — lParam value when the user clicks
+    // the balloon body (Win10+ rendered as toast).
+    const NIN_BALLOONUSERCLICK: u32 = 0x0405;
+    const NIN_BALLOONTIMEOUT: u32 = 0x0404;
     const INFINITE: u32 = 0xFFFFFFFF;
 
     const TPM_RIGHTBUTTON: u32 = 0x0002;
@@ -6932,6 +6957,19 @@ const win_pump = if (builtin.os.tag == .windows) struct {
     }
 
     fn handleTrayCallback(uid: u32, mouse_msg: u32) void {
+        // Balloon click — uid 가 notification tray 면 notification:click emit.
+        // 별도 emit handler 가 있으므로 tray click 과 분리.
+        if (mouse_msg == NIN_BALLOONUSERCLICK) {
+            if (win_notify.lookupIdByTrayId(uid)) |id_slice| {
+                if (g_notification_emit_handler) |emit| emit(id_slice);
+            }
+            return;
+        }
+        if (mouse_msg == NIN_BALLOONTIMEOUT) {
+            // OS 가 balloon 닫음 — id_map 정리.
+            _ = win_notify.lookupAndForgetByTrayId(uid);
+            return;
+        }
         var entry: ?*win_tray.Entry = null;
         for (&win_tray.entries) |*e| {
             if (e.used and e.id == uid) {
