@@ -3153,7 +3153,151 @@ pub fn shellTrashItem(path: []const u8) bool {
 // macOS arm64 ABI: 작은 struct(NSRect 32B)는 일반 objc_msgSend로 반환됨 — _stret 불필요.
 
 /// out_buf에 `[{...},{...}]` JSON 배열을 빌드해 길이 반환.
+// ============================================
+// Win32 Screen / NativeTheme FFI (Windows only).
+// ============================================
+const win_screen = if (builtin.os.tag == .windows) struct {
+    const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
+    const POINT = extern struct { x: i32, y: i32 };
+    const MONITORINFO = extern struct {
+        cbSize: u32 = @sizeOf(MONITORINFO),
+        rcMonitor: RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+        rcWork: RECT = .{ .left = 0, .top = 0, .right = 0, .bottom = 0 },
+        dwFlags: u32 = 0,
+    };
+    const MONITORINFOF_PRIMARY: u32 = 1;
+    const MONITOR_DEFAULTTONEAREST: u32 = 2;
+    const MONITOR_DEFAULTTONULL: u32 = 0;
+
+    extern "user32" fn EnumDisplayMonitors(
+        hdc: ?*anyopaque,
+        lprcClip: ?*RECT,
+        lpfnEnum: *const fn (?*anyopaque, ?*anyopaque, *RECT, isize) callconv(.winapi) i32,
+        dwData: isize,
+    ) callconv(.winapi) i32;
+    extern "user32" fn GetMonitorInfoW(hMonitor: ?*anyopaque, lpmi: *MONITORINFO) callconv(.winapi) i32;
+    extern "user32" fn GetCursorPos(lpPoint: *POINT) callconv(.winapi) i32;
+    extern "user32" fn MonitorFromPoint(pt: POINT, dwFlags: u32) callconv(.winapi) ?*anyopaque;
+    extern "shcore" fn GetDpiForMonitor(hmon: ?*anyopaque, dpi_type: u32, dpi_x: *u32, dpi_y: *u32) callconv(.winapi) i32;
+
+    /// MONITORINFO 한 entry 의 JSON 필드 (`{"index":0,"isPrimary":true,...}`) 를 writer 에 쓴다.
+    fn writeDisplay(w: *std.Io.Writer, hmon: ?*anyopaque, index: usize) bool {
+        var info: MONITORINFO = .{};
+        if (GetMonitorInfoW(hmon, &info) == 0) return false;
+        var dpi_x: u32 = 96;
+        var dpi_y: u32 = 96;
+        _ = GetDpiForMonitor(hmon, 0, &dpi_x, &dpi_y); // 0 = MDT_EFFECTIVE_DPI
+        const scale: f64 = @as(f64, @floatFromInt(dpi_x)) / 96.0;
+        const is_primary = (info.dwFlags & MONITORINFOF_PRIMARY) != 0;
+        w.print(
+            "{{\"index\":{d},\"isPrimary\":{},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"visibleX\":{d},\"visibleY\":{d},\"visibleWidth\":{d},\"visibleHeight\":{d},\"scaleFactor\":{d}}}",
+            .{
+                index,                                    is_primary,
+                info.rcMonitor.left,                      info.rcMonitor.top,
+                info.rcMonitor.right - info.rcMonitor.left, info.rcMonitor.bottom - info.rcMonitor.top,
+                info.rcWork.left,                         info.rcWork.top,
+                info.rcWork.right - info.rcWork.left,     info.rcWork.bottom - info.rcWork.top,
+                scale,
+            },
+        ) catch return false;
+        return true;
+    }
+
+    // Enum callback 컨텍스트 — pointer to writer + counter.
+    const EnumCtx = struct {
+        writer: *std.Io.Writer,
+        index: usize = 0,
+    };
+
+    fn enumProc(hmon: ?*anyopaque, _: ?*anyopaque, _: *RECT, lparam: isize) callconv(.winapi) i32 {
+        const ctx: *EnumCtx = @ptrFromInt(@as(usize, @intCast(lparam)));
+        if (ctx.index > 0) ctx.writer.writeByte(',') catch return 0;
+        if (!writeDisplay(ctx.writer, hmon, ctx.index)) return 0;
+        ctx.index += 1;
+        return 1; // continue enumeration
+    }
+
+    fn getAllDisplays(out_buf: []u8) []const u8 {
+        var w: std.Io.Writer = .fixed(out_buf);
+        w.writeByte('[') catch return out_buf[0..1];
+        var ctx: EnumCtx = .{ .writer = &w };
+        _ = EnumDisplayMonitors(null, null, &enumProc, @intCast(@intFromPtr(&ctx)));
+        w.writeByte(']') catch return w.buffered();
+        return w.buffered();
+    }
+
+    fn cursorPoint() NSPoint {
+        var p: POINT = .{ .x = 0, .y = 0 };
+        if (GetCursorPos(&p) == 0) return .{ .x = 0, .y = 0 };
+        return .{ .x = @floatFromInt(p.x), .y = @floatFromInt(p.y) };
+    }
+
+    fn displayNearestPoint(x: f64, y: f64) i32 {
+        const p: POINT = .{ .x = @intFromFloat(x), .y = @intFromFloat(y) };
+        // macOS `screenGetDisplayNearestPoint` 는 contained-only (못 찾으면 -1).
+        // Win32 MONITOR_DEFAULTTONULL 도 동일 시멘틱.
+        const hmon = MonitorFromPoint(p, MONITOR_DEFAULTTONULL) orelse return -1;
+        // hmon 의 index 찾기 — 다시 enumerate. 단순 PoC, 효율보다 단순함 우선.
+        const FindCtx = struct {
+            target: ?*anyopaque,
+            index: i32 = -1,
+            iter: i32 = 0,
+        };
+        const find_cb = struct {
+            fn cb(h: ?*anyopaque, _: ?*anyopaque, _: *RECT, lp: isize) callconv(.winapi) i32 {
+                const ctx: *FindCtx = @ptrFromInt(@as(usize, @intCast(lp)));
+                if (h == ctx.target) {
+                    ctx.index = ctx.iter;
+                    return 0;
+                }
+                ctx.iter += 1;
+                return 1;
+            }
+        }.cb;
+        var ctx: FindCtx = .{ .target = hmon };
+        _ = EnumDisplayMonitors(null, null, &find_cb, @intCast(@intFromPtr(&ctx)));
+        return ctx.index;
+    }
+} else struct {};
+
+const win_theme = if (builtin.os.tag == .windows) struct {
+    const HKEY_CURRENT_USER: usize = 0x80000001;
+    const KEY_READ: u32 = 0x20019;
+    const RRF_RT_REG_DWORD: u32 = 0x00000010;
+
+    extern "advapi32" fn RegGetValueW(
+        hkey: usize,
+        lpSubKey: ?[*:0]const u16,
+        lpValue: ?[*:0]const u16,
+        dwFlags: u32,
+        pdwType: ?*u32,
+        pvData: ?*anyopaque,
+        pcbData: ?*u32,
+    ) callconv(.winapi) i32;
+
+    /// HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme
+    /// DWORD: 0 = dark, 1 = light (default). 값 부재 시 light 가정 → false.
+    fn isDark() bool {
+        const sub_key = std.unicode.utf8ToUtf16LeStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+        const value_name = std.unicode.utf8ToUtf16LeStringLiteral("AppsUseLightTheme");
+        var data: u32 = 1;
+        var size: u32 = @sizeOf(u32);
+        const status = RegGetValueW(
+            HKEY_CURRENT_USER,
+            sub_key.ptr,
+            value_name.ptr,
+            RRF_RT_REG_DWORD,
+            null,
+            &data,
+            &size,
+        );
+        if (status != 0) return false; // ERROR_SUCCESS 가 아니면 default light.
+        return data == 0;
+    }
+} else struct {};
+
 pub fn screenGetAllDisplays(out_buf: []u8) []const u8 {
+    if (comptime builtin.os.tag == .windows) return win_screen.getAllDisplays(out_buf);
     if (!comptime is_macos) {
         const empty = "[]";
         const n = @min(empty.len, out_buf.len);
@@ -3439,6 +3583,7 @@ fn nsStringToUtf8Buf(ns_str: ?*anyopaque, out: []u8) []const u8 {
 /// macOS 10.14+ NSApp.effectiveAppearance.name이 "Dark"를 포함하면 dark.
 /// (NSAppearanceNameDarkAqua / NSAppearanceNameVibrantDark 둘 다 "Dark" 포함).
 pub fn nativeThemeIsDark() bool {
+    if (comptime builtin.os.tag == .windows) return win_theme.isDark();
     if (!comptime is_macos) return false;
     const NSApplication = getClass("NSApplication") orelse return false;
     const app = msgSend(NSApplication, "sharedApplication") orelse return false;
@@ -3482,6 +3627,7 @@ pub fn nativeThemeSetSource(source: []const u8) bool {
 /// macOS는 bottom-up 좌표계 (NSEvent.mouseLocation) — y는 main display height에서 반전 필요할 수
 /// 있음. caller가 필요 시 변환.
 pub fn screenGetCursorPoint() NSPoint {
+    if (comptime builtin.os.tag == .windows) return win_screen.cursorPoint();
     if (!comptime is_macos) return .{ .x = 0, .y = 0 };
     const NSEvent = getClass("NSEvent") orelse return .{ .x = 0, .y = 0 };
     const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
@@ -3492,6 +3638,7 @@ pub fn screenGetCursorPoint() NSPoint {
 /// 1차 단순 접근: point가 frame에 contained된 첫 display, 없으면 -1 반환.
 /// caller가 -1이면 mainScreen으로 fallback. y는 macOS bottom-up 좌표.
 pub fn screenGetDisplayNearestPoint(x: f64, y: f64) i32 {
+    if (comptime builtin.os.tag == .windows) return win_screen.displayNearestPoint(x, y);
     if (!comptime is_macos) return -1;
     const NSScreen = getClass("NSScreen") orelse return -1;
     const screens = msgSend(NSScreen, "screens") orelse return -1;
