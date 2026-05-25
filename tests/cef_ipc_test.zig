@@ -1925,6 +1925,35 @@ test "shell.showItemInFolder Linux FileManager1 D-Bus wiring + runtime E2E" {
     }
 }
 
+test "shell.beep Linux GDK wiring + runtime E2E" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "linux_shell.beep",
+        "gdk_display_get_default",
+        "gdk_display_beep",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const e2e_src = try readProjectFile(
+        "tests/e2e/shell-beep-runtime.test.ts",
+        1024 * 1024,
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "shell_beep",
+        "repeated beep calls",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    try std.testing.expect(std.mem.indexOf(u8, workflow_src, "E2E — shell beep (Linux)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow_src, "run-shell-beep-runtime.sh") != null);
+}
+
 test "shell.openExternal Linux GIO handler wiring + runtime E2E" {
     const cef_src = try readCefSource();
     defer std.testing.allocator.free(cef_src);

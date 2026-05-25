@@ -613,11 +613,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               Unicode/RTL/이모지/ZWJ, 200회 stress, 다중 창) + Linux Xvfb text round-trip E2E
               (`tests/e2e/run-clipboard-text-runtime.sh`). `documents/clipboard-shell.mdx`.
         - [x] **Shell** (`openExternal/showItemInFolder/beep/trashItem`) — macOS NSWorkspace + NSBeep + NSFileManager,
-              Linux GIO `g_app_info_launch_default_for_uri`/`g_file_get_uri`/`g_file_trash` + FileManager1 D-Bus, Windows ShellExecute/SHFileOperation.
+              Linux GIO `g_app_info_launch_default_for_uri`/`g_file_get_uri`/`g_file_trash` + FileManager1 D-Bus + GDK beep, Windows ShellExecute/SHFileOperation.
               modern API `activateFileViewerSelectingURLs:` (deprecated `selectFile:` 회피).
               scheme 사전 검사 + `fileExistsAtPath:` 사전 검증으로 LaunchServices `-50` dialog 회피.
               E2E 32 케이스 + Linux Xvfb/dbus openExternal x-scheme-handler + openPath MIME handler +
-              showItemInFolder fake FileManager1 + trashItem round-trip E2E. 4개 SDK 노출.
+              showItemInFolder fake FileManager1 + beep 반복 호출 + trashItem round-trip E2E. 4개 SDK 노출.
         - [x] **Dialog** (`showMessageBox/showErrorBox/showOpenDialog/showSaveDialog` + Sync 변종 3개) —
               NSAlert/NSOpenPanel/NSSavePanel + sheet modal. `src/platform/dialog.m` ObjC block
               completion handler + nested NSApp event loop. windowId 첫 인자로 sheet vs

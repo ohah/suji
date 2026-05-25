@@ -140,6 +140,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
 //   (openExternal/openPath: macOS NSWorkspace / Linux GIO default handler,
 //    showItemInFolder: macOS NSWorkspace reveal / Linux FileManager1 D-Bus,
+//    beep: macOS NSBeep / Linux GDK display beep,
 //    trashItem: macOS NSFileManager / Linux GIO / Windows SHFileOperation)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")
@@ -449,7 +450,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // import { clipboard, shell, dialog } from '@suji/node'
 // await clipboard.readText() / writeText("hi")
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
-//   (Linux: openExternal/openPath/trashItem = GIO, showItemInFolder = FileManager1, beep still no-op)
+//   (Linux: openExternal/openPath/trashItem = GIO, showItemInFolder = FileManager1, beep = GDK)
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
 // await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
 // await dialog.showErrorBox(title, content)

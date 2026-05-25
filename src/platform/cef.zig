@@ -3183,6 +3183,8 @@ const linux_shell = if (is_linux) struct {
     extern "c" fn g_variant_new_string(string: [*:0]const u8) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_new_tuple(children: [*]const ?*anyopaque, n_children: usize) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_unref(value: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gdk_display_get_default() callconv(.c) ?*anyopaque;
+    extern "c" fn gdk_display_beep(display: ?*anyopaque) callconv(.c) void;
     extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
     extern "c" fn g_error_free(err: ?*anyopaque) callconv(.c) void;
     extern "c" fn g_free(mem: ?*anyopaque) callconv(.c) void;
@@ -3296,6 +3298,11 @@ const linux_shell = if (is_linux) struct {
         return true;
     }
 
+    fn beep() void {
+        const display = gdk_display_get_default() orelse return;
+        gdk_display_beep(display);
+    }
+
     /// GIO `g_file_trash` follows the freedesktop trash spec and moves the item
     /// into the user's Trash when supported by the filesystem.
     fn trashItem(path: []const u8) bool {
@@ -3381,6 +3388,10 @@ pub fn shellShowItemInFolder(path: []const u8) bool {
 pub fn shellBeep() void {
     if (comptime builtin.os.tag == .windows) {
         win_shell.beep();
+        return;
+    }
+    if (comptime is_linux) {
+        linux_shell.beep();
         return;
     }
     if (!comptime is_macos) return;
