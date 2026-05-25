@@ -882,6 +882,54 @@ test "Phase 17-B docs record Linux Windows runtime E2E completion" {
     try std.testing.expect(std.mem.indexOf(u8, workflow, "bash tests/e2e/run-frameless-drag-region.sh") != null);
 }
 
+test "Linux CEF Views window lifecycle events are documented and run in Actions" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    const workflow = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow);
+    const lifecycle_doc = try readProjectFile("documents/window-lifecycle.mdx", 512 * 1024);
+    defer std.testing.allocator.free(lifecycle_doc);
+    const plan = try readProjectFile("docs/PLAN.md", 2 * 1024 * 1024);
+    defer std.testing.allocator.free(plan);
+
+    inline for (.{
+        "viewsWindowEmitBoundsChanged",
+        "viewsWindowBoundsChanged",
+        "viewsWindowActivationChanged",
+        "g_window_resized_handler",
+        "g_window_moved_handler",
+        "g_window_focus_handler",
+        "g_window_blur_handler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    inline for (.{
+        "E2E — window lifecycle events (Linux)",
+        "bash tests/e2e/run-window-lifecycle-events-cef-views.sh",
+        "xvfb-run",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow, needle) != null);
+    }
+
+    inline for (.{
+        "Linux는 CEF Views 경로",
+        "tests/e2e/run-window-lifecycle-events-cef-views.sh",
+        "Windows는 아직 후속",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, lifecycle_doc, needle) != null);
+    }
+    try std.testing.expect(std.mem.indexOf(u8, lifecycle_doc, "Linux/Windows는 모든 라이프사이클 이벤트가 stub") == null);
+
+    inline for (.{
+        "Linux CEF Views runtime E2E",
+        "run-window-lifecycle-events-cef-views.sh",
+        "macOS CI + Linux CEF runtime subset",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, plan, needle) != null);
+    }
+}
+
 test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

@@ -626,10 +626,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         Phase 2에서 완료. Phase 5-1~5-5에서 minimize/restore/maximize/unmaximize/enter·leave-
         full-screen/show/hide/ready-to-show/page-title-updated/will-resize 추가 + quit-policy
         (`app.quitOnAllWindowsClosed`) 옵션. SDK 호환성 (5 SDK 모두 EventBus 통해 자동) + 단위
-        47개 + e2e 13 pass / 4 skip / 0 fail. 4 skip은 e2e 환경 한계 — `docs/WINDOW_API.md#
+        47개 + macOS E2E 13 pass / 4 skip / 0 fail. Linux CEF Views runtime E2E도
+        `run-window-lifecycle-events-cef-views.sh`로 setBounds resize, lifecycle controls,
+        ready/title, show/hide를 검증한다. 4 skip은 e2e 환경 한계 — `docs/WINDOW_API.md#
         phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
         will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
-        미발화). frameless drag 라우팅은 macOS 완료 — Linux/Windows는 후속.
+        미발화). frameless drag 라우팅은 macOS/Linux 완료 — Windows는 후속.
   - [x] **Phase 5-B: Tray v1** — NSStatusItem + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
         (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
@@ -700,7 +702,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - **안전성**: id monotonic (재사용 X), create 전체 write lock, closed 창 emit은 silent no-op, orphan은 destroyAll, 부모-자식은 시각 관계만 (재귀 close X)
     - **TDD 인프라**: Light 투자 (MockBrowser/MockWebView 각 10~20줄만). 필요 시점에 확장. WindowManager 단위는 CEF 없이 풀-TDD
     - **구현 순서**: Phase 2 (기본) + Phase 2.5 (데이터 인프라) **분리 유지**. 2.5 없이 Phase 2만 완료되면 플러그인이 멀티 윈도우 인지 불가
-    - **E2E 실행**: macOS CI만 (필수/권장). Linux/Windows는 컴파일/단위만
+    - **E2E 실행**: macOS CI + Linux CEF runtime subset. Windows는 현재 보류/빌드 안정화 후 재개.
 - [ ] CLI 도구
   - [x] `suji init` — 프로젝트 스캐폴딩 (backend zig/rust/go/multi + frontend react/vue/svelte/solid/preact/vanilla)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)

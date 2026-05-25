@@ -6,8 +6,10 @@ description: 창 라이프사이클 이벤트 — resize/focus/blur/move/closed 
 # Window Lifecycle Events
 
 Electron `BrowserWindow` 이벤트와 동등한 OS-level 창 이벤트. macOS는 `NSWindowDelegate`
-(`windowDidResize:` / `windowDidMove:` / `windowDidBecomeKey:` / `windowDidResignKey:`)에서
-직접 라우팅하며, 모든 창 생성 시 자동 부착된다. Linux/Windows는 stub (이벤트 발화 X).
+(`windowDidResize:` / `windowDidMove:` / `windowDidBecomeKey:` / `windowDidResignKey:`)와
+CEF Views `CefWindowDelegate`에서 라우팅한다. Linux는 CEF Views 경로에서
+`window:resized`/`window:moved`, ready/title, show/hide, minimize/maximize 계열을
+GitHub Actions runtime E2E로 검증한다. Windows는 아직 후속이다.
 
 ## 이벤트 채널
 
@@ -74,9 +76,10 @@ suji.On("window:resized", func(data string) { /* ... */ })
 
 ## 한계
 
-- **focus/blur는 macOS app activation에 의존**. 다른 앱이 활성 중일 때 새 창을 만들면
-  `makeKeyAndOrderFront:`만 호출되고 key window 변경이 일어나지 않을 수 있다 →
-  focus 이벤트 미발화. `NSApp.activateIgnoringOtherApps:YES` 호출이 필요하다면 별도 IPC.
-- Linux/Windows는 모든 라이프사이클 이벤트가 stub. 향후 GTK signal / Win32 message로 확장.
-- 동시 부착 가능한 창 수는 `SUJI_WINDOW_LIFECYCLE_MAX = 64`. 한도 초과 시 attach 실패하나
-  창 자체는 정상 동작 (이벤트만 미발화).
+- **focus/blur는 app activation에 의존**. 다른 앱이 활성 중이면 key/active window 변경이
+  일어나지 않을 수 있다. E2E는 비결정적이라 단위/정적 경로로만 보존한다.
+- Linux E2E: `tests/e2e/run-window-lifecycle-events-cef-views.sh`가 Actions Linux runner에서
+  CEF Views `setBounds` resize, lifecycle control, ready/title, show/hide를 검증한다.
+- Windows는 후속이다. Win32 lifecycle message hook과 현재 Windows build 안정화가 필요하다.
+- macOS non-CEF fallback의 동시 부착 가능한 창 수는 `SUJI_WINDOW_LIFECYCLE_MAX = 64`.
+  CEF Views 경로는 CEF delegate 기반이라 이 한도에 의존하지 않는다.
