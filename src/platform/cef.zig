@@ -5998,8 +5998,154 @@ const win_notify = if (builtin.os.tag == .windows) struct {
     }
 } else struct {};
 
+const linux_notify = if (is_linux) struct {
+    extern "c" fn g_bus_get_sync(bus_type: c_int, cancellable: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) ?*anyopaque;
+    extern "c" fn g_dbus_connection_call_sync(connection: ?*anyopaque, bus_name: [*:0]const u8, object_path: [*:0]const u8, interface_name: [*:0]const u8, method_name: [*:0]const u8, parameters: ?*anyopaque, reply_type: ?*anyopaque, flags: c_int, timeout_msec: c_int, cancellable: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_string(string: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_uint32(value: u32) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_int32(value: i32) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_strv(strv: [*]const ?[*:0]const u8, length: isize) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_array(child_type: ?*anyopaque, children: ?[*]const ?*anyopaque, n_children: usize) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_tuple(children: [*]const ?*anyopaque, n_children: usize) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_get_child_value(value: ?*anyopaque, index_: usize) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_get_uint32(value: ?*anyopaque) callconv(.c) u32;
+    extern "c" fn g_variant_unref(value: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_variant_type_new(type_string: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_type_free(type_: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_error_free(err: ?*anyopaque) callconv(.c) void;
+
+    const G_BUS_TYPE_SESSION: c_int = 2;
+    const G_DBUS_CALL_FLAGS_NONE: c_int = 0;
+    const NOTIFY_TIMEOUT_MS: c_int = 3000;
+
+    const Entry = struct {
+        used: bool = false,
+        id_len: usize = 0,
+        id: [64]u8 = [_]u8{0} ** 64,
+        dbus_id: u32 = 0,
+    };
+    var entries: [64]Entry = [_]Entry{.{}} ** 64;
+
+    fn call(method: [*:0]const u8, parameters: ?*anyopaque, timeout_msec: c_int) ?*anyopaque {
+        var bus_err: ?*anyopaque = null;
+        const connection = g_bus_get_sync(G_BUS_TYPE_SESSION, null, &bus_err) orelse {
+            if (bus_err) |err| g_error_free(err);
+            return null;
+        };
+        defer g_object_unref(connection);
+
+        var call_err: ?*anyopaque = null;
+        return g_dbus_connection_call_sync(
+            connection,
+            "org.freedesktop.Notifications",
+            "/org/freedesktop/Notifications",
+            "org.freedesktop.Notifications",
+            method,
+            parameters,
+            null,
+            G_DBUS_CALL_FLAGS_NONE,
+            timeout_msec,
+            null,
+            &call_err,
+        ) orelse {
+            if (call_err) |err| g_error_free(err);
+            return null;
+        };
+    }
+
+    fn isSupported() bool {
+        const reply = call("GetServerInformation", null, 1000) orelse return false;
+        g_variant_unref(reply);
+        return true;
+    }
+
+    fn requestPermission() bool {
+        // The freedesktop notification spec has no permission prompt; service
+        // reachability is the closest synchronous support signal.
+        return isSupported();
+    }
+
+    fn findEntry(id: []const u8) ?*Entry {
+        for (&entries) |*entry| {
+            if (entry.used and std.mem.eql(u8, entry.id[0..entry.id_len], id)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    fn remember(id: []const u8, dbus_id: u32) bool {
+        if (id.len == 0 or id.len > 63) return false;
+        if (findEntry(id)) |entry| {
+            entry.dbus_id = dbus_id;
+            return true;
+        }
+
+        var free_slot: ?*Entry = null;
+        for (&entries) |*entry| {
+            if (!entry.used and free_slot == null) free_slot = entry;
+        }
+        const slot = free_slot orelse return false;
+        slot.used = true;
+        slot.id_len = id.len;
+        @memcpy(slot.id[0..id.len], id);
+        slot.id[id.len] = 0;
+        slot.dbus_id = dbus_id;
+        return true;
+    }
+
+    fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+        _ = silent; // Sound policy is notification-daemon specific on Linux.
+        var id_buf: [64]u8 = undefined;
+        var title_buf: [4096]u8 = undefined;
+        var body_buf: [4096]u8 = undefined;
+        _ = writeCStr(id, &id_buf) orelse return false;
+        const title_z = writeCStr(title, &title_buf) orelse return false;
+        const body_z = writeCStr(body, &body_buf) orelse return false;
+
+        const no_actions = [_]?[*:0]const u8{null};
+        const actions = g_variant_new_strv(&no_actions, 0) orelse return false;
+        const hint_entry_type = g_variant_type_new("{sv}") orelse return false;
+        defer g_variant_type_free(hint_entry_type);
+        const hints = g_variant_new_array(hint_entry_type, null, 0) orelse return false;
+
+        const children = [_]?*anyopaque{
+            g_variant_new_string("Suji") orelse return false,
+            g_variant_new_uint32(0) orelse return false,
+            g_variant_new_string("") orelse return false,
+            g_variant_new_string(title_z) orelse return false,
+            g_variant_new_string(body_z) orelse return false,
+            actions,
+            hints,
+            g_variant_new_int32(-1) orelse return false,
+        };
+        const parameters = g_variant_new_tuple(&children, children.len) orelse return false;
+        const reply = call("Notify", parameters, NOTIFY_TIMEOUT_MS) orelse return false;
+        defer g_variant_unref(reply);
+
+        const child = g_variant_get_child_value(reply, 0) orelse return false;
+        defer g_variant_unref(child);
+        const dbus_id = g_variant_get_uint32(child);
+        return remember(id, dbus_id);
+    }
+
+    fn close(id: []const u8) bool {
+        const entry = findEntry(id) orelse return false;
+        const dbus_id = entry.dbus_id;
+        const child = g_variant_new_uint32(dbus_id) orelse return false;
+        const children = [_]?*anyopaque{child};
+        const parameters = g_variant_new_tuple(&children, children.len) orelse return false;
+        const reply = call("CloseNotification", parameters, NOTIFY_TIMEOUT_MS) orelse return false;
+        g_variant_unref(reply);
+        entry.used = false;
+        return true;
+    }
+} else struct {};
+
 pub fn notificationIsSupported() bool {
     if (comptime builtin.os.tag == .windows) return true; // Shell_NotifyIcon balloon
+    if (comptime is_linux) return linux_notify.isSupported();
     if (!comptime is_macos) return false;
     return suji_notification_is_supported() != 0;
 }
@@ -6007,6 +6153,7 @@ pub fn notificationIsSupported() bool {
 /// 권한 요청 — 첫 호출 시 OS 다이얼로그. 동기 대기.
 pub fn notificationRequestPermission() bool {
     if (comptime builtin.os.tag == .windows) return true; // 권한 불필요 (Shell_NotifyIcon)
+    if (comptime is_linux) return linux_notify.requestPermission();
     if (!comptime is_macos) return false;
     return suji_notification_request_permission() != 0;
 }
@@ -6015,6 +6162,7 @@ pub fn notificationRequestPermission() bool {
 /// title/body는 4KB stack-alloc 한도.
 pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
     if (comptime builtin.os.tag == .windows) return win_notify.show(id, title, body, silent);
+    if (comptime is_linux) return linux_notify.show(id, title, body, silent);
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
     var t_buf: [4096]u8 = undefined;
@@ -6026,6 +6174,7 @@ pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, sil
 }
 
 pub fn notificationClose(id: []const u8) bool {
+    if (comptime is_linux) return linux_notify.close(id);
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
     const id_cstr = writeCStr(id, &id_buf) orelse return false;

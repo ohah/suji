@@ -641,12 +641,14 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
         representedObject 라우팅. v1 한계: 아이콘 이미지 미지원(텍스트만), tray:click 미지원,
         서브메뉴/checkbox 없음. 회귀 테스트 1건. `documents/tray.mdx`.
-  - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + 5 진입점.
+  - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + Linux D-Bus notification daemon + 5 진입점.
         `notification.{isSupported, requestPermission, show, close}` + `notification:click`
         이벤트 라우팅. `src/platform/notification.m` ObjC block completion handler 인프라
-        재사용 + SujiNotificationDelegate. Bundle ID 검사 — `suji dev` loose binary는 stub
-        동작, `.app` 번들 후 실 알림 표시. v1 한계: actions/buttons, reply, custom icon
-        미지원. 회귀 1건 + E2E 9건 + Zig SDK 단위 5건. `documents/notification.mdx`.
+        재사용 + SujiNotificationDelegate. Linux는 `org.freedesktop.Notifications`
+        `GetServerInformation`/`Notify`/`CloseNotification` 직접 호출 + fake daemon runtime E2E.
+        Bundle ID 검사 — macOS `suji dev` loose binary는 stub 동작, `.app` 번들 후 실 알림 표시.
+        v1 한계: actions/buttons, reply, custom icon 미지원. 회귀 + E2E + Zig SDK 단위.
+        `documents/notification.mdx`.
   - [x] **Phase 5-D: 메뉴바 커스터마이즈 API** — macOS NSMenu 기반.
         App 메뉴(Quit/Hide/About)는 Suji가 보존하고 사용자 정의 top-level menu를 그 뒤에 구성.
         `menu.setApplicationMenu/resetApplicationMenu`, `submenu/item/checkbox/separator`,

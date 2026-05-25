@@ -2025,6 +2025,51 @@ test "shell.openPath Linux GIO file handler wiring + runtime E2E" {
     }
 }
 
+test "notification Linux D-Bus wiring + runtime E2E" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "const linux_notify",
+        "linux_notify.isSupported",
+        "linux_notify.show",
+        "linux_notify.close",
+        "org.freedesktop.Notifications",
+        "GetServerInformation",
+        "Notify",
+        "CloseNotification",
+        "g_dbus_connection_call_sync",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const e2e_src = try readProjectFile(
+        "tests/e2e/notification-linux-runtime.test.ts",
+        1024 * 1024,
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "dbus.service.BusName('org.freedesktop.Notifications'",
+        "notification_is_supported",
+        "notification_request_permission",
+        "notification_show",
+        "notification_close",
+        "CloseNotification",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    inline for (.{
+        "E2E — notification (Linux)",
+        "run-notification-linux-runtime.sh",
+        "python3-dbus",
+        "python3-gi",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
+    }
+}
+
 test "app.requestUserAttention IPC — NSApp request/cancel" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
