@@ -36,6 +36,7 @@ suji run backends/node/main.js          # CEF 없이 embedded Node.js 파일 직
 bash tests/e2e/run-node-run.sh          # suji run main.js embedded Node.js CLI
 bash tests/e2e/run-types-cli.sh         # suji types stdout/--out schema generation
 bash tests/e2e/run-rust-types-helper.sh # Rust SDK SujiHandlers .d.ts helper
+bash tests/e2e/run-go-types-helper.sh   # Go SDK SujiHandlers .d.ts helper
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView/z-order/lifecycle)
@@ -86,8 +87,9 @@ suji types [--out <path>]   # zig 백엔드 .schema() → SujiHandlers .d.ts (st
 augment 불요). 백엔드 빌드→dlopen→`backend_dump_schema`(comptime `typeToTs`).
 미지정 시 stdout(`suji types > src/suji.d.ts`), `--out`이면 파일. Rust는
 `suji::typescript::SujiHandlers` + `#[derive(suji::Type)]`로 수동 등록한
-req/res 타입에서 동일한 module augmentation을 생성. Go·Node=수동 augment(runtime
-타입메타 부재 — 정직 한계).
+req/res 타입에서 동일한 module augmentation을 생성. Go는 `suji.NewTSHandlers()`
++ struct/json tag reflection으로 수동 등록한 req/res 타입에서 생성. Node=수동
+augment(runtime 타입메타 부재 — 정직 한계).
 
 ## API (Electron 스타일)
 
@@ -294,6 +296,8 @@ var _ = suji.Bind(&App{})
 // webrequest.SetBlockedUrls([]string{"https://*.ad/*"})
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
+// suji.NewTSHandlers().Handler("greet", GreetReq{}, GreetRes{}).Export()
+//   — Go req/res struct → SujiHandlers .d.ts
 ```
 
 ```js

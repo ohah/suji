@@ -123,6 +123,11 @@ jobs:
       - name: Test Rust SDK
         run: cargo test --manifest-path crates/suji-rs/Cargo.toml
 
+      - name: Test Go SDK
+        if: runner.os == 'macOS'
+        working-directory: sdks/suji-go
+        run: go test ./...
+
       - name: Build state plugin
         working-directory: plugins/state/zig
         run: zig build

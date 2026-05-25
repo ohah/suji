@@ -99,6 +99,29 @@ func (a *App) Save(text string, event *suji.InvokeEvent) suji.M {
 
 필드 없음 / 타입 불일치는 `ID=0, Name=""` default.
 
+## TypeScript Handler 타입 생성
+
+Go 백엔드는 런타임 자동 타입 추출 대신, 명시적으로 등록한 req/res struct를
+`SujiHandlers` module augmentation으로 내보낸다. `json` tag와 `omitempty`를 반영한다.
+
+```go
+type GreetReq struct {
+    Name string `json:"name"`
+}
+
+type GreetRes struct {
+    Greeting string `json:"greeting"`
+}
+
+dts, err := suji.NewTSHandlers().
+    Handler("greet", GreetReq{}, GreetRes{}).
+    Export()
+```
+
+생성 결과는 frontend `@suji/api`의 `invoke("greet", ...)` 타입 추론에 바로 쓰는
+`.d.ts` 파일이다. `ExportFor("@suji/node")`를 쓰면 Node SDK module augmentation도
+같은 방식으로 만들 수 있다.
+
 ## `SendTo` — 특정 창에만 이벤트 전달 (Phase 2.5)
 
 ```go
