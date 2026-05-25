@@ -287,6 +287,8 @@ jobs:
           cd dist
           sha256sum ./*.tar.gz ./*.zip 2>/dev/null > CHECKSUMS.txt || true
           ls -la
+      - name: Include installer script
+        run: cp scripts/install.sh dist/install.sh
       - name: Extract changelog block
         id: cl
         run: |

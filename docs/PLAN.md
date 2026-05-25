@@ -1330,7 +1330,7 @@ go get github.com/ohah/suji-go
 - GitHub Releases: 플랫폼별 바이너리 (macOS arm64/x86_64, Linux, Windows)
 - brew: `brew install suji`
 - npm: `npm install -g @suji/cli`
-- curl: `curl -fsSL https://suji.dev/install.sh | sh`
+- curl: `curl -fsSL https://github.com/ohah/suji/releases/latest/download/install.sh | sh`
 
 ### 앱 배포 (suji build)
 ```
@@ -1394,6 +1394,7 @@ suji build → 결과물:
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ✅ `.github/workflows/release.yml` — `v*.*.*` 태그 정식 릴리스 + `workflow_dispatch dry_run=true` 검증 모드. macOS/Linux/Windows CLI 패키지 + checksums + embed core libs 크로스빌드 아티팩트, 태그↔`build.zig.zon` 버전 일치 검증, release publish gate. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 workflow 계약 고정 |
 | Homebrew tap | 사용자 직접 | -- | ✅ `release.yml` `homebrew` job — 릴리스 아티팩트 checksum으로 `Formula/suji.rb` 생성 + `ruby -c` 검증 + `homebrew-formula` artifact 업로드. 정식 릴리스 시 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 있으면 외부 tap repo push, 없으면 경고 후 skip. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 Formula 계약 고정 |
+| curl installer | 직접 다운로드 | -- | ✅ `scripts/install.sh` — 최신/특정 버전 GitHub Release asset 다운로드 + `.sha256` 검증 + 기본 `~/.suji/bin` 설치. release job이 `dist/install.sh`에 포함. macOS arm64/Linux x64 tar.gz + Windows x64 zip 매핑. 유닛(`release_workflow_test.zig`) + E2E(fake release archive 설치/체크섬 mismatch)로 계약 고정 |
 | `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep — `--frontend` 도 양쪽 반영) + `.github/workflows/suji.yml` 생성 앱 CI 템플릿. 로컬 실증: npm pack→npx zig/rust/go/multi + frontend 분기 + 에러케이스, `suji init`/`@suji/cli` 산출 workflow + frontend build E2E. npm publish 는 토큰 대기(워크플로 후속) |
 
 ### 플러그인 / 확장 API

@@ -1,13 +1,15 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 const ROOT = path.resolve(import.meta.dir, "../..");
 
-async function run(cmd: string, args: string[]) {
+async function run(cmd: string, args: string[], options: { env?: Record<string, string>; cwd?: string } = {}) {
   const proc = Bun.spawn([cmd, ...args], {
-    cwd: ROOT,
+    cwd: options.cwd ?? ROOT,
+    env: { ...process.env, ...options.env },
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -17,6 +19,32 @@ async function run(cmd: string, args: string[]) {
     proc.exited,
   ]);
   return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode, combined: `${stdout}\n${stderr}` };
+}
+
+async function exists(file: string): Promise<boolean> {
+  try {
+    await access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function makeFakeRelease(tmp: string, checksum = "valid") {
+  const payloadDir = path.join(tmp, "suji-linux-x64-1.2.3");
+  await mkdir(payloadDir, { recursive: true });
+  const fakeSuji = path.join(payloadDir, "suji");
+  await writeFile(fakeSuji, "#!/usr/bin/env sh\necho fake suji \"$@\"\n");
+  await chmod(fakeSuji, 0o755);
+
+  const archive = path.join(tmp, "suji-linux-x64.tar.gz");
+  const packed = await run("tar", ["czf", archive, "-C", tmp, "suji-linux-x64-1.2.3"]);
+  expect(packed.exitCode, packed.combined).toBe(0);
+
+  const digest = createHash("sha256").update(await readFile(archive)).digest("hex");
+  const expected = checksum === "valid" ? digest : "0".repeat(64);
+  await writeFile(`${archive}.sha256`, `${expected}  suji-linux-x64.tar.gz\n`);
+  return archive;
 }
 
 test("release version script matches build.zig.zon and rejects mismatched tags", async () => {
@@ -98,4 +126,47 @@ test("homebrew formula generator rejects invalid checksums", async () => {
 
   expect(bad.exitCode).not.toBe(0);
   expect(bad.stderr).toContain("invalid macOS sha256");
+});
+
+test("curl installer installs a verified release archive", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "suji-install-release-"));
+  await makeFakeRelease(tmp);
+  const installDir = path.join(tmp, "bin");
+
+  const install = await run("sh", ["scripts/install.sh"], {
+    env: {
+      SUJI_VERSION: "1.2.3",
+      SUJI_RELEASE_BASE_URL: `file://${tmp}`,
+      SUJI_INSTALL_PLATFORM: "linux-x64",
+      SUJI_INSTALL_DIR: installDir,
+    },
+  });
+
+  expect(install.exitCode, install.combined).toBe(0);
+  expect(install.stdout).toContain("Installed suji");
+  const installed = path.join(installDir, "suji");
+  expect(await exists(installed)).toBe(true);
+
+  const probe = await run(installed, ["--version"]);
+  expect(probe.exitCode, probe.combined).toBe(0);
+  expect(probe.stdout).toContain("fake suji --version");
+});
+
+test("curl installer rejects checksum mismatches before installing", async () => {
+  const tmp = await mkdtemp(path.join(os.tmpdir(), "suji-install-bad-sha-"));
+  await makeFakeRelease(tmp, "invalid");
+  const installDir = path.join(tmp, "bin");
+
+  const install = await run("sh", ["scripts/install.sh"], {
+    env: {
+      SUJI_VERSION: "1.2.3",
+      SUJI_RELEASE_BASE_URL: `file://${tmp}`,
+      SUJI_INSTALL_PLATFORM: "linux-x64",
+      SUJI_INSTALL_DIR: installDir,
+    },
+  });
+
+  expect(install.exitCode).not.toBe(0);
+  expect(install.stderr).toContain("checksum mismatch");
+  expect(await exists(path.join(installDir, "suji"))).toBe(false);
 });

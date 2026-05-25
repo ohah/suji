@@ -1,7 +1,7 @@
 # 릴리스 / 코드 서명 / 배포
 
 zero-native 패리티의 인-트리 Zig 서명·패키징 + GitHub Releases / Homebrew
-Formula 자동화.
+Formula / curl installer 자동화.
 
 ## 버전 단일 출처
 
@@ -49,6 +49,30 @@ V="$(bash scripts/version.sh)"
 bash scripts/homebrew-formula.sh "$V" "$(printf '%064d' 0)" "$(printf '%064d' 0)" > suji.rb
 ruby -c suji.rb
 ```
+
+## curl installer
+
+`scripts/install.sh`는 GitHub Release asset을 직접 내려받아 `.sha256` 파일로
+검증한 뒤 `suji` 바이너리를 설치한다. 정식 릴리스에서는 release job이 이
+스크립트를 `dist/install.sh`에 포함하므로 아래 URL로 최신 버전을 설치할 수
+있다.
+
+```bash
+curl -fsSL https://github.com/ohah/suji/releases/latest/download/install.sh | sh
+```
+
+기본 설치 경로는 `~/.suji/bin`이다. 특정 버전이나 설치 경로를 고정할 수 있다:
+
+```bash
+SUJI_VERSION=0.1.0 SUJI_INSTALL_DIR="$HOME/bin" \
+  sh scripts/install.sh
+```
+
+지원 릴리스 asset은 현재 macOS arm64(`suji-macos-arm64.tar.gz`), Linux x64
+(`suji-linux-x64.tar.gz`), Windows x64(`suji-windows-x64.zip`)이다. 검증은
+로컬 fake release archive를 대상으로 한 E2E와 `release_workflow_test.zig`의
+workflow/script 계약 테스트가 고정한다. 실제 GitHub asset 다운로드는 정식 릴리스
+생성 후 검증 가능하다.
 
 ## 데스크톱 서명 (`suji build`)
 

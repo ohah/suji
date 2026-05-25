@@ -23,6 +23,15 @@ brew tap ohah/suji
 brew install suji
 ```
 
+Homebrew를 쓰지 않는 환경에서는 릴리스 installer를 사용할 수 있습니다:
+
+```bash
+curl -fsSL https://github.com/ohah/suji/releases/latest/download/install.sh | sh
+```
+
+기본 설치 경로는 `~/.suji/bin`입니다. 특정 버전이나 설치 경로가 필요하면
+`SUJI_VERSION`, `SUJI_INSTALL_DIR` 환경변수를 지정합니다.
+
 ## 2. 프로젝트 생성
 
 ```bash

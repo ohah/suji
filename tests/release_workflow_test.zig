@@ -82,6 +82,46 @@ test "release workflow generates Homebrew formula and can publish an external ta
     }
 }
 
+test "release workflow ships curl installer script with checksum verification" {
+    const allocator = std.testing.allocator;
+    const workflow = try slurp(allocator, ".github/workflows/release.yml");
+    defer allocator.free(workflow);
+    const installer = try slurp(allocator, "scripts/install.sh");
+    defer allocator.free(installer);
+    const claude = try slurp(allocator, "CLAUDE.md");
+    defer allocator.free(claude);
+
+    inline for (.{
+        "Include installer script",
+        "cp scripts/install.sh dist/install.sh",
+        "files: dist/*",
+    }) |needle| {
+        try expectContains(workflow, needle);
+    }
+
+    inline for (.{
+        "SUJI_VERSION",
+        "SUJI_INSTALL_DIR",
+        "SUJI_RELEASE_BASE_URL",
+        "SUJI_INSTALL_PLATFORM",
+        "asset=\"suji-macos-arm64\"",
+        "asset=\"suji-linux-x64\"",
+        "asset=\"suji-windows-x64\"",
+        "archive_name=\"${asset}.tar.gz\"",
+        "archive_name=\"${asset}.zip\"",
+        "sha256sum",
+        "shasum -a 256",
+        "openssl dgst -sha256",
+        "checksum mismatch",
+        "releases/latest/download",
+    }) |needle| {
+        try expectContains(installer, needle);
+    }
+
+    try expectContains(claude, "curl");
+    try expectContains(claude, "install.sh");
+}
+
 test "release docs and PLAN agree that GitHub Releases automation exists" {
     const allocator = std.testing.allocator;
     const plan = try slurp(allocator, "docs/PLAN.md");
@@ -99,4 +139,5 @@ test "release docs and PLAN agree that GitHub Releases automation exists" {
     try expectContains(claude, "release.yml");
     try expectContains(claude, "Homebrew");
     try expectContains(releasing, "Homebrew tap");
+    try expectContains(releasing, "curl installer");
 }
