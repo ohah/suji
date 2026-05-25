@@ -127,7 +127,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.capturePage(id, "/tmp/s.png", rect?)  — 스크린샷 PNG (CDP,
 //   결과는 window:page-captured; rect{x,y,width,height} 지정 시 부분 영역만)
 // suji.clipboard.readText() / writeText("hi") / clear()                — macOS NSPasteboard / Linux GTK text / Windows CF_UNICODETEXT
-//   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip (macOS NSPasteboard / Linux GTK text/html)
+//   / readHtml() / writeHtml("<b>x</b>")  — HTML round-trip (macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML)
 //   / has("public.html") / availableFormats()  — format 검사 (UTI)
 //   / writeImage(base64) / readImage() — PNG round-trip (raw ~8KB 1차)
 //   / writeTiff(base64) / readTiff() — TIFF round-trip (NSPasteboard public.tiff, PNG 동형)
@@ -356,7 +356,7 @@ suji.platform                                                // "macos" | "linux
 
 // import { clipboard, shell, dialog } from '@suji/api';
 // await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard / Linux GTK text / Windows CF_UNICODETEXT)
-// await clipboard.readHTML() / writeHTML(html)                            (macOS NSPasteboard / Linux GTK text/html)
+// await clipboard.readHTML() / writeHTML(html)                            (macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML)
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
 //   (macOS NSWorkspace + NSFileManager, Linux GIO/FileManager1 shell APIs)
 // await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert)
@@ -450,7 +450,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 
 // import { clipboard, shell, dialog } from '@suji/node'
 // await clipboard.readText() / writeText("hi")
-// await clipboard.readHTML() / writeHTML("<b>x</b>")  // macOS NSPasteboard / Linux GTK text/html
+// await clipboard.readHTML() / writeHTML("<b>x</b>")  // macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
 //   (Linux: openExternal/openPath/trashItem = GIO, showItemInFolder = FileManager1, beep = GDK)
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })

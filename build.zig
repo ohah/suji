@@ -959,6 +959,12 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const clipboard_cf_html_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/clipboard_cf_html.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cef_ipc_test_mod.addImport("clipboard_cf_html", clipboard_cf_html_test_mod);
     const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
 

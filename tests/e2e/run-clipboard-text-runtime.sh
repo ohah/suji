@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clipboard text runtime E2E — readText/writeText/clear/has/formats.
+# Clipboard text/HTML runtime E2E — read/write/clear/has/formats.
 
 set -euo pipefail
 

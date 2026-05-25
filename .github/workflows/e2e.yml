@@ -693,6 +693,18 @@ jobs:
           export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
           bash tests/e2e/run-view-lifecycle.sh
 
+      - name: E2E — clipboard text/HTML (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-clipboard-text-runtime.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-clipboard-text-runtime.sh
+
       - name: E2E — safeStorage (Windows)
         if: runner.os == 'Windows'
         shell: bash

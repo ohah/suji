@@ -1,4 +1,5 @@
 const std = @import("std");
+const clipboard_cf_html = @import("clipboard_cf_html");
 
 // CEF IPC 헬퍼 함수 테스트
 // cef.zig와 main.zig의 순수 함수들을 독립적으로 테스트
@@ -1697,6 +1698,11 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
         "text/html",
         "gtk_clipboard_wait_for_text",
         "gtk_clipboard_wait_is_text_available",
+        "const win_clip",
+        "RegisterClipboardFormatW",
+        "HTML Format",
+        "clipboard_cf_html.writeDocument",
+        "clipboard_cf_html.readFragment",
         "pub fn clipboardHas",
         "pub fn clipboardAvailableFormats",
         "pub fn appFocus",
@@ -1712,9 +1718,37 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
         "clipboard_write_html",
         "clipboard_read_html",
         "public.html",
+        "CF_UNICODETEXT + CF_HTML",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, linux_e2e_src, needle) != null);
     }
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    inline for (.{
+        "E2E — clipboard text/HTML (Windows)",
+        "bash tests/e2e/run-clipboard-text-runtime.sh",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
+    }
+}
+
+test "Win32 CF_HTML helper builds byte offsets and extracts fragment" {
+    const html = "<section data-x=\"1\">한글 <b>HTML</b></section>";
+    var buf: [1024]u8 = undefined;
+    const doc = clipboard_cf_html.writeDocument(&buf, html).?;
+
+    try std.testing.expect(std.mem.startsWith(u8, doc, "Version:0.9\r\nStartHTML:"));
+    try std.testing.expect(std.mem.indexOf(u8, doc, "<!--StartFragment-->") != null);
+    try std.testing.expect(std.mem.indexOf(u8, doc, "<!--EndFragment-->") != null);
+    try std.testing.expectEqualStrings(html, clipboard_cf_html.readFragment(doc).?);
+}
+
+test "Win32 CF_HTML helper rejects malformed offsets" {
+    var empty: [0]u8 = .{};
+    try std.testing.expect(clipboard_cf_html.writeDocument(&empty, "<b>x</b>") == null);
+    try std.testing.expect(clipboard_cf_html.readFragment("StartFragment:0000000010\r\nEndFragment:0000009999\r\nx") == null);
+    try std.testing.expect(clipboard_cf_html.readFragment("StartFragment:0000000020\r\nEndFragment:0000000010\r\nx") == null);
 }
 
 test "app.exit + session.clearCookies/flushStore IPC" {

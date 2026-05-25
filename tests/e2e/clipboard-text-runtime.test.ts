@@ -1,8 +1,8 @@
 /**
- * Clipboard text runtime E2E.
+ * Clipboard text/HTML runtime E2E.
  *
- * Linux Actions runs this under Xvfb so GTK clipboard calls use a real display
- * selection instead of the previous stub response.
+ * Linux Actions runs this under Xvfb/GTK. Windows Actions runs it against the
+ * Win32 clipboard (CF_UNICODETEXT + CF_HTML).
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
@@ -31,7 +31,7 @@ afterAll(async () => {
   await browser?.disconnect();
 });
 
-describe("clipboard text runtime APIs", () => {
+describe("clipboard text/HTML runtime APIs", () => {
   test("writeText/readText/has/availableFormats/clear round-trip", async () => {
     await core({ cmd: "clipboard_clear" });
 
@@ -61,7 +61,7 @@ describe("clipboard text runtime APIs", () => {
   test("writeHTML/readHTML/has/availableFormats round-trip", async () => {
     await core({ cmd: "clipboard_clear" });
 
-    const html = '<section data-suji="linux">Hello <b>HTML</b> 한글 🚀</section>';
+    const html = '<section data-suji="clipboard">Hello <b>HTML</b> 한글 🚀</section>';
     const write = await core<{ success: boolean }>({ cmd: "clipboard_write_html", html });
     expect(write.success).toBe(true);
 
