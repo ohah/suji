@@ -2023,6 +2023,10 @@ test "shell.openPath Linux GIO file handler wiring + runtime E2E" {
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
+
+    const shell_doc = try readProjectFile("documents/clipboard-shell.mdx", 1024 * 1024);
+    defer std.testing.allocator.free(shell_doc);
+    try std.testing.expect(std.mem.indexOf(u8, shell_doc, "path 또는 `file://` URI marker") != null);
 }
 
 test "notification Linux D-Bus wiring + runtime E2E" {
@@ -2068,6 +2072,21 @@ test "notification Linux D-Bus wiring + runtime E2E" {
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
+
+    const notification_doc = try readProjectFile("documents/notification.mdx", 1024 * 1024);
+    defer std.testing.allocator.free(notification_doc);
+    inline for (.{
+        "Linux D-Bus backend",
+        "D-Bus `Notify`",
+        "D-Bus `CloseNotification`",
+        "fake `org.freedesktop.Notifications` daemon",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, notification_doc, needle) != null);
+    }
+
+    const plan_src = try readProjectFile("docs/PLAN.md", 1024 * 1024 * 2);
+    defer std.testing.allocator.free(plan_src);
+    try std.testing.expect(std.mem.indexOf(u8, plan_src, "Linux freedesktop D-Bus") != null);
 }
 
 test "app.requestUserAttention IPC — NSApp request/cancel" {

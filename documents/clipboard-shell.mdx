@@ -183,7 +183,7 @@ control char `\u00XX`. 백슬래시/따옴표 round-trip 정확. UTF-8 멀티바
 - **Linux Clipboard text**: `tests/e2e/clipboard-text-runtime.test.ts` — Xvfb에서 GTK clipboard text write/read/has/formats/clear round-trip
 - **Linux Shell trashItem**: `tests/e2e/shell-trash-runtime.test.ts` — Xvfb/dbus에서 GIO trashItem file disappearance + missing path 검증
 - **Linux Shell openExternal**: `tests/e2e/shell-open-external-runtime.test.ts` — Xvfb/dbus에서 임시 `x-scheme-handler` 등록 후 GIO launch + marker file round-trip 검증
-- **Linux Shell openPath**: `tests/e2e/shell-open-path-runtime.test.ts` — Xvfb/dbus에서 임시 MIME type/default app 등록 후 GIO `file://` launch + marker file round-trip 검증
+- **Linux Shell openPath**: `tests/e2e/shell-open-path-runtime.test.ts` — Xvfb/dbus에서 임시 MIME type/default app 등록 후 GIO launch + handler가 받은 path 또는 `file://` URI marker round-trip 검증
 - **Linux Shell showItemInFolder**: `tests/e2e/shell-show-item-runtime.test.ts` — Xvfb/dbus에서 fake FileManager1 서비스 등록 후 `ShowItems(file://...)` round-trip 검증
 - **Linux Shell beep**: `tests/e2e/shell-beep-runtime.test.ts` — Xvfb에서 GDK beep IPC 반복 호출 안정성 검증
 - **Shell**: `tests/e2e/shell.test.ts` — 32 케이스 (invalid input, valid path/URL RUN_DESTRUCTIVE, scheme 사전 차단, fixtures with spaces/한글/symlink/hidden, 100회 stress)

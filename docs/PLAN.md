@@ -1372,7 +1372,7 @@ suji build → 결과물:
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
 | 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
-| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
+| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key (권한 불필요) + 5 SDK + accelerator 파싱 |
 | 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | ✅ Phase 5. close/closed/all-closed/resized/moved/focus/blur (macOS NSWindowDelegate) |
 | 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ✅ `windows.create()` + Phase 3 외형 옵션 풀 셋 (frame/transparent/parent) |
@@ -1418,7 +1418,7 @@ suji build → 결과물:
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
 | 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
-| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
+| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + scheme 사전 검사 + 4 SDK + Linux x-scheme-handler E2E |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
