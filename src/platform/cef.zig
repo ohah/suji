@@ -843,7 +843,31 @@ fn viewsWindowBoundsChanged(
         releaseWindowRef(@ptrCast(window));
         return;
     };
-    defer releaseWindowRef(@ptrCast(window));
+    const win: *c.cef_window_t = @ptrCast(window orelse return);
+    defer releaseWindowRef(win);
+    // OS-initiated minimize/maximize/restore 감지 — CEF window 의 is_minimized
+    // /is_maximized 가 bounds-change 직전에 변경된다. delegate 의 last_* 와 비교해
+    // transition 만 이벤트 발화. SDK 호출(minimizeImpl 등)은 별도로 가드되어 중복
+    // 방지된다(handle == 0 이거나 last_* 가 already-set).
+    if (d.handle != 0) {
+        const is_min = viewsWindowIsMinimized(win);
+        const is_max = viewsWindowIsMaximized(win);
+        if (is_min and !d.last_minimized) {
+            d.last_minimized = true;
+            d.last_maximized = false;
+            if (g_window_minimize_handler) |h| h(d.handle);
+        } else if (!is_min and d.last_minimized) {
+            d.last_minimized = false;
+            if (g_window_restore_handler) |h| h(d.handle);
+        }
+        if (is_max and !d.last_maximized and !is_min) {
+            d.last_maximized = true;
+            if (g_window_maximize_handler) |h| h(d.handle);
+        } else if (!is_max and d.last_maximized and !is_min) {
+            d.last_maximized = false;
+            if (g_window_unmaximize_handler) |h| h(d.handle);
+        }
+    }
     const bounds = new_bounds orelse return;
     viewsWindowEmitBoundsChanged(d, bounds.*);
 }
@@ -1980,9 +2004,8 @@ pub const CefNative = struct {
         assertUiThread();
         if (comptime builtin.os.tag == .windows) {
             const self = fromCtx(ctx);
-            const entry = self.browsers.get(handle) orelse return;
-            const views_window = entry.views_window orelse return;
-            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            const entry_ptr = self.browsers.getPtr(handle) orelse return;
+            const hwnd = windowsEntryHwnd(entry_ptr) orelse return;
             win_window.setLayeredOpacity(hwnd, opacity);
             return;
         }
@@ -1996,9 +2019,8 @@ pub const CefNative = struct {
     fn getOpacityImpl(ctx: ?*anyopaque, handle: u64) f64 {
         if (comptime builtin.os.tag == .windows) {
             const self = fromCtx(ctx);
-            const entry = self.browsers.get(handle) orelse return 1;
-            const views_window = entry.views_window orelse return 1;
-            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            const entry_ptr = self.browsers.getPtr(handle) orelse return 1;
+            const hwnd = windowsEntryHwnd(entry_ptr) orelse return 1;
             return win_window.getLayeredOpacity(hwnd);
         }
         if (!comptime is_macos) return 1;
@@ -2019,9 +2041,8 @@ pub const CefNative = struct {
         assertUiThread();
         if (comptime builtin.os.tag == .windows) {
             const self = fromCtx(ctx);
-            const entry = self.browsers.get(handle) orelse return;
-            const views_window = entry.views_window orelse return;
-            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            const entry_ptr = self.browsers.getPtr(handle) orelse return;
+            const hwnd = windowsEntryHwnd(entry_ptr) orelse return;
             win_window.setShadow(hwnd, has);
             return;
         }
@@ -2033,9 +2054,8 @@ pub const CefNative = struct {
     fn hasShadowImpl(ctx: ?*anyopaque, handle: u64) bool {
         if (comptime builtin.os.tag == .windows) {
             const self = fromCtx(ctx);
-            const entry = self.browsers.get(handle) orelse return false;
-            const views_window = entry.views_window orelse return false;
-            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            const entry_ptr = self.browsers.getPtr(handle) orelse return false;
+            const hwnd = windowsEntryHwnd(entry_ptr) orelse return false;
             return win_window.hasShadow(hwnd);
         }
         if (!comptime is_macos) return false;
@@ -3905,10 +3925,15 @@ const win_window = if (builtin.os.tag == .windows) struct {
         return buf[0..written :0];
     }
 
-    /// macOS NSAlert 의 임의 button text 와 다름 — MessageBoxW 는 standard buttons
-    /// (OK/Cancel/Yes/No 조합) 만. button 수에 따라 dwType 선택. 응답 → button index.
-    /// 빈 buttons → MB_OK (response 0).
+    /// 표준 버튼 세트(OK/Cancel/Yes/No 조합) 면 MessageBoxW(빠르고 manifest 불필요),
+    /// 커스텀 버튼 라벨이면 TaskDialogIndirect(임의 텍스트, macOS NSAlert 패리티).
+    /// 빈 buttons → MB_OK.
     fn messageBox(opts: MessageBoxOpts) MessageBoxResult {
+        // 커스텀 버튼 감지 — buttons 가 1 개 이상이고 표준 세트가 아니면 TaskDialog 경로.
+        if (hasCustomButtonLabels(opts.buttons)) {
+            return messageBoxTaskDialog(opts);
+        }
+
         var text_buf: [4096]u16 = undefined;
         const caption_max: usize = 511;
         var caption_w_buf: [512]u16 = undefined;
@@ -3961,6 +3986,21 @@ const win_window = if (builtin.os.tag == .windows) struct {
         return b0_yes and b1_no;
     }
 
+    /// 표준이 아닌 라벨이 하나라도 있으면 TaskDialog 경로 사용.
+    /// 표준 = "ok"|"cancel"|"yes"|"no" (case-insensitive). 0/1 개는 OK 만 표시되므로
+    /// 항상 MessageBoxW 로 충분 → 표준 처리.
+    fn hasCustomButtonLabels(buttons: []const []const u8) bool {
+        if (buttons.len < 2) return false;
+        for (buttons) |b| {
+            const is_std = std.ascii.eqlIgnoreCase(b, "ok") or
+                std.ascii.eqlIgnoreCase(b, "cancel") or
+                std.ascii.eqlIgnoreCase(b, "yes") or
+                std.ascii.eqlIgnoreCase(b, "no");
+            if (!is_std) return true;
+        }
+        return false;
+    }
+
     fn errorBox(title: []const u8, content: []const u8) void {
         var text_buf: [4096]u16 = undefined;
         var caption_buf: [512]u16 = undefined;
@@ -3970,6 +4010,111 @@ const win_window = if (builtin.os.tag == .windows) struct {
             break :blk z.ptr;
         } else null;
         _ = MessageBoxW(null, text_z.ptr, caption_z, MB_OK | MB_ICONERROR);
+    }
+
+    // ============================================
+    // TaskDialogIndirect — 임의 button text 지원 (macOS NSAlert 패리티).
+    // TASKDIALOGCONFIG 와 TASKDIALOG_BUTTON 둘 다 pshpack1.h pack(1) 라
+    // Zig extern struct natural align 으로는 표현 불가 → raw byte buffer 로
+    // 수동 layout. x64 전용 (suji 데스크톱은 모두 x64).
+    // ============================================
+    extern "comctl32" fn TaskDialogIndirect(pTaskConfig: *const anyopaque, pnButton: ?*i32, pnRadioButton: ?*i32, pfVerificationFlagChecked: ?*i32) callconv(.winapi) i32;
+
+    const TDC_SIZE: usize = 160; // pack(1) x64 size
+    const TDB_SIZE: usize = 12; // pack(1) x64 size
+    const TD_INFORMATION_ICON: isize = -3; // pszMainIcon literal
+    const TD_WARNING_ICON: isize = -1;
+    const TD_ERROR_ICON: isize = -2;
+    // TDCBF_OK_BUTTON: 1, TDCBF_CANCEL_BUTTON: 8 (사용 안 함 — 모두 커스텀 버튼)
+    const TDF_ALLOW_DIALOG_CANCELLATION: u32 = 0x0008;
+    const TDF_VERIFICATION_FLAG_CHECKED: u32 = 0x0100;
+    const TDF_USE_HICON_MAIN: u32 = 0x0002;
+
+    fn writeUsizeLE(buf: []u8, val: usize) void {
+        std.mem.writeInt(usize, buf[0..@sizeOf(usize)], val, .little);
+    }
+    fn writeU32LE(buf: []u8, val: u32) void {
+        std.mem.writeInt(u32, buf[0..4], val, .little);
+    }
+    fn writeI32LE(buf: []u8, val: i32) void {
+        std.mem.writeInt(i32, buf[0..4], val, .little);
+    }
+    fn writeIsizeLE(buf: []u8, val: isize) void {
+        std.mem.writeInt(isize, buf[0..@sizeOf(isize)], val, .little);
+    }
+
+    const MAX_TD_BUTTONS: usize = 8;
+    const TD_LABEL_WIDE_MAX: usize = 64;
+
+    fn messageBoxTaskDialog(opts: MessageBoxOpts) MessageBoxResult {
+        // 라벨 → UTF-16 변환 (각 버튼당 최대 64자).
+        var label_storage: [MAX_TD_BUTTONS][TD_LABEL_WIDE_MAX]u16 = undefined;
+        var button_records: [MAX_TD_BUTTONS * TDB_SIZE]u8 = undefined;
+        const button_count = @min(opts.buttons.len, MAX_TD_BUTTONS);
+        var i: usize = 0;
+        while (i < button_count) : (i += 1) {
+            const label_z = utf8ToZ16(&label_storage[i], opts.buttons[i]) orelse return .{};
+            const off = i * TDB_SIZE;
+            // TASKDIALOG_BUTTON: int nButtonID(4), PCWSTR pszButtonText(8) — pack(1)
+            writeI32LE(button_records[off .. off + 4], @intCast(100 + @as(i32, @intCast(i))));
+            writeUsizeLE(button_records[off + 4 .. off + 12], @intFromPtr(label_z.ptr));
+        }
+
+        // Title (window) / instruction (main) / content (sub) UTF-16.
+        var title_buf: [256]u16 = undefined;
+        var instruction_buf: [1024]u16 = undefined;
+        var content_buf: [4096]u16 = undefined;
+        const title_z: ?[*:0]const u16 = if (opts.title.len > 0)
+            (utf8ToZ16(&title_buf, opts.title) orelse return .{}).ptr
+        else
+            null;
+        const instruction_z: ?[*:0]const u16 = if (opts.message.len > 0)
+            (utf8ToZ16(&instruction_buf, opts.message) orelse return .{}).ptr
+        else
+            null;
+        const content_z: ?[*:0]const u16 = if (opts.detail.len > 0)
+            (utf8ToZ16(&content_buf, opts.detail) orelse return .{}).ptr
+        else
+            null;
+
+        const icon_literal: isize = switch (opts.style) {
+            .info => TD_INFORMATION_ICON,
+            .err => TD_ERROR_ICON,
+            .warning => TD_WARNING_ICON,
+            .question => TD_INFORMATION_ICON, // task dialog 에 question 없음
+            .none => 0,
+        };
+
+        // TASKDIALOGCONFIG 빌드 (pack(1), x64 = 160 bytes).
+        var tdc: [TDC_SIZE]u8 = std.mem.zeroes([TDC_SIZE]u8);
+        writeU32LE(tdc[0..4], TDC_SIZE); // cbSize
+        // 4..12 hwndParent = null
+        // 12..20 hInstance = null
+        writeU32LE(tdc[20..24], TDF_ALLOW_DIALOG_CANCELLATION); // dwFlags
+        // 24..28 dwCommonButtons = 0 (custom buttons만)
+        writeUsizeLE(tdc[28..36], @intFromPtr(title_z)); // pszWindowTitle
+        // 36..44 hMainIcon union — pszMainIcon literal (negative LONG_PTR)
+        writeIsizeLE(tdc[36..44], icon_literal);
+        writeUsizeLE(tdc[44..52], @intFromPtr(instruction_z)); // pszMainInstruction
+        writeUsizeLE(tdc[52..60], @intFromPtr(content_z)); // pszContent
+        writeU32LE(tdc[60..64], @intCast(button_count)); // cButtons
+        writeUsizeLE(tdc[64..72], if (button_count > 0) @intFromPtr(&button_records) else 0); // pButtons
+        writeI32LE(tdc[72..76], 100); // nDefaultButton (first custom)
+        // 76..80 cRadioButtons = 0
+        // 80..88 pRadioButtons = null
+        // 88..92 nDefaultRadioButton = 0
+        // 92..156 — all zero (no expand/footer/etc.)
+        // 156..160 cxWidth = 0 (auto)
+
+        var clicked_id: i32 = 0;
+        const hr = TaskDialogIndirect(&tdc, &clicked_id, null, null);
+        if (hr != 0) return .{};
+        const idx_signed = clicked_id - 100;
+        const idx: usize = if (idx_signed >= 0 and idx_signed < @as(i32, @intCast(button_count)))
+            @intCast(idx_signed)
+        else
+            0;
+        return .{ .response = idx, .checkbox_checked = opts.checkbox_checked };
     }
 } else struct {};
 

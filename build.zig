@@ -221,6 +221,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("shcore", .{});
         // comdlg32 — GetOpenFileNameW/GetSaveFileNameW (dialog showOpen/Save).
         root_module.linkSystemLibrary("comdlg32", .{});
+        // comctl32 — TaskDialogIndirect (dialog.messageBox custom button labels).
+        root_module.linkSystemLibrary("comctl32", .{});
         // dwmapi — DwmSetWindowAttribute (window setHasShadow via NCRP policy).
         root_module.linkSystemLibrary("dwmapi", .{});
         // ole32 — COM IFileOpenDialog (dialog directory selection).
