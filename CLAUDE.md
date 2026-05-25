@@ -143,7 +143,7 @@ fn onAllClosed(_: suji.Event) void {
 //   → suji.on("nativeTheme:updated", ({dark}) => ...) — NSAppearance KVO 자동 발신
 // suji.nativeImage.getSize("/path/to/img.png")  — {width, height} (NSImage)
 //   / toPng(path) / toJpeg(path, quality)        — base64 인코딩 (raw ~8KB)
-// suji.screen.getCursorScreenPoint()      — NSEvent.mouseLocation (bottom-up)
+// suji.screen.getCursorScreenPoint()      — 플랫폼 native cursor point
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
 // suji.dialog.showErrorBox("Title", "content")
@@ -161,7 +161,7 @@ fn onAllClosed(_: suji.Event) void {
 //   "MediaStop", click) — Electron 토큰 패리티. Carbon 불가분 NSEvent
 //   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
 //   수신은 Accessibility(TCC) 필요(헤드리스 미발화 — globalShortcut 동급 경계)
-// suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen)
+// suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen / Linux X11 screen)
 // suji.desktopCapturer.getSources("screen,window")  — 화면/창 소스
 //   {id,name,type,x,y,width,height,displayId?} (CGGetActiveDisplayList +
 //   CGWindowListCopyWindowInfo)
@@ -367,7 +367,7 @@ suji.platform                                                // "macos" | "linux
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, crashReporter, autoUpdater } from '@suji/api';
-// const displays = await screen.getAllDisplays()                         (macOS NSScreen)
+// const displays = await screen.getAllDisplays()                         (macOS NSScreen / Linux X11 screen)
 // await crashReporter.start({uploadToServer:false, extra:{suite:"e2e"}})
 // await crashReporter.addExtraParameter("mode", "test") / getParameters()
 // const update = await autoUpdater.checkForUpdates({version:"1.2.3", url:"https://example/app.zip"})
@@ -457,7 +457,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
 // await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, session, crashReporter, autoUpdater } from '@suji/node'
-// const displays = await screen.getAllDisplays()                         (macOS NSScreen)
+// const displays = await screen.getAllDisplays()                         (macOS NSScreen / Linux X11 screen)
 // await crashReporter.start({uploadToServer:false})
 // await autoUpdater.checkForUpdates({version:"1.2.3", url:"https://example/app.zip"})
 // const downloaded = await autoUpdater.downloadArtifact("https://example/app.zip", "/tmp/app.zip", {sha256})

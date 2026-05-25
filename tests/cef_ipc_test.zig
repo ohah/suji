@@ -945,6 +945,11 @@ test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn screenGetAllDisplays") != null);
     // JSON shape 필드 정적 검증 — fmt 내 escape 형태가 zig source에서 다양하므로 단어만 매칭.
     inline for (.{
+        "const linux_screen",
+        "XScreenCount",
+        "XDisplayWidth",
+        "XDisplayHeight",
+        "writeEmptyJsonArray",
         "isPrimary",
         "visibleWidth",
         "visibleHeight",
@@ -1739,6 +1744,7 @@ test "app.getName/getVersion + screen.getDisplayNearestPoint IPC" {
     defer std.testing.allocator.free(cef_src);
     inline for (.{
         "pub fn screenGetDisplayNearestPoint",
+        "screen_model.containedDisplayIndex",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
@@ -1832,6 +1838,7 @@ test "shell.openPath / nativeTheme / screen.getCursorPoint IPC + cef.zig 함수"
         "pub fn shellOpenPath",
         "pub fn nativeThemeIsDark",
         "pub fn screenGetCursorPoint",
+        "XQueryPointer",
         "effectiveAppearance",
         "mouseLocation",
     }) |needle| {

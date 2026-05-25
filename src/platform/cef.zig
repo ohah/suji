@@ -41,6 +41,7 @@ const cef_command_line_policy = @import("cef_command_line_policy.zig");
 const cef_pdf_print = @import("cef_pdf_print.zig");
 const safe_storage = @import("safe_storage.zig");
 const desktop_capturer = @import("desktop_capturer.zig");
+const screen_model = @import("screen_model.zig");
 
 const log = logger.module("cef");
 
@@ -3218,13 +3219,116 @@ pub fn shellTrashItem(path: []const u8) bool {
 }
 
 // ============================================
-// Screen API — NSScreen (Electron `screen`)
+// Screen API — Electron `screen`
 // ============================================
-// `screen.getAllDisplays` — 연결된 모든 NSScreen의 frame/visibleFrame/scale.
-// 결과는 JSON 배열로 직접 빌드. macOS만 — 다른 OS는 빈 배열 반환.
+// `screen.getAllDisplays` — 연결된 display의 frame/visibleFrame/scale.
+// 결과는 JSON 배열로 직접 빌드.
+// macOS: NSScreen, Linux: X11 screen, Windows: EnumDisplayMonitors.
 // macOS arm64 ABI: 작은 struct(NSRect 32B)는 일반 objc_msgSend로 반환됨 — _stret 불필요.
 
 /// out_buf에 `[{...},{...}]` JSON 배열을 빌드해 길이 반환.
+fn writeEmptyJsonArray(out_buf: []u8) []const u8 {
+    const empty = "[]";
+    const n = @min(empty.len, out_buf.len);
+    @memcpy(out_buf[0..n], empty[0..n]);
+    return out_buf[0..n];
+}
+
+const linux_screen = if (is_linux) struct {
+    extern "c" fn XDefaultScreen(display: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn XScreenCount(display: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn XDisplayWidth(display: ?*anyopaque, screen_number: c_int) callconv(.c) c_int;
+    extern "c" fn XDisplayHeight(display: ?*anyopaque, screen_number: c_int) callconv(.c) c_int;
+    extern "c" fn XRootWindow(display: ?*anyopaque, screen_number: c_int) callconv(.c) c_ulong;
+    extern "c" fn XQueryPointer(
+        display: ?*anyopaque,
+        window: c_ulong,
+        root_return: *c_ulong,
+        child_return: *c_ulong,
+        root_x_return: *c_int,
+        root_y_return: *c_int,
+        win_x_return: *c_int,
+        win_y_return: *c_int,
+        mask_return: *c_uint,
+    ) callconv(.c) c_int;
+
+    fn displayBounds(display: ?*anyopaque, screen_number: c_int) ?screen_model.DisplayBounds {
+        const width = XDisplayWidth(display, screen_number);
+        const height = XDisplayHeight(display, screen_number);
+        if (width <= 0 or height <= 0) return null;
+        return .{ .x = 0, .y = 0, .width = width, .height = height };
+    }
+
+    fn getAllDisplays(out_buf: []u8) []const u8 {
+        const display = linux_xss.XOpenDisplay(null) orelse return writeEmptyJsonArray(out_buf);
+        defer _ = linux_xss.XCloseDisplay(display);
+
+        const count = XScreenCount(display);
+        if (count <= 0) return writeEmptyJsonArray(out_buf);
+        const primary = XDefaultScreen(display);
+
+        var w = std.Io.Writer.fixed(out_buf);
+        w.writeByte('[') catch return out_buf[0..1];
+        var first = true;
+        var idx: c_int = 0;
+        while (idx < count) : (idx += 1) {
+            const b = displayBounds(display, idx) orelse continue;
+            if (!first) w.writeByte(',') catch return w.buffered();
+            first = false;
+            w.print(
+                "{{\"index\":{d},\"isPrimary\":{},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"visibleX\":{d},\"visibleY\":{d},\"visibleWidth\":{d},\"visibleHeight\":{d},\"scaleFactor\":{d}}}",
+                .{
+                    idx,           idx == primary,
+                    b.x,           b.y,
+                    b.width,       b.height,
+                    b.x,           b.y,
+                    b.width,       b.height,
+                    @as(f64, 1.0),
+                },
+            ) catch return w.buffered();
+        }
+        w.writeByte(']') catch return w.buffered();
+        return w.buffered();
+    }
+
+    fn cursorPoint() NSPoint {
+        const display = linux_xss.XOpenDisplay(null) orelse return .{ .x = 0, .y = 0 };
+        defer _ = linux_xss.XCloseDisplay(display);
+
+        const screen = XDefaultScreen(display);
+        const root = XRootWindow(display, screen);
+        var root_return: c_ulong = 0;
+        var child_return: c_ulong = 0;
+        var root_x: c_int = 0;
+        var root_y: c_int = 0;
+        var win_x: c_int = 0;
+        var win_y: c_int = 0;
+        var mask: c_uint = 0;
+        if (XQueryPointer(display, root, &root_return, &child_return, &root_x, &root_y, &win_x, &win_y, &mask) == 0)
+            return .{ .x = 0, .y = 0 };
+        return .{ .x = @floatFromInt(root_x), .y = @floatFromInt(root_y) };
+    }
+
+    fn displayNearestPoint(x: f64, y: f64) i32 {
+        const display = linux_xss.XOpenDisplay(null) orelse return -1;
+        defer _ = linux_xss.XCloseDisplay(display);
+
+        const count = XScreenCount(display);
+        if (count <= 0) return -1;
+
+        var displays: [32]screen_model.DisplayBounds = undefined;
+        var len: usize = 0;
+        var idx: c_int = 0;
+        while (idx < count and len < displays.len) : (idx += 1) {
+            if (displayBounds(display, idx)) |b| {
+                displays[len] = b;
+                len += 1;
+            }
+        }
+        return screen_model.containedDisplayIndex(displays[0..len], x, y);
+    }
+} else struct {};
+
 // ============================================
 // Win32 Screen / NativeTheme FFI (Windows only).
 // ============================================
@@ -3496,12 +3600,8 @@ const win_window = if (builtin.os.tag == .windows) struct {
 
 pub fn screenGetAllDisplays(out_buf: []u8) []const u8 {
     if (comptime builtin.os.tag == .windows) return win_screen.getAllDisplays(out_buf);
-    if (!comptime is_macos) {
-        const empty = "[]";
-        const n = @min(empty.len, out_buf.len);
-        @memcpy(out_buf[0..n], empty[0..n]);
-        return out_buf[0..n];
-    }
+    if (comptime is_linux) return linux_screen.getAllDisplays(out_buf);
+    if (!comptime is_macos) return writeEmptyJsonArray(out_buf);
     var w = std.Io.Writer.fixed(out_buf);
     w.writeByte('[') catch return out_buf[0..1];
 
@@ -3814,6 +3914,7 @@ pub fn nativeThemeSetSource(source: []const u8) bool {
 /// 있음. caller가 필요 시 변환.
 pub fn screenGetCursorPoint() NSPoint {
     if (comptime builtin.os.tag == .windows) return win_screen.cursorPoint();
+    if (comptime is_linux) return linux_screen.cursorPoint();
     if (!comptime is_macos) return .{ .x = 0, .y = 0 };
     const NSEvent = getClass("NSEvent") orelse return .{ .x = 0, .y = 0 };
     const f: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSPoint = @ptrCast(&objc.objc_msgSend);
@@ -3825,6 +3926,7 @@ pub fn screenGetCursorPoint() NSPoint {
 /// caller가 -1이면 mainScreen으로 fallback. y는 macOS bottom-up 좌표.
 pub fn screenGetDisplayNearestPoint(x: f64, y: f64) i32 {
     if (comptime builtin.os.tag == .windows) return win_screen.displayNearestPoint(x, y);
+    if (comptime is_linux) return linux_screen.displayNearestPoint(x, y);
     if (!comptime is_macos) return -1;
     const NSScreen = getClass("NSScreen") orelse return -1;
     const screens = msgSend(NSScreen, "screens") orelse return -1;
