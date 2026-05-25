@@ -1642,7 +1642,7 @@ fn crashParamIndex(key: []const u8) ?usize {
 
 fn crashAddExtraParameter(key: []const u8, value: []const u8) bool {
     if (!crash_reporter.isValidCrashKey(key)) return false;
-    if (value.len > crash_reporter.MAX_VALUE_BYTES) return false;
+    if (!crash_reporter.isValidCrashValue(value)) return false;
 
     const idx = crashParamIndex(key) orelse blk: {
         if (g_crash_param_count >= g_crash_params.len) return false;
@@ -2468,13 +2468,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "crash_reporter_add_extra_parameter")) {
         var key_buf: [128]u8 = undefined;
         var value_buf: [crash_reporter.MAX_VALUE_BYTES]u8 = undefined;
-        const key = extractUnescapedField(req_clean, "key", &key_buf) orelse "";
-        const value = extractUnescapedField(req_clean, "value", &value_buf) orelse "";
+        const key = extractUnescapedField(req_clean, "key", &key_buf) orelse
+            return respondSuccess(response_buf, "crash_reporter_add_extra_parameter", false);
+        const value = extractUnescapedField(req_clean, "value", &value_buf) orelse
+            return respondSuccess(response_buf, "crash_reporter_add_extra_parameter", false);
         return respondSuccess(response_buf, "crash_reporter_add_extra_parameter", crashAddExtraParameter(key, value));
     }
     if (std.mem.eql(u8, cmd, "crash_reporter_remove_extra_parameter")) {
         var key_buf: [128]u8 = undefined;
-        const key = extractUnescapedField(req_clean, "key", &key_buf) orelse "";
+        const key = extractUnescapedField(req_clean, "key", &key_buf) orelse
+            return respondSuccess(response_buf, "crash_reporter_remove_extra_parameter", false);
         return respondSuccess(response_buf, "crash_reporter_remove_extra_parameter", crashRemoveExtraParameter(key));
     }
     if (std.mem.eql(u8, cmd, "crash_reporter_get_upload_to_server")) {

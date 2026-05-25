@@ -267,6 +267,12 @@ describe('crashReporter', () => {
     expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"crash_reporter_start","uploadToServer":false,"extra":{"suite":"unit"}}');
   });
 
+  it('start maps core validation failure to false', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":false,"error":"submitURL_required"}');
+    expect(await crashReporter.start({ uploadToServer: true })).toBe(false);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"crash_reporter_start","uploadToServer":true}');
+  });
+
   it('parameters and upload flag wrappers unwrap core responses', async () => {
     bridge.invoke.mockResolvedValueOnce('{"parameters":{"suite":"unit"}}');
     expect(await crashReporter.getParameters()).toEqual({ suite: 'unit' });

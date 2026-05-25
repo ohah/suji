@@ -58,6 +58,10 @@ pub fn isValidCrashKey(key: []const u8) bool {
     return true;
 }
 
+pub fn isValidCrashValue(value: []const u8) bool {
+    return value.len <= MAX_VALUE_BYTES;
+}
+
 fn appendIniValue(allocator: std.mem.Allocator, out: *std.ArrayList(u8), value: []const u8) !void {
     for (value) |c| {
         // INI line injection and control bytes are not meaningful to Crashpad config.
@@ -250,6 +254,15 @@ test "isValidCrashKey accepts compact ascii identifiers only" {
     try std.testing.expect(!isValidCrashKey("has.dot"));
     try std.testing.expect(!isValidCrashKey("한글"));
     try std.testing.expect(!isValidCrashKey("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN"));
+}
+
+test "isValidCrashValue accepts 1024 bytes max" {
+    var ok_value = [_]u8{'x'} ** MAX_VALUE_BYTES;
+    var oversized_value = [_]u8{'x'} ** (MAX_VALUE_BYTES + 1);
+
+    try std.testing.expect(isValidCrashValue(""));
+    try std.testing.expect(isValidCrashValue(&ok_value));
+    try std.testing.expect(!isValidCrashValue(&oversized_value));
 }
 
 test "renderConfig includes upload URL and core Crashpad knobs" {

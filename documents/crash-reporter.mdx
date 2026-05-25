@@ -49,7 +49,7 @@ await crashReporter.removeExtraParameter("mode");
 |---|---|
 | `start(options)` | 런타임 상태와 `extra` 값을 등록. `uploadToServer:true`이면 `submitURL` 필요 |
 | `getParameters()` | 현재 등록된 extra parameter 객체 |
-| `addExtraParameter(key, value)` | crash key 추가/갱신. key는 ASCII `[A-Za-z0-9_-]`, 39바이트 이하 |
+| `addExtraParameter(key, value)` | crash key 추가/갱신. key는 ASCII `[A-Za-z0-9_-]`, 39바이트 이하. value는 1024바이트 이하 |
 | `removeExtraParameter(key)` | crash key 제거 |
 | `getUploadToServer()` / `setUploadToServer(bool)` | 업로드 플래그 조회/변경 |
 | `getUploadedReports()` | 로컬 Crashpad DB의 `completed/*.dmp` report 목록 |
@@ -61,6 +61,7 @@ await crashReporter.removeExtraParameter("mode");
   macOS/Linux는 CEF `root_cache_path`, Windows는 CEF `AppName` 규칙에 따라
   `%LOCALAPPDATA%/<AppName>/User Data/Crashpad`를 사용한다.
 - CI는 fake `.dmp` 파일로 DB 조회 경로를 검증한다. 실제 crash 유발과 upload 서버
-  round-trip은 아직 자동화하지 않는다.
+  round-trip은 아직 자동화하지 않는다. 대신 `submitURL_required`, invalid crash key,
+  oversized value 같은 런타임 validation은 E2E로 고정한다.
 - `extra` 값은 CEF crash reporter가 켜져 있을 때 `cef_set_crash_key_value`로도 전달된다.
 - crash key 선언은 시작 전 cfg의 `[CrashKeys]`에 있어야 CEF가 dump에 안정적으로 포함한다.

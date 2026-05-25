@@ -341,6 +341,15 @@ describe("crashReporter", () => {
     });
   });
 
+  it("start maps core validation failure to false", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false, error: "submitURL_required" });
+    expect(await crashReporter.start({ uploadToServer: true })).toBe(false);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "crash_reporter_start",
+      uploadToServer: true,
+    });
+  });
+
   it("parameters and upload flag wrappers unwrap core responses", async () => {
     mockBridge.core.mockResolvedValueOnce({ parameters: { suite: "unit" } });
     expect(await crashReporter.getParameters()).toEqual({ suite: "unit" });

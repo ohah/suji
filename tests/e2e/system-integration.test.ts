@@ -165,6 +165,15 @@ describe("desktopCapturer.getSources", () => {
 });
 
 describe("crashReporter", () => {
+  test("start(uploadToServer:true) without submitURL returns submitURL_required", async () => {
+    const r = await core<{ success: boolean; error: string }>({
+      cmd: "crash_reporter_start",
+      uploadToServer: true,
+    });
+    expect(r.success).toBe(false);
+    expect(r.error).toBe("submitURL_required");
+  });
+
   test("start(uploadToServer:false) + parameters round-trip", async () => {
     const key = `suite_${Date.now()}`;
     const start = await core<{ success: boolean; enabled: boolean }>({
@@ -214,6 +223,31 @@ describe("crashReporter", () => {
       cmd: "crash_reporter_get_parameters",
     });
     expect(params.parameters[key]).toBeUndefined();
+  });
+
+  test("invalid extra parameter keys/values are rejected and not persisted", async () => {
+    const invalidKey = await core<{ success: boolean }>({
+      cmd: "crash_reporter_add_extra_parameter",
+      key: "bad key",
+      value: "ignored",
+    });
+    expect(invalidKey.success).toBe(false);
+
+    const oversizedValue = await core<{ success: boolean }>({
+      cmd: "crash_reporter_add_extra_parameter",
+      key: `too_long_${Date.now()}`,
+      value: "x".repeat(1025),
+    });
+    expect(oversizedValue.success).toBe(false);
+
+    const params = await core<{ parameters: Record<string, string> }>({
+      cmd: "crash_reporter_get_parameters",
+    });
+    expect(params.parameters["bad key"]).toBeUndefined();
+    for (const [key, value] of Object.entries(params.parameters)) {
+      expect(key).not.toMatch(/\s/);
+      expect(value.length).toBeLessThanOrEqual(1024);
+    }
   });
 
   test("reports APIs expose local Crashpad completed dump files", async () => {
