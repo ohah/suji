@@ -8,8 +8,10 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
+import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { getMainPage } from "./_page";
 
@@ -268,6 +270,80 @@ describe("autoUpdater", () => {
       expect(mismatch.success).toBe(false);
       expect(mismatch.actualSha256).toBe(expected);
     } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("artifact download — file URL checksum match/mismatch", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-updater-download-"));
+    const source = path.join(dir, "source.bin");
+    const dest = path.join(dir, "downloaded.bin");
+    const badDest = path.join(dir, "bad.bin");
+    const payload = Buffer.from("suji updater file download e2e payload");
+    fs.writeFileSync(source, payload);
+    const expected = createHash("sha256").update(payload).digest("hex");
+    try {
+      const ok = await core<{ success: boolean; path: string; sha256: string; size: number }>({
+        cmd: "auto_updater_download_artifact",
+        url: pathToFileURL(source).href,
+        path: dest,
+        sha256: expected,
+      });
+      expect(ok.success).toBe(true);
+      expect(ok.path).toBe(dest);
+      expect(ok.sha256).toBe(expected);
+      expect(ok.size).toBe(payload.length);
+      expect(fs.readFileSync(dest)).toEqual(payload);
+
+      const mismatch = await core<{ success: boolean; sha256: string; size: number }>({
+        cmd: "auto_updater_download_artifact",
+        url: pathToFileURL(source).href,
+        path: badDest,
+        sha256: "0".repeat(64),
+      });
+      expect(mismatch.success).toBe(false);
+      expect(mismatch.sha256).toBe(expected);
+      expect(mismatch.size).toBe(payload.length);
+      expect(fs.existsSync(badDest)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("artifact download — local HTTP", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-updater-http-"));
+    const dest = path.join(dir, "payload.bin");
+    const payload = Buffer.from("suji updater http download e2e payload");
+    const expected = createHash("sha256").update(payload).digest("hex");
+    const server = http.createServer((req, res) => {
+      if (req.url !== "/payload.bin") {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
+      res.writeHead(200, {
+        "content-type": "application/octet-stream",
+        "content-length": String(payload.length),
+      });
+      res.end(payload);
+    });
+    try {
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      const address = server.address();
+      if (typeof address !== "object" || address === null) throw new Error("no server address");
+      const r = await core<{ success: boolean; path: string; sha256: string; size: number }>({
+        cmd: "auto_updater_download_artifact",
+        url: `http://127.0.0.1:${address.port}/payload.bin`,
+        path: dest,
+        sha256: expected,
+      });
+      expect(r.success).toBe(true);
+      expect(r.path).toBe(dest);
+      expect(r.sha256).toBe(expected);
+      expect(r.size).toBe(payload.length);
+      expect(fs.readFileSync(dest)).toEqual(payload);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
@@ -1325,7 +1401,7 @@ describe("@suji/api SDK — round-trip", () => {
     }
   });
 
-  test("autoUpdater.checkForUpdates + verifyFile wrappers", async () => {
+  test("autoUpdater.checkForUpdates + verifyFile + downloadArtifact wrappers", async () => {
     const check = await sdk<any>("autoUpdater.checkForUpdates", {
       version: "9.9.9",
       url: "https://example.test/suji-9.9.9.zip",
@@ -1339,6 +1415,7 @@ describe("@suji/api SDK — round-trip", () => {
 
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-sdk-updater-"));
     const file = path.join(dir, "payload.bin");
+    const downloaded = path.join(dir, "downloaded.bin");
     const payload = Buffer.from("suji updater sdk payload");
     fs.writeFileSync(file, payload);
     const expected = createHash("sha256").update(payload).digest("hex");
@@ -1346,6 +1423,15 @@ describe("@suji/api SDK — round-trip", () => {
       const verified = await sdk<any>("autoUpdater.verifyFile", file, expected);
       expect(verified.success).toBe(true);
       expect(verified.actualSha256).toBe(expected);
+
+      const dl = await sdk<any>(
+        "autoUpdater.downloadArtifact",
+        { version: "9.9.9", url: pathToFileURL(file).href, sha256: expected },
+        downloaded,
+      );
+      expect(dl.success).toBe(true);
+      expect(dl.sha256).toBe(expected);
+      expect(fs.readFileSync(downloaded)).toEqual(payload);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

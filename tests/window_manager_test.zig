@@ -3048,6 +3048,10 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_mkdir\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_rm\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"fs_readdir\"") != null);
+    // autoUpdater 파일 경로도 frontend sandbox를 우회하지 않는다.
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_verify_file\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_download_artifact\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "auto_updater.filePathFromUrl") != null);
 
     const cfg_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

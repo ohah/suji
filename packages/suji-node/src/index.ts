@@ -1527,6 +1527,17 @@ export interface AutoUpdaterVerifyResult {
   actualSha256: string;
 }
 
+export interface AutoUpdaterDownloadOptions {
+  sha256?: string;
+}
+
+export interface AutoUpdaterDownloadResult {
+  success: boolean;
+  path: string;
+  sha256: string;
+  size: number;
+}
+
 async function resolveAutoUpdaterManifest(input: string | AutoUpdaterManifest): Promise<AutoUpdaterManifest> {
   if (typeof input !== 'string') return input;
   const res = await fetch(input);
@@ -1557,6 +1568,22 @@ export const autoUpdater = {
   async verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult> {
     return invoke<AutoUpdaterVerifyResult>('__core__', {
       cmd: 'auto_updater_verify_file',
+      path,
+      sha256,
+    });
+  },
+
+  /** artifact URL 또는 manifest 객체를 지정 경로로 다운로드하고 optional SHA-256을 검증. */
+  async downloadArtifact(
+    input: string | AutoUpdaterManifest,
+    path: string,
+    options: AutoUpdaterDownloadOptions = {},
+  ): Promise<AutoUpdaterDownloadResult> {
+    const url = typeof input === 'string' ? input : input.url;
+    const sha256 = options.sha256 ?? (typeof input === 'string' ? '' : input.sha256 ?? '');
+    return invoke<AutoUpdaterDownloadResult>('__core__', {
+      cmd: 'auto_updater_download_artifact',
+      url,
       path,
       sha256,
     });

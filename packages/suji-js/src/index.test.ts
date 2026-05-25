@@ -411,6 +411,27 @@ describe("autoUpdater", () => {
       sha256: "0".repeat(64),
     });
   });
+
+  it("downloadArtifact sends URL/path/hash and supports manifest sha default", async () => {
+    mockBridge.core.mockResolvedValueOnce({
+      success: true,
+      path: "/tmp/suji.zip",
+      sha256: "1".repeat(64),
+      size: 12,
+    });
+    const r = await autoUpdater.downloadArtifact(
+      { version: "1.2.0", url: "https://example.test/suji.zip", sha256: "1".repeat(64) },
+      "/tmp/suji.zip",
+    );
+    expect(r.success).toBe(true);
+    expect(r.size).toBe(12);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "auto_updater_download_artifact",
+      url: "https://example.test/suji.zip",
+      path: "/tmp/suji.zip",
+      sha256: "1".repeat(64),
+    });
+  });
 });
 
 describe("powerSaveBlocker", () => {

@@ -1113,6 +1113,17 @@ export const autoUpdater = {
             sha256,
         });
     },
+    /** artifact URL 또는 manifest 객체를 지정 경로로 다운로드하고 optional SHA-256을 검증. */
+    async downloadArtifact(input, path, options = {}) {
+        const url = typeof input === "string" ? input : input.url;
+        const sha256 = options.sha256 ?? (typeof input === "string" ? "" : input.sha256 ?? "");
+        return coreCall({
+            cmd: "auto_updater_download_artifact",
+            url,
+            path,
+            sha256,
+        });
+    },
 };
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */

@@ -9,6 +9,17 @@ pub const CheckError = error{
     InvalidSha256,
 };
 
+pub const DownloadError = error{
+    InvalidUrl,
+    InvalidDestination,
+    DestinationTooLong,
+    InvalidSha256,
+    Read,
+    Write,
+    Download,
+    HttpStatus,
+};
+
 pub const CheckResult = struct {
     update_available: bool,
     current_version: []const u8,
@@ -19,6 +30,13 @@ pub const CheckResult = struct {
     pub_date: []const u8,
 };
 
+pub const DownloadResult = struct {
+    success: bool,
+    path: []const u8,
+    sha256: []const u8,
+    size: u64,
+};
+
 pub fn errorCode(err: anyerror) []const u8 {
     return switch (err) {
         error.MissingCurrentVersion => "missing_current_version",
@@ -27,6 +45,12 @@ pub fn errorCode(err: anyerror) []const u8 {
         error.InvalidLatestVersion => "invalid_latest_version",
         error.InvalidUrl => "invalid_url",
         error.InvalidSha256 => "invalid_sha256",
+        error.InvalidDestination => "invalid_destination",
+        error.DestinationTooLong => "destination_too_long",
+        error.Read => "read",
+        error.Write => "write",
+        error.Download => "download",
+        error.HttpStatus => "http_status",
         else => "updater_error",
     };
 }
@@ -244,6 +268,49 @@ pub fn sha256File(io: std.Io, path: []const u8, out_hex: *[64]u8) ![]const u8 {
     return out_hex[0..];
 }
 
+pub fn downloadArtifact(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    destination: []const u8,
+    expected_sha256: []const u8,
+    temp_path_buf: []u8,
+    out_hex: *[64]u8,
+) DownloadError!DownloadResult {
+    if (!isSupportedUpdateUrl(url)) return error.InvalidUrl;
+    if (!isValidDestinationPath(destination)) return error.InvalidDestination;
+    if (!isValidSha256Hex(expected_sha256)) return error.InvalidSha256;
+
+    const temp_path = std.fmt.bufPrint(temp_path_buf, "{s}.download", .{destination}) catch
+        return error.DestinationTooLong;
+
+    deleteFileIfExists(io, temp_path);
+    var promoted = false;
+    defer if (!promoted) deleteFileIfExists(io, temp_path);
+
+    try writeUrlToFile(allocator, io, url, temp_path);
+
+    const actual = sha256File(io, temp_path, out_hex) catch return error.Read;
+    const size = fileSize(io, temp_path) catch return error.Read;
+    if (expected_sha256.len > 0 and !sha256Equal(actual, expected_sha256)) {
+        return .{
+            .success = false,
+            .path = destination,
+            .sha256 = actual,
+            .size = size,
+        };
+    }
+
+    renameFile(io, temp_path, destination) catch return error.Write;
+    promoted = true;
+    return .{
+        .success = true,
+        .path = destination,
+        .sha256 = actual,
+        .size = size,
+    };
+}
+
 pub fn sha256Equal(actual: []const u8, expected: []const u8) bool {
     if (actual.len != expected.len) return false;
     for (actual, 0..) |a, i| {
@@ -251,6 +318,131 @@ pub fn sha256Equal(actual: []const u8, expected: []const u8) bool {
         if (std.ascii.toLower(a) != std.ascii.toLower(b)) return false;
     }
     return true;
+}
+
+fn isValidDestinationPath(path: []const u8) bool {
+    if (path.len == 0 or path.len > 4096) return false;
+    for (path) |c| {
+        if (c == 0) return false;
+    }
+    return true;
+}
+
+fn writeUrlToFile(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    destination: []const u8,
+) DownloadError!void {
+    if (std.mem.startsWith(u8, url, "file://")) {
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const source = filePathFromUrl(url, &path_buf) catch return error.InvalidUrl;
+        return copyFile(io, source, destination);
+    }
+
+    if (std.mem.startsWith(u8, url, "http://") or std.mem.startsWith(u8, url, "https://")) {
+        return downloadHttp(allocator, io, url, destination);
+    }
+
+    return error.InvalidUrl;
+}
+
+pub fn filePathFromUrl(url: []const u8, path_buf: []u8) ![]const u8 {
+    const uri = std.Uri.parse(url) catch return error.InvalidUrl;
+    if (!std.mem.eql(u8, uri.scheme, "file")) return error.InvalidUrl;
+    if (uri.host) |host| {
+        var host_buf: [256]u8 = undefined;
+        const raw_host = host.toRaw(&host_buf) catch return error.InvalidUrl;
+        if (raw_host.len != 0 and !std.mem.eql(u8, raw_host, "localhost")) {
+            return error.InvalidUrl;
+        }
+    }
+    const raw_path = uri.path.toRaw(path_buf) catch return error.InvalidUrl;
+    if (!std.fs.path.isAbsolute(raw_path)) return error.InvalidUrl;
+    return raw_path;
+}
+
+fn copyFile(io: std.Io, source: []const u8, destination: []const u8) DownloadError!void {
+    var in_file = openFileRead(io, source) catch return error.Read;
+    defer in_file.close(io);
+
+    var out_file = createFileWrite(io, destination) catch return error.Write;
+    defer out_file.close(io);
+
+    var reader_buf: [8192]u8 = undefined;
+    var writer_buf: [8192]u8 = undefined;
+    var writer = out_file.writer(io, &writer_buf);
+    while (true) {
+        const n = in_file.readStreaming(io, &.{&reader_buf}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return error.Read,
+        };
+        if (n == 0) break;
+        writer.interface.writeAll(reader_buf[0..n]) catch return error.Write;
+    }
+    writer.interface.flush() catch return error.Write;
+}
+
+fn downloadHttp(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    url: []const u8,
+    destination: []const u8,
+) DownloadError!void {
+    var out_file = createFileWrite(io, destination) catch return error.Write;
+    defer out_file.close(io);
+
+    var writer_buf: [8192]u8 = undefined;
+    var writer = out_file.writer(io, &writer_buf);
+
+    var client: std.http.Client = .{ .allocator = allocator, .io = io };
+    defer client.deinit();
+
+    const response = client.fetch(.{
+        .location = .{ .url = url },
+        .response_writer = &writer.interface,
+    }) catch return error.Download;
+    writer.interface.flush() catch return error.Write;
+
+    const status: u16 = @intFromEnum(response.status);
+    if (status < 200 or status >= 300) return error.HttpStatus;
+}
+
+fn openFileRead(io: std.Io, path: []const u8) !std.Io.File {
+    if (std.fs.path.isAbsolute(path)) {
+        return std.Io.Dir.openFileAbsolute(io, path, .{});
+    }
+    return std.Io.Dir.cwd().openFile(io, path, .{});
+}
+
+fn createFileWrite(io: std.Io, path: []const u8) !std.Io.File {
+    if (std.fs.path.isAbsolute(path)) {
+        return std.Io.Dir.createFileAbsolute(io, path, .{});
+    }
+    return std.Io.Dir.cwd().createFile(io, path, .{});
+}
+
+fn deleteFileIfExists(io: std.Io, path: []const u8) void {
+    if (std.fs.path.isAbsolute(path)) {
+        std.Io.Dir.deleteFileAbsolute(io, path) catch {};
+    } else {
+        std.Io.Dir.cwd().deleteFile(io, path) catch {};
+    }
+}
+
+fn renameFile(io: std.Io, source: []const u8, destination: []const u8) !void {
+    if (std.fs.path.isAbsolute(source) or std.fs.path.isAbsolute(destination)) {
+        try std.Io.Dir.renameAbsolute(source, destination, io);
+        return;
+    }
+    const cwd = std.Io.Dir.cwd();
+    try cwd.rename(source, cwd, destination, io);
+}
+
+fn fileSize(io: std.Io, path: []const u8) !u64 {
+    var file = try openFileRead(io, path);
+    defer file.close(io);
+    return (try file.stat(io)).size;
 }
 
 fn writeLowerHex(bytes: []const u8, out: []u8) void {
@@ -309,4 +501,87 @@ test "sha256File hashes bytes and compares case-insensitively" {
         digest,
     );
     try std.testing.expect(sha256Equal(digest, "026CFA17E5BB78D47C0B760323306B7727F62D83E4A8435B3DCF1EF5EC1DA1AC"));
+}
+
+test "downloadArtifact stages file URL downloads and validates checksum before promote" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const base = try std.fmt.bufPrint(&base_buf, "/tmp/suji-auto-updater-{s}", .{&tmp.sub_path});
+    try std.Io.Dir.cwd().createDirPath(io, base);
+    defer std.Io.Dir.cwd().deleteTree(io, base) catch {};
+
+    var source_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const source_path = try std.fmt.bufPrint(&source_path_buf, "{s}/source.bin", .{base});
+    var file = try std.Io.Dir.createFileAbsolute(io, source_path, .{});
+    var writer_buf: [64]u8 = undefined;
+    var writer = file.writer(io, &writer_buf);
+    try writer.interface.writeAll("download payload");
+    try writer.interface.flush();
+    file.close(io);
+
+    var url_buf: [std.Io.Dir.max_path_bytes + 16]u8 = undefined;
+    const url = try std.fmt.bufPrint(&url_buf, "file://{s}", .{source_path});
+
+    var sha: [64]u8 = undefined;
+    _ = try sha256File(io, source_path, &sha);
+
+    var dest_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dest = try std.fmt.bufPrint(&dest_buf, "{s}/downloaded.bin", .{base});
+    var temp_buf: [std.Io.Dir.max_path_bytes + 16]u8 = undefined;
+    var actual: [64]u8 = undefined;
+    const result = try downloadArtifact(std.testing.allocator, io, url, dest, sha[0..], &temp_buf, &actual);
+
+    try std.testing.expect(result.success);
+    try std.testing.expectEqualStrings(sha[0..], result.sha256);
+    try std.testing.expectEqual(@as(u64, "download payload".len), result.size);
+
+    var verify: [64]u8 = undefined;
+    try std.testing.expectEqualStrings(sha[0..], try sha256File(io, dest, &verify));
+}
+
+test "downloadArtifact checksum mismatch does not publish destination" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const base = try std.fmt.bufPrint(&base_buf, "/tmp/suji-auto-updater-bad-{s}", .{&tmp.sub_path});
+    try std.Io.Dir.cwd().createDirPath(io, base);
+    defer std.Io.Dir.cwd().deleteTree(io, base) catch {};
+
+    var source_path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const source_path = try std.fmt.bufPrint(&source_path_buf, "{s}/bad-source.bin", .{base});
+    var file = try std.Io.Dir.createFileAbsolute(io, source_path, .{});
+    var writer_buf: [64]u8 = undefined;
+    var writer = file.writer(io, &writer_buf);
+    try writer.interface.writeAll("bad checksum payload");
+    try writer.interface.flush();
+    file.close(io);
+
+    var url_buf: [std.Io.Dir.max_path_bytes + 16]u8 = undefined;
+    const url = try std.fmt.bufPrint(&url_buf, "file://{s}", .{source_path});
+
+    var dest_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dest = try std.fmt.bufPrint(&dest_buf, "{s}/bad-dest.bin", .{base});
+    var temp_buf: [std.Io.Dir.max_path_bytes + 16]u8 = undefined;
+    var actual: [64]u8 = undefined;
+    const result = try downloadArtifact(
+        std.testing.allocator,
+        io,
+        url,
+        dest,
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        &temp_buf,
+        &actual,
+    );
+
+    try std.testing.expect(!result.success);
+    try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(io, dest, .{}));
 }

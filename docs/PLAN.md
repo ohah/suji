@@ -1391,7 +1391,7 @@ suji build → 결과물:
 | Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
 | Linux .deb/.AppImage | electron-builder | `tauri build` | ✅ `.deb` 구현(`suji build --deb`/`SUJI_DEB`, `/opt/<package>` + `.desktop`, Debian control/data ar archive) + AppImage 구현(`suji build --appimage`/`SUJI_APPIMAGE`, `SUJI_APPIMAGETOOL` 지원, AppDir/usr/bin + resources/frontend). 유닛 + Linux Actions E2E로 `.deb` control/data와 `.AppImage` 생성/추출 검증 |
 | 코드 서명 & 공증 | electron-notarize | 빌트인 | ✅ codesign(none/adhoc/identity)+`notarytool`+stapler+DMG 구현(`bundle_macos.zig`), Win signtool(`package_desktop.zig`). `suji build --sign/--identity/--notarize/--dmg`. **adhoc 로컬 실증**(codesign --verify --deep --strict exit=0·Designated Req 만족·helper entitlements 부착·spctl 은 adhoc 이라 reject=정직 경계). identity/notarize/signtool 은 자격증명·Win 환경 필요로 미검증(CI secret 시) |
-| 자동 업데이트 | autoUpdater | `updater` 플러그인 | 🟡 1차 — manifest 기반 update check + semver 비교 + 다운로드 artifact SHA-256 검증 구현(`auto_updater_check_update`/`auto_updater_verify_file`). Frontend/Node/Zig SDK + 유닛 + system-integration E2E. 설치 적용/quit-and-install/백그라운드 native download는 후속 |
+| 자동 업데이트 | autoUpdater | `updater` 플러그인 | 🟡 1차 — manifest 기반 update check + semver 비교 + native artifact download + SHA-256 검증 구현(`auto_updater_check_update`/`auto_updater_verify_file`/`auto_updater_download_artifact`). Frontend/Node/Zig SDK + 유닛 + system-integration E2E. 패키지 교체/quit-and-install/relaunch는 후속 |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ✅ `.github/workflows/release.yml` — `v*.*.*` 태그 정식 릴리스 + `workflow_dispatch dry_run=true` 검증 모드. macOS/Linux/Windows CLI 패키지 + checksums + embed core libs 크로스빌드 아티팩트, 태그↔`build.zig.zon` 버전 일치 검증, release publish gate. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 workflow 계약 고정 |
 | Homebrew tap | 사용자 직접 | -- | ✅ `release.yml` `homebrew` job — 릴리스 아티팩트 checksum으로 `Formula/suji.rb` 생성 + `ruby -c` 검증 + `homebrew-formula` artifact 업로드. 정식 릴리스 시 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 있으면 외부 tap repo push, 없으면 경고 후 skip. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 Formula 계약 고정 |
 | curl installer | 직접 다운로드 | -- | ✅ `scripts/install.sh` — 최신/특정 버전 GitHub Release asset 다운로드 + `.sha256` 검증 + 기본 `~/.suji/bin` 설치. release job이 `dist/install.sh`에 포함. macOS arm64/Linux x64 tar.gz + Windows x64 zip 매핑. 유닛(`release_workflow_test.zig`) + E2E(fake release archive 설치/체크섬 mismatch)로 계약 고정 |
@@ -1516,7 +1516,7 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 10. **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — 진입 장벽 즉각 해소
 11. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
-13. 🟡 **자동 업데이트** — manifest check + SHA-256 verify 1차 완료. 남은 것: artifact download, 패키지 교체, quit-and-install/relaunch 정책
+13. 🟡 **자동 업데이트** — manifest check + artifact download + SHA-256 verify 1차 완료. 남은 것: 패키지 교체, quit-and-install/relaunch 정책
 14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.
 15. ✅ **`safeStorage` (OS secure store) — macOS + Linux + Windows 완료**.
     `safe_storage_set/get/delete` IPC 3개. macOS는 Keychain Services

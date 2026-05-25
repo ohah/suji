@@ -853,11 +853,22 @@ export interface AutoUpdaterVerifyResult {
     success: boolean;
     actualSha256: string;
 }
+export interface AutoUpdaterDownloadOptions {
+    sha256?: string;
+}
+export interface AutoUpdaterDownloadResult {
+    success: boolean;
+    path: string;
+    sha256: string;
+    size: number;
+}
 export declare const autoUpdater: {
     /** manifest 객체 또는 manifest URL을 확인해 새 버전 여부를 반환. */
     checkForUpdates(input: string | AutoUpdaterManifest, options?: AutoUpdaterCheckOptions): Promise<AutoUpdaterCheckResult>;
     /** 다운로드된 파일의 SHA-256을 검증. mismatch면 success=false와 actualSha256 반환. */
     verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult>;
+    /** artifact URL 또는 manifest 객체를 지정 경로로 다운로드하고 optional SHA-256을 검증. */
+    downloadArtifact(input: string | AutoUpdaterManifest, path: string, options?: AutoUpdaterDownloadOptions): Promise<AutoUpdaterDownloadResult>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {

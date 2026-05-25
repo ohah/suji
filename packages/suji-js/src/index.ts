@@ -1740,7 +1740,7 @@ export const crashReporter = {
 };
 
 // ============================================
-// autoUpdater — manifest 기반 업데이트 확인 + 다운로드 파일 checksum 검증
+// autoUpdater — manifest 기반 업데이트 확인 + artifact download/checksum 검증
 // ============================================
 // v1은 설치/재시작 적용을 하지 않는다. 앱이 manifest를 받아 새 버전 여부를
 // 판단하고, 별도 다운로드된 artifact의 SHA-256을 검증하는 안전 프리미티브.
@@ -1773,6 +1773,17 @@ export interface AutoUpdaterVerifyResult {
   actualSha256: string;
 }
 
+export interface AutoUpdaterDownloadOptions {
+  sha256?: string;
+}
+
+export interface AutoUpdaterDownloadResult {
+  success: boolean;
+  path: string;
+  sha256: string;
+  size: number;
+}
+
 async function resolveAutoUpdaterManifest(input: string | AutoUpdaterManifest): Promise<AutoUpdaterManifest> {
   if (typeof input !== "string") return input;
   const res = await fetch(input);
@@ -1803,6 +1814,22 @@ export const autoUpdater = {
   async verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult> {
     return coreCall<AutoUpdaterVerifyResult>({
       cmd: "auto_updater_verify_file",
+      path,
+      sha256,
+    });
+  },
+
+  /** artifact URL 또는 manifest 객체를 지정 경로로 다운로드하고 optional SHA-256을 검증. */
+  async downloadArtifact(
+    input: string | AutoUpdaterManifest,
+    path: string,
+    options: AutoUpdaterDownloadOptions = {},
+  ): Promise<AutoUpdaterDownloadResult> {
+    const url = typeof input === "string" ? input : input.url;
+    const sha256 = options.sha256 ?? (typeof input === "string" ? "" : input.sha256 ?? "");
+    return coreCall<AutoUpdaterDownloadResult>({
+      cmd: "auto_updater_download_artifact",
+      url,
       path,
       sha256,
     });

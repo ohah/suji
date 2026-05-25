@@ -321,6 +321,24 @@ describe('autoUpdater', () => {
       sha256: '0'.repeat(64),
     }));
   });
+
+  it('downloadArtifact sends URL/path/hash and supports explicit sha override', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"path":"/tmp/suji.zip","sha256":"' + '2'.repeat(64) + '","size":12}');
+    expect(await autoUpdater.downloadArtifact('https://example.test/suji.zip', '/tmp/suji.zip', {
+      sha256: '2'.repeat(64),
+    })).toEqual({
+      success: true,
+      path: '/tmp/suji.zip',
+      sha256: '2'.repeat(64),
+      size: 12,
+    });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', JSON.stringify({
+      cmd: 'auto_updater_download_artifact',
+      url: 'https://example.test/suji.zip',
+      path: '/tmp/suji.zip',
+      sha256: '2'.repeat(64),
+    }));
+  });
 });
 
 describe('powerSaveBlocker', () => {

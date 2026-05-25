@@ -2815,6 +2815,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "auto_updater_verify_file")) {
         return handleAutoUpdaterVerifyFile(req_clean, response_buf);
     }
+    if (std.mem.eql(u8, cmd, "auto_updater_download_artifact")) {
+        return handleAutoUpdaterDownloadArtifact(req_clean, response_buf);
+    }
 
     // app.requestUserAttention — dock bounce. critical=true는 활성화까지 반복, false는 1회.
     if (std.mem.eql(u8, cmd, "app_attention_request")) {
@@ -3353,6 +3356,9 @@ fn handleAutoUpdaterVerifyFile(req_clean: []const u8, response_buf: []u8) ?[]con
     var sha_buf: [128]u8 = undefined;
     const path = unescapeField(req_clean, "path", &path_buf, true) orelse
         return coreError(response_buf, "auto_updater_verify_file", "path");
+    if (!g_in_backend_invoke) {
+        if (fsSandboxCheck(response_buf, "auto_updater_verify_file", path)) |err| return err;
+    }
     const expected = unescapeField(req_clean, "sha256", &sha_buf, true) orelse
         return coreError(response_buf, "auto_updater_verify_file", "sha256");
     if (!auto_updater.isValidSha256Hex(expected) or expected.len == 0) {
@@ -3367,6 +3373,60 @@ fn handleAutoUpdaterVerifyFile(req_clean: []const u8, response_buf: []u8) ?[]con
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_verify_file\",\"success\":{},\"actualSha256\":\"{s}\"}}",
         .{ ok, actual },
+    ) catch null;
+}
+
+fn handleAutoUpdaterDownloadArtifact(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var url_buf: [4096]u8 = undefined;
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    var sha_buf: [128]u8 = undefined;
+    const url = unescapeField(req_clean, "url", &url_buf, true) orelse
+        return coreError(response_buf, "auto_updater_download_artifact", "url");
+    const path = blk: {
+        if (unescapeField(req_clean, "path", &path_buf, false)) |p| {
+            if (p.len > 0) break :blk p;
+        } else return coreError(response_buf, "auto_updater_download_artifact", "path");
+        if (unescapeField(req_clean, "destination", &path_buf, false)) |p| {
+            if (p.len > 0) break :blk p;
+        } else return coreError(response_buf, "auto_updater_download_artifact", "path");
+        return coreError(response_buf, "auto_updater_download_artifact", "path");
+    };
+    if (!g_in_backend_invoke) {
+        if (std.mem.startsWith(u8, url, "file://")) {
+            var source_path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+            const source_path = auto_updater.filePathFromUrl(url, &source_path_buf) catch
+                return coreError(response_buf, "auto_updater_download_artifact", "invalid_url");
+            if (fsSandboxCheck(response_buf, "auto_updater_download_artifact", source_path)) |err| return err;
+        }
+        if (fsSandboxCheck(response_buf, "auto_updater_download_artifact", path)) |err| return err;
+    }
+    const expected = unescapeField(req_clean, "sha256", &sha_buf, false) orelse
+        return coreError(response_buf, "auto_updater_download_artifact", "sha256");
+
+    var temp_path_buf: [FS_MAX_PATH_BYTES + 32]u8 = undefined;
+    var actual_buf: [64]u8 = undefined;
+    const result = auto_updater.downloadArtifact(
+        runtime.gpa,
+        runtime.io,
+        url,
+        path,
+        expected,
+        &temp_path_buf,
+        &actual_buf,
+    ) catch |err| {
+        return coreError(response_buf, "auto_updater_download_artifact", auto_updater.errorCode(err));
+    };
+
+    var path_esc: [8192]u8 = undefined;
+    var sha_esc: [128]u8 = undefined;
+    const path_n = util.escapeJsonStrFull(result.path, &path_esc) orelse
+        return coreError(response_buf, "auto_updater_download_artifact", "encode");
+    const sha_n = util.escapeJsonStrFull(result.sha256, &sha_esc) orelse
+        return coreError(response_buf, "auto_updater_download_artifact", "encode");
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_download_artifact\",\"success\":{},\"path\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}",
+        .{ result.success, path_esc[0..path_n], sha_esc[0..sha_n], result.size },
     ) catch null;
 }
 

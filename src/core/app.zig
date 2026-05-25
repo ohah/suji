@@ -1504,6 +1504,24 @@ pub const autoUpdater = struct {
         ) catch return null;
         return coreCmd("auto_updater_verify_file", fields);
     }
+
+    /// artifact URL을 지정 경로로 다운로드하고 optional SHA-256을 검증.
+    /// checksum mismatch면 최종 경로로 승격하지 않고 `success:false`.
+    pub fn downloadArtifact(url: []const u8, path: []const u8, sha256: []const u8) ?[]const u8 {
+        var url_buf: [4096]u8 = undefined;
+        var path_buf: [2048]u8 = undefined;
+        var sha_buf: [128]u8 = undefined;
+        const url_n = util.escapeJsonStrFull(url, &url_buf) orelse return null;
+        const path_n = util.escapeJsonStrFull(path, &path_buf) orelse return null;
+        const sha_n = util.escapeJsonStrFull(sha256, &sha_buf) orelse return null;
+        var fields_buf: [6400]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"url\":\"{s}\",\"path\":\"{s}\",\"sha256\":\"{s}\"",
+            .{ url_buf[0..url_n], path_buf[0..path_n], sha_buf[0..sha_n] },
+        ) catch return null;
+        return coreCmd("auto_updater_download_artifact", fields);
+    }
 };
 
 // app() 함수와 이름 충돌 방지를 위해 dock/attention을 top-level namespace로 분리.

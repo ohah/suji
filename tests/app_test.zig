@@ -1596,7 +1596,7 @@ test "crashReporter SDK: start/extra/upload/report cmd 조립" {
     }.run);
 }
 
-test "autoUpdater SDK: checkForUpdates/verifyFile cmd 조립" {
+test "autoUpdater SDK: checkForUpdates/verifyFile/downloadArtifact cmd 조립" {
     try withInvokeCore(struct {
         fn run() !void {
             _ = app_mod.autoUpdater.checkForUpdates(
@@ -1616,6 +1616,17 @@ test "autoUpdater SDK: checkForUpdates/verifyFile cmd 조립" {
             try std.testing.expect(std.mem.indexOf(u8, r2, "\"cmd\":\"auto_updater_verify_file\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, r2, "\"path\":\"/tmp/app.zip\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, r2, "\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"") != null);
+
+            _ = app_mod.autoUpdater.downloadArtifact(
+                "https://example.test/app.zip",
+                "/tmp/app.zip",
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            );
+            const r3 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r3, "\"cmd\":\"auto_updater_download_artifact\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r3, "\"url\":\"https://example.test/app.zip\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r3, "\"path\":\"/tmp/app.zip\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r3, "\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"") != null);
         }
     }.run);
 }
