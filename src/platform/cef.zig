@@ -3876,18 +3876,33 @@ const win_theme = if (builtin.os.tag == .windows) struct {
     /// source = "light"|"dark"|"system". "system" 은 registry 값 unchanged + broadcast
     /// (Windows 자체에는 "system follows OS" 개념이 앱 단에서 노출 안 됨 → no-op +
     /// nativeTheme:updated 만 emit 되도록 broadcast).
+    /// 정직한 한계: Windows 는 OS-level dark mode 만 있고 "app 만 system 따라가게"
+    /// 토글이 native 로 없음. system / dark / light 3 케이스 모두 HKCU
+    /// AppsUseLightTheme 를 직접 set 한다 — system 은 현재 OS 의 SystemUsesLightTheme
+    /// 값을 mirror 해서 AppsUseLightTheme 에 박는다. broadcast 후 Chromium 이 refresh.
     fn setSource(source: []const u8) bool {
         const sub_key = std.unicode.utf8ToUtf16LeStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
         const value_name = std.unicode.utf8ToUtf16LeStringLiteral("AppsUseLightTheme");
+        const sys_value_name = std.unicode.utf8ToUtf16LeStringLiteral("SystemUsesLightTheme");
         var data: u32 = undefined;
         if (std.mem.eql(u8, source, "light")) {
             data = 1;
         } else if (std.mem.eql(u8, source, "dark")) {
             data = 0;
         } else if (std.mem.eql(u8, source, "system")) {
-            // registry 변경 없이 broadcast 만.
-            broadcastSettingChange();
-            return true;
+            // SystemUsesLightTheme 읽어 AppsUseLightTheme 에 mirror.
+            var sys_data: u32 = 1;
+            var sz: u32 = @sizeOf(u32);
+            const rc = RegGetValueW(
+                HKEY_CURRENT_USER,
+                sub_key.ptr,
+                sys_value_name.ptr,
+                RRF_RT_REG_DWORD,
+                null,
+                &sys_data,
+                &sz,
+            );
+            data = if (rc == 0) sys_data else 1;
         } else {
             return false;
         }
@@ -4251,7 +4266,9 @@ const win_window = if (builtin.os.tag == .windows) struct {
         } else null;
         const button_type: u32 = switch (opts.buttons.len) {
             0, 1 => MB_OK,
-            2 => MB_OKCANCEL,
+            // 2-button 케이스 — isYesNoButtons 가 true 면 MB_YESNO (else MB_OKCANCEL),
+            // messageBox path 와 동일 컨벤션.
+            2 => if (isYesNoButtons(opts.buttons)) MB_YESNO else MB_OKCANCEL,
             else => MB_YESNOCANCEL,
         };
         const icon: u32 = switch (opts.style) {
@@ -6251,6 +6268,25 @@ const win_tray = if (builtin.os.tag == .windows) struct {
         return false;
     }
 
+    /// pump 스레드에서 안전하게 호출 가능 — submitSync 재진입 없이 직접 DestroyMenu.
+    /// NIN_BALLOONTIMEOUT 같이 WndProc 안에서 호출되는 경로 전용.
+    pub fn destroyIconFromPumpThread(tray_id: u32) bool {
+        for (&entries) |*e| {
+            if (e.used and e.id == tray_id) {
+                var nid: NOTIFYICONDATAW = .{};
+                nid.cbSize = @sizeOf(NOTIFYICONDATAW);
+                nid.hWnd = e.hwnd;
+                nid.uID = tray_id;
+                _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+                if (e.hmenu) |hm| _ = win_pump.DestroyMenu(hm);
+                win_pump.clearMenuIdsForTray(tray_id);
+                e.* = .{};
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// caller (main thread) 가 호출 → pump 스레드로 proxy. pump executeReq 가
     /// applyTooltipOnPump 호출.
     fn setTooltip(tray_id: u32, tooltip: []const u8) bool {
@@ -6553,29 +6589,35 @@ const win_notify = if (builtin.os.tag == .windows) struct {
         return null;
     }
 
-    /// 호출자는 lock 안에서 슬라이스 복사 또는 즉시 emit. 슬라이스가 escape 하면
-    /// 다음 mutator 가 underlying 배열 zero 처리 시 dangling.
-    pub fn lookupIdByTrayId(tray_id: u32) ?[]const u8 {
+    /// out_buf 에 id 를 lock 안에서 복사. 반환은 복사된 바이트 수 (0 = miss).
+    /// 이전 시그니처(?[]const u8 슬라이스 반환)는 defer unlockIdMap() 이 슬라이스
+    /// 리턴 시점에 lock 을 풀어 caller @memcpy 사이에 race window 가 열렸음 —
+    /// 다른 스레드가 m.* = .{} 로 zero 하면 caller 가 zero 된 id 복사. out_buf
+    /// 패턴은 복사를 lock 안에서 수행해 race 봉쇄.
+    pub fn copyIdByTrayId(tray_id: u32, out_buf: []u8) usize {
         lockIdMap();
         defer unlockIdMap();
         for (&id_map) |*m| {
-            if (m.used and m.tray_id == tray_id) return m.id[0..m.id_len];
+            if (m.used and m.tray_id == tray_id) {
+                const n = @min(m.id_len, out_buf.len);
+                @memcpy(out_buf[0..n], m.id[0..n]);
+                return n;
+            }
         }
-        return null;
+        return 0;
     }
 
-    /// tray_id 매칭 슬롯 clear. 시그니처는 ?[]const u8 이지만 caller 가 더 필요
-    /// 없는 컨텍스트(balloon timeout) 라 의도적으로 null 반환 — id 복사 비용 절약.
-    pub fn lookupAndForgetByTrayId(tray_id: u32) ?[]const u8 {
+    /// tray_id 매칭 슬롯 clear. 매칭 = true, 미매칭 = false. lock 안에서 zero.
+    pub fn forgetByTrayId(tray_id: u32) bool {
         lockIdMap();
         defer unlockIdMap();
         for (&id_map) |*m| {
             if (m.used and m.tray_id == tray_id) {
                 m.* = .{};
-                return null;
+                return true;
             }
         }
-        return null;
+        return false;
     }
 
     /// id 별 tray icon 생성 → balloon (NIM_MODIFY + NIF_INFO). show 후
@@ -6929,6 +6971,7 @@ pub const GlobalShortcutStatus = enum(i32) {
     parse = -3,
     os_reject = -4,
     too_long = -5,
+    timed_out = -6, // Windows pump 스레드 5초 timeout (TrackPopupMenu 모달 등)
 };
 
 // ============================================
@@ -7137,14 +7180,9 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         // Balloon click — uid 가 notification tray 면 notification:click emit.
         // 별도 emit handler 가 있으므로 tray click 과 분리.
         if (mouse_msg == NIN_BALLOONUSERCLICK) {
-            // lookupIdByTrayId 가 lock 풀린 후 슬라이스 반환 → 다른 스레드가 zero
-            // 처리하면 dangling. 여기서 즉시 스택 버퍼로 복사 후 emit.
+            // copyIdByTrayId 가 lock 안에서 stack buf 로 memcpy → race-free.
             var id_copy: [64]u8 = undefined;
-            var id_copy_len: usize = 0;
-            if (win_notify.lookupIdByTrayId(uid)) |id_slice| {
-                id_copy_len = @min(id_slice.len, id_copy.len);
-                @memcpy(id_copy[0..id_copy_len], id_slice[0..id_copy_len]);
-            }
+            const id_copy_len = win_notify.copyIdByTrayId(uid, &id_copy);
             if (id_copy_len > 0) {
                 if (g_notification_emit_handler) |emit| emit(id_copy[0..id_copy_len]);
             }
@@ -7152,9 +7190,12 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         }
         if (mouse_msg == NIN_BALLOONTIMEOUT) {
             // OS 가 balloon 닫음 — id_map slot 정리 + tray icon NIM_DELETE.
-            // (이전엔 id_map 만 cleared, tray entry/icon은 destroyTray 까지 잔존)
-            _ = win_notify.lookupAndForgetByTrayId(uid);
-            _ = win_tray.destroyIcon(uid);
+            // destroyIcon 은 pump thread 컨텍스트에서 호출 — e.hmenu == null 인
+            // 경우(notification balloon 표준 경로)만 안전. hmenu 가 있으면
+            // submitSync 가 자기 자신에게 post → 5s timeout. notification 은 menu
+            // 미사용이므로 typical path 는 안전. destroyIconNoMenu 로 명시 분리.
+            _ = win_notify.forgetByTrayId(uid);
+            _ = win_tray.destroyIconFromPumpThread(uid);
             return;
         }
         var entry: ?*win_tray.Entry = null;
@@ -7285,23 +7326,37 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         _ = WaitForSingleObject(ready_event, 2000);
     }
 
+    pub const SUBMIT_TIMEOUT: i32 = std.math.minInt(i32); // -2147483648 — caller 식별용 sentinel
+    pub const SUBMIT_FAIL: i32 = 0;
+
+    /// Generation counter — current_req 가 timeout 후 pump thread 에 의해 늦게
+    /// 처리되더라도, 다음 submitSync 가 신규 generation 으로 마킹하므로 stale
+    /// completion 이 새 요청 자리에서 처리되지 않음.
+    var req_generation: std.atomic.Value(u64) = .init(0);
+
     pub fn submitSync(req: Req) i32 {
         ensureRunning();
-        if (thread_id == 0) return 0;
+        if (thread_id == 0) return SUBMIT_FAIL;
         lock();
         defer unlock();
+        const my_gen = req_generation.fetchAdd(1, .acq_rel) + 1;
         current_req = req;
+        current_req_gen = my_gen;
         _ = ResetEvent(response_event);
-        if (PostThreadMessageW(thread_id, WM_APP_REQ, 0, 0) == 0) return 0;
+        if (PostThreadMessageW(thread_id, WM_APP_REQ, 0, 0) == 0) return SUBMIT_FAIL;
         // 5초 타임아웃 — TrackPopupMenu(우클릭 메뉴) 가 펌프 스레드를 모달로 점유
-        // 중일 때 main 스레드 → pump 요청은 메뉴 닫힐 때까지 대기. INFINITE 면
-        // 사용자가 메뉴 열어둔 채 frontend 가 setMenu 호출 시 데드락. 5초 후
-        // graceful timeout — caller 는 false/0 받음.
+        // 중일 때 main → pump 요청 INFINITE 대기 시 데드락. 5초 후 graceful
+        // timeout — caller 는 SUBMIT_TIMEOUT sentinel 받아 'os_reject' 와 구분.
         const WAIT_TIMEOUT_MS: u32 = 5000;
         const rc = WaitForSingleObject(response_event, WAIT_TIMEOUT_MS);
-        if (rc != 0) return 0; // WAIT_OBJECT_0 == 0; 그 외는 timeout/abandoned
+        if (rc != 0) return SUBMIT_TIMEOUT; // WAIT_OBJECT_0 == 0; 그 외는 timeout/abandoned
+        // generation 일치 확인 — 늦은 stale completion 이 우리 generation 으로
+        // 잘못 마킹되는 경우 방지 (pump 이전 요청을 늦게 처리하며 current_req 가
+        // 우리 요청 데이터로 덮인 후 result 만 stale 일 가능성).
+        if (current_req_gen != my_gen) return SUBMIT_FAIL;
         return current_req.result;
     }
+    var current_req_gen: u64 = 0;
 } else struct {};
 
 // nativeTheme:updated callback — Windows pump WM_SETTINGCHANGE 가 호출.
@@ -7420,7 +7475,9 @@ const win_gs = if (builtin.os.tag == .windows) struct {
             .mods = parsed.mods,
             .vk = parsed.vk,
         });
-        if (rc == 0) return .os_reject;
+        if (rc == win_pump.SUBMIT_TIMEOUT) return .timed_out;
+        if (rc == win_pump.SUBMIT_FAIL) return .os_reject;
+        if (rc == 0) return .os_reject; // RegisterHotKey returned 0 → 실 os reject
         next_id += 1;
         var s = &slots[idx];
         s.used = true;
