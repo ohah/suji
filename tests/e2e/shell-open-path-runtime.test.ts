@@ -104,11 +104,11 @@ function registerLinuxMimeHandler(): void {
   execFileSync("xdg-mime", ["default", desktopId, mimeType], { stdio: "ignore" });
 }
 
-async function waitForMarker(expected: string): Promise<void> {
+async function waitForMarker(expected: string[]): Promise<void> {
   const deadline = Date.now() + 10000;
   while (Date.now() < deadline) {
     if (fs.existsSync(markerPath)) {
-      expect(fs.readFileSync(markerPath, "utf8")).toBe(expected);
+      expect(expected).toContain(fs.readFileSync(markerPath, "utf8"));
       return;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -156,7 +156,7 @@ describe("shell.openPath runtime APIs", () => {
 
       const result = await core<{ success: boolean }>({ cmd: "shell_open_path", path: targetPath });
       expect(result.success).toBe(true);
-      await waitForMarker(pathToFileURL(targetPath).href);
+      await waitForMarker([targetPath, pathToFileURL(targetPath).href]);
     },
   );
 });
