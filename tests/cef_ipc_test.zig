@@ -1726,11 +1726,21 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
     const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
     defer std.testing.allocator.free(workflow_src);
     inline for (.{
+        "E2E — clipboard text/HTML (Linux)",
         "E2E — clipboard text/HTML (Windows)",
         "bash tests/e2e/run-clipboard-text-runtime.sh",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
+    const matrix_job_pos = std.mem.indexOf(u8, workflow_src, "webcontentsview-cross-platform:").?;
+    const deps_pos = std.mem.indexOfPos(u8, workflow_src, matrix_job_pos, "Install frontend dependencies").?;
+    const linux_clip_pos = std.mem.indexOfPos(u8, workflow_src, matrix_job_pos, "E2E — clipboard text/HTML (Linux)").?;
+    const linux_auto_pos = std.mem.indexOf(u8, workflow_src, "E2E — autoUpdater prepare/quit (Linux)").?;
+    const windows_clip_pos = std.mem.indexOf(u8, workflow_src, "E2E — clipboard text/HTML (Windows)").?;
+    const windows_wcv_pos = std.mem.indexOf(u8, workflow_src, "E2E — WebContentsView lifecycle (Windows)").?;
+    try std.testing.expect(deps_pos < linux_clip_pos);
+    try std.testing.expect(linux_clip_pos < linux_auto_pos);
+    try std.testing.expect(windows_clip_pos < windows_wcv_pos);
 }
 
 test "Win32 CF_HTML helper builds byte offsets and extracts fragment" {
