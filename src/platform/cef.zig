@@ -5559,13 +5559,68 @@ pub fn setNotificationEmitHandler(handler: NotificationEmitHandler) void {
     suji_notification_set_click_callback(&notificationClickC);
 }
 
+// ============================================
+// Win32 notification — Shell_NotifyIcon balloon (NIF_INFO).
+// 정직: real WinRT ToastNotification 미구현 (AppUserModelID 등록 + Activator
+// 필요). balloon 은 Win10+ 에서 toast 와 같은 UI 로 자동 렌더되지만 action
+// button / image 등 제약. PoC 로는 충분.
+// ============================================
+const win_notify = if (builtin.os.tag == .windows) struct {
+    const NIF_INFO: u32 = 0x10;
+    const NIIF_INFO: u32 = 0x01;
+    const NIIF_WARNING: u32 = 0x02;
+    const NIIF_ERROR: u32 = 0x03;
+    const NIIF_NOSOUND: u32 = 0x10;
+
+    /// id 별 tray icon 생성 → balloon (NIM_MODIFY + NIF_INFO). show 후
+    /// auto-timeout (10초). close 시 NIM_DELETE.
+    /// caller 가 같은 id 로 여러 번 show 하면 새 icon 추가 (기존 안 지움).
+    fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+        _ = id;
+        // 빈 tooltip 으로 tray icon 생성 (notification 전용 — 사용자에게 visible 한 icon
+        // 짧게 표시 후 destroy 됨, 실제로는 toast UI 가 주로 보임).
+        const tray_id = win_tray.createIcon("");
+        if (tray_id == 0) return false;
+        // tray entry 찾기
+        var entry: ?*win_tray.Entry = null;
+        for (&win_tray.entries) |*e| {
+            if (e.used and e.id == tray_id) {
+                entry = e;
+                break;
+            }
+        }
+        const e = entry orelse return false;
+
+        var nid: win_tray.NOTIFYICONDATAW = .{};
+        nid.cbSize = @sizeOf(win_tray.NOTIFYICONDATAW);
+        nid.hWnd = e.hwnd;
+        nid.uID = tray_id;
+        nid.uFlags = NIF_INFO;
+        // szInfo (body), szInfoTitle (title) 채우기 — utf-16 truncate.
+        const body_max = nid.szInfo.len - 1;
+        const body_src = if (body.len > body_max) body[0..body_max] else body;
+        _ = std.unicode.utf8ToUtf16Le(nid.szInfo[0..body_max], body_src) catch {};
+        const title_max = nid.szInfoTitle.len - 1;
+        const title_src = if (title.len > title_max) title[0..title_max] else title;
+        _ = std.unicode.utf8ToUtf16Le(nid.szInfoTitle[0..title_max], title_src) catch {};
+        nid.dwInfoFlags = NIIF_INFO;
+        if (silent) nid.dwInfoFlags |= NIIF_NOSOUND;
+        const ok = win_tray.Shell_NotifyIconW(win_tray.NIM_MODIFY, &nid);
+        // balloon 표시 후 icon 은 OS 가 auto-timeout (~10s) — caller 가 close 호출
+        // 안 해도 사라짐. 정직: tray entry 는 우리 table 에 남음 (next destroy 까지).
+        return ok != 0;
+    }
+} else struct {};
+
 pub fn notificationIsSupported() bool {
+    if (comptime builtin.os.tag == .windows) return true; // Shell_NotifyIcon balloon
     if (!comptime is_macos) return false;
     return suji_notification_is_supported() != 0;
 }
 
 /// 권한 요청 — 첫 호출 시 OS 다이얼로그. 동기 대기.
 pub fn notificationRequestPermission() bool {
+    if (comptime builtin.os.tag == .windows) return true; // 권한 불필요 (Shell_NotifyIcon)
     if (!comptime is_macos) return false;
     return suji_notification_request_permission() != 0;
 }
@@ -5573,6 +5628,7 @@ pub fn notificationRequestPermission() bool {
 /// 알림 표시. id는 caller-controlled 식별자 (close에 사용). 한도: 64 byte.
 /// title/body는 4KB stack-alloc 한도.
 pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+    if (comptime builtin.os.tag == .windows) return win_notify.show(id, title, body, silent);
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
     var t_buf: [4096]u8 = undefined;
