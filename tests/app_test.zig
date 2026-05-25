@@ -1596,7 +1596,7 @@ test "crashReporter SDK: start/extra/upload/report cmd 조립" {
     }.run);
 }
 
-test "autoUpdater SDK: checkForUpdates/verifyFile/downloadArtifact/quitAndInstall cmd 조립" {
+test "autoUpdater SDK: checkForUpdates/verifyFile/downloadArtifact/prepareInstall/quitAndInstall cmd 조립" {
     try withInvokeCore(struct {
         fn run() !void {
             _ = app_mod.autoUpdater.checkForUpdates(
@@ -1628,18 +1628,32 @@ test "autoUpdater SDK: checkForUpdates/verifyFile/downloadArtifact/quitAndInstal
             try std.testing.expect(std.mem.indexOf(u8, r3, "\"path\":\"/tmp/app.zip\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, r3, "\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"") != null);
 
+            _ = app_mod.autoUpdater.prepareInstall(
+                "/tmp/app.zip",
+                "/Applications/Suji.app",
+                "/tmp/app.zip.stage",
+                "zip",
+                "1111111111111111111111111111111111111111111111111111111111111111",
+            );
+            const r4 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r4, "\"cmd\":\"auto_updater_prepare_install\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r4, "\"path\":\"/tmp/app.zip\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r4, "\"target\":\"/Applications/Suji.app\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r4, "\"stageDir\":\"/tmp/app.zip.stage\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r4, "\"format\":\"zip\"") != null);
+
             _ = app_mod.autoUpdater.quitAndInstall(
                 "/tmp/app.zip",
                 "/Applications/Suji.app",
                 "2222222222222222222222222222222222222222222222222222222222222222",
                 false,
             );
-            const r4 = InvokeSpy.lastRequest();
-            try std.testing.expect(std.mem.indexOf(u8, r4, "\"cmd\":\"auto_updater_quit_and_install\"") != null);
-            try std.testing.expect(std.mem.indexOf(u8, r4, "\"path\":\"/tmp/app.zip\"") != null);
-            try std.testing.expect(std.mem.indexOf(u8, r4, "\"target\":\"/Applications/Suji.app\"") != null);
-            try std.testing.expect(std.mem.indexOf(u8, r4, "\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"") != null);
-            try std.testing.expect(std.mem.indexOf(u8, r4, "\"relaunch\":false") != null);
+            const r5 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r5, "\"cmd\":\"auto_updater_quit_and_install\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r5, "\"path\":\"/tmp/app.zip\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r5, "\"target\":\"/Applications/Suji.app\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r5, "\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r5, "\"relaunch\":false") != null);
         }
     }.run);
 }

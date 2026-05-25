@@ -433,6 +433,32 @@ describe("autoUpdater", () => {
     });
   });
 
+  it("prepareInstall sends artifact, stage and format policy", async () => {
+    mockBridge.core.mockResolvedValueOnce({
+      success: true,
+      path: "/tmp/Suji.app",
+      source: "/tmp/Suji.app",
+      target: "/Applications/Suji.app",
+      stageDir: "/tmp/suji-stage",
+      format: "zip",
+      action: "quitAndInstall",
+      requiresQuitAndInstall: true,
+    });
+    const r = await autoUpdater.prepareInstall(
+      { success: true, path: "/tmp/suji.zip", sha256: "3".repeat(64), size: 12 },
+      { target: "/Applications/Suji.app", stageDir: "/tmp/suji-stage", format: "zip" },
+    );
+    expect(r.requiresQuitAndInstall).toBe(true);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "auto_updater_prepare_install",
+      path: "/tmp/suji.zip",
+      target: "/Applications/Suji.app",
+      stageDir: "/tmp/suji-stage",
+      format: "zip",
+      sha256: "3".repeat(64),
+    });
+  });
+
   it("quitAndInstall sends staged path, target, hash and relaunch policy", async () => {
     mockBridge.core.mockResolvedValueOnce({
       success: true,
@@ -451,6 +477,34 @@ describe("autoUpdater", () => {
       path: "/tmp/suji.zip",
       target: "/Applications/Suji.app",
       sha256: "2".repeat(64),
+      relaunch: false,
+      helperPath: "",
+    });
+  });
+
+  it("quitAndInstall reuses prepareInstall target when options.target is omitted", async () => {
+    mockBridge.core.mockResolvedValueOnce({
+      success: true,
+      path: "/tmp/Suji.app",
+      target: "/Applications/Suji.app",
+      helperPath: "/tmp/Suji.app.quit-install.sh",
+      relaunch: false,
+    });
+    await autoUpdater.quitAndInstall({
+      success: true,
+      path: "/tmp/Suji.app",
+      source: "/tmp/Suji.app",
+      target: "/Applications/Suji.app",
+      stageDir: "/tmp/stage",
+      format: "zip",
+      action: "quitAndInstall",
+      requiresQuitAndInstall: true,
+    }, { relaunch: false });
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "auto_updater_quit_and_install",
+      path: "/tmp/Suji.app",
+      target: "/Applications/Suji.app",
+      sha256: "",
       relaunch: false,
       helperPath: "",
     });

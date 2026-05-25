@@ -1124,14 +1124,28 @@ export const autoUpdater = {
             sha256,
         });
     },
-    /** staged artifact를 앱 종료 후 target으로 교체하고 quit을 요청. */
-    async quitAndInstall(input, options = {}) {
+    /** artifact 포맷(.zip/.dmg/.app/.AppImage/.deb)을 quitAndInstall 또는 system package handoff 입력으로 정규화. */
+    async prepareInstall(input, options = {}) {
         const path = typeof input === "string" ? input : input.path;
         const sha256 = options.sha256 ?? (typeof input === "string" ? "" : input.sha256 ?? "");
         return coreCall({
-            cmd: "auto_updater_quit_and_install",
+            cmd: "auto_updater_prepare_install",
             path,
             target: options.target ?? "",
+            stageDir: options.stageDir ?? "",
+            format: options.format ?? "auto",
+            sha256,
+        });
+    },
+    /** staged artifact를 앱 종료 후 target으로 교체하고 quit을 요청. */
+    async quitAndInstall(input, options = {}) {
+        const path = typeof input === "string" ? input : input.path;
+        const sha256 = options.sha256 ?? (typeof input === "string" ? "" : "sha256" in input ? input.sha256 ?? "" : "");
+        const target = options.target ?? (typeof input === "string" ? "" : "target" in input ? input.target ?? "" : "");
+        return coreCall({
+            cmd: "auto_updater_quit_and_install",
+            path,
+            target,
             sha256,
             relaunch: options.relaunch ?? true,
             helperPath: options.helperPath ?? "",

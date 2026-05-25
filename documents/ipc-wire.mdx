@@ -168,7 +168,7 @@ CEF DevTools (`--remote-debugging-port=9222`)에서 `console.log(await suji.invo
 | 5-D Menu | `menu_set_application_menu` / `menu_reset_application_menu` |
 | 5-E Global shortcut | `global_shortcut_register` / `global_shortcut_unregister` / `global_shortcut_unregister_all` / `global_shortcut_is_registered` |
 | 5-F File system | `fs_read_file` / `fs_write_file` / `fs_stat` / `fs_mkdir` / `fs_readdir` / `fs_rm` |
-| 배포 | `auto_updater_check_update` / `auto_updater_verify_file` / `auto_updater_download_artifact` / `auto_updater_quit_and_install` |
+| 배포 | `auto_updater_check_update` / `auto_updater_verify_file` / `auto_updater_download_artifact` / `auto_updater_prepare_install` / `auto_updater_quit_and_install` |
 
 window 계열 응답은 `{ from: "zig-core", cmd, windowId, ok, ... }`, Native API 계열은
 각 API별 `{success}` / `{trayId}` / `{notificationId}` 등 응답을 반환한다. cmd 매치는 정확 비교

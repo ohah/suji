@@ -1523,6 +1523,35 @@ pub const autoUpdater = struct {
         return coreCmd("auto_updater_download_artifact", fields);
     }
 
+    /// 다운로드된 artifact를 quitAndInstall 입력으로 준비한다.
+    /// macOS .zip/.dmg는 .app을 stageDir로 풀고, Linux AppImage는 실행 권한을 보정한다.
+    /// format은 "auto"|"app"|"zip"|"dmg"|"appimage"|"raw"|"deb".
+    pub fn prepareInstall(
+        path: []const u8,
+        target: []const u8,
+        stage_dir: []const u8,
+        format: []const u8,
+        sha256: []const u8,
+    ) ?[]const u8 {
+        var path_buf: [2048]u8 = undefined;
+        var target_buf: [2048]u8 = undefined;
+        var stage_buf: [2048]u8 = undefined;
+        var format_buf: [64]u8 = undefined;
+        var sha_buf: [128]u8 = undefined;
+        const path_n = util.escapeJsonStrFull(path, &path_buf) orelse return null;
+        const target_n = util.escapeJsonStrFull(target, &target_buf) orelse return null;
+        const stage_n = util.escapeJsonStrFull(stage_dir, &stage_buf) orelse return null;
+        const format_n = util.escapeJsonStrFull(format, &format_buf) orelse return null;
+        const sha_n = util.escapeJsonStrFull(sha256, &sha_buf) orelse return null;
+        var fields_buf: [6600]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"path\":\"{s}\",\"target\":\"{s}\",\"stageDir\":\"{s}\",\"format\":\"{s}\",\"sha256\":\"{s}\"",
+            .{ path_buf[0..path_n], target_buf[0..target_n], stage_buf[0..stage_n], format_buf[0..format_n], sha_buf[0..sha_n] },
+        ) catch return null;
+        return coreCmd("auto_updater_prepare_install", fields);
+    }
+
     /// staged artifact를 현재 프로세스 종료 후 target으로 교체하고 앱 종료를 요청.
     /// relaunch=false면 교체 후 재실행하지 않는다. target이 비어 있으면 현재 앱 경로.
     pub fn quitAndInstall(path: []const u8, target: []const u8, sha256: []const u8, relaunch: bool) ?[]const u8 {

@@ -336,7 +336,11 @@ pub fn build(b: *std.Build) void {
             root_module.addObjectFile(.{ .cwd_relative = bridge_obj });
             root_module.addLibraryPath(.{ .cwd_relative = node_path });
             root_module.linkSystemLibrary("node", .{});
-            root_module.linkSystemLibrary("stdc++", .{});
+            // `linkSystemLibrary("stdc++")` is treated by Zig as "the target
+            // C++ runtime" and becomes libc++ on Linux. bridge.o is compiled
+            // by g++ and needs libstdc++ symbols, so pass GNU ld's exact-name
+            // form through as an ordinary system library.
+            root_module.linkSystemLibrary(":libstdc++.so.6", .{ .needed = true, .use_pkg_config = .no });
         } else {
             root_module.addCSourceFile(.{
                 .file = b.path("src/platform/node/bridge.cc"),

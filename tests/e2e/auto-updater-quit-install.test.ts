@@ -16,16 +16,32 @@ let page: Page;
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function waitForReplacement(target: string, expected: Buffer, source: string, helper: string) {
+async function run(cmd: string, args: string[], cwd?: string) {
+  const proc = Bun.spawn([cmd, ...args], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr, code] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (code !== 0) {
+    throw new Error(`${cmd} ${args.join(" ")} failed (${code})\n${stdout}\n${stderr}`);
+  }
+}
+
+async function waitForReplacement(verifyPath: string, expected: Buffer, source: string, helper: string) {
   const deadline = Date.now() + 12000;
   while (Date.now() < deadline) {
-    if (fs.existsSync(target) && fs.readFileSync(target).equals(expected) && !fs.existsSync(source)) {
+    if (fs.existsSync(verifyPath) && fs.readFileSync(verifyPath).equals(expected) && !fs.existsSync(source)) {
       expect(fs.existsSync(helper)).toBe(false);
       return;
     }
     await wait(100);
   }
-  throw new Error(`quitAndInstall helper did not replace target within timeout: ${target}`);
+  throw new Error(`quitAndInstall helper did not replace target within timeout: ${verifyPath}`);
 }
 
 beforeAll(async () => {
@@ -60,26 +76,73 @@ afterAll(async () => {
 });
 
 describe.skipIf(process.platform === "win32")("autoUpdater.quitAndInstall", () => {
-  test("staged artifact replaces target after app quits", async () => {
+  test("prepared artifact replaces target after app quits", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-updater-quit-install-"));
-    const source = path.join(dir, "staged.bin");
-    const target = path.join(dir, "current.bin");
-    const helperPath = `${source}.quit-install.sh`;
+    const stageDir = path.join(dir, "stage");
     const oldPayload = Buffer.from("old app bytes");
-    const newPayload = Buffer.from("new app bytes from quitAndInstall");
-    fs.writeFileSync(target, oldPayload);
-    fs.writeFileSync(source, newPayload);
-    const expected = createHash("sha256").update(newPayload).digest("hex");
+    const newPayload = Buffer.from("new app bytes from prepared quitAndInstall");
 
-    const result = await page.evaluate(async (artifact, options) => {
-      return (window as any).__suji_sdk__.autoUpdater.quitAndInstall(artifact, options);
+    let artifact: string;
+    let target: string;
+    let verifyPath: string;
+    let format: "zip" | "appimage";
+
+    if (process.platform === "darwin") {
+      const stagedApp = path.join(dir, "Staged Suji.app");
+      const targetApp = path.join(dir, "Current Suji.app");
+      fs.mkdirSync(path.join(stagedApp, "Contents"), { recursive: true });
+      fs.mkdirSync(path.join(targetApp, "Contents"), { recursive: true });
+      fs.writeFileSync(path.join(stagedApp, "Contents", "payload.txt"), newPayload);
+      fs.writeFileSync(path.join(targetApp, "Contents", "payload.txt"), oldPayload);
+      artifact = path.join(dir, "staged.zip");
+      target = targetApp;
+      verifyPath = path.join(targetApp, "Contents", "payload.txt");
+      format = "zip";
+      await run("ditto", ["-c", "-k", "--keepParent", stagedApp, artifact]);
+    } else {
+      artifact = path.join(dir, "staged.AppImage");
+      target = path.join(dir, "current.AppImage");
+      verifyPath = target;
+      format = "appimage";
+      fs.writeFileSync(artifact, newPayload, { mode: 0o644 });
+      fs.writeFileSync(target, oldPayload, { mode: 0o755 });
+    }
+
+    const artifactBytes = fs.readFileSync(artifact);
+    const expected = createHash("sha256").update(artifactBytes).digest("hex");
+
+    const prepared = await page.evaluate(async (artifactInfo, options) => {
+      return (window as any).__suji_sdk__.autoUpdater.prepareInstall(artifactInfo, options);
     }, {
       success: true,
-      path: source,
+      path: artifact,
       sha256: expected,
-      size: newPayload.length,
+      size: artifactBytes.length,
     }, {
       target,
+      stageDir,
+      format,
+    }) as {
+      success: boolean;
+      path: string;
+      source: string;
+      target: string;
+      stageDir: string;
+      format: string;
+      action: string;
+      requiresQuitAndInstall: boolean;
+    };
+
+    expect(prepared.success).toBe(true);
+    expect(prepared.target).toBe(target);
+    expect(prepared.stageDir).toBe(stageDir);
+    expect(prepared.action).toBe("quitAndInstall");
+    expect(prepared.requiresQuitAndInstall).toBe(true);
+    expect(fs.existsSync(prepared.path)).toBe(true);
+
+    const result = await page.evaluate(async (preparedInfo, options) => {
+      return (window as any).__suji_sdk__.autoUpdater.quitAndInstall(preparedInfo, options);
+    }, prepared, {
       relaunch: false,
     }) as {
       success: boolean;
@@ -90,13 +153,12 @@ describe.skipIf(process.platform === "win32")("autoUpdater.quitAndInstall", () =
     };
 
     expect(result.success).toBe(true);
-    expect(result.path).toBe(source);
+    expect(result.path).toBe(prepared.path);
     expect(result.target).toBe(target);
-    expect(result.helperPath).toBe(helperPath);
     expect(result.relaunch).toBe(false);
 
     await browser?.disconnect();
     browser = undefined;
-    await waitForReplacement(target, newPayload, source, helperPath);
+    await waitForReplacement(verifyPath, newPayload, prepared.path, result.helperPath);
   });
 });

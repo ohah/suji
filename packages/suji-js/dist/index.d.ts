@@ -862,6 +862,23 @@ export interface AutoUpdaterDownloadResult {
     sha256: string;
     size: number;
 }
+export type AutoUpdaterInstallFormat = "auto" | "app" | "zip" | "dmg" | "appimage" | "raw" | "deb";
+export interface AutoUpdaterPrepareInstallOptions {
+    sha256?: string;
+    target?: string;
+    stageDir?: string;
+    format?: AutoUpdaterInstallFormat;
+}
+export interface AutoUpdaterPrepareInstallResult {
+    success: boolean;
+    path: string;
+    source: string;
+    target: string;
+    stageDir: string;
+    format: Exclude<AutoUpdaterInstallFormat, "auto">;
+    action: "quitAndInstall" | "systemPackage";
+    requiresQuitAndInstall: boolean;
+}
 export interface AutoUpdaterQuitAndInstallOptions {
     sha256?: string;
     target?: string;
@@ -882,8 +899,10 @@ export declare const autoUpdater: {
     verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult>;
     /** artifact URL 또는 manifest 객체를 지정 경로로 다운로드하고 optional SHA-256을 검증. */
     downloadArtifact(input: string | AutoUpdaterManifest, path: string, options?: AutoUpdaterDownloadOptions): Promise<AutoUpdaterDownloadResult>;
+    /** artifact 포맷(.zip/.dmg/.app/.AppImage/.deb)을 quitAndInstall 또는 system package handoff 입력으로 정규화. */
+    prepareInstall(input: string | AutoUpdaterDownloadResult, options?: AutoUpdaterPrepareInstallOptions): Promise<AutoUpdaterPrepareInstallResult>;
     /** staged artifact를 앱 종료 후 target으로 교체하고 quit을 요청. */
-    quitAndInstall(input: string | AutoUpdaterDownloadResult, options?: AutoUpdaterQuitAndInstallOptions): Promise<AutoUpdaterQuitAndInstallResult>;
+    quitAndInstall(input: string | AutoUpdaterDownloadResult | AutoUpdaterPrepareInstallResult, options?: AutoUpdaterQuitAndInstallOptions): Promise<AutoUpdaterQuitAndInstallResult>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {

@@ -21,6 +21,19 @@ pub const DownloadError = error{
     HttpStatus,
 };
 
+pub const PrepareError = error{
+    OutOfMemory,
+    UnsupportedPlatform,
+    UnsupportedFormat,
+    RequiresPackageManager,
+    InvalidPath,
+    ArtifactNotFound,
+    StagePathTooLong,
+    CommandFailed,
+    AppBundleNotFound,
+    AmbiguousAppBundle,
+};
+
 pub const InstallError = error{
     OutOfMemory,
     UnsupportedPlatform,
@@ -49,6 +62,31 @@ pub const DownloadResult = struct {
     size: u64,
 };
 
+pub const InstallFormat = enum {
+    app,
+    zip,
+    dmg,
+    appimage,
+    raw,
+    deb,
+};
+
+pub const PrepareInstallOptions = struct {
+    artifact_path: []const u8,
+    stage_dir: []const u8,
+    target_path: []const u8,
+    format: InstallFormat,
+};
+
+pub const PreparedInstall = struct {
+    source_path: []const u8,
+    target_path: []const u8,
+    stage_dir: []const u8,
+    format: InstallFormat,
+    action: []const u8,
+    requires_quit_and_install: bool,
+};
+
 pub const QuitAndInstallOptions = struct {
     source_path: []const u8,
     target_path: []const u8,
@@ -72,6 +110,13 @@ pub fn errorCode(err: anyerror) []const u8 {
         error.Download => "download",
         error.HttpStatus => "http_status",
         error.UnsupportedPlatform => "unsupported_platform",
+        error.UnsupportedFormat => "unsupported_format",
+        error.RequiresPackageManager => "requires_package_manager",
+        error.ArtifactNotFound => "artifact_not_found",
+        error.StagePathTooLong => "stage_path_too_long",
+        error.CommandFailed => "command_failed",
+        error.AppBundleNotFound => "app_bundle_not_found",
+        error.AmbiguousAppBundle => "ambiguous_app_bundle",
         error.InvalidPath => "invalid_path",
         error.SourceNotFound => "source_not_found",
         error.SamePath => "same_path",
@@ -344,6 +389,148 @@ pub fn sha256Equal(actual: []const u8, expected: []const u8) bool {
         if (std.ascii.toLower(a) != std.ascii.toLower(b)) return false;
     }
     return true;
+}
+
+pub fn detectInstallFormat(artifact_path: []const u8) InstallFormat {
+    if (std.ascii.endsWithIgnoreCase(artifact_path, ".app")) return .app;
+    if (std.ascii.endsWithIgnoreCase(artifact_path, ".zip")) return .zip;
+    if (std.ascii.endsWithIgnoreCase(artifact_path, ".dmg")) return .dmg;
+    if (std.ascii.endsWithIgnoreCase(artifact_path, ".appimage")) return .appimage;
+    if (std.ascii.endsWithIgnoreCase(artifact_path, ".deb")) return .deb;
+    return .raw;
+}
+
+pub fn parseInstallFormat(format_raw: []const u8, artifact_path: []const u8) PrepareError!InstallFormat {
+    const format = std.mem.trim(u8, format_raw, " \t\r\n");
+    if (format.len == 0 or std.ascii.eqlIgnoreCase(format, "auto")) {
+        return detectInstallFormat(artifact_path);
+    }
+    if (std.ascii.eqlIgnoreCase(format, "app")) return .app;
+    if (std.ascii.eqlIgnoreCase(format, "zip")) return .zip;
+    if (std.ascii.eqlIgnoreCase(format, "dmg")) return .dmg;
+    if (std.ascii.eqlIgnoreCase(format, "appimage")) return .appimage;
+    if (std.ascii.eqlIgnoreCase(format, "raw")) return .raw;
+    if (std.ascii.eqlIgnoreCase(format, "deb")) return .deb;
+    return error.UnsupportedFormat;
+}
+
+pub fn installFormatName(format: InstallFormat) []const u8 {
+    return switch (format) {
+        .app => "app",
+        .zip => "zip",
+        .dmg => "dmg",
+        .appimage => "appimage",
+        .raw => "raw",
+        .deb => "deb",
+    };
+}
+
+pub fn defaultPrepareInstallStageDir(artifact_path: []const u8, out: []u8) PrepareError![]const u8 {
+    if (!isValidInstallPath(artifact_path)) return error.InvalidPath;
+    return std.fmt.bufPrint(out, "{s}.stage", .{artifact_path}) catch error.StagePathTooLong;
+}
+
+pub fn validatePrepareInstallOptions(io: std.Io, opts: PrepareInstallOptions) PrepareError!void {
+    if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
+    if (!isValidInstallPath(opts.artifact_path) or !isValidInstallPath(opts.stage_dir)) {
+        return error.InvalidPath;
+    }
+    if (opts.target_path.len > 0 and !isValidInstallPath(opts.target_path)) {
+        return error.InvalidPath;
+    }
+    if (!pathExists(io, opts.artifact_path)) return error.ArtifactNotFound;
+
+    switch (opts.format) {
+        .app, .zip, .dmg => {
+            if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+            if (opts.target_path.len == 0) return error.InvalidPath;
+        },
+        .appimage => {
+            if (builtin.os.tag != .linux) return error.UnsupportedPlatform;
+            if (opts.target_path.len == 0) return error.InvalidPath;
+        },
+        .raw => {
+            if (opts.target_path.len == 0) return error.InvalidPath;
+        },
+        .deb => {
+            if (builtin.os.tag != .linux) return error.UnsupportedPlatform;
+        },
+    }
+}
+
+pub fn preparedQuitAndInstall(
+    source_path: []const u8,
+    target_path: []const u8,
+    stage_dir: []const u8,
+    format: InstallFormat,
+) PreparedInstall {
+    return .{
+        .source_path = source_path,
+        .target_path = target_path,
+        .stage_dir = stage_dir,
+        .format = format,
+        .action = "quitAndInstall",
+        .requires_quit_and_install = true,
+    };
+}
+
+pub fn preparedSystemPackage(artifact_path: []const u8, stage_dir: []const u8) PreparedInstall {
+    return .{
+        .source_path = artifact_path,
+        .target_path = "",
+        .stage_dir = stage_dir,
+        .format = .deb,
+        .action = "systemPackage",
+        .requires_quit_and_install = false,
+    };
+}
+
+pub fn findAppBundle(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    root_path: []const u8,
+) PrepareError![]u8 {
+    if (!isValidInstallPath(root_path)) return error.InvalidPath;
+    var found: ?[]u8 = null;
+    errdefer if (found) |p| allocator.free(p);
+    try findAppBundleInner(allocator, io, root_path, 0, &found);
+    return found orelse error.AppBundleNotFound;
+}
+
+fn findAppBundleInner(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    dir_path: []const u8,
+    depth: usize,
+    found: *?[]u8,
+) PrepareError!void {
+    if (depth > 8) return;
+
+    var dir = std.Io.Dir.openDirAbsolute(io, dir_path, .{ .iterate = true }) catch return error.AppBundleNotFound;
+    defer dir.close(io);
+
+    var iter = dir.iterate();
+    while (iter.next(io) catch return error.AppBundleNotFound) |entry| {
+        if (entry.kind != .directory) continue;
+
+        const child_path = std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name }) catch
+            return error.OutOfMemory;
+        errdefer allocator.free(child_path);
+
+        if (std.ascii.endsWithIgnoreCase(entry.name, ".app")) {
+            if (found.* != null) return error.AmbiguousAppBundle;
+            found.* = child_path;
+            continue;
+        }
+
+        if (depth < 8) {
+            findAppBundleInner(allocator, io, child_path, depth + 1, found) catch |err| switch (err) {
+                error.AppBundleNotFound => {},
+                else => return err,
+            };
+        }
+        allocator.free(child_path);
+    }
 }
 
 pub fn defaultQuitAndInstallHelperPath(source_path: []const u8, out: []u8) InstallError![]const u8 {
@@ -744,6 +931,50 @@ test "downloadArtifact checksum mismatch does not publish destination" {
 
     try std.testing.expect(!result.success);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(io, dest, .{}));
+}
+
+test "prepareInstall detects formats and validates platform policy" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    try std.testing.expectEqual(InstallFormat.app, try parseInstallFormat("auto", "/tmp/Suji.app"));
+    try std.testing.expectEqual(InstallFormat.zip, try parseInstallFormat("", "/tmp/Suji.zip"));
+    try std.testing.expectEqual(InstallFormat.dmg, try parseInstallFormat("DMG", "/tmp/Suji.bin"));
+    try std.testing.expectEqual(InstallFormat.appimage, detectInstallFormat("/tmp/Suji.AppImage"));
+    try std.testing.expectEqual(InstallFormat.deb, detectInstallFormat("/tmp/suji_1.0.0_amd64.deb"));
+    try std.testing.expectError(error.UnsupportedFormat, parseInstallFormat("msi", "/tmp/Suji.msi"));
+
+    var stage_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const stage = try defaultPrepareInstallStageDir("/tmp/Suji.zip", &stage_buf);
+    try std.testing.expectEqualStrings("/tmp/Suji.zip.stage", stage);
+
+    const prepared = preparedQuitAndInstall("/tmp/Suji.app", "/Applications/Suji.app", "/tmp/stage", .app);
+    try std.testing.expect(prepared.requires_quit_and_install);
+    try std.testing.expectEqualStrings("quitAndInstall", prepared.action);
+
+    const deb = preparedSystemPackage("/tmp/suji.deb", "/tmp/stage");
+    try std.testing.expect(!deb.requires_quit_and_install);
+    try std.testing.expectEqualStrings("systemPackage", deb.action);
+}
+
+test "prepareInstall finds a single app bundle under a staging directory" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const base = try std.fmt.bufPrint(&base_buf, "/tmp/suji-auto-updater-prepare-{s}", .{&tmp.sub_path});
+    try std.Io.Dir.cwd().createDirPath(io, base);
+    defer std.Io.Dir.cwd().deleteTree(io, base) catch {};
+
+    var nested_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const nested = try std.fmt.bufPrint(&nested_buf, "{s}/Payload/Suji.app/Contents", .{base});
+    try std.Io.Dir.cwd().createDirPath(io, nested);
+
+    const found = try findAppBundle(std.testing.allocator, io, base);
+    defer std.testing.allocator.free(found);
+    try std.testing.expect(std.mem.endsWith(u8, found, "/Payload/Suji.app"));
 }
 
 test "quitAndInstall helper script quotes paths and encodes relaunch policy" {

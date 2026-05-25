@@ -2826,6 +2826,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "auto_updater_download_artifact")) {
         return handleAutoUpdaterDownloadArtifact(req_clean, response_buf);
     }
+    if (std.mem.eql(u8, cmd, "auto_updater_prepare_install")) {
+        return handleAutoUpdaterPrepareInstall(req_clean, response_buf);
+    }
     if (std.mem.eql(u8, cmd, "auto_updater_quit_and_install")) {
         return handleAutoUpdaterQuitAndInstall(req_clean, response_buf);
     }
@@ -3441,6 +3444,115 @@ fn handleAutoUpdaterDownloadArtifact(req_clean: []const u8, response_buf: []u8) 
     ) catch null;
 }
 
+fn handleAutoUpdaterPrepareInstall(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    if (builtin.os.tag == .windows) {
+        return coreError(response_buf, "auto_updater_prepare_install", "unsupported_platform");
+    }
+
+    var artifact_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    var stage_buf: [FS_MAX_PATH_BYTES + 64]u8 = undefined;
+    var target_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    var format_buf: [32]u8 = undefined;
+    var sha_buf: [128]u8 = undefined;
+
+    const artifact = blk: {
+        if (unescapeField(req_clean, "path", &artifact_buf, false)) |p| {
+            if (p.len > 0) break :blk p;
+        } else return coreError(response_buf, "auto_updater_prepare_install", "path");
+        if (unescapeField(req_clean, "artifact", &artifact_buf, false)) |p| {
+            if (p.len > 0) break :blk p;
+        } else return coreError(response_buf, "auto_updater_prepare_install", "path");
+        return coreError(response_buf, "auto_updater_prepare_install", "path");
+    };
+    const format_raw = unescapeField(req_clean, "format", &format_buf, false) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "format");
+    const format = auto_updater.parseInstallFormat(format_raw, artifact) catch |err|
+        return coreError(response_buf, "auto_updater_prepare_install", auto_updater.errorCode(err));
+
+    const explicit_stage = unescapeField(req_clean, "stageDir", &stage_buf, false) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "stage_dir");
+    const stage_dir = if (explicit_stage.len > 0)
+        explicit_stage
+    else
+        (auto_updater.defaultPrepareInstallStageDir(artifact, &stage_buf) catch |err|
+            return coreError(response_buf, "auto_updater_prepare_install", auto_updater.errorCode(err)));
+
+    const explicit_target = unescapeField(req_clean, "target", &target_buf, false) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "target");
+    const target = if (format == .deb)
+        ""
+    else if (explicit_target.len > 0)
+        explicit_target
+    else
+        (defaultAutoUpdaterInstallTarget(&target_buf) orelse
+            return coreError(response_buf, "auto_updater_prepare_install", "target"));
+
+    const expected = unescapeField(req_clean, "sha256", &sha_buf, false) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "sha256");
+    if (!auto_updater.isValidSha256Hex(expected)) {
+        return coreError(response_buf, "auto_updater_prepare_install", "invalid_sha256");
+    }
+
+    if (!g_in_backend_invoke) {
+        if (fsSandboxCheck(response_buf, "auto_updater_prepare_install", artifact)) |err| return err;
+        if (fsSandboxCheck(response_buf, "auto_updater_prepare_install", stage_dir)) |err| return err;
+        if (explicit_target.len > 0) {
+            if (fsSandboxCheck(response_buf, "auto_updater_prepare_install", target)) |err| return err;
+        }
+    }
+
+    if (expected.len > 0) {
+        var actual_buf: [64]u8 = undefined;
+        const actual = auto_updater.sha256File(runtime.io, artifact, &actual_buf) catch
+            return coreError(response_buf, "auto_updater_prepare_install", "read");
+        if (!auto_updater.sha256Equal(actual, expected)) {
+            return coreError(response_buf, "auto_updater_prepare_install", "checksum_mismatch");
+        }
+    }
+
+    auto_updater.validatePrepareInstallOptions(runtime.io, .{
+        .artifact_path = artifact,
+        .stage_dir = stage_dir,
+        .target_path = target,
+        .format = format,
+    }) catch |err| {
+        return coreError(response_buf, "auto_updater_prepare_install", auto_updater.errorCode(err));
+    };
+
+    var owned_source: ?[]u8 = null;
+    defer if (owned_source) |p| runtime.gpa.free(p);
+
+    const prepared = prepareAutoUpdaterInstallArtifact(format, artifact, stage_dir, target, &owned_source) catch |err| {
+        return coreError(response_buf, "auto_updater_prepare_install", auto_updater.errorCode(err));
+    };
+
+    var source_esc: [8192]u8 = undefined;
+    var target_esc: [8192]u8 = undefined;
+    var stage_esc: [8192]u8 = undefined;
+    var action_esc: [64]u8 = undefined;
+    const source_n = util.escapeJsonStrFull(prepared.source_path, &source_esc) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "encode");
+    const target_n = util.escapeJsonStrFull(prepared.target_path, &target_esc) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "encode");
+    const stage_n = util.escapeJsonStrFull(prepared.stage_dir, &stage_esc) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "encode");
+    const action_n = util.escapeJsonStrFull(prepared.action, &action_esc) orelse
+        return coreError(response_buf, "auto_updater_prepare_install", "encode");
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_prepare_install\",\"success\":true,\"path\":\"{s}\",\"source\":\"{s}\",\"target\":\"{s}\",\"stageDir\":\"{s}\",\"format\":\"{s}\",\"action\":\"{s}\",\"requiresQuitAndInstall\":{}}}",
+        .{
+            source_esc[0..source_n],
+            source_esc[0..source_n],
+            target_esc[0..target_n],
+            stage_esc[0..stage_n],
+            auto_updater.installFormatName(prepared.format),
+            action_esc[0..action_n],
+            prepared.requires_quit_and_install,
+        },
+    ) catch null;
+}
+
 fn handleAutoUpdaterQuitAndInstall(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     if (builtin.os.tag == .windows) {
         return coreError(response_buf, "auto_updater_quit_and_install", "unsupported_platform");
@@ -3533,6 +3645,83 @@ fn handleAutoUpdaterQuitAndInstall(req_clean: []const u8, response_buf: []u8) ?[
         cef.quitAfterNextResponse();
     }
     return resp;
+}
+
+fn prepareAutoUpdaterInstallArtifact(
+    format: auto_updater.InstallFormat,
+    artifact: []const u8,
+    stage_dir: []const u8,
+    target: []const u8,
+    owned_source: *?[]u8,
+) auto_updater.PrepareError!auto_updater.PreparedInstall {
+    switch (format) {
+        .app => return auto_updater.preparedQuitAndInstall(artifact, target, stage_dir, .app),
+        .raw => return auto_updater.preparedQuitAndInstall(artifact, target, stage_dir, .raw),
+        .appimage => {
+            runCmd(runtime.gpa, &.{ "chmod", "+x", artifact }) catch return error.CommandFailed;
+            return auto_updater.preparedQuitAndInstall(artifact, target, stage_dir, .appimage);
+        },
+        .deb => return auto_updater.preparedSystemPackage(artifact, stage_dir),
+        .zip => {
+            const source = prepareMacZipApp(artifact, stage_dir) catch |err| return err;
+            owned_source.* = source;
+            return auto_updater.preparedQuitAndInstall(source, target, stage_dir, .zip);
+        },
+        .dmg => {
+            const source = prepareMacDmgApp(artifact, stage_dir) catch |err| return err;
+            owned_source.* = source;
+            return auto_updater.preparedQuitAndInstall(source, target, stage_dir, .dmg);
+        },
+    }
+}
+
+fn prepareMacZipApp(artifact: []const u8, stage_dir: []const u8) auto_updater.PrepareError![]u8 {
+    if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+    std.Io.Dir.cwd().createDirPath(runtime.io, stage_dir) catch return error.CommandFailed;
+
+    const extract_dir = std.fmt.allocPrint(runtime.gpa, "{s}/extract", .{stage_dir}) catch
+        return error.OutOfMemory;
+    defer runtime.gpa.free(extract_dir);
+
+    runCmd(runtime.gpa, &.{ "rm", "-rf", extract_dir }) catch return error.CommandFailed;
+    std.Io.Dir.cwd().createDirPath(runtime.io, extract_dir) catch return error.CommandFailed;
+    runCmd(runtime.gpa, &.{ "ditto", "-x", "-k", artifact, extract_dir }) catch return error.CommandFailed;
+
+    return auto_updater.findAppBundle(runtime.gpa, runtime.io, extract_dir);
+}
+
+fn prepareMacDmgApp(artifact: []const u8, stage_dir: []const u8) auto_updater.PrepareError![]u8 {
+    if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+    std.Io.Dir.cwd().createDirPath(runtime.io, stage_dir) catch return error.CommandFailed;
+
+    const mount_dir = std.fmt.allocPrint(runtime.gpa, "{s}/mount", .{stage_dir}) catch
+        return error.OutOfMemory;
+    defer runtime.gpa.free(mount_dir);
+
+    runCmd(runtime.gpa, &.{ "rm", "-rf", mount_dir }) catch return error.CommandFailed;
+    std.Io.Dir.cwd().createDirPath(runtime.io, mount_dir) catch return error.CommandFailed;
+
+    runCmd(runtime.gpa, &.{ "hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", mount_dir, artifact }) catch
+        return error.CommandFailed;
+    var attached = true;
+    defer if (attached) {
+        runCmd(runtime.gpa, &.{ "hdiutil", "detach", mount_dir, "-quiet" }) catch {};
+    };
+
+    const mounted_app = auto_updater.findAppBundle(runtime.gpa, runtime.io, mount_dir) catch |err| return err;
+    defer runtime.gpa.free(mounted_app);
+
+    const app_name = std.fs.path.basename(mounted_app);
+    const staged_app = std.fmt.allocPrint(runtime.gpa, "{s}/{s}", .{ stage_dir, app_name }) catch
+        return error.OutOfMemory;
+    errdefer runtime.gpa.free(staged_app);
+
+    runCmd(runtime.gpa, &.{ "rm", "-rf", staged_app }) catch return error.CommandFailed;
+    runCmd(runtime.gpa, &.{ "ditto", mounted_app, staged_app }) catch return error.CommandFailed;
+
+    runCmd(runtime.gpa, &.{ "hdiutil", "detach", mount_dir, "-quiet" }) catch return error.CommandFailed;
+    attached = false;
+    return staged_app;
 }
 
 fn defaultAutoUpdaterInstallTarget(buf: []u8) ?[]const u8 {

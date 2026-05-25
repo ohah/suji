@@ -3055,6 +3055,7 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     // autoUpdater 파일 경로도 frontend sandbox를 우회하지 않는다.
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_verify_file\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_download_artifact\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_prepare_install\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_quit_and_install\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "auto_updater.filePathFromUrl") != null);
 

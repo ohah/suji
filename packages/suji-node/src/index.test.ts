@@ -340,6 +340,37 @@ describe('autoUpdater', () => {
     }));
   });
 
+  it('prepareInstall sends artifact, stage and format policy', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"path":"/tmp/Suji.app","source":"/tmp/Suji.app","target":"/Applications/Suji.app","stageDir":"/tmp/suji-stage","format":"zip","action":"quitAndInstall","requiresQuitAndInstall":true}');
+    expect(await autoUpdater.prepareInstall({
+      success: true,
+      path: '/tmp/suji.zip',
+      sha256: '3'.repeat(64),
+      size: 12,
+    }, {
+      target: '/Applications/Suji.app',
+      stageDir: '/tmp/suji-stage',
+      format: 'zip',
+    })).toEqual({
+      success: true,
+      path: '/tmp/Suji.app',
+      source: '/tmp/Suji.app',
+      target: '/Applications/Suji.app',
+      stageDir: '/tmp/suji-stage',
+      format: 'zip',
+      action: 'quitAndInstall',
+      requiresQuitAndInstall: true,
+    });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', JSON.stringify({
+      cmd: 'auto_updater_prepare_install',
+      path: '/tmp/suji.zip',
+      target: '/Applications/Suji.app',
+      stageDir: '/tmp/suji-stage',
+      format: 'zip',
+      sha256: '3'.repeat(64),
+    }));
+  });
+
   it('quitAndInstall sends staged path, target, hash and relaunch policy', async () => {
     bridge.invoke.mockResolvedValueOnce('{"success":true,"path":"/tmp/suji.zip","target":"/Applications/Suji.app","helperPath":"/tmp/suji.zip.quit-install.sh","relaunch":false}');
     expect(await autoUpdater.quitAndInstall({
@@ -362,6 +393,28 @@ describe('autoUpdater', () => {
       path: '/tmp/suji.zip',
       target: '/Applications/Suji.app',
       sha256: '3'.repeat(64),
+      relaunch: false,
+      helperPath: '',
+    }));
+  });
+
+  it('quitAndInstall reuses prepareInstall target when options.target is omitted', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"path":"/tmp/Suji.app","target":"/Applications/Suji.app","helperPath":"/tmp/Suji.app.quit-install.sh","relaunch":false}');
+    await autoUpdater.quitAndInstall({
+      success: true,
+      path: '/tmp/Suji.app',
+      source: '/tmp/Suji.app',
+      target: '/Applications/Suji.app',
+      stageDir: '/tmp/stage',
+      format: 'zip',
+      action: 'quitAndInstall',
+      requiresQuitAndInstall: true,
+    }, { relaunch: false });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', JSON.stringify({
+      cmd: 'auto_updater_quit_and_install',
+      path: '/tmp/Suji.app',
+      target: '/Applications/Suji.app',
+      sha256: '',
       relaunch: false,
       helperPath: '',
     }));
