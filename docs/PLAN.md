@@ -628,7 +628,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         (`app.quitOnAllWindowsClosed`) 옵션. SDK 호환성 (5 SDK 모두 EventBus 통해 자동) + 단위
         47개 + macOS E2E 13 pass / 4 skip / 0 fail. Linux CEF Views runtime E2E도
         `run-window-lifecycle-events-cef-views.sh`로 setBounds resize, lifecycle controls,
-        ready/title, show/hide를 검증한다. 4 skip은 e2e 환경 한계 — `docs/WINDOW_API.md#
+        ready/title, show/hide를 검증한다. Linux headless에서 CEF Views min/max getter가
+        command 직후 lag되는 문제는 delegate-side 상태 cache로 보정했다. 4 skip은 e2e 환경 한계 — `docs/WINDOW_API.md#
         phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
         will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
         미발화). frameless drag 라우팅은 macOS/Linux 완료 — Windows는 후속.

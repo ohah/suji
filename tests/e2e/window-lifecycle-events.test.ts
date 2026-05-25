@@ -339,13 +339,13 @@ describe("window lifecycle events", () => {
     const id = created.windowId;
     await new Promise((r) => setTimeout(r, 1500));
 
-    const titleCol = collect<{ windowId: number; title: string }>("window:page-title-updated", 2000);
+    const titleCol = await startCollect<{ windowId: number; title: string }>("window:page-title-updated");
     await core({
       cmd: "execute_javascript",
       windowId: id,
       code: "document.title = 'updated-title'",
     });
-    const titleEvs = (await titleCol).filter((e) => e.windowId === id && e.title === "updated-title");
+    const titleEvs = (await titleCol.stop(2000)).filter((e) => e.windowId === id && e.title === "updated-title");
     expect(titleEvs.length).toBeGreaterThan(0);
 
     await core({ cmd: "destroy_window", windowId: id });

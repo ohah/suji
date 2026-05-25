@@ -490,6 +490,8 @@ const ViewsWindowDelegate = struct {
     constraints: window_mod.Constraints,
     last_bounds: c.cef_rect_t = .{ .x = 0, .y = 0, .width = 0, .height = 0 },
     has_last_bounds: bool = false,
+    last_minimized: bool = false,
+    last_maximized: bool = false,
     last_fullscreen: bool = false,
 };
 
@@ -876,6 +878,8 @@ fn viewsWindowOnCreated(self: ?*c._cef_window_delegate_t, window: ?*c._cef_windo
 
     if (win.base.base.base.add_ref) |add_ref| add_ref(&win.base.base.base);
     d.cef_window = win;
+    d.last_minimized = viewsWindowIsMinimized(win);
+    d.last_maximized = viewsWindowIsMaximized(win);
     d.last_fullscreen = viewsWindowIsFullscreen(win);
 
     if (d.appearance.background_color) |hex| {
@@ -1264,6 +1268,8 @@ pub const CefNative = struct {
         if (views_window.base.base.get_bounds) |get_bounds| {
             viewsWindowRememberBounds(window_delegate, get_bounds(&views_window.base.base));
         }
+        window_delegate.last_minimized = viewsWindowIsMinimized(views_window);
+        window_delegate.last_maximized = viewsWindowIsMaximized(views_window);
 
         var entry: BrowserEntry = .{
             .browser = br,
@@ -1584,6 +1590,8 @@ pub const CefNative = struct {
         if (views_window.base.base.get_bounds) |get_bounds| {
             viewsWindowRememberBounds(window_delegate, get_bounds(&views_window.base.base));
         }
+        window_delegate.last_minimized = viewsWindowIsMinimized(views_window);
+        window_delegate.last_maximized = viewsWindowIsMaximized(views_window);
         window_delegate.last_fullscreen = viewsWindowIsFullscreen(views_window);
 
         var entry: BrowserEntry = .{
@@ -2170,10 +2178,20 @@ pub const CefNative = struct {
         assertUiThread();
         if (self.browsers.get(handle)) |entry| {
             if (entry.views_window) |views_window| {
-                const was_minimized = viewsWindowIsMinimized(views_window);
-                if (views_window.minimize) |minimize| minimize(views_window);
-                if (!was_minimized) {
-                    if (g_window_minimize_handler) |h| h(handle);
+                const delegate = entry.views_window_delegate;
+                const was_minimized = if (delegate) |d|
+                    d.last_minimized or viewsWindowIsMinimized(views_window)
+                else
+                    viewsWindowIsMinimized(views_window);
+                if (views_window.minimize) |minimize| {
+                    minimize(views_window);
+                    if (delegate) |d| {
+                        d.last_minimized = true;
+                        d.last_maximized = false;
+                    }
+                    if (!was_minimized) {
+                        if (g_window_minimize_handler) |h| h(handle);
+                    }
                 }
                 return;
             }
@@ -2185,10 +2203,17 @@ pub const CefNative = struct {
         assertUiThread();
         if (self.browsers.get(handle)) |entry| {
             if (entry.views_window) |views_window| {
-                const was_minimized = viewsWindowIsMinimized(views_window);
-                if (views_window.restore) |restore| restore(views_window);
-                if (was_minimized) {
-                    if (g_window_restore_handler) |h| h(handle);
+                const delegate = entry.views_window_delegate;
+                const was_minimized = if (delegate) |d|
+                    d.last_minimized or viewsWindowIsMinimized(views_window)
+                else
+                    viewsWindowIsMinimized(views_window);
+                if (views_window.restore) |restore| {
+                    restore(views_window);
+                    if (delegate) |d| d.last_minimized = false;
+                    if (was_minimized) {
+                        if (g_window_restore_handler) |h| h(handle);
+                    }
                 }
                 return;
             }
@@ -2200,9 +2225,20 @@ pub const CefNative = struct {
         assertUiThread();
         if (self.browsers.get(handle)) |entry| {
             if (entry.views_window) |views_window| {
-                if (viewsWindowIsMaximized(views_window)) return;
-                if (views_window.maximize) |maximize| maximize(views_window);
-                if (g_window_maximize_handler) |h| h(handle);
+                const delegate = entry.views_window_delegate;
+                const was_maximized = if (delegate) |d|
+                    d.last_maximized or viewsWindowIsMaximized(views_window)
+                else
+                    viewsWindowIsMaximized(views_window);
+                if (was_maximized) return;
+                if (views_window.maximize) |maximize| {
+                    maximize(views_window);
+                    if (delegate) |d| {
+                        d.last_maximized = true;
+                        d.last_minimized = false;
+                    }
+                    if (g_window_maximize_handler) |h| h(handle);
+                }
                 return;
             }
         }
@@ -2213,9 +2249,17 @@ pub const CefNative = struct {
         assertUiThread();
         if (self.browsers.get(handle)) |entry| {
             if (entry.views_window) |views_window| {
-                if (!viewsWindowIsMaximized(views_window)) return;
-                if (views_window.restore) |restore| restore(views_window);
-                if (g_window_unmaximize_handler) |h| h(handle);
+                const delegate = entry.views_window_delegate;
+                const was_maximized = if (delegate) |d|
+                    d.last_maximized or viewsWindowIsMaximized(views_window)
+                else
+                    viewsWindowIsMaximized(views_window);
+                if (!was_maximized) return;
+                if (views_window.restore) |restore| {
+                    restore(views_window);
+                    if (delegate) |d| d.last_maximized = false;
+                    if (g_window_unmaximize_handler) |h| h(handle);
+                }
                 return;
             }
         }
@@ -2242,7 +2286,12 @@ pub const CefNative = struct {
         const self = fromCtx(ctx);
         assertUiThread();
         if (self.browsers.get(handle)) |entry| {
-            if (entry.views_window) |views_window| return viewsWindowIsMinimized(views_window);
+            if (entry.views_window) |views_window| {
+                if (entry.views_window_delegate) |delegate| {
+                    return delegate.last_minimized or viewsWindowIsMinimized(views_window);
+                }
+                return viewsWindowIsMinimized(views_window);
+            }
         }
         return callOnNsBool(ctx, handle, suji_window_lifecycle_is_minimized);
     }
@@ -2250,7 +2299,12 @@ pub const CefNative = struct {
         const self = fromCtx(ctx);
         assertUiThread();
         if (self.browsers.get(handle)) |entry| {
-            if (entry.views_window) |views_window| return viewsWindowIsMaximized(views_window);
+            if (entry.views_window) |views_window| {
+                if (entry.views_window_delegate) |delegate| {
+                    return delegate.last_maximized or viewsWindowIsMaximized(views_window);
+                }
+                return viewsWindowIsMaximized(views_window);
+            }
         }
         return callOnNsBool(ctx, handle, suji_window_lifecycle_is_maximized);
     }
