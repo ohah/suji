@@ -58,14 +58,34 @@ type Handler = (data: any) => any;
 handle('ping', (data) => ({ msg: 'pong', echo: data }));
 ```
 
-### `invoke(backend, request) → Promise<string>`
+### `invoke(backend, request) → Promise<T>`
 
 비동기 크로스 호출. 핸들러 **외부**에서 사용 (event loop 블록 X).
 
-### `invokeSync(backend, request) → string`
+`request.cmd`가 `SujiHandlers`에 등록된 값이면 req/res 타입을 추론한다. 등록되지
+않은 요청은 기존처럼 `invoke<T>()` generic으로 사용할 수 있다.
+
+```ts
+import { invoke, call } from '@suji/node';
+
+declare module '@suji/node' {
+  interface SujiHandlers {
+    ping: { req: void; res: { msg: string } };
+    greet: { req: { name: string }; res: string };
+  }
+}
+
+const ping = await invoke('zig', { cmd: 'ping' });              // { msg: string }
+const greet = await invoke('zig', { cmd: 'greet', name: 'Suji' }); // string
+const same = await call('zig', 'greet', { name: 'Suji' });      // string
+const raw = await invoke<{ ok: boolean }>('zig', { cmd: 'custom' });
+```
+
+### `invokeSync(backend, request) → T`
 
 동기 크로스 호출. 핸들러 **내부** 전용. Node main thread가 block되는 동안
-재진입 가능 (deadlock 방지 메커니즘 내장).
+재진입 가능 (deadlock 방지 메커니즘 내장). `invoke`와 동일하게 `SujiHandlers`
+기반 타입 추론을 지원하며, `callSync(backend, cmd, data?)` 편의 래퍼도 제공한다.
 
 ### `send(channel, data)`
 

@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, type InvokeEvent } from './index';
+import { handle, invoke, invokeSync, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -65,6 +65,22 @@ describe('handle — 2-arity (InvokeEvent)', () => {
     registered['ping']('{}', { window: { id: 9, name: 'x', url: null, is_main_frame: null } });
     // 1-arity — 두 번째 인자 생략
     expect(h.mock.calls[0].length).toBe(1);
+  });
+});
+
+describe('invoke / invokeSync', () => {
+  it('invoke serializes request and parses JSON response', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"ok":true}');
+    const result = await invoke<{ ok: boolean }>('zig', { cmd: 'ping' });
+    expect(result).toEqual({ ok: true });
+    expect(bridge.invoke).toHaveBeenCalledWith('zig', '{"cmd":"ping"}');
+  });
+
+  it('invokeSync serializes request and returns raw string when response is not JSON', () => {
+    bridge.invokeSync.mockReturnValueOnce('raw-response');
+    const result = invokeSync<string>('zig', { cmd: 'raw' });
+    expect(result).toBe('raw-response');
+    expect(bridge.invokeSync).toHaveBeenCalledWith('zig', '{"cmd":"raw"}');
   });
 });
 

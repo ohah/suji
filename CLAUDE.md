@@ -37,6 +37,7 @@ bash tests/e2e/run-node-run.sh          # suji run main.js embedded Node.js CLI
 bash tests/e2e/run-types-cli.sh         # suji types stdout/--out schema generation
 bash tests/e2e/run-rust-types-helper.sh # Rust SDK SujiHandlers .d.ts helper
 bash tests/e2e/run-go-types-helper.sh   # Go SDK SujiHandlers .d.ts helper
+bash tests/e2e/run-node-types-helper.sh # Node SDK SujiHandlers typed invoke/call consumer
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView/z-order/lifecycle)
@@ -87,9 +88,10 @@ suji types [--out <path>]   # zig 백엔드 .schema() → SujiHandlers .d.ts (st
 augment 불요). 백엔드 빌드→dlopen→`backend_dump_schema`(comptime `typeToTs`).
 미지정 시 stdout(`suji types > src/suji.d.ts`), `--out`이면 파일. Rust는
 `suji::typescript::SujiHandlers` + `#[derive(suji::Type)]`로 수동 등록한
-req/res 타입에서 동일한 module augmentation을 생성. Go는 `suji.NewTSHandlers()`
-+ struct/json tag reflection으로 수동 등록한 req/res 타입에서 생성. Node=수동
-augment(runtime 타입메타 부재 — 정직 한계).
+req/res 타입에서 동일한 module augmentation을 생성. Go는 `suji.NewTSHandlers()`와
+struct/json tag reflection으로 수동 등록한 req/res 타입에서 생성. Node는 수동
+augment를 `invoke/invokeSync/call/callSync`가 소비한다(runtime 타입메타 부재 —
+정직 한계).
 
 ## API (Electron 스타일)
 
@@ -464,6 +466,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //   const rows = await sqlite.query(db, "SELECT * FROM t WHERE n=?", ["x"]); await sqlite.close(db)
 
 // TypeScript type-safe — `@suji/node`도 SujiHandlers augment 지원.
+//   await invoke('zig', { cmd: 'greet', name: 'x' }) // res: string 추론
 //   await call('zig', 'greet', { name: 'x' })   // res: string 추론
 //   const v = callSync('zig', 'ping')           // sync 변형, res: { msg: string } 추론
 //   await invoke<T>('zig', { cmd: 'foo' })      // 기존 untyped 그대로 동작 (backwards compat)

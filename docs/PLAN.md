@@ -1573,7 +1573,10 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     Go는 `suji.NewTSHandlers()` helper로 struct/json tag reflection 기반 수동 등록
     경로를 추가했고, Go SDK 단위 테스트 + 임시 외부 Go consumer E2E
     (`tests/e2e/run-go-types-helper.sh`, GitHub Actions macOS E2E)로 고정.
-    Node=수동 augment 는 후속(런타임 타입메타 부재).
+    Node는 수동 augment를 `invoke/invokeSync/call/callSync`가 소비하도록 확장했고,
+    Node SDK type/unit 테스트 + 임시 외부 TS consumer E2E
+    (`tests/e2e/run-node-types-helper.sh`, GitHub Actions macOS E2E)로 고정.
+    런타임 타입메타 부재 때문에 Node 자동 생성은 범위 밖.
 21. 🟡 **`desktopCapturer` / `crashReporter`** — 화면 캡처 / 크래시 리포팅 (crashReporter 1차 runtime API + CEF cfg, 실제 crash upload/DB는 후속)
 22. ✅ **SQLite plugin** — `plugins/sqlite` 공식 플러그인 완료. 벤더 SQLite 3.51.0 + Zig/Rust/Go/JS/Node 래퍼 + `zig build test-sqlite` + 모바일 host harness.
 23. ✅ **session 쿠키 풀 셋** — `setCookie` / `getCookies` / `removeCookies` 추가

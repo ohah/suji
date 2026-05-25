@@ -1,13 +1,14 @@
 /**
- * Type-only test — Node SDK call/callSync가 SujiHandlers augment를 추론.
+ * Type-only test — Node SDK invoke/invokeSync/call/callSync가 SujiHandlers augment를 추론.
  * tsc 컴파일 통과 = pass.
  */
-import { call, callSync, invoke, BrowserWindow } from "./index";
+import { call, callSync, invoke, invokeSync, BrowserWindow } from "./index";
 
 declare module "./index" {
   interface SujiHandlers {
     ping: { req: void; res: { msg: string } };
     greet: { req: { name: string }; res: string };
+    add: { req: { a: number; b: number }; res: number };
   }
 }
 
@@ -27,9 +28,22 @@ async function _compileChecks() {
   const s2 = callSync("zig", "greet", { name: "x" });
   const _sgreet: string = s2;
 
+  // raw invoke도 request.cmd 기준으로 req/res 추론.
+  const r3 = await invoke("zig", { cmd: "ping" });
+  const _imsg: string = r3.msg;
+
+  const r4 = await invoke("zig", { cmd: "greet", name: "Suji" });
+  const _igreet: string = r4;
+
+  const r5 = await invoke("zig", { cmd: "add", a: 1, b: 2 });
+  const _isum: number = r5;
+
+  const s3 = invokeSync("zig", { cmd: "greet", name: "x" });
+  const _isync: string = s3;
+
   // untyped invoke는 그대로 동작 (backwards compat).
-  const r3 = await invoke<{ ok: boolean }>("zig", { cmd: "anything" });
-  const _ok: boolean = r3.ok;
+  const r6 = await invoke<{ ok: boolean }>("zig", { cmd: "anything" });
+  const _ok: boolean = r6.ok;
 
   // @ts-expect-error - 'greet'은 name 필수, 인자 누락.
   await call("zig", "greet");
@@ -43,7 +57,17 @@ async function _compileChecks() {
   // @ts-expect-error - res 타입 mismatch.
   const _wrong: number = await call("zig", "greet", { name: "x" });
 
-  void _msg; void _greet; void _smsg; void _sgreet; void _ok; void _wrong;
+  // @ts-expect-error - raw invoke도 req 누락 시 typed string으로 쓸 수 없어야 한다.
+  const _badRawMissing: string = await invoke("zig", { cmd: "greet" });
+
+  // @ts-expect-error - raw invoke도 field 이름 오타면 typed string으로 쓸 수 없어야 한다.
+  const _badRawTypo: string = await invoke("zig", { cmd: "greet", Name: "x" });
+
+  // @ts-expect-error - raw invoke res 타입 mismatch.
+  const _badRawRes: number = await invoke("zig", { cmd: "greet", name: "x" });
+
+  void _msg; void _greet; void _smsg; void _sgreet; void _imsg; void _igreet; void _isum;
+  void _isync; void _ok; void _wrong; void _badRawMissing; void _badRawTypo; void _badRawRes;
 }
 void _compileChecks;
 

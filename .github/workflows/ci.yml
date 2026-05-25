@@ -51,6 +51,12 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Install Bun
+        if: runner.os == 'macOS'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -127,6 +133,14 @@ jobs:
         if: runner.os == 'macOS'
         working-directory: sdks/suji-go
         run: go test ./...
+
+      - name: Test Node SDK
+        if: runner.os == 'macOS'
+        working-directory: packages/suji-node
+        run: |
+          npm install --include=dev --ignore-scripts
+          npm run build
+          bun test src/index.test.ts tests/sdk.test.ts
 
       - name: Build state plugin
         working-directory: plugins/state/zig
