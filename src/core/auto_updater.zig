@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const CheckError = error{
     MissingCurrentVersion,
@@ -20,6 +21,17 @@ pub const DownloadError = error{
     HttpStatus,
 };
 
+pub const InstallError = error{
+    OutOfMemory,
+    UnsupportedPlatform,
+    InvalidPath,
+    SourceNotFound,
+    SamePath,
+    HelperPathTooLong,
+    InvalidPid,
+    Write,
+};
+
 pub const CheckResult = struct {
     update_available: bool,
     current_version: []const u8,
@@ -37,6 +49,14 @@ pub const DownloadResult = struct {
     size: u64,
 };
 
+pub const QuitAndInstallOptions = struct {
+    source_path: []const u8,
+    target_path: []const u8,
+    helper_path: []const u8,
+    wait_pid: i64,
+    relaunch: bool = true,
+};
+
 pub fn errorCode(err: anyerror) []const u8 {
     return switch (err) {
         error.MissingCurrentVersion => "missing_current_version",
@@ -51,6 +71,12 @@ pub fn errorCode(err: anyerror) []const u8 {
         error.Write => "write",
         error.Download => "download",
         error.HttpStatus => "http_status",
+        error.UnsupportedPlatform => "unsupported_platform",
+        error.InvalidPath => "invalid_path",
+        error.SourceNotFound => "source_not_found",
+        error.SamePath => "same_path",
+        error.HelperPathTooLong => "helper_path_too_long",
+        error.InvalidPid => "invalid_pid",
         else => "updater_error",
     };
 }
@@ -320,12 +346,146 @@ pub fn sha256Equal(actual: []const u8, expected: []const u8) bool {
     return true;
 }
 
+pub fn defaultQuitAndInstallHelperPath(source_path: []const u8, out: []u8) InstallError![]const u8 {
+    if (!isValidInstallPath(source_path)) return error.InvalidPath;
+    return std.fmt.bufPrint(out, "{s}.quit-install.sh", .{source_path}) catch error.HelperPathTooLong;
+}
+
+pub fn validateQuitAndInstallOptions(io: std.Io, opts: QuitAndInstallOptions) InstallError!void {
+    if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
+    if (!isValidInstallPath(opts.source_path) or
+        !isValidInstallPath(opts.target_path) or
+        !isValidInstallPath(opts.helper_path))
+    {
+        return error.InvalidPath;
+    }
+    if (opts.wait_pid <= 0) return error.InvalidPid;
+    if (std.mem.eql(u8, opts.source_path, opts.target_path)) return error.SamePath;
+    if (std.mem.eql(u8, opts.helper_path, opts.source_path) or
+        std.mem.eql(u8, opts.helper_path, opts.target_path))
+    {
+        return error.InvalidPath;
+    }
+    if (!pathExists(io, opts.source_path)) return error.SourceNotFound;
+}
+
+pub fn renderQuitAndInstallScript(
+    allocator: std.mem.Allocator,
+    opts: QuitAndInstallOptions,
+) InstallError![]u8 {
+    if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
+    if (!isValidInstallPath(opts.source_path) or
+        !isValidInstallPath(opts.target_path) or
+        !isValidInstallPath(opts.helper_path))
+    {
+        return error.InvalidPath;
+    }
+    if (opts.wait_pid <= 0) return error.InvalidPid;
+
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(allocator);
+
+    try out.appendSlice(allocator,
+        \\#!/bin/sh
+        \\set -eu
+        \\SOURCE=
+    );
+    try appendShellSingleQuoted(allocator, &out, opts.source_path);
+    try out.appendSlice(allocator, "\nTARGET=");
+    try appendShellSingleQuoted(allocator, &out, opts.target_path);
+    try out.appendSlice(allocator, "\nWAIT_PID=");
+    try out.print(allocator, "{d}", .{opts.wait_pid});
+    try out.appendSlice(allocator, "\nRELAUNCH=");
+    try out.appendSlice(allocator, if (opts.relaunch) "1" else "0");
+    try out.appendSlice(allocator,
+        \\
+        \\BACKUP="${TARGET}.suji-update-backup-$$"
+        \\cleanup() { rm -f "$0"; }
+        \\trap cleanup EXIT
+        \\while kill -0 "$WAIT_PID" 2>/dev/null; do
+        \\  sleep 0.1
+        \\done
+        \\if [ ! -e "$SOURCE" ]; then
+        \\  exit 2
+        \\fi
+        \\rm -rf "$BACKUP"
+        \\if [ -e "$TARGET" ]; then
+        \\  mv "$TARGET" "$BACKUP"
+        \\fi
+        \\if ! mv "$SOURCE" "$TARGET"; then
+        \\  if [ -e "$BACKUP" ]; then
+        \\    mv "$BACKUP" "$TARGET"
+        \\  fi
+        \\  exit 3
+        \\fi
+        \\rm -rf "$BACKUP"
+        \\if [ "$RELAUNCH" = "1" ]; then
+        \\  case "$TARGET" in
+        \\    *.app) open -n "$TARGET" >/dev/null 2>&1 || true ;;
+        \\    *) if [ -x "$TARGET" ]; then "$TARGET" >/dev/null 2>&1 & fi ;;
+        \\  esac
+        \\fi
+        \\
+    );
+
+    return out.toOwnedSlice(allocator);
+}
+
+pub fn writeQuitAndInstallScript(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    opts: QuitAndInstallOptions,
+) InstallError!void {
+    try validateQuitAndInstallOptions(io, opts);
+    const script = try renderQuitAndInstallScript(allocator, opts);
+    defer allocator.free(script);
+
+    deleteFileIfExists(io, opts.helper_path);
+    var file = createFileWrite(io, opts.helper_path) catch return error.Write;
+    defer file.close(io);
+
+    var writer_buf: [8192]u8 = undefined;
+    var writer = file.writer(io, &writer_buf);
+    writer.interface.writeAll(script) catch return error.Write;
+    writer.interface.flush() catch return error.Write;
+}
+
 fn isValidDestinationPath(path: []const u8) bool {
     if (path.len == 0 or path.len > 4096) return false;
     for (path) |c| {
         if (c == 0) return false;
     }
     return true;
+}
+
+fn isValidInstallPath(path: []const u8) bool {
+    if (!isValidDestinationPath(path)) return false;
+    return std.fs.path.isAbsolute(path);
+}
+
+fn pathExists(io: std.Io, path: []const u8) bool {
+    if (std.fs.path.isAbsolute(path)) {
+        std.Io.Dir.accessAbsolute(io, path, .{}) catch return false;
+        return true;
+    }
+    std.Io.Dir.cwd().access(io, path, .{}) catch return false;
+    return true;
+}
+
+fn appendShellSingleQuoted(
+    allocator: std.mem.Allocator,
+    out: *std.ArrayList(u8),
+    value: []const u8,
+) !void {
+    try out.append(allocator, '\'');
+    for (value) |c| {
+        if (c == '\'') {
+            try out.appendSlice(allocator, "'\\''");
+        } else {
+            try out.append(allocator, c);
+        }
+    }
+    try out.append(allocator, '\'');
 }
 
 fn writeUrlToFile(
@@ -584,4 +744,76 @@ test "downloadArtifact checksum mismatch does not publish destination" {
 
     try std.testing.expect(!result.success);
     try std.testing.expectError(error.FileNotFound, std.Io.Dir.cwd().openFile(io, dest, .{}));
+}
+
+test "quitAndInstall helper script quotes paths and encodes relaunch policy" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    const script = try renderQuitAndInstallScript(std.testing.allocator, .{
+        .source_path = "/tmp/Suji Update's App.app",
+        .target_path = "/Applications/Suji App.app",
+        .helper_path = "/tmp/suji-helper.sh",
+        .wait_pid = 12345,
+        .relaunch = false,
+    });
+    defer std.testing.allocator.free(script);
+
+    try std.testing.expect(std.mem.indexOf(u8, script, "SOURCE='/tmp/Suji Update'\\''s App.app'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "TARGET='/Applications/Suji App.app'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "WAIT_PID=12345") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "RELAUNCH=0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "while kill -0 \"$WAIT_PID\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "mv \"$SOURCE\" \"$TARGET\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "open -n \"$TARGET\"") != null);
+}
+
+test "quitAndInstall validates source and writes helper script" {
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var base_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const base = try std.fmt.bufPrint(&base_buf, "/tmp/suji-auto-updater-install-{s}", .{&tmp.sub_path});
+    try std.Io.Dir.cwd().createDirPath(io, base);
+    defer std.Io.Dir.cwd().deleteTree(io, base) catch {};
+
+    var source_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const source = try std.fmt.bufPrint(&source_buf, "{s}/staged.bin", .{base});
+    var file = try std.Io.Dir.createFileAbsolute(io, source, .{});
+    var writer_buf: [64]u8 = undefined;
+    var writer = file.writer(io, &writer_buf);
+    try writer.interface.writeAll("new app bytes");
+    try writer.interface.flush();
+    file.close(io);
+
+    var target_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const target = try std.fmt.bufPrint(&target_buf, "{s}/current.bin", .{base});
+    var helper_buf: [std.Io.Dir.max_path_bytes + 32]u8 = undefined;
+    const helper = try defaultQuitAndInstallHelperPath(source, &helper_buf);
+
+    try writeQuitAndInstallScript(std.testing.allocator, io, .{
+        .source_path = source,
+        .target_path = target,
+        .helper_path = helper,
+        .wait_pid = 1,
+        .relaunch = true,
+    });
+    try std.Io.Dir.accessAbsolute(io, helper, .{});
+
+    try std.testing.expectError(error.SourceNotFound, validateQuitAndInstallOptions(io, .{
+        .source_path = "/tmp/suji-missing-staged-update",
+        .target_path = target,
+        .helper_path = helper,
+        .wait_pid = 1,
+        .relaunch = false,
+    }));
+    try std.testing.expectError(error.SamePath, validateQuitAndInstallOptions(io, .{
+        .source_path = source,
+        .target_path = source,
+        .helper_path = helper,
+        .wait_pid = 1,
+        .relaunch = false,
+    }));
 }

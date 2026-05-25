@@ -862,6 +862,19 @@ export interface AutoUpdaterDownloadResult {
     sha256: string;
     size: number;
 }
+export interface AutoUpdaterQuitAndInstallOptions {
+    sha256?: string;
+    target?: string;
+    relaunch?: boolean;
+    helperPath?: string;
+}
+export interface AutoUpdaterQuitAndInstallResult {
+    success: boolean;
+    path: string;
+    target: string;
+    helperPath: string;
+    relaunch: boolean;
+}
 export declare const autoUpdater: {
     /** manifest 객체 또는 manifest URL을 확인해 새 버전 여부를 반환. */
     checkForUpdates(input: string | AutoUpdaterManifest, options?: AutoUpdaterCheckOptions): Promise<AutoUpdaterCheckResult>;
@@ -869,6 +882,8 @@ export declare const autoUpdater: {
     verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult>;
     /** artifact URL 또는 manifest 객체를 지정 경로로 다운로드하고 optional SHA-256을 검증. */
     downloadArtifact(input: string | AutoUpdaterManifest, path: string, options?: AutoUpdaterDownloadOptions): Promise<AutoUpdaterDownloadResult>;
+    /** staged artifact를 앱 종료 후 target으로 교체하고 quit을 요청. */
+    quitAndInstall(input: string | AutoUpdaterDownloadResult, options?: AutoUpdaterQuitAndInstallOptions): Promise<AutoUpdaterQuitAndInstallResult>;
 };
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {

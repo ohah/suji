@@ -3207,11 +3207,11 @@ const win_screen = if (builtin.os.tag == .windows) struct {
         w.print(
             "{{\"index\":{d},\"isPrimary\":{},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"visibleX\":{d},\"visibleY\":{d},\"visibleWidth\":{d},\"visibleHeight\":{d},\"scaleFactor\":{d}}}",
             .{
-                index,                                    is_primary,
-                info.rcMonitor.left,                      info.rcMonitor.top,
+                index,                                      is_primary,
+                info.rcMonitor.left,                        info.rcMonitor.top,
                 info.rcMonitor.right - info.rcMonitor.left, info.rcMonitor.bottom - info.rcMonitor.top,
-                info.rcWork.left,                         info.rcWork.top,
-                info.rcWork.right - info.rcWork.left,     info.rcWork.bottom - info.rcWork.top,
+                info.rcWork.left,                           info.rcWork.top,
+                info.rcWork.right - info.rcWork.left,       info.rcWork.bottom - info.rcWork.top,
                 scale,
             },
         ) catch return false;
@@ -6765,6 +6765,13 @@ pub fn shutdown() void {
 /// **명시적 idempotent**: 두 번째 호출은 즉시 no-op. user code(suji.on("window:all-closed"))
 /// + 코어 자동 quit(`app.quitOnAllWindowsClosed: true`) 두 경로가 동시에 발화해도 안전.
 var g_quit_called: bool = false;
+var g_quit_after_next_response: bool = false;
+
+/// Frontend IPC handlers that must return a final response before quitting can
+/// request this; browser IPC delivery calls quit immediately after send.
+pub fn quitAfterNextResponse() void {
+    g_quit_after_next_response = true;
+}
 
 pub fn quit() void {
     if (g_quit_called) return;
@@ -7847,6 +7854,10 @@ fn handleBrowserInvoke(
 
     // 응답 CefProcessMessage 생성
     sendInvokeResponse(browser, frame, seq_id, success, result);
+    if (g_quit_after_next_response) {
+        g_quit_after_next_response = false;
+        quit();
+    }
     return 1;
 }
 
@@ -8999,7 +9010,7 @@ pub var g_csp_enabled: bool = true;
 /// 사용자가 csp 미지정 시 default CSP를 빌드. iframe allowed origins는 frame-src에 합성.
 /// allocator 소유 — 결과는 process lifetime 유지 (config arena와 연결). 빈 origin 배열이면
 /// `frame-src 'none'` (iframe 완전 차단, default safe).
-pub fn buildDefaultCsp(allocator: std.mem.Allocator, iframe_allowed_origins: []const []const u8) ![]const u8 {
+pub fn buildDefaultCsp(allocator: std.mem.Allocator, iframe_allowed_origins: []const []const u8) ![]u8 {
     var frame_src_buf: std.ArrayList(u8) = .empty;
     defer frame_src_buf.deinit(allocator);
     if (iframe_allowed_origins.len == 0) {

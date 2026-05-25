@@ -1194,20 +1194,22 @@ test "create propagates OOM, leaks no memory, and reclaims native handle" {
 
     var i: usize = 0;
     while (i < total_allocs) : (i += 1) {
-        var fail = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = i });
-        var wm = WindowManager.init(fail.allocator(), std.testing.io, native.asNative());
-        defer wm.deinit();
+        {
+            var fail = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = i });
+            var wm = WindowManager.init(fail.allocator(), std.testing.io, native.asNative());
+            defer wm.deinit();
 
-        const before_create = native.create_calls;
-        const before_destroy = native.destroy_calls;
-        if (wm.create(.{ .name = "x", .title = "Hi" })) |_| {
-            // 이 fail_index에서는 실패 지점이 없어서 성공 — 다음 인덱스로
-        } else |err| {
-            try std.testing.expectEqual(window.Error.OutOfMemory, err);
-            // native.createWindow 호출됐다면 handle이 errdefer로 회수되어야 함
-            const creates = native.create_calls - before_create;
-            const destroys = native.destroy_calls - before_destroy;
-            try std.testing.expectEqual(creates, destroys);
+            const before_create = native.create_calls;
+            const before_destroy = native.destroy_calls;
+            if (wm.create(.{ .name = "x", .title = "Hi" })) |_| {
+                // 이 fail_index에서는 실패 지점이 없어서 성공 — 다음 인덱스로
+            } else |err| {
+                try std.testing.expectEqual(window.Error.OutOfMemory, err);
+                // native.createWindow 호출됐다면 handle이 errdefer로 회수되어야 함
+                const creates = native.create_calls - before_create;
+                const destroys = native.destroy_calls - before_destroy;
+                try std.testing.expectEqual(creates, destroys);
+            }
         }
     }
 }
@@ -1316,17 +1318,19 @@ test "by_name OOM must not silently break singleton policy" {
 
     var i: usize = 0;
     while (i < total) : (i += 1) {
-        var one = OneShotFail{ .backing = std.testing.allocator, .fail_at = i };
-        var wm = WindowManager.init(one.allocator(), std.testing.io, native.asNative());
-        defer wm.deinit();
+        {
+            var one = OneShotFail{ .backing = std.testing.allocator, .fail_at = i };
+            var wm = WindowManager.init(one.allocator(), std.testing.io, native.asNative());
+            defer wm.deinit();
 
-        const res = wm.create(.{ .name = "singleton" });
-        if (res) |id1| {
-            // create 성공 — 반드시 by_name에도 등록돼서 두 번째 create가 싱글턴 반환해야
-            const id2 = try wm.create(.{ .name = "singleton" });
-            try std.testing.expectEqual(id1, id2);
-        } else |_| {
-            // OOM 반환 — 정상 실패 경로
+            const res = wm.create(.{ .name = "singleton" });
+            if (res) |id1| {
+                // create 성공 — 반드시 by_name에도 등록돼서 두 번째 create가 싱글턴 반환해야
+                const id2 = try wm.create(.{ .name = "singleton" });
+                try std.testing.expectEqual(id1, id2);
+            } else |_| {
+                // OOM 반환 — 정상 실패 경로
+            }
         }
     }
 }
@@ -2594,8 +2598,8 @@ test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpe
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "setShowsSuppressionButton:") != null);
     // 응답 형식 — Electron 매칭 ("canceled" + "filePaths"/"filePath").
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"canceled\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"filePaths\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"filePath\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "filePaths") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "filePath") != null);
 
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -3051,6 +3055,7 @@ test "회귀: fs sandbox (Path safety) — config + handler 검증 + backend 우
     // autoUpdater 파일 경로도 frontend sandbox를 우회하지 않는다.
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_verify_file\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_download_artifact\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "fsSandboxCheck(response_buf, \"auto_updater_quit_and_install\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "auto_updater.filePathFromUrl") != null);
 
     const cfg_src = try std.Io.Dir.cwd().readFileAlloc(

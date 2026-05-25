@@ -1124,6 +1124,19 @@ export const autoUpdater = {
             sha256,
         });
     },
+    /** staged artifact를 앱 종료 후 target으로 교체하고 quit을 요청. */
+    async quitAndInstall(input, options = {}) {
+        const path = typeof input === "string" ? input : input.path;
+        const sha256 = options.sha256 ?? (typeof input === "string" ? "" : input.sha256 ?? "");
+        return coreCall({
+            cmd: "auto_updater_quit_and_install",
+            path,
+            target: options.target ?? "",
+            sha256,
+            relaunch: options.relaunch ?? true,
+            helperPath: options.helperPath ?? "",
+        });
+    },
 };
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */

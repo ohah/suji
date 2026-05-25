@@ -118,6 +118,11 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-system-integration.log
         run: bash tests/e2e/run-system-integration.sh
 
+      - name: E2E — autoUpdater quitAndInstall
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-auto-updater-quit-install.log
+        run: bash tests/e2e/run-auto-updater-quit-install.sh
+
       # 첫 단계: 가벼운 fs e2e만. 안정화되면 더 추가.
       - name: E2E — fs
         env:

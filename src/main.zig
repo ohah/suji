@@ -993,6 +993,8 @@ fn runDev(allocator: std.mem.Allocator) !void {
     };
     defer config.deinit();
     setGlobalConfig(&config);
+    var owned_csp: ?[]u8 = null;
+    defer if (owned_csp) |csp| allocator.free(csp);
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
@@ -1019,8 +1021,10 @@ fn runDev(allocator: std.mem.Allocator) !void {
         cef.setCspValue(csp_val);
     } else blk: {
         const origins_slice = allocator.alloc([]const u8, config.security.iframe_allowed_origins.len) catch break :blk;
+        defer allocator.free(origins_slice);
         for (config.security.iframe_allowed_origins, 0..) |s, i| origins_slice[i] = s;
         const csp = cef.buildDefaultCsp(allocator, origins_slice) catch break :blk;
+        owned_csp = csp;
         cef.setCspValue(csp);
     }
 
@@ -1178,6 +1182,8 @@ fn runProd(allocator: std.mem.Allocator) !void {
     };
     defer config.deinit();
     setGlobalConfig(&config);
+    var owned_csp: ?[]u8 = null;
+    defer if (owned_csp) |csp| allocator.free(csp);
 
     std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
 
@@ -1204,8 +1210,10 @@ fn runProd(allocator: std.mem.Allocator) !void {
         cef.setCspValue(csp_val);
     } else blk: {
         const origins_slice = allocator.alloc([]const u8, config.security.iframe_allowed_origins.len) catch break :blk;
+        defer allocator.free(origins_slice);
         for (config.security.iframe_allowed_origins, 0..) |s, i| origins_slice[i] = s;
         const csp = cef.buildDefaultCsp(allocator, origins_slice) catch break :blk;
+        owned_csp = csp;
         cef.setCspValue(csp);
     }
 
@@ -2818,6 +2826,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "auto_updater_download_artifact")) {
         return handleAutoUpdaterDownloadArtifact(req_clean, response_buf);
     }
+    if (std.mem.eql(u8, cmd, "auto_updater_quit_and_install")) {
+        return handleAutoUpdaterQuitAndInstall(req_clean, response_buf);
+    }
 
     // app.requestUserAttention — dock bounce. critical=true는 활성화까지 반복, false는 1회.
     if (std.mem.eql(u8, cmd, "app_attention_request")) {
@@ -3428,6 +3439,127 @@ fn handleAutoUpdaterDownloadArtifact(req_clean: []const u8, response_buf: []u8) 
         "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_download_artifact\",\"success\":{},\"path\":\"{s}\",\"sha256\":\"{s}\",\"size\":{d}}}",
         .{ result.success, path_esc[0..path_n], sha_esc[0..sha_n], result.size },
     ) catch null;
+}
+
+fn handleAutoUpdaterQuitAndInstall(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    if (builtin.os.tag == .windows) {
+        return coreError(response_buf, "auto_updater_quit_and_install", "unsupported_platform");
+    }
+
+    var source_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    var target_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    var helper_buf: [FS_MAX_PATH_BYTES + 64]u8 = undefined;
+    var sha_buf: [128]u8 = undefined;
+
+    const source = blk: {
+        if (unescapeField(req_clean, "path", &source_buf, false)) |p| {
+            if (p.len > 0) break :blk p;
+        } else return coreError(response_buf, "auto_updater_quit_and_install", "path");
+        if (unescapeField(req_clean, "source", &source_buf, false)) |p| {
+            if (p.len > 0) break :blk p;
+        } else return coreError(response_buf, "auto_updater_quit_and_install", "path");
+        return coreError(response_buf, "auto_updater_quit_and_install", "path");
+    };
+    const explicit_target = unescapeField(req_clean, "target", &target_buf, false) orelse
+        return coreError(response_buf, "auto_updater_quit_and_install", "target");
+    const target = if (explicit_target.len > 0)
+        explicit_target
+    else
+        (defaultAutoUpdaterInstallTarget(&target_buf) orelse
+            return coreError(response_buf, "auto_updater_quit_and_install", "target"));
+    const explicit_helper = unescapeField(req_clean, "helperPath", &helper_buf, false) orelse
+        return coreError(response_buf, "auto_updater_quit_and_install", "helper_path");
+    const helper = if (explicit_helper.len > 0)
+        explicit_helper
+    else
+        (auto_updater.defaultQuitAndInstallHelperPath(source, &helper_buf) catch |err|
+            return coreError(response_buf, "auto_updater_quit_and_install", auto_updater.errorCode(err)));
+    const expected = unescapeField(req_clean, "sha256", &sha_buf, false) orelse
+        return coreError(response_buf, "auto_updater_quit_and_install", "sha256");
+    if (!auto_updater.isValidSha256Hex(expected)) {
+        return coreError(response_buf, "auto_updater_quit_and_install", "invalid_sha256");
+    }
+
+    if (!g_in_backend_invoke) {
+        if (fsSandboxCheck(response_buf, "auto_updater_quit_and_install", source)) |err| return err;
+        if (explicit_target.len > 0) {
+            if (fsSandboxCheck(response_buf, "auto_updater_quit_and_install", target)) |err| return err;
+        }
+        if (fsSandboxCheck(response_buf, "auto_updater_quit_and_install", helper)) |err| return err;
+    }
+
+    if (expected.len > 0) {
+        var actual_buf: [64]u8 = undefined;
+        const actual = auto_updater.sha256File(runtime.io, source, &actual_buf) catch
+            return coreError(response_buf, "auto_updater_quit_and_install", "read");
+        if (!auto_updater.sha256Equal(actual, expected)) {
+            return coreError(response_buf, "auto_updater_quit_and_install", "checksum_mismatch");
+        }
+    }
+
+    const relaunch = util.extractJsonBool(req_clean, "relaunch") orelse true;
+    auto_updater.writeQuitAndInstallScript(runtime.gpa, runtime.io, .{
+        .source_path = source,
+        .target_path = target,
+        .helper_path = helper,
+        .wait_pid = getCurrentPid(),
+        .relaunch = relaunch,
+    }) catch |err| {
+        return coreError(response_buf, "auto_updater_quit_and_install", auto_updater.errorCode(err));
+    };
+
+    launchQuitAndInstallHelper(helper) catch {
+        return coreError(response_buf, "auto_updater_quit_and_install", "spawn");
+    };
+
+    var source_esc: [8192]u8 = undefined;
+    var target_esc: [8192]u8 = undefined;
+    var helper_esc: [8192]u8 = undefined;
+    const source_n = util.escapeJsonStrFull(source, &source_esc) orelse
+        return coreError(response_buf, "auto_updater_quit_and_install", "encode");
+    const target_n = util.escapeJsonStrFull(target, &target_esc) orelse
+        return coreError(response_buf, "auto_updater_quit_and_install", "encode");
+    const helper_n = util.escapeJsonStrFull(helper, &helper_esc) orelse
+        return coreError(response_buf, "auto_updater_quit_and_install", "encode");
+    const resp = std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_quit_and_install\",\"success\":true,\"path\":\"{s}\",\"target\":\"{s}\",\"helperPath\":\"{s}\",\"relaunch\":{}}}",
+        .{ source_esc[0..source_n], target_esc[0..target_n], helper_esc[0..helper_n], relaunch },
+    ) catch return null;
+
+    if (g_in_backend_invoke) {
+        cef.quit();
+    } else {
+        cef.quitAfterNextResponse();
+    }
+    return resp;
+}
+
+fn defaultAutoUpdaterInstallTarget(buf: []u8) ?[]const u8 {
+    if (builtin.os.tag == .macos) {
+        const bundle_path = cef.appGetBundlePath(buf);
+        if (std.mem.endsWith(u8, bundle_path, ".app")) return bundle_path;
+    } else if (builtin.os.tag == .linux) {
+        if (runtime.env("APPIMAGE")) |appimage| {
+            if (std.fs.path.isAbsolute(appimage) and appimage.len <= buf.len) {
+                @memcpy(buf[0..appimage.len], appimage);
+                return buf[0..appimage.len];
+            }
+        }
+    }
+
+    const exe_len = std.process.executablePath(runtime.io, buf) catch return null;
+    return buf[0..exe_len];
+}
+
+fn launchQuitAndInstallHelper(helper_path: []const u8) !void {
+    const child = try std.process.spawn(runtime.io, .{
+        .argv = &.{ "/bin/sh", helper_path },
+        .stdin = .ignore,
+        .stdout = .ignore,
+        .stderr = .ignore,
+    });
+    _ = child;
 }
 
 const FS_MAX_TEXT_BYTES: usize = 8192;

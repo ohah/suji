@@ -339,6 +339,33 @@ describe('autoUpdater', () => {
       sha256: '2'.repeat(64),
     }));
   });
+
+  it('quitAndInstall sends staged path, target, hash and relaunch policy', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true,"path":"/tmp/suji.zip","target":"/Applications/Suji.app","helperPath":"/tmp/suji.zip.quit-install.sh","relaunch":false}');
+    expect(await autoUpdater.quitAndInstall({
+      success: true,
+      path: '/tmp/suji.zip',
+      sha256: '3'.repeat(64),
+      size: 12,
+    }, {
+      target: '/Applications/Suji.app',
+      relaunch: false,
+    })).toEqual({
+      success: true,
+      path: '/tmp/suji.zip',
+      target: '/Applications/Suji.app',
+      helperPath: '/tmp/suji.zip.quit-install.sh',
+      relaunch: false,
+    });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', JSON.stringify({
+      cmd: 'auto_updater_quit_and_install',
+      path: '/tmp/suji.zip',
+      target: '/Applications/Suji.app',
+      sha256: '3'.repeat(64),
+      relaunch: false,
+      helperPath: '',
+    }));
+  });
 });
 
 describe('powerSaveBlocker', () => {

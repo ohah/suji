@@ -1742,8 +1742,7 @@ export const crashReporter = {
 // ============================================
 // autoUpdater — manifest 기반 업데이트 확인 + artifact download/checksum 검증
 // ============================================
-// v1은 설치/재시작 적용을 하지 않는다. 앱이 manifest를 받아 새 버전 여부를
-// 판단하고, 별도 다운로드된 artifact의 SHA-256을 검증하는 안전 프리미티브.
+// staged artifact를 검증한 뒤 앱 종료 후 target을 교체하는 quitAndInstall까지 제공한다.
 
 export interface AutoUpdaterManifest {
   version: string;
@@ -1782,6 +1781,21 @@ export interface AutoUpdaterDownloadResult {
   path: string;
   sha256: string;
   size: number;
+}
+
+export interface AutoUpdaterQuitAndInstallOptions {
+  sha256?: string;
+  target?: string;
+  relaunch?: boolean;
+  helperPath?: string;
+}
+
+export interface AutoUpdaterQuitAndInstallResult {
+  success: boolean;
+  path: string;
+  target: string;
+  helperPath: string;
+  relaunch: boolean;
 }
 
 async function resolveAutoUpdaterManifest(input: string | AutoUpdaterManifest): Promise<AutoUpdaterManifest> {
@@ -1832,6 +1846,23 @@ export const autoUpdater = {
       url,
       path,
       sha256,
+    });
+  },
+
+  /** staged artifact를 앱 종료 후 target으로 교체하고 quit을 요청. */
+  async quitAndInstall(
+    input: string | AutoUpdaterDownloadResult,
+    options: AutoUpdaterQuitAndInstallOptions = {},
+  ): Promise<AutoUpdaterQuitAndInstallResult> {
+    const path = typeof input === "string" ? input : input.path;
+    const sha256 = options.sha256 ?? (typeof input === "string" ? "" : input.sha256 ?? "");
+    return coreCall<AutoUpdaterQuitAndInstallResult>({
+      cmd: "auto_updater_quit_and_install",
+      path,
+      target: options.target ?? "",
+      sha256,
+      relaunch: options.relaunch ?? true,
+      helperPath: options.helperPath ?? "",
     });
   },
 };

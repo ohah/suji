@@ -1522,6 +1522,24 @@ pub const autoUpdater = struct {
         ) catch return null;
         return coreCmd("auto_updater_download_artifact", fields);
     }
+
+    /// staged artifact를 현재 프로세스 종료 후 target으로 교체하고 앱 종료를 요청.
+    /// relaunch=false면 교체 후 재실행하지 않는다. target이 비어 있으면 현재 앱 경로.
+    pub fn quitAndInstall(path: []const u8, target: []const u8, sha256: []const u8, relaunch: bool) ?[]const u8 {
+        var path_buf: [2048]u8 = undefined;
+        var target_buf: [2048]u8 = undefined;
+        var sha_buf: [128]u8 = undefined;
+        const path_n = util.escapeJsonStrFull(path, &path_buf) orelse return null;
+        const target_n = util.escapeJsonStrFull(target, &target_buf) orelse return null;
+        const sha_n = util.escapeJsonStrFull(sha256, &sha_buf) orelse return null;
+        var fields_buf: [4600]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"path\":\"{s}\",\"target\":\"{s}\",\"sha256\":\"{s}\",\"relaunch\":{}",
+            .{ path_buf[0..path_n], target_buf[0..target_n], sha_buf[0..sha_n], relaunch },
+        ) catch return null;
+        return coreCmd("auto_updater_quit_and_install", fields);
+    }
 };
 
 // app() 함수와 이름 충돌 방지를 위해 dock/attention을 top-level namespace로 분리.
