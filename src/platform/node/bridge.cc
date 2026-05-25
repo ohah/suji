@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <queue>
 #include <functional>
+#include <algorithm>
 
 // JSON 문자열 값에 사용할 수 없는 문자를 이스케이프
 static std::string escape_json(const std::string& s) {

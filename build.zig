@@ -116,7 +116,10 @@ pub fn build(b: *std.Build) void {
 
     const cef_base = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/{s}", .{ home, cef_platform }) catch @panic("OOM");
     root_module.addIncludePath(.{ .cwd_relative = cef_base });
-    root_module.link_libcpp = true;
+    // Windows: libnode 가 mingw libstdc++ 라 zig libcxx 와 ABI 충돌. 우리가
+    // 명시적으로 mingw libstdc++ 만 link 하도록 zig 의 auto libcxx 비활성.
+    // macOS/Linux 는 시스템 libc++ / libstdc++ 자동 매칭이라 그대로 유지.
+    root_module.link_libcpp = (os_tag != .windows);
 
     if (os_tag == .macos) {
         // macOS: CEF framework + Objective-C
@@ -221,13 +224,23 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("ole32", .{});
     }
 
-    // libnode (Node.js 임베딩) — 선택적
+    // libnode (Node.js 임베딩) — 선택적. OS별 dynamic lib 확장자가 달라
+    // (macOS: .dylib, Linux: .so, Windows: .dll) 각각 검사.
+    //
+    // Windows 는 mingw-w64 ABI libnode (MSYS2 mingw-w64-x86_64-nodejs 패키지)
+    // 필요 — 공식 Node.js Windows 빌드는 MSVC ABI 라 zig clang(mingw/Itanium)
+    // 으로 만든 bridge.cc 와 C++ name mangling 불일치 + MSVC CRT 와 mingw libc
+    // CFG 심볼 충돌. MSYS2 패키지에서 가져온 mingw libnode 는 zig 와 동일 ABI
+    // (`_ZN2v86Object3NewEPNS_7IsolateE` Itanium mangling) 라 link 가능.
     const node_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/node/24.14.1", .{home}) catch @panic("OOM");
-    const node_supported = os_tag == .macos;
+    const node_lib_name: []const u8 = switch (os_tag) {
+        .macos => "libnode.dylib",
+        .windows => "libnode.dll",
+        else => "libnode.so",
+    };
     const node_available = blk: {
-        if (!node_supported) break :blk false;
-        const lib = std.fmt.allocPrint(b.allocator, "{s}/libnode.dylib", .{node_path}) catch break :blk false;
-        std.Io.Dir.accessAbsolute(b.graph.io, lib, .{}) catch break :blk false;
+        const lib_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ node_path, node_lib_name }) catch break :blk false;
+        std.Io.Dir.accessAbsolute(b.graph.io, lib_path, .{}) catch break :blk false;
         break :blk true;
     };
     // Node.js 지원 (libnode가 설치된 경우만)
@@ -240,20 +253,71 @@ pub fn build(b: *std.Build) void {
         root_module.addIncludePath(.{ .cwd_relative = node_include });
     }
 
+    var gpp_bridge_step: ?*std.Build.Step = null;
+    if (node_available) {
+        if (os_tag == .windows) {
+            // Windows: bridge.cc 를 외부 mingw g++ 로 컴파일. zig 의 clang/libcxx
+            // (`std::__1::vector`) 와 mingw libnode 의 libstdc++ (`std::vector`)
+            // mangling/STL layout 불일치 회피. g++ 16.1+ 필요 (`C:\mingw-w64-16\
+            // mingw64\bin\g++.exe` — winlibs build).
+            const bridge_obj = b.cache_root.join(b.allocator, &.{ "bridge-mingw", "bridge.o" }) catch @panic("OOM");
+            const obj_dir = std.fs.path.dirname(bridge_obj) orelse @panic("path");
+            const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
+            const ps_script = std.fmt.allocPrint(b.allocator,
+                \\$ErrorActionPreference = 'Stop'
+                \\$gpp = 'C:\mingw-w64-16\mingw64\bin\g++.exe'
+                \\if (-not (Test-Path $gpp)) {{ throw "mingw g++ 16+ missing at $gpp. winlibs gcc 16.1.0 MSVCRT zip 풀어두기." }}
+                \\New-Item -ItemType Directory -Force -Path '{s}' | Out-Null
+                \\& $gpp -c -std=c++20 -I $env:SUJI_NODE_INC -I $env:SUJI_BRIDGE_INC $env:SUJI_BRIDGE_SRC -o '{s}'
+                \\if ($LASTEXITCODE -ne 0) {{ throw "g++ failed: exit $LASTEXITCODE" }}
+                ,
+                .{ obj_dir, bridge_obj },
+            ) catch @panic("OOM");
+            const gpp_step = b.addSystemCommand(&.{
+                "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", ps_script,
+            });
+            gpp_step.setEnvironmentVariable("SUJI_NODE_INC", node_include);
+            gpp_step.setEnvironmentVariable("SUJI_BRIDGE_INC", b.path("src/platform/node").getPath(b));
+            gpp_step.setEnvironmentVariable("SUJI_BRIDGE_SRC", b.path("src/platform/node/bridge.cc").getPath(b));
+            gpp_bridge_step = &gpp_step.step;
+
+            root_module.addObjectFile(.{ .cwd_relative = bridge_obj });
+            const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libnode.dll.a", .{node_path}) catch @panic("OOM");
+            root_module.addObjectFile(.{ .cwd_relative = import_lib });
+
+            // mingw libstdc++ / libgcc / winpthread import lib 직접 명시.
+            // (linkSystemLibrary 는 mingw 의 `libNAME.dll.a` 패턴 자동 매칭 안 함).
+            // winpthread 는 `x86_64-w64-mingw32/lib/` subdir 에 있어 path 별도.
+            const mingw_lib = "C:\\mingw-w64-16\\mingw64\\lib";
+            const mingw_target_lib = "C:\\mingw-w64-16\\mingw64\\x86_64-w64-mingw32\\lib";
+            const libs_main = [_][]const u8{ "libstdc++.dll.a", "libgcc_s.a" };
+            for (libs_main) |lib_name| {
+                const lib_path = std.fmt.allocPrint(b.allocator, "{s}\\{s}", .{ mingw_lib, lib_name }) catch @panic("OOM");
+                root_module.addObjectFile(.{ .cwd_relative = lib_path });
+            }
+            const libs_target = [_][]const u8{"libwinpthread.dll.a"};
+            for (libs_target) |lib_name| {
+                const lib_path = std.fmt.allocPrint(b.allocator, "{s}\\{s}", .{ mingw_target_lib, lib_name }) catch @panic("OOM");
+                root_module.addObjectFile(.{ .cwd_relative = lib_path });
+            }
+        } else {
+            root_module.addCSourceFile(.{
+                .file = b.path("src/platform/node/bridge.cc"),
+                .flags = &.{"-std=c++20"},
+            });
+            root_module.addLibraryPath(.{ .cwd_relative = node_path });
+            root_module.linkSystemLibrary("node", .{});
+        }
+    }
+
     const exe = b.addExecutable(.{
         .name = "suji",
         .root_module = root_module,
     });
 
-    if (node_available) {
-        // bridge.cc를 C++ 오브젝트로 컴파일 + 링크
-        root_module.addCSourceFile(.{
-            .file = b.path("src/platform/node/bridge.cc"),
-            .flags = &.{"-std=c++20"},
-        });
-        root_module.addLibraryPath(.{ .cwd_relative = node_path });
-        root_module.linkSystemLibrary("node", .{});
-    }
+    // Windows: bridge.o 는 mingw g++ 가 미리 만들어야 (addObjectFile 의존성
+    // 자동 추론 안 됨).
+    if (gpp_bridge_step) |s| exe.step.dependOn(s);
 
     if (os_tag == .macos) {
         exe.headerpad_max_install_names = true;
@@ -306,6 +370,50 @@ pub fn build(b: *std.Build) void {
         const copy_cef_runtime = addInstallCefRuntimeStep(b, os_tag, cef_base, b.getInstallPath(.bin, ""));
         copy_cef_runtime.dependOn(&install_artifact.step);
         b.getInstallStep().dependOn(copy_cef_runtime);
+
+        // Windows: libnode.dll + mingw runtime + libnode deps 를 zig-out/bin/
+        // 옆으로 복사. libnode 는 libnode.dll.a 의 import descriptor 가 가리키는
+        // dll 로 runtime resolve. mingw runtime (libstdc++-6 / libgcc_s_seh-1 /
+        // libwinpthread-1) 은 bridge.o 가 의존. libnode 자체가 또 OpenSSL/ICU/
+        // c-ares/zlib 동적 의존 — 누락 시 STATUS_DLL_NOT_FOUND.
+        // mingw + libnode deps DLL 출처는 MSYS2 mingw64 pkg 들을 미리
+        // C:\msys2-deps\mingw64\bin\ 에 풀어두는 것을 가정 (run-libnode
+        // setup script 가 자동화).
+        if (node_available and os_tag == .windows) {
+            const bin_dir_w = b.getInstallPath(.bin, "");
+            const copy_dlls = b.addSystemCommand(&.{
+                "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                \\$ErrorActionPreference = 'Stop'
+                \\New-Item -ItemType Directory -Force -Path $env:SUJI_BIN_DIR | Out-Null
+                \\Copy-Item -Force -LiteralPath $env:SUJI_NODE_SRC -Destination $env:SUJI_BIN_DIR
+                \\$mingw_bin = 'C:\mingw-w64-16\mingw64\bin'
+                \\foreach ($d in @('libstdc++-6.dll', 'libgcc_s_seh-1.dll', 'libwinpthread-1.dll')) {
+                \\  $src = Join-Path $mingw_bin $d
+                \\  if (Test-Path $src) { Copy-Item -Force -LiteralPath $src -Destination $env:SUJI_BIN_DIR }
+                \\  else { throw "missing mingw runtime DLL: $src (install winlibs gcc 16.1.0 MSVCRT zip to C:\mingw-w64-16\)" }
+                \\}
+                \\# libnode 가 dynamic load 하는 mingw 패키지 deps
+                \\$deps_bin = $env:LOCALAPPDATA + '\Temp\msys2-deps\mingw64\bin'
+                \\foreach ($d in @('libcares-2.dll', 'libcrypto-3-x64.dll', 'libssl-3-x64.dll',
+                \\                  'libicudt78.dll', 'libicuin78.dll', 'libicuuc78.dll',
+                \\                  'zlib1.dll')) {
+                \\  $src = Join-Path $deps_bin $d
+                \\  if (Test-Path $src) { Copy-Item -Force -LiteralPath $src -Destination $env:SUJI_BIN_DIR }
+                \\  else { throw "missing libnode dep DLL: $src (MSYS2 mingw-w64-x86_64-{c-ares,openssl,icu,zlib} 패키지 압축 풀어두기)" }
+                \\}
+                ,
+            });
+            // Windows: SUJI_NODE_SRC 는 PowerShell Copy-Item -LiteralPath 에
+            // 들어가므로 backslash 통일. node_path 가 forward-slash 포함이라
+            // mut copy 후 / → \ 치환.
+            const src_mixed = std.fmt.allocPrint(b.allocator, "{s}\\{s}", .{ node_path, node_lib_name }) catch @panic("OOM");
+            std.mem.replaceScalar(u8, src_mixed, '/', '\\');
+            const node_src = src_mixed;
+            copy_dlls.setEnvironmentVariable("SUJI_NODE_SRC", node_src);
+            copy_dlls.setEnvironmentVariable("SUJI_BIN_DIR", bin_dir_w);
+            copy_dlls.step.dependOn(&install_artifact.step);
+            b.getInstallStep().dependOn(&copy_dlls.step);
+        }
     }
 
     const run_cmd = b.addRunArtifact(exe);
@@ -916,3 +1024,4 @@ fn dependOnTestWithProjectCwd(b: *std.Build, test_step: *std.Build.Step, t: *std
     r.setCwd(b.path("."));
     test_step.dependOn(&r.step);
 }
+
