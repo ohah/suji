@@ -78,7 +78,7 @@ afterAll(async () => {
 });
 
 describe("CEF Views frameless drag region", () => {
-  test.skipIf(process.platform === "win32")("native drag regions are applied and no-drag controls remain clickable", async () => {
+  test("native drag regions are applied and no-drag controls remain clickable", async () => {
     const logPath = process.env.SUJI_LOG;
     expect(logPath).toBeTruthy();
     expect(readFileSync(logPath!, "utf8")).toContain("CEF Views path enabled");
