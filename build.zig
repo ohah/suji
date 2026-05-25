@@ -885,9 +885,16 @@ pub fn build(b: *std.Build) void {
         .windows => "backend.dll",
         else => "libbackend.dylib",
     };
-    const go_build = b.addSystemCommand(&.{
-        "go", "build", "-buildmode=c-shared", "-o", go_bridge_lib, "main.go",
-    });
+    // Windows 는 -ldflags="-s -w" 로 DWARF strip — Go 1.26+ c-shared DLL 이
+    // PE loader 와 .debug_* 섹션 충돌로 ERROR_BAD_EXE_FORMAT 발생 회피.
+    const go_build = if (target.result.os.tag == .windows)
+        b.addSystemCommand(&.{
+            "go", "build", "-buildmode=c-shared", "-ldflags=-s -w", "-o", go_bridge_lib, "main.go",
+        })
+    else
+        b.addSystemCommand(&.{
+            "go", "build", "-buildmode=c-shared", "-o", go_bridge_lib, "main.go",
+        });
     go_build.setCwd(b.path("tests/fixtures/state_go_bridge"));
     // macOS: Homebrew LLVM과 충돌 회피 (examples/multi-backend/backends/go와 동일)
     if (target.result.os.tag == .macos) {
