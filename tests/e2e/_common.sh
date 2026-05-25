@@ -35,8 +35,18 @@ e2e_cleanup() {
     kill "$SUJI_PID" >/dev/null 2>&1 || true
   fi
   if [ "$SUJI_E2E_WINDOWS" = "1" ]; then
+    # 패턴: zig-out\suji.exe (메인 + CEF subprocess), bun frontend dev wrap,
+    # vite.cmd/.exe stub, node vite.js (실제 dev server). 기존엔 `*node* vite*`
+    # 만 봤는데 `node "..\vite.js"` 의 따옴표 때문에 매칭 실패 → tee 가 stdout
+    # pipe 를 잡고 있어 호출자 substitution 이 EOF 대기로 행. 모든 frontend
+    # 도구를 명시적으로 잡는다.
+    #
+    # scope 주의: vite.exe / bun.exe 는 시스템 어디서나 실행될 수 있어 process
+    # name 만으로 잡지 않는다. CommandLine 에 `--cwd frontend` (bun spawn 패턴)
+    # 또는 `node_modules*vite` (vite dev server) 또는 `zig-out*suji.exe` (백엔드)
+    # 가 들어가야 매칭 — 개발자가 별개 vite/bun 프로젝트를 동시에 띄워도 영향 X.
     powershell -NoProfile -ExecutionPolicy Bypass -Command \
-      'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*zig-out*suji.exe*" -or $_.CommandLine -like "*node* vite*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' \
+      'Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*zig-out*suji.exe*" -or $_.CommandLine -like "*bun*--cwd*frontend*" -or $_.CommandLine -like "*node_modules*vite*" } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }' \
       >/dev/null 2>&1 || true
   else
     pkill -TERM -f "zig-out/bin/suji" 2>/dev/null || true
