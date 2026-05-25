@@ -1866,8 +1866,20 @@ test "shell.trashItem IPC — main.zig dispatch + cef.zig 함수" {
     inline for (.{
         "pub fn shellTrashItem",
         "trashItemAtURL:resultingItemURL:error:",
+        "const linux_shell",
+        "g_file_trash",
+        "g_file_new_for_path",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const build_src = try readProjectFile("build.zig", 1024 * 1024);
+    defer std.testing.allocator.free(build_src);
+    inline for (.{
+        "linkSystemLibrary(\"gio-2.0\"",
+        "linkSystemLibrary(\"gobject-2.0\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, build_src, needle) != null);
     }
 }
 

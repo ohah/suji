@@ -3007,9 +3007,10 @@ pub fn powerMonitorIdleSeconds() f64 {
 }
 
 // ============================================
-// Shell API — NSWorkspace + NSBeep (Electron `shell.*`)
+// Shell API — NSWorkspace / GIO / Win32 (Electron `shell.*`)
 // ============================================
-// 비-macOS는 모두 false / no-op (시스템 핸들러 미연결).
+// Linux는 현재 GIO trashItem만 native로 배선. 기본 앱/파일 매니저 호출은 환경 의존이
+// 커서 CI로 검증 가능한 surface부터 채운다.
 
 /// URL 또는 path 길이 한도 (null terminator 포함). 4KB는 macOS NSString이 무난하게 처리 가능.
 const SHELL_MAX_PATH: usize = 4096;
@@ -3170,6 +3171,35 @@ const win_shell = if (builtin.os.tag == .windows) struct {
     }
 } else struct {};
 
+const linux_shell = if (is_linux) struct {
+    extern "c" fn g_file_new_for_path(path: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn g_file_trash(file: ?*anyopaque, cancellable: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) c_int;
+    extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_error_free(err: ?*anyopaque) callconv(.c) void;
+
+    fn toZPath(path: []const u8, buf: *[SHELL_MAX_PATH]u8) ?[*:0]const u8 {
+        if (path.len == 0 or path.len + 1 > buf.len) return null;
+        if (std.mem.indexOfScalar(u8, path, 0) != null) return null;
+        @memcpy(buf[0..path.len], path);
+        buf[path.len] = 0;
+        return @ptrCast(buf);
+    }
+
+    /// GIO `g_file_trash` follows the freedesktop trash spec and moves the item
+    /// into the user's Trash when supported by the filesystem.
+    fn trashItem(path: []const u8) bool {
+        var path_buf: [SHELL_MAX_PATH]u8 = undefined;
+        const path_z = toZPath(path, &path_buf) orelse return false;
+        const file = g_file_new_for_path(path_z) orelse return false;
+        defer g_object_unref(file);
+
+        var gerr: ?*anyopaque = null;
+        const ok = g_file_trash(file, null, &gerr) != 0;
+        if (gerr) |err| g_error_free(err);
+        return ok;
+    }
+} else struct {};
+
 /// 시스템 기본 핸들러로 URL 열기 (Electron `shell.openExternal`). http(s) → 기본 브라우저,
 /// mailto: → 메일 앱 등. URL syntax invalid 또는 scheme 누락이면 false (LaunchServices에
 /// 보내면 -50 OS dialog 발생하므로 사전 차단).
@@ -3285,6 +3315,7 @@ pub fn shellOpenPath(path: []const u8) bool {
 /// 은 false. resultingItemURL/error는 nil 전달 (caller가 결과 path 필요 없음).
 pub fn shellTrashItem(path: []const u8) bool {
     if (comptime builtin.os.tag == .windows) return win_shell.trashItem(path);
+    if (comptime is_linux) return linux_shell.trashItem(path);
     if (!comptime is_macos) return false;
     const ns_path = nsStringFromSlice(path) orelse return false;
 

@@ -612,10 +612,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               Zig/Rust/Go/Node SDK 4개. macOS E2E 37 케이스(write/read/clear, 길이 한도, JSON wire,
               Unicode/RTL/이모지/ZWJ, 200회 stress, 다중 창) + Linux Xvfb text round-trip E2E
               (`tests/e2e/run-clipboard-text-runtime.sh`). `documents/clipboard-shell.mdx`.
-        - [x] **Shell** (`openExternal/showItemInFolder/beep`) — NSWorkspace + NSBeep.
+        - [x] **Shell** (`openExternal/showItemInFolder/beep/trashItem`) — macOS NSWorkspace + NSBeep + NSFileManager,
+              Linux GIO `g_file_trash`, Windows ShellExecute/SHFileOperation.
               modern API `activateFileViewerSelectingURLs:` (deprecated `selectFile:` 회피).
               scheme 사전 검사 + `fileExistsAtPath:` 사전 검증으로 LaunchServices `-50` dialog 회피.
-              E2E 32 케이스. 4개 SDK 노출.
+              E2E 32 케이스 + Linux Xvfb/dbus trashItem round-trip E2E. 4개 SDK 노출.
         - [x] **Dialog** (`showMessageBox/showErrorBox/showOpenDialog/showSaveDialog` + Sync 변종 3개) —
               NSAlert/NSOpenPanel/NSSavePanel + sheet modal. `src/platform/dialog.m` ObjC block
               completion handler + nested NSApp event loop. windowId 첫 인자로 sheet vs
@@ -1415,7 +1416,7 @@ suji build → 결과물:
 | 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
-| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. NSWorkspace + scheme 사전 검사 + 4 SDK |
+| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + scheme 사전 검사 + 4 SDK |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
@@ -1440,7 +1441,7 @@ suji build → 결과물:
 | Mac dock badge / app badge count | `app.dock.setBadge`, `app.setBadgeCount` | -- | ✅ macOS NSDockTile.setBadgeLabel — `dock_set_badge`/`dock_get_badge` IPC, set/get/clear/escape/멀티바이트(이모지+한글) round-trip + `app_set_badge_count`/`app_get_badge_count` Electron식 숫자 badge count(0/음수=clear, dock label sync). Linux/Windows native backend도 같은 IPC에 배선(아래 행). 5 SDK + e2e |
 | dock 바운스 (사용자 주의 환기) | `app.requestUserAttention` | -- | ✅ macOS NSApp `requestUserAttention:` / `cancelUserAttentionRequest:` — `app_attention_request`/`app_attention_cancel` IPC, critical/informational + cancel guard 4 e2e (active app 시 id=0 lenient) |
 | 표준 디렉토리 경로 | `app.getPath(name)` | `path` 플러그인 | ✅ Electron 표준 7 키 (home/appData/userData/temp/desktop/documents/downloads) — `app_get_path` IPC + `resolveAppDataDir` OS 분기 (macOS/Linux/Windows/fallback). `buildAppCachePath`와 분기 공유. 5 SDK + e2e |
-| 휴지통 (trashItem) | `shell.trashItem` | `fs` 플러그인 | ✅ macOS NSFileManager `trashItemAtURL:resultingItemURL:error:` — `shell_trash_item` IPC, 임시 파일 trash + 비존재 경로 false 2 e2e |
+| 휴지통 (trashItem) | `shell.trashItem` | `fs` 플러그인 | ✅ macOS NSFileManager + Linux GIO `g_file_trash` + Windows SHFileOperationW — `shell_trash_item` IPC, 임시 파일 trash + 비존재 경로 false e2e |
 | 미디어 키 (재생/일시정지) | `globalShortcut`로 캡처 | -- | ✅ macOS — `globalShortcut.register("MediaPlayPause"\|"MediaNextTrack"\|"MediaPreviousTrack"\|"MediaStop", click)` Electron 토큰 패리티. Carbon RegisterEventHotKey 는 미디어키 미지원 → NSEvent `NSEventMaskSystemDefined` 글로벌+로컬 모니터로 분기(`media_key_for`/`media_event_dispatch`/`ensure_media_monitor`), 엔트리 `ref=NULL` sentinel + unregister NULL 가드. **신규 IPC/SDK 표면 0** — 기존 `global_shortcut_register` 로 토큰만 전달(5 SDK 무수정). ⚠️ 정직 경계: 글로벌 system-defined 키 실수신은 Accessibility(TCC) 신뢰 필요 → 헤드리스 미발화(globalShortcut 실 키 e2e 불가와 동급). 검증=parse/register/emit-wiring source-grep(`cef_ipc_test`) + IPC 패리티 단위(`app_test` MediaPlayPause) + 빌드(AppKit/NSEvent 링크). `MediaStop`=macOS HW transport 키 부재라 토큰 수용은 하나 실 HW 소스 없음 |
 | 다크/라이트 테마 감지 + 강제 | `nativeTheme.shouldUseDarkColors` + `themeSource` setter + `updated` 이벤트 | `theme` 플러그인 | ✅ macOS — `shouldUseDarkColors()` + `setThemeSource("light"\|"dark"\|"system")` (NSAppearance setAppearance:) + `nativeTheme:updated` 이벤트 (NSApp.effectiveAppearance KVO observer). 5 SDK + e2e (setThemeSource light→dark 트리거 시 이벤트 round-trip 검증) |
 | dock 진행률 표시 | `BrowserWindow.setProgressBar(0..1)` | -- | ✅ macOS NSDockTile.contentView NSProgressIndicator. progress<0=hide, 0~1=ratio, >1=clamp. 5 SDK + e2e |

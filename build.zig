@@ -204,6 +204,9 @@ pub fn build(b: *std.Build) void {
         // libsecret + GLib — safeStorage Linux backend.
         root_module.linkSystemLibrary("secret-1", .{});
         root_module.linkSystemLibrary("glib-2.0", .{});
+        // GIO/GObject — Linux shell.trashItem.
+        root_module.linkSystemLibrary("gio-2.0", .{});
+        root_module.linkSystemLibrary("gobject-2.0", .{});
     } else if (os_tag == .windows) {
         // Windows: CEF DLL + Win32
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");
