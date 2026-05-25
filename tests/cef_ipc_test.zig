@@ -943,9 +943,20 @@ test "desktopCapturer.captureThumbnail IPC + cef CG/ImageIO 인코딩 경로" {
         "CGImageDestinationCreateWithURL",
         "CGImageDestinationFinalize",
         "CFURLCreateFromFileSystemRepresentation",
-        "fn parseSourceId",
+        "desktop_capturer.parseSourceId",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const parser_src = try readProjectFile("src/platform/desktop_capturer.zig", 64 * 1024);
+    defer std.testing.allocator.free(parser_src);
+    inline for (.{
+        "pub fn parseSourceId",
+        "screen:<displayId>:0",
+        "window:<windowNumber>:0",
+        "if (!std.mem.eql(u8, rest[c2 + 1 ..], \"0\")) return null",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, parser_src, needle) != null);
     }
 
     // ImageIO 프레임워크 링크(빌드 회귀 가드).

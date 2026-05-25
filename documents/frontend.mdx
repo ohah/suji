@@ -81,7 +81,7 @@ interface InvokeOptions {
 | `app_get_badge_count` | — | `{count:N}` |
 | `screen_get_all_displays` | — | `{displays:[...]}` |
 | `desktop_capturer_get_sources` | `types?` | `{sources:[...]}` |
-| `desktop_capturer_capture_thumbnail` | `sourceId`, `path` | `{success:bool}` |
+| `desktop_capturer_capture_thumbnail` | `sourceId`(`screen:<id>:0`/`window:<id>:0`), `path` | `{success:bool}` |
 | `crash_reporter_start` | `uploadToServer?`, `submitURL?`, `extra?` | `{success:true,enabled:bool}` |
 | `crash_reporter_get_parameters` | — | `{parameters:{...}}` |
 | `crash_reporter_add_extra_parameter` | `key`, `value` | `{success:bool}` |

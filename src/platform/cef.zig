@@ -38,6 +38,7 @@ const drag_region = @import("cef_drag_region.zig");
 const cef_views_policy = @import("cef_views_policy.zig");
 const cef_command_line_policy = @import("cef_command_line_policy.zig");
 const safe_storage = @import("safe_storage.zig");
+const desktop_capturer = @import("desktop_capturer.zig");
 
 const log = logger.module("cef");
 
@@ -3661,23 +3662,11 @@ extern "c" fn CGImageDestinationFinalize(dest: ?*anyopaque) u8;
 const kCGWindowListOptionIncludingWindow: u32 = 8;
 const kCGWindowImageDefault: u32 = 0;
 
-/// "screen:<displayId>:0" / "window:<windowNumber>:0" → (is_screen, numeric id).
-fn parseSourceId(source_id: []const u8) ?struct { screen: bool, id: u32 } {
-    const c1 = std.mem.indexOfScalar(u8, source_id, ':') orelse return null;
-    const kind = source_id[0..c1];
-    const rest = source_id[c1 + 1 ..];
-    const c2 = std.mem.indexOfScalar(u8, rest, ':') orelse rest.len;
-    const num = std.fmt.parseInt(u32, rest[0..c2], 10) catch return null;
-    if (std.mem.eql(u8, kind, "screen")) return .{ .screen = true, .id = num };
-    if (std.mem.eql(u8, kind, "window")) return .{ .screen = false, .id = num };
-    return null;
-}
-
 /// desktopCapturer source(screen/window)를 PNG 로 캡처해 `path` 에 기록. 동기.
 /// TCC 미부여/무효 id/인코딩 실패 시 false (graceful — crash 없음).
 pub fn desktopCapturerCaptureThumbnail(source_id: []const u8, path: []const u8) bool {
     if (!comptime is_macos) return false;
-    const src = parseSourceId(source_id) orelse return false;
+    const src = desktop_capturer.parseSourceId(source_id) orelse return false;
 
     const img = if (src.screen)
         CGDisplayCreateImage(src.id)

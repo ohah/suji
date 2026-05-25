@@ -968,6 +968,15 @@ pub fn build(b: *std.Build) void {
     const cef_command_line_policy_test = b.addTest(.{ .root_module = cef_command_line_policy_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_command_line_policy_test).step);
 
+    // desktopCapturer source id parser tests (CEF/CoreGraphics 불필요).
+    const desktop_capturer_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/desktop_capturer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const desktop_capturer_test = b.addTest(.{ .root_module = desktop_capturer_test_mod });
+    test_step.dependOn(&b.addRunArtifact(desktop_capturer_test).step);
+
     // safeStorage target key tests (CEF 런타임/OS secure store 불필요).
     const safe_storage_test_mod = b.createModule(.{
         .root_source_file = b.path("src/platform/safe_storage.zig"),

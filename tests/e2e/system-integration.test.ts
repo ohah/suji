@@ -138,6 +138,30 @@ describe("desktopCapturer.getSources", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("captureThumbnail rejects known screen id with malformed suffix before native capture", async () => {
+    const sources = await core<{ sources: any[] }>({
+      cmd: "desktop_capturer_get_sources",
+      types: "screen",
+    });
+    const screen = sources.sources.find((s) => typeof s.id === "string" && /^screen:\d+:0$/.test(s.id));
+    if (!screen) throw new Error("screen desktopCapturer source not found");
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-thumb-strict-"));
+    const target = path.join(dir, "strict-source.png");
+    const malformed = screen.id.replace(/:0$/, ":999");
+    try {
+      const r = await core<{ success: boolean }>({
+        cmd: "desktop_capturer_capture_thumbnail",
+        sourceId: malformed,
+        path: target,
+      });
+      expect(r.success).toBe(false);
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("crashReporter", () => {
