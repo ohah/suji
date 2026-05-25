@@ -968,6 +968,15 @@ pub fn build(b: *std.Build) void {
     const cef_command_line_policy_test = b.addTest(.{ .root_module = cef_command_line_policy_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_command_line_policy_test).step);
 
+    // CEF PDF print policy tests (CEF 런타임/헤더 불필요).
+    const cef_pdf_print_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/cef_pdf_print.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cef_pdf_print_test = b.addTest(.{ .root_module = cef_pdf_print_test_mod });
+    test_step.dependOn(&b.addRunArtifact(cef_pdf_print_test).step);
+
     // desktopCapturer source id parser tests (CEF/CoreGraphics 불필요).
     const desktop_capturer_test_mod = b.createModule(.{
         .root_source_file = b.path("src/platform/desktop_capturer.zig"),

@@ -37,6 +37,7 @@ const util = @import("util");
 const drag_region = @import("cef_drag_region.zig");
 const cef_views_policy = @import("cef_views_policy.zig");
 const cef_command_line_policy = @import("cef_command_line_policy.zig");
+const cef_pdf_print = @import("cef_pdf_print.zig");
 const safe_storage = @import("safe_storage.zig");
 const desktop_capturer = @import("desktop_capturer.zig");
 
@@ -7351,8 +7352,8 @@ fn getFindHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_find_handler_t {
 // Linux 는 `cef_browser_host_t::print_to_pdf()` 가 `get_pdf_paper_size` 콜백
 // 없이는 용지 크기를 못 얻어 PDF 출력이 동작하지 않음(CEF 설계). macOS/Windows
 // 는 네이티브 인쇄 경로라 print_handler 자체를 무시 → 등록해도 무영향
-// (cefclient 도 전 플랫폼 무조건 등록). 실 동작 검증은 Linux CI 빌드까지 —
-// 실 PDF 출력 e2e 는 macOS 러너뿐이라 Linux 산출은 미검증(정직).
+// (cefclient 도 전 플랫폼 무조건 등록). Linux 산출은 GitHub Actions
+// `run-print-to-pdf.sh`에서 실제 PDF 파일 생성 + `%PDF-` 시그니처까지 검증한다.
 
 var g_print_handler: c.cef_print_handler_t = undefined;
 var g_print_handler_initialized: bool = false;
@@ -7376,10 +7377,10 @@ fn getPdfPaperSize(
     device_units_per_inch: c_int,
 ) callconv(.c) c.cef_size_t {
     // U.S. Letter (8.5 × 11 in) in device units — cefclient 기본값.
-    const dpi: f64 = @floatFromInt(device_units_per_inch);
+    const size = cef_pdf_print.defaultPaperSize(device_units_per_inch);
     return .{
-        .width = @intFromFloat(8.5 * dpi),
-        .height = @intFromFloat(11.0 * dpi),
+        .width = size.width,
+        .height = size.height,
     };
 }
 

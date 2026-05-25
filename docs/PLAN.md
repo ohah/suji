@@ -537,8 +537,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
             Linux용 `cef_print_handler_t.get_pdf_paper_size`(U.S. Letter) 등록 완료
             (cef.zig `getPrintHandler`/`getPdfPaperSize`, initClient 배선). macOS/
             Windows 는 네이티브 인쇄라 print_handler 무시 → 등록 무영향(회귀 가드:
-            단위 790 + window-lifecycle pdf-print). ⚠️ 실 PDF 출력 e2e 는 macOS
-            러너뿐이라 **Linux 산출은 미검증**(Linux CI 빌드까지만, 정직).
+            단위 790 + window-lifecycle pdf-print). Linux 는 GitHub Actions
+            `run-print-to-pdf.sh`에서 실제 PDF 생성 + `%PDF-` 시그니처 검증.
       - [x] **`capture_page`** — CEF 직접 미지원 → CDP `Page.captureScreenshot`
             (send_dev_tools_message + dev_tools_message_observer). base64 PNG 가
             IPC 한도(64KB) 초과 가능 → printToPDF 와 동형 file-path 방식:
@@ -585,7 +585,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] **Linux PDF 인쇄** — `cef_print_handler_t.get_pdf_paper_size`(U.S. Letter,
           device-units) + `getPrintHandler` 등록 완료(cef.zig, initClient 배선).
           macOS/Windows 는 print_handler 무시(네이티브 인쇄) → 무영향. Linux CI
-          빌드까지 검증, 실 PDF 출력은 macOS e2e 러너뿐이라 **미검증**(정직).
+          런타임 E2E(`run-print-to-pdf.sh`)로 실제 PDF 파일 생성과 `%PDF-`
+          시그니처까지 검증.
     - [x] **`set_user_agent` / `get_user_agent` dynamic** — CEF settings UA 는
           init 1회뿐이라, 동적은 CDP `Network.setUserAgentOverride`
           (`send_dev_tools_message`, raw JSON)로 구현. set 값은 BrowserEntry
