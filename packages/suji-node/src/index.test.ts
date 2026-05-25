@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, invoke, invokeSync, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, type InvokeEvent } from './index';
+import { handle, invoke, invokeSync, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -239,6 +239,24 @@ describe('screen', () => {
     expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"screen_get_all_displays"}');
     expect(r.length).toBe(1);
     expect(r[0].isPrimary).toBe(true);
+  });
+});
+
+describe('desktopCapturer', () => {
+  it('getSources invokes + unwraps sources', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"sources":[{"id":"screen:1:0","type":"screen"}]}');
+    const r = await desktopCapturer.getSources({ types: ['screen'] });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"desktop_capturer_get_sources","types":"screen"}');
+    expect(r).toEqual([{ id: 'screen:1:0', type: 'screen' }]);
+  });
+
+  it('captureThumbnail sends sourceId/path + maps success', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":false}');
+    expect(await desktopCapturer.captureThumbnail('bad-source', '/tmp/thumb.png')).toBe(false);
+    expect(bridge.invoke).toHaveBeenCalledWith(
+      '__core__',
+      '{"cmd":"desktop_capturer_capture_thumbnail","sourceId":"bad-source","path":"/tmp/thumb.png"}',
+    );
   });
 });
 

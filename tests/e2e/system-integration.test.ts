@@ -7,6 +7,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { getMainPage } from "./_page";
@@ -117,6 +118,22 @@ describe("desktopCapturer.getSources", () => {
       cmd: "desktop_capturer_get_sources", types: "window",
     });
     expect(r.sources.some((s) => s.type === "screen")).toBe(false);
+  });
+
+  test("captureThumbnail malformed sourceId → graceful false + 파일 미생성", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-thumb-"));
+    const target = path.join(dir, "invalid-source.png");
+    try {
+      const r = await core<{ success: boolean }>({
+        cmd: "desktop_capturer_capture_thumbnail",
+        sourceId: "not-a-desktop-capturer-source",
+        path: target,
+      });
+      expect(r.success).toBe(false);
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1198,6 +1215,22 @@ describe("@suji/api SDK — round-trip", () => {
     expect(Array.isArray(r)).toBe(true);
     expect(r.some((s) => s.type === "screen")).toBe(true);
     expect(r[0].id).toMatch(/^screen:\d+:0$/);
+  });
+
+  test("desktopCapturer.captureThumbnail maps graceful false", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-sdk-thumb-"));
+    const target = path.join(dir, "invalid-source.png");
+    try {
+      const ok = await sdk<boolean>(
+        "desktopCapturer.captureThumbnail",
+        "not-a-desktop-capturer-source",
+        target,
+      );
+      expect(ok).toBe(false);
+      expect(fs.existsSync(target)).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("crashReporter SDK wrappers round-trip parameters", async () => {

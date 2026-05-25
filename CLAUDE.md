@@ -164,8 +164,9 @@ fn onAllClosed(_: suji.Event) void {
 //   CGWindowListCopyWindowInfo)
 //   / captureThumbnail(sourceId, path)  — 소스 PNG 를 파일경로로 캡처
 //   (CG capture + ImageIO 인코딩, base64 IPC 한도 우회). ⚠️ Screen Recording
-//   TCC 권한 필요 — 미부여 시 success:false. 인코딩 경로는 권한 실기기에서만
-//   실행(헤드리스=컴파일/링크+graceful-fail 만 검증, 정직 경계)
+//   TCC 권한 필요 — 미부여/무효 sourceId 시 success:false. 무효 sourceId는
+//   파일 미생성까지 E2E 고정. 인코딩 경로는 권한 실기기에서만 실행(헤드리스=
+//   컴파일/링크+graceful-fail 만 검증, 정직 경계)
 // suji.crashReporter.start("\"uploadToServer\":false") / getParameters()
 //   / addExtraParameter(key,value) / removeExtraParameter(key)
 //   / getUploadToServer() / setUploadToServer(false)

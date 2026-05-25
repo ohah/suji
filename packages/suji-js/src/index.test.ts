@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, BrowserWindow, windows } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, BrowserWindow, windows } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -301,6 +301,30 @@ describe("screen.getAllDisplays", () => {
     expect(r.length).toBe(1);
     expect(r[0].isPrimary).toBe(true);
     expect(r[0].scaleFactor).toBe(2);
+  });
+});
+
+describe("desktopCapturer", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("getSources sends desktop_capturer_get_sources + unwraps sources", async () => {
+    mockBridge.core.mockResolvedValueOnce({ sources: [{ id: "screen:1:0", type: "screen" }] });
+    const r = await desktopCapturer.getSources({ types: ["screen"] });
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "desktop_capturer_get_sources",
+      types: "screen",
+    });
+    expect(r).toEqual([{ id: "screen:1:0", type: "screen" }]);
+  });
+
+  it("captureThumbnail sends sourceId/path + maps success", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false });
+    expect(await desktopCapturer.captureThumbnail("bad-source", "/tmp/thumb.png")).toBe(false);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "desktop_capturer_capture_thumbnail",
+      sourceId: "bad-source",
+      path: "/tmp/thumb.png",
+    });
   });
 });
 
