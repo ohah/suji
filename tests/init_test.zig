@@ -63,13 +63,20 @@ test "번들 프론트엔드 템플릿: 계약 + suji-cli 미러 drift 가드" {
     }
 
     // 루트 백엔드 템플릿 미러도 동일 가드 (init.zig @embedFile 무가드였음).
-    inline for (.{ "gitignore", "zig_app.zig", "rust_cargo.toml", "rust_lib.rs", "go_main.go" }) |rf| {
+    inline for (.{ "gitignore", "zig_app.zig", "rust_cargo.toml", "rust_lib.rs", "go_main.go", ".github/workflows/suji.yml" }) |rf| {
         const s = try slurp(a, "src/templates/" ++ rf);
         defer a.free(s);
         const m = try slurp(a, "packages/suji-cli/templates/" ++ rf);
         defer a.free(m);
         try std.testing.expectEqualStrings(s, m);
     }
+
+    const workflow = try slurp(a, "src/templates/.github/workflows/suji.yml");
+    defer a.free(workflow);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "bun run build") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "zig fmt --check") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "cargo build --manifest-path") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "go build ./...") != null);
 }
 
 test "InitOptions: 기본값 rust 백엔드 + react 프론트엔드" {

@@ -87,6 +87,7 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
 
     // .gitignore
     try writeFileContent(project_dir, ".gitignore", @embedFile("../templates/gitignore"));
+    try scaffoldGitHubActions(project_dir);
 
     std.debug.print("\n[suji] project '{s}' created!\n\n  cd {s}\n  suji dev\n\n", .{ name, name });
 }
@@ -179,6 +180,17 @@ fn scaffoldFrontend(project_dir: Dir, template: FrontendTemplate) !void {
             }
         },
     }
+}
+
+fn scaffoldGitHubActions(project_dir: Dir) !void {
+    const io = runtime.io;
+    try project_dir.createDir(io, ".github", .default_dir);
+    var github_dir = try project_dir.openDir(io, ".github", .{});
+    defer github_dir.close(io);
+    try github_dir.createDir(io, "workflows", .default_dir);
+    var workflows_dir = try github_dir.openDir(io, "workflows", .{});
+    defer workflows_dir.close(io);
+    try writeFileContent(workflows_dir, "suji.yml", @embedFile("../templates/.github/workflows/suji.yml"));
 }
 
 fn bunInstall(allocator: std.mem.Allocator, project_name: []const u8) !void {

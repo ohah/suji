@@ -1,0 +1,68 @@
+name: suji
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          bun install
+          bun run build
+
+      - name: Check Zig backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          for app in app.zig backends/zig/app.zig; do
+            if [ -f "$app" ]; then
+              zig fmt --check "$app"
+            fi
+          done
+
+      - name: Build Rust backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in Cargo.toml backends/rust/Cargo.toml; do
+            if [ -f "$manifest" ]; then
+              cargo build --manifest-path "$manifest"
+            fi
+          done
+
+      - name: Build Go backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          for mod in go.mod backends/go/go.mod; do
+            if [ -f "$mod" ]; then
+              (cd "$(dirname "$mod")" && go build ./...)
+            fi
+          done

@@ -73,6 +73,7 @@ const sujiJson = backend === "multi"
 `;
 W("suji.json", sujiJson);
 W(".gitignore", tpl("gitignore"));
+W(".github/workflows/suji.yml", tpl(".github/workflows/suji.yml"));
 
 // 백엔드 스캐폴딩 — init.zig scaffoldZig/Rust/Go 동형.
 const scaffoldZig = (d) => W(join(d, "app.zig"), tpl("zig_app.zig"));

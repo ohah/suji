@@ -35,6 +35,7 @@ suji run backends/node/main.js          # CEF 없이 embedded Node.js 파일 직
 # E2E 테스트 (puppeteer + bun) — 대부분 fresh suji dev, CLI 테스트는 단독 실행
 bash tests/e2e/run-node-run.sh          # suji run main.js embedded Node.js CLI
 bash tests/e2e/run-types-cli.sh         # suji types stdout/--out schema generation
+bash tests/e2e/run-init-cli.sh          # suji init / @suji/cli 스캐폴딩 + CI 템플릿
 bash tests/e2e/run-rust-types-helper.sh # Rust SDK SujiHandlers .d.ts helper
 bash tests/e2e/run-go-types-helper.sh   # Go SDK SujiHandlers .d.ts helper
 bash tests/e2e/run-node-types-helper.sh # Node SDK SujiHandlers typed invoke/call consumer
@@ -738,7 +739,7 @@ BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runti
 |------|--------|------|
 | GitHub Releases | 직접 다운로드 | CI 추가 필요 |
 | Homebrew | `brew install ohah/tap/suji` | tap 레포 생성 필요 |
-| npm/npx | `npx @suji/cli init my-app` | ✅ `packages/suji-cli`(의존 0, 바이너리 불요, init.zig 동형) — npm publish 토큰 대기 |
+| npm/npx | `npx @suji/cli init my-app` | ✅ `packages/suji-cli`(의존 0, 바이너리 불요, init.zig 동형, 생성 앱 CI 템플릿 포함) — npm publish 토큰 대기 |
 | curl 스크립트 | `curl -fsSL https://get.suji.dev \| sh` | 스크립트 작성 필요 |
 
 ### SDK 배포

@@ -1394,7 +1394,7 @@ suji build → 결과물:
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ❌ |
 | Homebrew tap | 사용자 직접 | -- | ❌ (CLAUDE.md "예정") |
-| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep — `--frontend` 도 양쪽 반영). 로컬 실증: npm pack→npx zig/rust/go/multi + frontend 분기 + 에러케이스. npm publish 는 토큰 대기(워크플로 후속) |
+| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep — `--frontend` 도 양쪽 반영) + `.github/workflows/suji.yml` 생성 앱 CI 템플릿. 로컬 실증: npm pack→npx zig/rust/go/multi + frontend 분기 + 에러케이스, `suji init`/`@suji/cli` 산출 workflow + frontend build E2E. npm publish 는 토큰 대기(워크플로 후속) |
 
 ### 플러그인 / 확장 API
 
@@ -1451,7 +1451,7 @@ suji build → 결과물:
 | TypeScript 타입 자동 생성 | - | specta 연동 | ✅ 옵션 A+B 1차 완료 — `@suji/api` invoke<K> + `@suji/node` invoke/invokeSync/call/callSync 모두 SujiHandlers conditional generic으로 cmd/req/res 추론. Zig SDK는 comptime `typeToTs` + `App.schema` chain + `suji types` CLI(stdout/`--out`). Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`) + `suji::typescript::SujiHandlers` helper로 수동 등록한 req/res를 `.d.ts` module augmentation으로 emit. Go SDK는 `suji.NewTSHandlers()` + struct/json tag reflection helper로 동일 emit. 검증: app_test 골든 + 실 CLI 통합 + JS/Node type tests + Rust/Go SDK unit + Rust/Go/Node 외부 consumer E2E. Node 자동 생성은 런타임 타입메타 부재로 범위 밖 |
 | 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). **번들 Vite 템플릿**(Tauri식, create-vite 미위임 — `src/templates/frontend/<fw>/` 트리 comptime `@embedFile`; 누락 시 컴파일 실패=회귀 가드). 각 템플릿은 스캐폴딩 백엔드의 `ping`/`greet` 를 호출하는 동작 데모. `--backend` 대칭, `FrontendTemplate=std.meta.stringToEnum`. ⚠️ **정직 한계**: `@suji/api` npm 미발행 → 템플릿은 발행 불요 로컬 래퍼 `src/suji.ts`(런타임 `window.__suji__` 감쌈, @suji/api 와 표면 동형 — 발행 시 import 경로만 교체)로 동작. suji-cli(npx)는 `cpSync` 로 동일 트리 복사(lockstep). 검증=전 6 fw `bun install`+`bun run build`=0+dist 실증, 실 `suji init` E2E(zig+svelte 스캐폴딩→빌드), `tests/init_test.zig`(enum 구동 계약 + **suji-cli 미러 byte-동형 drift 가드** + 루트 템플릿 미러). 미검증=CEF 런타임 invoke 왕복(globalShortcut 동급 e2e 경계) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
-| CI/CD 템플릿 | - | GitHub Actions 공식 제공 | 🟡 (내부 CI만, 템플릿 미제공) |
+| CI/CD 템플릿 | - | GitHub Actions 공식 제공 | ✅ `suji init` / `@suji/cli`가 `.github/workflows/suji.yml` 생성. 템플릿은 frontend `bun run build`, Zig backend fmt check, Rust/Go backend build를 포함하고, init.zig와 npm CLI 미러 byte-동형 단위 테스트 + init CLI E2E로 고정 |
 
 ### 바이너리 데이터 / 고급 기능
 

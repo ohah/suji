@@ -85,6 +85,9 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-types-cli.log
         run: bash tests/e2e/run-types-cli.sh
 
+      - name: E2E — Init CLI
+        run: bash tests/e2e/run-init-cli.sh
+
       - name: E2E — Rust TypeScript helper
         env:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-rust-types-helper.log

@@ -12,6 +12,7 @@ npx @suji/cli init my-app --frontend=vue  # react | vue | svelte | solid | preac
 
 생성물: `suji.json` · 백엔드(zig=`app.zig` / rust=`Cargo.toml`+`src/lib.rs` /
 go=`go.mod`+`main.go` / multi=`backends/{zig,rust,go}`) · `.gitignore` ·
+`.github/workflows/suji.yml` ·
 `frontend/`(`--frontend` 프레임워크의 번들 Vite 템플릿 — `invoke("ping")`/
 `invoke("greet")` 데모가 스캐폴딩 백엔드와 연결되어 동작).
 
