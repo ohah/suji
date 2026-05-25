@@ -729,10 +729,14 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         defer allocator.free(output);
         const go_entry = try std.fmt.allocPrint(allocator, "{s}/main.go", .{entry});
         defer allocator.free(go_entry);
-        const argv = &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry };
         if (builtin.os.tag == .windows) {
+            // Windows: -ldflags="-s -w" 가 없으면 Go c-shared DLL 이 LoadLibrary 에서
+            // ERROR_BAD_EXE_FORMAT(193) 으로 실패하는 케이스가 있다 (Go 1.26+
+            // DWARF/.debug_* 섹션이 PE loader 와 충돌). debug info 제거로 안정 로드.
+            const argv = &.{ "go", "build", "-buildmode=c-shared", "-ldflags=-s -w", "-o", output, go_entry };
             try runCmdEnv(allocator, argv, &.{.{ "CGO_ENABLED", "1" }});
         } else {
+            const argv = &.{ "go", "build", "-buildmode=c-shared", "-o", output, go_entry };
             try runCmdEnv(allocator, argv, &.{
                 .{ "CC", "/usr/bin/clang" },
                 .{ "CGO_ENABLED", "1" },
