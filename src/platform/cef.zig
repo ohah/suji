@@ -2822,6 +2822,15 @@ pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
         @memcpy(out_buf[0..n], formats[0..n]);
         return out_buf[0..n];
     }
+    if (comptime builtin.os.tag == .windows) {
+        const formats = if (win_clip.IsClipboardFormatAvailable(win_clip.CF_UNICODETEXT) != 0)
+            "[\"public.utf8-plain-text\"]"
+        else
+            "[]";
+        const n = @min(formats.len, out_buf.len);
+        @memcpy(out_buf[0..n], formats[0..n]);
+        return out_buf[0..n];
+    }
     if (!comptime is_macos) {
         const empty = "[]";
         const n = @min(empty.len, out_buf.len);
@@ -5957,12 +5966,52 @@ const win_notify = if (builtin.os.tag == .windows) struct {
     const NIIF_WARNING: u32 = 0x02;
     const NIIF_ERROR: u32 = 0x03;
     const NIIF_NOSOUND: u32 = 0x10;
+    const NIM_DELETE: u32 = 0x2;
+
+    const MapEntry = struct {
+        used: bool = false,
+        id_len: usize = 0,
+        id: [64]u8 = [_]u8{0} ** 64,
+        tray_id: u32 = 0,
+    };
+    var id_map: [16]MapEntry = [_]MapEntry{.{}} ** 16;
+
+    fn rememberMapping(id: []const u8, tray_id: u32) void {
+        if (id.len == 0 or id.len > 64) return;
+        // 기존 id 갱신 (caller 가 같은 id 로 다시 show 한 경우).
+        for (&id_map) |*m| {
+            if (m.used and m.id_len == id.len and std.mem.eql(u8, m.id[0..m.id_len], id)) {
+                m.tray_id = tray_id;
+                return;
+            }
+        }
+        for (&id_map) |*m| {
+            if (!m.used) {
+                m.used = true;
+                m.id_len = id.len;
+                @memcpy(m.id[0..id.len], id);
+                m.tray_id = tray_id;
+                return;
+            }
+        }
+        // 슬롯 부족 — 닫기 호출 시 fall-through. 정직 한계.
+    }
+
+    fn lookupAndForget(id: []const u8) ?u32 {
+        for (&id_map) |*m| {
+            if (m.used and m.id_len == id.len and std.mem.eql(u8, m.id[0..m.id_len], id)) {
+                const tid = m.tray_id;
+                m.* = .{};
+                return tid;
+            }
+        }
+        return null;
+    }
 
     /// id 별 tray icon 생성 → balloon (NIM_MODIFY + NIF_INFO). show 후
     /// auto-timeout (10초). close 시 NIM_DELETE.
     /// caller 가 같은 id 로 여러 번 show 하면 새 icon 추가 (기존 안 지움).
     fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
-        _ = id;
         // 빈 tooltip 으로 tray icon 생성 (notification 전용 — 사용자에게 visible 한 icon
         // 짧게 표시 후 destroy 됨, 실제로는 toast UI 가 주로 보임).
         const tray_id = win_tray.createIcon("");
@@ -5994,7 +6043,18 @@ const win_notify = if (builtin.os.tag == .windows) struct {
         const ok = win_tray.Shell_NotifyIconW(win_tray.NIM_MODIFY, &nid);
         // balloon 표시 후 icon 은 OS 가 auto-timeout (~10s) — caller 가 close 호출
         // 안 해도 사라짐. 정직: tray entry 는 우리 table 에 남음 (next destroy 까지).
-        return ok != 0;
+        if (ok == 0) {
+            _ = win_tray.destroyIcon(tray_id);
+            return false;
+        }
+        rememberMapping(id, tray_id);
+        return true;
+    }
+
+    /// id 로 매핑된 tray icon 을 NIM_DELETE 한다. 매핑 없으면 false (auto-timeout 이미 닫힌 경우 포함).
+    fn close(id: []const u8) bool {
+        const tray_id = lookupAndForget(id) orelse return false;
+        return win_tray.destroyIcon(tray_id);
     }
 } else struct {};
 
@@ -6100,12 +6160,30 @@ const linux_notify = if (is_linux) struct {
 
     fn makeHints(silent: bool, hint_entry_type: ?*anyopaque) ?*anyopaque {
         if (!silent) return g_variant_new_array(hint_entry_type, null, 0);
+        // Floating refs — 일부 alloc 실패 시 g_variant_new_tuple/array 가 sink 하기
+        // 전까지 남은 floating ref 는 호출자가 unref 해야 한다(GLib doc). 여기서는
+        // 4 단계 의존이라 마지막 array 호출이 모두 sink 하는 path 만 안전 — 중간
+        // 실패 시 g_variant_unref 로 명시 해제.
         const key = g_variant_new_string("suppress-sound") orelse return null;
-        const bool_value = g_variant_new_boolean(1) orelse return null;
-        const variant_value = g_variant_new_variant(bool_value) orelse return null;
-        const entry = g_variant_new_dict_entry(key, variant_value) orelse return null;
+        const bool_value = g_variant_new_boolean(1) orelse {
+            g_variant_unref(key);
+            return null;
+        };
+        const variant_value = g_variant_new_variant(bool_value) orelse {
+            g_variant_unref(bool_value);
+            g_variant_unref(key);
+            return null;
+        };
+        const entry = g_variant_new_dict_entry(key, variant_value) orelse {
+            g_variant_unref(variant_value);
+            // variant_value 가 bool_value 를 sink/own — bool_value 별도 unref 안 함.
+            g_variant_unref(key);
+            return null;
+        };
         const hint_entries = [_]?*anyopaque{entry};
-        return g_variant_new_array(hint_entry_type, &hint_entries, hint_entries.len);
+        const arr = g_variant_new_array(hint_entry_type, &hint_entries, hint_entries.len);
+        if (arr == null) g_variant_unref(entry);
+        return arr;
     }
 
     fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
@@ -6116,23 +6194,67 @@ const linux_notify = if (is_linux) struct {
         const title_z = writeCStr(title, &title_buf) orelse return false;
         const body_z = writeCStr(body, &body_buf) orelse return false;
 
-        const no_actions = [_]?[*:0]const u8{null};
-        const actions = g_variant_new_strv(&no_actions, 0) orelse return false;
         const hint_entry_type = g_variant_type_new("{sv}") orelse return false;
         defer g_variant_type_free(hint_entry_type);
-        const hints = makeHints(silent, hint_entry_type) orelse return false;
 
-        const children = [_]?*anyopaque{
-            g_variant_new_string("Suji") orelse return false,
-            g_variant_new_uint32(0) orelse return false,
-            g_variant_new_string("") orelse return false,
-            g_variant_new_string(title_z) orelse return false,
-            g_variant_new_string(body_z) orelse return false,
-            actions,
-            hints,
-            g_variant_new_int32(-1) orelse return false,
+        // 8 자식 floating ref 를 누적 — 중간 실패 시 collected 된 것 unref.
+        var collected: [8]?*anyopaque = [_]?*anyopaque{null} ** 8;
+        var n: usize = 0;
+        const cleanupOnFail = struct {
+            fn run(items: *[8]?*anyopaque, count: usize) void {
+                var i: usize = 0;
+                while (i < count) : (i += 1) {
+                    if (items[i]) |v| g_variant_unref(v);
+                }
+            }
+        }.run;
+
+        const no_actions = [_]?[*:0]const u8{null};
+        collected[n] = g_variant_new_string("Suji") orelse {
+            cleanupOnFail(&collected, n);
+            return false;
         };
-        const parameters = g_variant_new_tuple(&children, children.len) orelse return false;
+        n += 1;
+        collected[n] = g_variant_new_uint32(0) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+        collected[n] = g_variant_new_string("") orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+        collected[n] = g_variant_new_string(title_z) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+        collected[n] = g_variant_new_string(body_z) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+        collected[n] = g_variant_new_strv(&no_actions, 0) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+        collected[n] = makeHints(silent, hint_entry_type) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+        collected[n] = g_variant_new_int32(-1) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
+        n += 1;
+
+        const parameters = g_variant_new_tuple(&collected, n) orelse {
+            cleanupOnFail(&collected, n);
+            return false;
+        };
         const reply = call("Notify", parameters, NOTIFY_TIMEOUT_MS) orelse return false;
         defer g_variant_unref(reply);
 
@@ -6147,7 +6269,10 @@ const linux_notify = if (is_linux) struct {
         const dbus_id = entry.dbus_id;
         const child = g_variant_new_uint32(dbus_id) orelse return false;
         const children = [_]?*anyopaque{child};
-        const parameters = g_variant_new_tuple(&children, children.len) orelse return false;
+        const parameters = g_variant_new_tuple(&children, children.len) orelse {
+            g_variant_unref(child);
+            return false;
+        };
         const reply = call("CloseNotification", parameters, NOTIFY_TIMEOUT_MS) orelse return false;
         g_variant_unref(reply);
         entry.used = false;
@@ -6187,6 +6312,7 @@ pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, sil
 
 pub fn notificationClose(id: []const u8) bool {
     if (comptime is_linux) return linux_notify.close(id);
+    if (comptime builtin.os.tag == .windows) return win_notify.close(id);
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
     const id_cstr = writeCStr(id, &id_buf) orelse return false;
@@ -6997,20 +7123,23 @@ const win_dlg = if (builtin.os.tag == .windows) struct {
             w.print("\"{s}\"", .{esc_buf[0..esc_n]}) catch {};
         } else {
             // multi: file_buf[0..first_len] = dir, then each segment 다음 file name.
-            var dir_buf: [2048]u8 = undefined;
+            // dir/name 둘 다 4096-byte UTF-8 까지 수용 — Windows long-path 와 한자/이모지
+            // 혼합 시도 안전. z16ToUtf8 는 overflow 시 truncate-and-return-empty 동작이고
+            // 그 경우 bufPrint catch 가 segment 를 skip.
+            var dir_buf: [4096]u8 = undefined;
             const dir = z16ToUtf8(&dir_buf, file_buf[0..first_len :0].ptr);
             var cursor: usize = first_len + 1;
             var first = true;
             while (cursor < file_buf.len and file_buf[cursor] != 0) {
                 var seg_end = cursor;
                 while (seg_end < file_buf.len and file_buf[seg_end] != 0) : (seg_end += 1) {}
-                var name_buf: [1024]u8 = undefined;
+                var name_buf: [4096]u8 = undefined;
                 const name = z16ToUtf8(&name_buf, file_buf[cursor..seg_end :0].ptr);
                 if (!first) w.writeByte(',') catch break;
                 first = false;
-                var path_buf: [4200]u8 = undefined;
+                var path_buf: [8208]u8 = undefined; // dir(4096) + '\\' + name(4096) + slack
                 const full = std.fmt.bufPrint(&path_buf, "{s}\\{s}", .{ dir, name }) catch break;
-                var esc_buf: [8200]u8 = undefined;
+                var esc_buf: [16416]u8 = undefined; // worst-case JSON escape ~2x
                 const esc_n = util.escapeJsonStrFull(full, &esc_buf) orelse 0;
                 w.print("\"{s}\"", .{esc_buf[0..esc_n]}) catch {};
                 cursor = seg_end + 1;
