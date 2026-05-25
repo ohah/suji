@@ -221,8 +221,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("shcore", .{});
         // comdlg32 — GetOpenFileNameW/GetSaveFileNameW (dialog showOpen/Save).
         root_module.linkSystemLibrary("comdlg32", .{});
-        // comctl32 — TaskDialogIndirect (dialog.messageBox custom button labels).
-        root_module.linkSystemLibrary("comctl32", .{});
+        // comctl32 — TaskDialogIndirect 은 LoadLibrary 런타임 해상도라 정적 link 불필요.
+        // (manifest 없는 dev 빌드에서 정적 import 시 v5.82 fallback → STATUS_ENTRYPOINT_NOT_FOUND.)
         // dwmapi — DwmSetWindowAttribute (window setHasShadow via NCRP policy).
         root_module.linkSystemLibrary("dwmapi", .{});
         // ole32 — COM IFileOpenDialog (dialog directory selection).
@@ -389,6 +389,11 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{
         .name = "suji",
         .root_module = root_module,
+        // Windows: SxS manifest 임베드 → Microsoft.Windows.Common-Controls v6
+        // 활성화 (TaskDialogIndirect 등 modern controls), PerMonitorV2 DPI,
+        // supportedOS GUIDs. Electron 의 영구적 배포 패리티. 없으면 SxS 로더가
+        // legacy comctl32 v5.82 로 폴백 → TaskDialog 사용 불가.
+        .win32_manifest = if (os_tag == .windows) b.path("src/suji.manifest") else null,
     });
 
     // Windows: bridge.o 는 mingw g++ 가 미리 만들어야 (addObjectFile 의존성

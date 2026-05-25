@@ -845,6 +845,8 @@ fn viewsWindowBoundsChanged(
     };
     const win: *c.cef_window_t = @ptrCast(window orelse return);
     defer releaseWindowRef(win);
+    // new_bounds 가 null 이면 CEF teardown 중 — vtable 호출 위험하니 state 체크 스킵.
+    const bounds = new_bounds orelse return;
     // OS-initiated minimize/maximize/restore 감지 — CEF window 의 is_minimized
     // /is_maximized 가 bounds-change 직전에 변경된다. delegate 의 last_* 와 비교해
     // transition 만 이벤트 발화. SDK 호출(minimizeImpl 등)은 별도로 가드되어 중복
@@ -868,7 +870,6 @@ fn viewsWindowBoundsChanged(
             if (g_window_unmaximize_handler) |h| h(d.handle);
         }
     }
-    const bounds = new_bounds orelse return;
     viewsWindowEmitBoundsChanged(d, bounds.*);
 }
 
@@ -3808,7 +3809,12 @@ const win_screen = if (builtin.os.tag == .windows) struct {
 const win_theme = if (builtin.os.tag == .windows) struct {
     const HKEY_CURRENT_USER: usize = 0x80000001;
     const KEY_READ: u32 = 0x20019;
+    const KEY_SET_VALUE: u32 = 0x0002;
+    const REG_DWORD: u32 = 4;
     const RRF_RT_REG_DWORD: u32 = 0x00000010;
+    const HWND_BROADCAST: ?*anyopaque = @ptrFromInt(0xFFFF);
+    const WM_SETTINGCHANGE: u32 = 0x001A;
+    const SMTO_ABORTIFHUNG: u32 = 0x0002;
 
     extern "advapi32" fn RegGetValueW(
         hkey: usize,
@@ -3819,6 +3825,31 @@ const win_theme = if (builtin.os.tag == .windows) struct {
         pvData: ?*anyopaque,
         pcbData: ?*u32,
     ) callconv(.winapi) i32;
+    extern "advapi32" fn RegOpenKeyExW(
+        hkey: usize,
+        lpSubKey: ?[*:0]const u16,
+        ulOptions: u32,
+        samDesired: u32,
+        phkResult: *usize,
+    ) callconv(.winapi) i32;
+    extern "advapi32" fn RegSetValueExW(
+        hkey: usize,
+        lpValueName: ?[*:0]const u16,
+        Reserved: u32,
+        dwType: u32,
+        lpData: *const anyopaque,
+        cbData: u32,
+    ) callconv(.winapi) i32;
+    extern "advapi32" fn RegCloseKey(hkey: usize) callconv(.winapi) i32;
+    extern "user32" fn SendMessageTimeoutW(
+        hwnd: ?*anyopaque,
+        Msg: u32,
+        wParam: usize,
+        lParam: isize,
+        fuFlags: u32,
+        uTimeout: u32,
+        lpdwResult: ?*usize,
+    ) callconv(.winapi) isize;
 
     /// HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme
     /// DWORD: 0 = dark, 1 = light (default). 값 부재 시 light 가정 → false.
@@ -3838,6 +3869,47 @@ const win_theme = if (builtin.os.tag == .windows) struct {
         );
         if (status != 0) return false; // ERROR_SUCCESS 가 아니면 default light.
         return data == 0;
+    }
+
+    /// HKCU AppsUseLightTheme write + WM_SETTINGCHANGE broadcast. CEF/Chromium
+    /// 이 WM_SETTINGCHANGE("ImmersiveColorSet") 를 받아 즉시 dark/light refresh.
+    /// source = "light"|"dark"|"system". "system" 은 registry 값 unchanged + broadcast
+    /// (Windows 자체에는 "system follows OS" 개념이 앱 단에서 노출 안 됨 → no-op +
+    /// nativeTheme:updated 만 emit 되도록 broadcast).
+    fn setSource(source: []const u8) bool {
+        const sub_key = std.unicode.utf8ToUtf16LeStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+        const value_name = std.unicode.utf8ToUtf16LeStringLiteral("AppsUseLightTheme");
+        var data: u32 = undefined;
+        if (std.mem.eql(u8, source, "light")) {
+            data = 1;
+        } else if (std.mem.eql(u8, source, "dark")) {
+            data = 0;
+        } else if (std.mem.eql(u8, source, "system")) {
+            // registry 변경 없이 broadcast 만.
+            broadcastSettingChange();
+            return true;
+        } else {
+            return false;
+        }
+        var hkey: usize = 0;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, sub_key.ptr, 0, KEY_SET_VALUE, &hkey) != 0) return false;
+        defer _ = RegCloseKey(hkey);
+        if (RegSetValueExW(hkey, value_name.ptr, 0, REG_DWORD, &data, @sizeOf(u32)) != 0) return false;
+        broadcastSettingChange();
+        return true;
+    }
+
+    fn broadcastSettingChange() void {
+        const param_w = std.unicode.utf8ToUtf16LeStringLiteral("ImmersiveColorSet");
+        _ = SendMessageTimeoutW(
+            HWND_BROADCAST,
+            WM_SETTINGCHANGE,
+            0,
+            @as(isize, @bitCast(@intFromPtr(param_w.ptr))),
+            SMTO_ABORTIFHUNG,
+            100,
+            null,
+        );
     }
 } else struct {};
 
@@ -4017,14 +4089,51 @@ const win_window = if (builtin.os.tag == .windows) struct {
     // TASKDIALOGCONFIG 와 TASKDIALOG_BUTTON 둘 다 pshpack1.h pack(1) 라
     // Zig extern struct natural align 으로는 표현 불가 → raw byte buffer 로
     // 수동 layout. x64 전용 (suji 데스크톱은 모두 x64).
+    //
+    // ⚠️ 정적 import 하지 않음 — comctl32.dll 이 SxS manifest 없이 로드되면
+    // legacy v5.82 가 resolve 되고 TaskDialogIndirect symbol 이 없어 프로세스
+    // 로드 자체가 STATUS_ENTRYPOINT_NOT_FOUND 로 실패한다. runtime LoadLibrary +
+    // GetProcAddress 로 graceful detect → 없으면 MessageBoxW fallback.
     // ============================================
-    extern "comctl32" fn TaskDialogIndirect(pTaskConfig: *const anyopaque, pnButton: ?*i32, pnRadioButton: ?*i32, pfVerificationFlagChecked: ?*i32) callconv(.winapi) i32;
+    const HMODULE = ?*anyopaque;
+    extern "kernel32" fn LoadLibraryW(lpLibFileName: [*:0]const u16) callconv(.winapi) HMODULE;
+    extern "kernel32" fn GetProcAddress(hModule: HMODULE, lpProcName: [*:0]const u8) callconv(.winapi) ?*anyopaque;
+
+    const TaskDialogIndirectFn = *const fn (
+        pTaskConfig: *const anyopaque,
+        pnButton: ?*i32,
+        pnRadioButton: ?*i32,
+        pfVerificationFlagChecked: ?*i32,
+    ) callconv(.winapi) i32;
+
+    var g_task_dialog_ptr: ?TaskDialogIndirectFn = null;
+    var g_task_dialog_resolved: std.atomic.Value(bool) = .init(false);
+    var g_task_dialog_resolve_lock: std.atomic.Value(bool) = .init(false);
+
+    fn resolveTaskDialog() ?TaskDialogIndirectFn {
+        if (g_task_dialog_resolved.load(.acquire)) return g_task_dialog_ptr;
+        // double-checked locking via simple spinlock — 첫 해상도만 진입.
+        while (g_task_dialog_resolve_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+        defer g_task_dialog_resolve_lock.store(false, .release);
+        if (g_task_dialog_resolved.load(.acquire)) return g_task_dialog_ptr;
+        const dll = std.unicode.utf8ToUtf16LeStringLiteral("comctl32.dll");
+        if (LoadLibraryW(dll.ptr)) |mod| {
+            if (GetProcAddress(mod, "TaskDialogIndirect")) |ptr| {
+                g_task_dialog_ptr = @ptrCast(@alignCast(ptr));
+            }
+        }
+        g_task_dialog_resolved.store(true, .release);
+        return g_task_dialog_ptr;
+    }
 
     const TDC_SIZE: usize = 160; // pack(1) x64 size
     const TDB_SIZE: usize = 12; // pack(1) x64 size
-    const TD_INFORMATION_ICON: isize = -3; // pszMainIcon literal
-    const TD_WARNING_ICON: isize = -1;
-    const TD_ERROR_ICON: isize = -2;
+    // MAKEINTRESOURCEW(-N) = (LPWSTR)((ULONG_PTR)((WORD)(-N))) — 16비트 unsigned
+    // 캐스트만 → high word 0. Zig 에서 isize 로 -N 쓰면 sign-extend 되어 Windows
+    // 가 valid PCWSTR pointer 로 해석 → garbage deref. (WORD)(-N) 동등으로 mask.
+    const TD_INFORMATION_ICON: usize = @as(u16, @bitCast(@as(i16, -3)));
+    const TD_WARNING_ICON: usize = @as(u16, @bitCast(@as(i16, -1)));
+    const TD_ERROR_ICON: usize = @as(u16, @bitCast(@as(i16, -2)));
     // TDCBF_OK_BUTTON: 1, TDCBF_CANCEL_BUTTON: 8 (사용 안 함 — 모두 커스텀 버튼)
     const TDF_ALLOW_DIALOG_CANCELLATION: u32 = 0x0008;
     const TDF_VERIFICATION_FLAG_CHECKED: u32 = 0x0100;
@@ -4106,14 +4215,59 @@ const win_window = if (builtin.os.tag == .windows) struct {
         // 92..156 — all zero (no expand/footer/etc.)
         // 156..160 cxWidth = 0 (auto)
 
+        const task_dialog = resolveTaskDialog() orelse return messageBoxFallback(opts);
         var clicked_id: i32 = 0;
-        const hr = TaskDialogIndirect(&tdc, &clicked_id, null, null);
-        if (hr != 0) return .{};
+        const hr = task_dialog(&tdc, &clicked_id, null, null);
+        if (hr != 0) {
+            // 매니페스트 누락/E_NOTIMPL/HRESULT 실패 → MessageBoxW fallback (always available).
+            return messageBoxFallback(opts);
+        }
         const idx_signed = clicked_id - 100;
+        // ESC/IDCANCEL/dialog 외부 닫기 → custom button 범위 밖 → 마지막 버튼 인덱스 매핑.
+        // MessageBoxW path 의 IDCANCEL → "Cancel" 버튼 (보통 마지막) 매핑과 동일 컨벤션.
         const idx: usize = if (idx_signed >= 0 and idx_signed < @as(i32, @intCast(button_count)))
             @intCast(idx_signed)
+        else if (button_count > 0)
+            button_count - 1
         else
             0;
+        return .{ .response = idx, .checkbox_checked = opts.checkbox_checked };
+    }
+
+    /// TaskDialogIndirect 가 사용 불가(manifest 누락 등) 일 때 MessageBoxW 로 fallback.
+    /// 커스텀 라벨은 보존 못 하지만 최소 dialog 는 표시.
+    fn messageBoxFallback(opts: MessageBoxOpts) MessageBoxResult {
+        var text_buf: [4096]u16 = undefined;
+        var caption_w_buf: [512]u16 = undefined;
+        var combined_buf: [4096]u8 = undefined;
+        const text_utf8 = if (opts.detail.len > 0) blk: {
+            const combined = std.fmt.bufPrint(&combined_buf, "{s}\n\n{s}", .{ opts.message, opts.detail }) catch opts.message;
+            break :blk combined;
+        } else opts.message;
+        const text_z = utf8ToZ16(&text_buf, text_utf8) orelse return .{};
+        const caption_z: ?[*:0]const u16 = if (opts.title.len > 0) blk: {
+            const z = utf8ToZ16(&caption_w_buf, opts.title) orelse break :blk null;
+            break :blk z.ptr;
+        } else null;
+        const button_type: u32 = switch (opts.buttons.len) {
+            0, 1 => MB_OK,
+            2 => MB_OKCANCEL,
+            else => MB_YESNOCANCEL,
+        };
+        const icon: u32 = switch (opts.style) {
+            .info => MB_ICONINFORMATION,
+            .err => MB_ICONERROR,
+            .warning => MB_ICONWARNING,
+            .question => MB_ICONQUESTION,
+            .none => 0,
+        };
+        const response_id = MessageBoxW(null, text_z.ptr, caption_z, icon | button_type);
+        const idx: usize = switch (response_id) {
+            IDOK, IDYES => 0,
+            IDNO => 1,
+            IDCANCEL => if (opts.buttons.len > 0) opts.buttons.len - 1 else 0,
+            else => 0,
+        };
         return .{ .response = idx, .checkbox_checked = opts.checkbox_checked };
     }
 } else struct {};
@@ -4404,6 +4558,7 @@ pub fn nativeThemeIsDark() bool {
 /// system은 OS 설정 따름 (NSApp.appearance = nil), 그 외는 NSAppearance 명시.
 /// 잘못된 source는 false. macOS 10.14+.
 pub fn nativeThemeSetSource(source: []const u8) bool {
+    if (comptime builtin.os.tag == .windows) return win_theme.setSource(source);
     if (!comptime is_macos) return false;
     const NSApplication = getClass("NSApplication") orelse return false;
     const app = msgSend(NSApplication, "sharedApplication") orelse return false;
@@ -6350,11 +6505,23 @@ const win_notify = if (builtin.os.tag == .windows) struct {
         id: [64]u8 = [_]u8{0} ** 64,
         tray_id: u32 = 0,
     };
-    var id_map: [16]MapEntry = [_]MapEntry{.{}} ** 16;
+    // 64-slot — Linux notify entries 와 동일 cap. main 스레드(show/close) 와
+    // pump 스레드(handleTrayCallback NIN_BALLOONUSERCLICK/TIMEOUT) 가 동시 접근
+    // 하므로 spinlock 으로 직렬화.
+    var id_map: [64]MapEntry = [_]MapEntry{.{}} ** 64;
+    var id_map_lock_flag: std.atomic.Value(bool) = .init(false);
+
+    fn lockIdMap() void {
+        while (id_map_lock_flag.cmpxchgWeak(false, true, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+    }
+    fn unlockIdMap() void {
+        id_map_lock_flag.store(false, .release);
+    }
 
     fn rememberMapping(id: []const u8, tray_id: u32) void {
         if (id.len == 0 or id.len > 64) return;
-        // 기존 id 갱신 (caller 가 같은 id 로 다시 show 한 경우).
+        lockIdMap();
+        defer unlockIdMap();
         for (&id_map) |*m| {
             if (m.used and m.id_len == id.len and std.mem.eql(u8, m.id[0..m.id_len], id)) {
                 m.tray_id = tray_id;
@@ -6370,10 +6537,12 @@ const win_notify = if (builtin.os.tag == .windows) struct {
                 return;
             }
         }
-        // 슬롯 부족 — 닫기 호출 시 fall-through. 정직 한계.
+        // 슬롯 부족 (64+ 동시 notification) — close 호출 시 silent fail. 정직 한계.
     }
 
     fn lookupAndForget(id: []const u8) ?u32 {
+        lockIdMap();
+        defer unlockIdMap();
         for (&id_map) |*m| {
             if (m.used and m.id_len == id.len and std.mem.eql(u8, m.id[0..m.id_len], id)) {
                 const tid = m.tray_id;
@@ -6384,14 +6553,22 @@ const win_notify = if (builtin.os.tag == .windows) struct {
         return null;
     }
 
+    /// 호출자는 lock 안에서 슬라이스 복사 또는 즉시 emit. 슬라이스가 escape 하면
+    /// 다음 mutator 가 underlying 배열 zero 처리 시 dangling.
     pub fn lookupIdByTrayId(tray_id: u32) ?[]const u8 {
+        lockIdMap();
+        defer unlockIdMap();
         for (&id_map) |*m| {
             if (m.used and m.tray_id == tray_id) return m.id[0..m.id_len];
         }
         return null;
     }
 
+    /// tray_id 매칭 슬롯 clear. 시그니처는 ?[]const u8 이지만 caller 가 더 필요
+    /// 없는 컨텍스트(balloon timeout) 라 의도적으로 null 반환 — id 복사 비용 절약.
     pub fn lookupAndForgetByTrayId(tray_id: u32) ?[]const u8 {
+        lockIdMap();
+        defer unlockIdMap();
         for (&id_map) |*m| {
             if (m.used and m.tray_id == tray_id) {
                 m.* = .{};
@@ -6960,14 +7137,24 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         // Balloon click — uid 가 notification tray 면 notification:click emit.
         // 별도 emit handler 가 있으므로 tray click 과 분리.
         if (mouse_msg == NIN_BALLOONUSERCLICK) {
+            // lookupIdByTrayId 가 lock 풀린 후 슬라이스 반환 → 다른 스레드가 zero
+            // 처리하면 dangling. 여기서 즉시 스택 버퍼로 복사 후 emit.
+            var id_copy: [64]u8 = undefined;
+            var id_copy_len: usize = 0;
             if (win_notify.lookupIdByTrayId(uid)) |id_slice| {
-                if (g_notification_emit_handler) |emit| emit(id_slice);
+                id_copy_len = @min(id_slice.len, id_copy.len);
+                @memcpy(id_copy[0..id_copy_len], id_slice[0..id_copy_len]);
+            }
+            if (id_copy_len > 0) {
+                if (g_notification_emit_handler) |emit| emit(id_copy[0..id_copy_len]);
             }
             return;
         }
         if (mouse_msg == NIN_BALLOONTIMEOUT) {
-            // OS 가 balloon 닫음 — id_map 정리.
+            // OS 가 balloon 닫음 — id_map slot 정리 + tray icon NIM_DELETE.
+            // (이전엔 id_map 만 cleared, tray entry/icon은 destroyTray 까지 잔존)
             _ = win_notify.lookupAndForgetByTrayId(uid);
+            _ = win_tray.destroyIcon(uid);
             return;
         }
         var entry: ?*win_tray.Entry = null;
@@ -7106,7 +7293,13 @@ const win_pump = if (builtin.os.tag == .windows) struct {
         current_req = req;
         _ = ResetEvent(response_event);
         if (PostThreadMessageW(thread_id, WM_APP_REQ, 0, 0) == 0) return 0;
-        _ = WaitForSingleObject(response_event, INFINITE);
+        // 5초 타임아웃 — TrackPopupMenu(우클릭 메뉴) 가 펌프 스레드를 모달로 점유
+        // 중일 때 main 스레드 → pump 요청은 메뉴 닫힐 때까지 대기. INFINITE 면
+        // 사용자가 메뉴 열어둔 채 frontend 가 setMenu 호출 시 데드락. 5초 후
+        // graceful timeout — caller 는 false/0 받음.
+        const WAIT_TIMEOUT_MS: u32 = 5000;
+        const rc = WaitForSingleObject(response_event, WAIT_TIMEOUT_MS);
+        if (rc != 0) return 0; // WAIT_OBJECT_0 == 0; 그 외는 timeout/abandoned
         return current_req.result;
     }
 } else struct {};
