@@ -5322,9 +5322,109 @@ pub fn setTrayEmitHandler(handler: TrayEmitHandler) void {
     g_tray_emit_handler = handler;
 }
 
+// ============================================
+// Win32 Shell_NotifyIcon — tray PoC (createTray/destroyTray only).
+// Menu/click/balloon notification 은 hidden hwnd + WindowProc + message pump
+// thread 가 필요해 별도 후속 PR. 현재는 icon 표시 + tooltip 만.
+// ============================================
+const win_tray = if (builtin.os.tag == .windows) struct {
+    const NIM_ADD: u32 = 0;
+    const NIM_MODIFY: u32 = 1;
+    const NIM_DELETE: u32 = 2;
+    const NIF_MESSAGE: u32 = 0x01;
+    const NIF_ICON: u32 = 0x02;
+    const NIF_TIP: u32 = 0x04;
+
+    const NOTIFYICONDATAW = extern struct {
+        cbSize: u32 = 0,
+        hWnd: ?*anyopaque = null,
+        uID: u32 = 0,
+        uFlags: u32 = 0,
+        uCallbackMessage: u32 = 0,
+        hIcon: ?*anyopaque = null,
+        szTip: [128]u16 = std.mem.zeroes([128]u16),
+        dwState: u32 = 0,
+        dwStateMask: u32 = 0,
+        szInfo: [256]u16 = std.mem.zeroes([256]u16),
+        uVersion: u32 = 0,
+        szInfoTitle: [64]u16 = std.mem.zeroes([64]u16),
+        dwInfoFlags: u32 = 0,
+        guidItem: [16]u8 = std.mem.zeroes([16]u8),
+        hBalloonIcon: ?*anyopaque = null,
+    };
+
+    extern "shell32" fn Shell_NotifyIconW(dwMessage: u32, lpData: *NOTIFYICONDATAW) callconv(.winapi) i32;
+    extern "user32" fn LoadIconW(hInstance: ?*anyopaque, lpIconName: usize) callconv(.winapi) ?*anyopaque;
+    extern "user32" fn GetActiveWindow() callconv(.winapi) ?*anyopaque;
+    extern "user32" fn GetDesktopWindow() callconv(.winapi) ?*anyopaque;
+    const IDI_APPLICATION: usize = 32512;
+
+    /// id 별 NOTIFYICONDATAW 저장 — destroy 시 같은 hwnd/uID 로 NIM_DELETE.
+    const Entry = struct {
+        used: bool = false,
+        id: u32 = 0,
+        hwnd: ?*anyopaque = null,
+    };
+    var entries: [16]Entry = [_]Entry{.{}} ** 16;
+    var next_id: u32 = 1;
+
+    fn createIcon(tooltip: []const u8) u32 {
+        // hwnd 는 desktop window (사용자 click 콜백 없음, icon 만 표시).
+        const hwnd = GetActiveWindow() orelse GetDesktopWindow() orelse return 0;
+        var slot_idx: usize = 0;
+        var found = false;
+        for (&entries, 0..) |*e, i| {
+            if (!e.used) {
+                slot_idx = i;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return 0;
+
+        var nid: NOTIFYICONDATAW = .{};
+        nid.cbSize = @sizeOf(NOTIFYICONDATAW);
+        nid.hWnd = hwnd;
+        nid.uID = next_id;
+        nid.uFlags = NIF_ICON | NIF_TIP;
+        nid.hIcon = LoadIconW(null, IDI_APPLICATION);
+        if (tooltip.len > 0) {
+            const max_tip = nid.szTip.len - 1;
+            const src = if (tooltip.len > max_tip) tooltip[0..max_tip] else tooltip;
+            _ = std.unicode.utf8ToUtf16Le(nid.szTip[0..max_tip], src) catch {};
+        }
+        if (Shell_NotifyIconW(NIM_ADD, &nid) == 0) return 0;
+        const id = next_id;
+        next_id += 1;
+        entries[slot_idx] = .{ .used = true, .id = id, .hwnd = hwnd };
+        return id;
+    }
+
+    fn destroyIcon(tray_id: u32) bool {
+        for (&entries) |*e| {
+            if (e.used and e.id == tray_id) {
+                var nid: NOTIFYICONDATAW = .{};
+                nid.cbSize = @sizeOf(NOTIFYICONDATAW);
+                nid.hWnd = e.hwnd;
+                nid.uID = tray_id;
+                _ = Shell_NotifyIconW(NIM_DELETE, &nid);
+                e.used = false;
+                return true;
+            }
+        }
+        return false;
+    }
+} else struct {};
+
 /// 새 tray 생성. title/tooltip은 빈 문자열이면 미설정 (icon 미지원 v1).
 /// 반환: trayId (failure 시 0).
 pub fn createTray(title: []const u8, tooltip: []const u8) u32 {
+    if (comptime builtin.os.tag == .windows) {
+        // Windows PoC: title 무시 (system tray 는 보통 icon-only). tooltip 만 적용.
+        // 빈 tooltip 이면 title 을 fallback 으로 사용.
+        const tip = if (tooltip.len > 0) tooltip else title;
+        return win_tray.createIcon(tip);
+    }
     if (!comptime is_macos) return 0;
     ensureTraysMap();
     if (!g_trays_initialized) return 0;
@@ -5418,6 +5518,7 @@ pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
 
 /// tray 제거. NSStatusBar에서 빼고 retain count 해제.
 pub fn destroyTray(tray_id: u32) bool {
+    if (comptime builtin.os.tag == .windows) return win_tray.destroyIcon(tray_id);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry = g_trays.get(tray_id) orelse return false;
