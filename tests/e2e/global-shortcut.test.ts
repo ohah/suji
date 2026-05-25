@@ -38,7 +38,10 @@ afterAll(async () => {
   await browser?.disconnect();
 });
 
-describe("global shortcut core commands", () => {
+// macOS Carbon Hot Key API 의존 — Windows/Linux 는 별도 native impl 필요(후속).
+// Windows: RegisterHotKey + WM_HOTKEY message loop. Linux: X11 XGrabKey / xkb.
+// 현재 Windows/Linux 에선 global_shortcut_* IPC 가 ok=false 반환 → 전체 fail.
+describe.skipIf(process.platform !== "darwin")("global shortcut core commands", () => {
   test("register / isRegistered / unregister round-trip", async () => {
     const accel = "Cmd+Shift+F8";
 

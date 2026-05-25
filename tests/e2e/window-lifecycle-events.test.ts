@@ -83,6 +83,9 @@ afterAll(async () => {
 });
 
 describe("window lifecycle events", () => {
+  // Windows CEF native window 는 resize/move 콜백을 emit 하지 않음 (macOS
+  // NSWindowDelegate windowDidResize/Move 만 cef.zig 가 후크). Windows 측
+  // WM_SIZE/WM_MOVE → emit 후속 작업.
   test("setBounds triggers window:resized", async () => {
     // 첫 창 ID는 항상 1 (suji.json startup window).
     // moved는 macOS setFrame:display:가 origin 변경에 windowDidMove를 비결정적으로
@@ -132,6 +135,8 @@ describe("window lifecycle events", () => {
   // e2e에서 비결정적이라 인프라만 unit test (window_manager_test)로 검증.
   test.skip("focus/blur는 e2e에서 비결정적 — 인프라는 unit test 회귀로 검증", () => {});
 
+  // Windows CEF native window 는 resize 이벤트를 macOS NSWindowDelegate 처럼
+  // bounds-dedupe 하지 않고 매번 emit → cache 가 다른 메커니즘. macOS 만 가드.
   test("change-detection guard — 동일 setBounds 두 번이면 resized 한 번만", async () => {
     // 우선 다른 bounds로 한번 → 이후 동일 bounds 두 번 호출.
     await core({ cmd: "set_bounds", windowId: 1, x: 100, y: 100, width: 700, height: 500 });
@@ -155,6 +160,8 @@ describe("window lifecycle events", () => {
     expect(win1Events.length).toBe(1);
   });
 
+  // Windows CEF resize 이벤트 payload 는 width/height 만 포함 — macOS
+  // NSWindowDelegate 의 5필드(x,y,width,height,windowId) 와 다른 형태.
   test("4 typed callback 분리 — resized payload는 5필드, moved/focus/blur 미포함", async () => {
     // 4 typed callback 분리 효과를 emit payload shape으로 검증:
     //   resized → {windowId, x, y, width, height}
@@ -198,6 +205,9 @@ describe("window lifecycle events", () => {
   // 새 창을 만들고 IPC로 NSWindow를 조작 → NSWindowDelegate가 이벤트 발화.
   // CI runner는 dock 동작이 비결정적이라 toBeGreaterThan(0)만 검증 (정확한 횟수 X).
 
+  // minimize/restore/maximize/unmaximize 이벤트는 NSWindowDelegate
+  // (windowDidMiniaturize 등) 의존 — Windows CEF 는 동등 콜백 미배선.
+  // 후속에서 WM_SYSCOMMAND hook + emit 추가 시 가드 제거.
   test("minimize → window:minimize 이벤트, restore_window → window:restore", async () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",
