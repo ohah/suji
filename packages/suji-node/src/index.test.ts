@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, invoke, invokeSync, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, type InvokeEvent } from './index';
+import { handle, invoke, invokeSync, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -290,6 +290,36 @@ describe('crashReporter', () => {
 
     bridge.invoke.mockResolvedValueOnce('{"report":null}');
     expect(await crashReporter.getLastCrashReport()).toBeNull();
+  });
+});
+
+describe('autoUpdater', () => {
+  it('checkForUpdates sends manifest fields and returns result', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"updateAvailable":true,"currentVersion":"1.0.0","version":"1.1.0","url":"https://example.test/app.zip","sha256":"","notes":"release notes","pubDate":"2026-05-25T00:00:00Z"}');
+    const r = await autoUpdater.checkForUpdates(
+      {
+        version: '1.1.0',
+        url: 'https://example.test/app.zip',
+        notes: 'release notes',
+        pubDate: '2026-05-25T00:00:00Z',
+      },
+      { currentVersion: '1.0.0' },
+    );
+    expect(r.updateAvailable).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"auto_updater_check_update","currentVersion":"1.0.0","latestVersion":"1.1.0","url":"https://example.test/app.zip","sha256":"","notes":"release notes","pubDate":"2026-05-25T00:00:00Z"}');
+  });
+
+  it('verifyFile sends path/hash and returns actual digest', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":false,"actualSha256":"abc"}');
+    expect(await autoUpdater.verifyFile('/tmp/suji.zip', '0'.repeat(64))).toEqual({
+      success: false,
+      actualSha256: 'abc',
+    });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', JSON.stringify({
+      cmd: 'auto_updater_verify_file',
+      path: '/tmp/suji.zip',
+      sha256: '0'.repeat(64),
+    }));
   });
 });
 

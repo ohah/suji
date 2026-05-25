@@ -12,6 +12,7 @@ const window_mod = @import("window");
 const window_stack_mod = @import("window_stack");
 const window_ipc = @import("window_ipc");
 const logger = @import("logger");
+const auto_updater = @import("auto_updater");
 
 const log = logger.module("main");
 const Watcher = @import("platform/watcher.zig").Watcher;
@@ -2727,6 +2728,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{esc_buf[0..esc_n]},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "auto_updater_check_update")) {
+        return handleAutoUpdaterCheckUpdate(req_clean, response_buf);
+    }
+    if (std.mem.eql(u8, cmd, "auto_updater_verify_file")) {
+        return handleAutoUpdaterVerifyFile(req_clean, response_buf);
+    }
 
     // app.requestUserAttention — dock bounce. critical=true는 활성화까지 반복, false는 1회.
     if (std.mem.eql(u8, cmd, "app_attention_request")) {
@@ -3167,6 +3174,119 @@ fn handleDialogShowErrorBox(req_clean: []const u8, response_buf: []u8) ?[]const 
 /// `__core__` cmd handler 공용 에러 응답. 모든 핸들러가 같은 wire 포맷 사용.
 fn coreError(response_buf: []u8, cmd: []const u8, err: []const u8) ?[]const u8 {
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":false,\"error\":\"{s}\"}}", .{ cmd, err }) catch null;
+}
+
+fn unescapeField(
+    req_clean: []const u8,
+    key: []const u8,
+    dst: []u8,
+    required: bool,
+) ?[]const u8 {
+    const raw = util.extractJsonString(req_clean, key) orelse {
+        if (required) return null;
+        return "";
+    };
+    const n = util.unescapeJsonStr(raw, dst) orelse return null;
+    return dst[0..n];
+}
+
+fn handleAutoUpdaterCheckUpdate(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var current_buf: [128]u8 = undefined;
+    var latest_buf: [128]u8 = undefined;
+    var url_buf: [4096]u8 = undefined;
+    var sha_buf: [128]u8 = undefined;
+    var notes_buf: [1024]u8 = undefined;
+    var pub_buf: [128]u8 = undefined;
+
+    const current_req = unescapeField(req_clean, "currentVersion", &current_buf, false) orelse
+        return coreError(response_buf, "auto_updater_check_update", "current_version");
+    const current = if (current_req.len > 0) current_req else if (g_config) |c| c.app.version else "0.0.0";
+
+    const latest_raw = util.extractJsonString(req_clean, "latestVersion") orelse
+        util.extractJsonString(req_clean, "version") orelse
+        return coreError(response_buf, "auto_updater_check_update", "missing_latest_version");
+    const latest_n = util.unescapeJsonStr(latest_raw, &latest_buf) orelse
+        return coreError(response_buf, "auto_updater_check_update", "latest_version");
+    const latest = latest_buf[0..latest_n];
+
+    const url = unescapeField(req_clean, "url", &url_buf, true) orelse
+        return coreError(response_buf, "auto_updater_check_update", "url");
+    const sha = unescapeField(req_clean, "sha256", &sha_buf, false) orelse
+        return coreError(response_buf, "auto_updater_check_update", "sha256");
+    const notes = unescapeField(req_clean, "notes", &notes_buf, false) orelse
+        return coreError(response_buf, "auto_updater_check_update", "notes");
+    const pub_date = blk: {
+        if (util.extractJsonString(req_clean, "pubDate")) |raw| {
+            const n = util.unescapeJsonStr(raw, &pub_buf) orelse
+                return coreError(response_buf, "auto_updater_check_update", "pub_date");
+            break :blk pub_buf[0..n];
+        }
+        if (util.extractJsonString(req_clean, "pub_date")) |raw| {
+            const n = util.unescapeJsonStr(raw, &pub_buf) orelse
+                return coreError(response_buf, "auto_updater_check_update", "pub_date");
+            break :blk pub_buf[0..n];
+        }
+        break :blk "";
+    };
+
+    const result = auto_updater.checkUpdate(current, latest, url, sha, notes, pub_date) catch |err| {
+        return coreError(response_buf, "auto_updater_check_update", auto_updater.errorCode(err));
+    };
+
+    var current_esc: [256]u8 = undefined;
+    var version_esc: [256]u8 = undefined;
+    var url_esc: [8192]u8 = undefined;
+    var sha_esc: [128]u8 = undefined;
+    var notes_esc: [6144]u8 = undefined;
+    var pub_esc: [256]u8 = undefined;
+    const current_n = util.escapeJsonStrFull(result.current_version, &current_esc) orelse
+        return coreError(response_buf, "auto_updater_check_update", "encode");
+    const version_n = util.escapeJsonStrFull(result.version, &version_esc) orelse
+        return coreError(response_buf, "auto_updater_check_update", "encode");
+    const url_n = util.escapeJsonStrFull(result.url, &url_esc) orelse
+        return coreError(response_buf, "auto_updater_check_update", "encode");
+    const sha_n = util.escapeJsonStrFull(result.sha256, &sha_esc) orelse
+        return coreError(response_buf, "auto_updater_check_update", "encode");
+    const notes_n = util.escapeJsonStrFull(result.notes, &notes_esc) orelse
+        return coreError(response_buf, "auto_updater_check_update", "encode");
+    const pub_n = util.escapeJsonStrFull(result.pub_date, &pub_esc) orelse
+        return coreError(response_buf, "auto_updater_check_update", "encode");
+
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_check_update\",\"success\":true,\"updateAvailable\":{},\"currentVersion\":\"{s}\",\"version\":\"{s}\",\"url\":\"{s}\",\"sha256\":\"{s}\",\"notes\":\"{s}\",\"pubDate\":\"{s}\"}}",
+        .{
+            result.update_available,
+            current_esc[0..current_n],
+            version_esc[0..version_n],
+            url_esc[0..url_n],
+            sha_esc[0..sha_n],
+            notes_esc[0..notes_n],
+            pub_esc[0..pub_n],
+        },
+    ) catch null;
+}
+
+fn handleAutoUpdaterVerifyFile(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+    var sha_buf: [128]u8 = undefined;
+    const path = unescapeField(req_clean, "path", &path_buf, true) orelse
+        return coreError(response_buf, "auto_updater_verify_file", "path");
+    const expected = unescapeField(req_clean, "sha256", &sha_buf, true) orelse
+        return coreError(response_buf, "auto_updater_verify_file", "sha256");
+    if (!auto_updater.isValidSha256Hex(expected) or expected.len == 0) {
+        return coreError(response_buf, "auto_updater_verify_file", "invalid_sha256");
+    }
+
+    var actual_buf: [64]u8 = undefined;
+    const actual = auto_updater.sha256File(runtime.io, path, &actual_buf) catch
+        return coreError(response_buf, "auto_updater_verify_file", "read");
+    const ok = auto_updater.sha256Equal(actual, expected);
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"auto_updater_verify_file\",\"success\":{},\"actualSha256\":\"{s}\"}}",
+        .{ ok, actual },
+    ) catch null;
 }
 
 const FS_MAX_TEXT_BYTES: usize = 8192;

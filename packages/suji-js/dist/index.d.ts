@@ -829,6 +829,36 @@ export declare const crashReporter: {
     getUploadedReports(): Promise<CrashReport[]>;
     getLastCrashReport(): Promise<CrashReport | null>;
 };
+export interface AutoUpdaterManifest {
+    version: string;
+    url: string;
+    sha256?: string;
+    notes?: string;
+    pubDate?: string;
+}
+export interface AutoUpdaterCheckOptions {
+    currentVersion?: string;
+}
+export interface AutoUpdaterCheckResult {
+    success: boolean;
+    updateAvailable: boolean;
+    currentVersion: string;
+    version: string;
+    url: string;
+    sha256: string;
+    notes: string;
+    pubDate: string;
+}
+export interface AutoUpdaterVerifyResult {
+    success: boolean;
+    actualSha256: string;
+}
+export declare const autoUpdater: {
+    /** manifest 객체 또는 manifest URL을 확인해 새 버전 여부를 반환. */
+    checkForUpdates(input: string | AutoUpdaterManifest, options?: AutoUpdaterCheckOptions): Promise<AutoUpdaterCheckResult>;
+    /** 다운로드된 파일의 SHA-256을 검증. mismatch면 success=false와 actualSha256 반환. */
+    verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult>;
+};
 export type PowerSaveBlockerType = "prevent_app_suspension" | "prevent_display_sleep";
 export declare const powerSaveBlocker: {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */

@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, BrowserWindow, windows } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, BrowserWindow, windows } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -364,6 +364,52 @@ describe("crashReporter", () => {
 
     mockBridge.core.mockResolvedValueOnce({ report: null });
     expect(await crashReporter.getLastCrashReport()).toBeNull();
+  });
+});
+
+describe("autoUpdater", () => {
+  beforeEach(() => mockBridge.core.mockClear());
+
+  it("checkForUpdates sends manifest fields and returns result", async () => {
+    mockBridge.core.mockResolvedValueOnce({
+      updateAvailable: true,
+      currentVersion: "1.0.0",
+      version: "1.1.0",
+      url: "https://example.test/app.zip",
+      sha256: "",
+      notes: "release notes",
+      pubDate: "2026-05-25T00:00:00Z",
+    });
+    const r = await autoUpdater.checkForUpdates(
+      {
+        version: "1.1.0",
+        url: "https://example.test/app.zip",
+        notes: "release notes",
+        pubDate: "2026-05-25T00:00:00Z",
+      },
+      { currentVersion: "1.0.0" },
+    );
+    expect(r.updateAvailable).toBe(true);
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "auto_updater_check_update",
+      currentVersion: "1.0.0",
+      latestVersion: "1.1.0",
+      url: "https://example.test/app.zip",
+      sha256: "",
+      notes: "release notes",
+      pubDate: "2026-05-25T00:00:00Z",
+    });
+  });
+
+  it("verifyFile sends path/hash and returns actual digest", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false, actualSha256: "abc" });
+    const r = await autoUpdater.verifyFile("/tmp/suji.zip", "0".repeat(64));
+    expect(r).toEqual({ success: false, actualSha256: "abc" });
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "auto_updater_verify_file",
+      path: "/tmp/suji.zip",
+      sha256: "0".repeat(64),
+    });
   });
 });
 

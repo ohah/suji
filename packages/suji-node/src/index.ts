@@ -1499,6 +1499,70 @@ export const crashReporter = {
   },
 };
 
+export interface AutoUpdaterManifest {
+  version: string;
+  url: string;
+  sha256?: string;
+  notes?: string;
+  pubDate?: string;
+}
+
+export interface AutoUpdaterCheckOptions {
+  currentVersion?: string;
+}
+
+export interface AutoUpdaterCheckResult {
+  success: boolean;
+  updateAvailable: boolean;
+  currentVersion: string;
+  version: string;
+  url: string;
+  sha256: string;
+  notes: string;
+  pubDate: string;
+}
+
+export interface AutoUpdaterVerifyResult {
+  success: boolean;
+  actualSha256: string;
+}
+
+async function resolveAutoUpdaterManifest(input: string | AutoUpdaterManifest): Promise<AutoUpdaterManifest> {
+  if (typeof input !== 'string') return input;
+  const res = await fetch(input);
+  if (!res.ok) throw new Error(`autoUpdater manifest request failed: ${res.status}`);
+  return (await res.json()) as AutoUpdaterManifest;
+}
+
+export const autoUpdater = {
+  /** manifest 객체 또는 manifest URL을 확인해 새 버전 여부를 반환. */
+  async checkForUpdates(
+    input: string | AutoUpdaterManifest,
+    options: AutoUpdaterCheckOptions = {},
+  ): Promise<AutoUpdaterCheckResult> {
+    const manifest = await resolveAutoUpdaterManifest(input);
+    const currentVersion = options.currentVersion ?? (await app.getVersion());
+    return invoke<AutoUpdaterCheckResult>('__core__', {
+      cmd: 'auto_updater_check_update',
+      currentVersion,
+      latestVersion: manifest.version,
+      url: manifest.url,
+      sha256: manifest.sha256 ?? '',
+      notes: manifest.notes ?? '',
+      pubDate: manifest.pubDate ?? '',
+    });
+  },
+
+  /** 다운로드된 파일의 SHA-256을 검증. mismatch면 success=false와 actualSha256 반환. */
+  async verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult> {
+    return invoke<AutoUpdaterVerifyResult>('__core__', {
+      cmd: 'auto_updater_verify_file',
+      path,
+      sha256,
+    });
+  },
+};
+
 export const webRequest = {
   /** URL glob blocklist 등록 (Electron `session.webRequest`). `*` wildcard만 지원.
    *  최대 32개/256자per. 빈 list 호출 시 모든 패턴 제거. */

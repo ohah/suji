@@ -6,6 +6,7 @@
  * 실행: ./tests/e2e/run-system-integration.sh
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -215,6 +216,71 @@ describe("crashReporter", () => {
     } finally {
       fs.rmSync(dump, { force: true });
     }
+  });
+});
+
+describe("autoUpdater", () => {
+  test("manifest 비교 — 새 버전 true, 같은 버전 false", async () => {
+    const up = await core<any>({
+      cmd: "auto_updater_check_update",
+      currentVersion: "1.0.0",
+      latestVersion: "1.1.0",
+      url: "https://example.test/suji-1.1.0.zip",
+      sha256: "",
+      notes: "e2e notes",
+      pubDate: "2026-05-25T00:00:00Z",
+    });
+    expect(up.success).toBe(true);
+    expect(up.updateAvailable).toBe(true);
+    expect(up.version).toBe("1.1.0");
+    expect(up.notes).toBe("e2e notes");
+
+    const same = await core<any>({
+      cmd: "auto_updater_check_update",
+      currentVersion: "1.1.0",
+      latestVersion: "1.1.0",
+      url: "file:///tmp/suji-1.1.0.zip",
+    });
+    expect(same.success).toBe(true);
+    expect(same.updateAvailable).toBe(false);
+  });
+
+  test("download artifact SHA-256 검증 — match/mismatch", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-updater-"));
+    const file = path.join(dir, "payload.bin");
+    const payload = Buffer.from("suji updater e2e payload");
+    fs.writeFileSync(file, payload);
+    const expected = createHash("sha256").update(payload).digest("hex");
+    try {
+      const ok = await core<{ success: boolean; actualSha256: string }>({
+        cmd: "auto_updater_verify_file",
+        path: file,
+        sha256: expected,
+      });
+      expect(ok.success).toBe(true);
+      expect(ok.actualSha256).toBe(expected);
+
+      const mismatch = await core<{ success: boolean; actualSha256: string }>({
+        cmd: "auto_updater_verify_file",
+        path: file,
+        sha256: "0".repeat(64),
+      });
+      expect(mismatch.success).toBe(false);
+      expect(mismatch.actualSha256).toBe(expected);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("invalid manifest는 success:false error 반환", async () => {
+    const bad = await core<{ success: boolean; error: string }>({
+      cmd: "auto_updater_check_update",
+      currentVersion: "1.0.0",
+      latestVersion: "1.2.0",
+      url: "ftp://example.test/app.zip",
+    });
+    expect(bad.success).toBe(false);
+    expect(bad.error).toBe("invalid_url");
   });
 });
 
@@ -1256,6 +1322,32 @@ describe("@suji/api SDK — round-trip", () => {
     if (last !== null) {
       expect(typeof last.id).toBe("string");
       expect(typeof last.date).toBe("string");
+    }
+  });
+
+  test("autoUpdater.checkForUpdates + verifyFile wrappers", async () => {
+    const check = await sdk<any>("autoUpdater.checkForUpdates", {
+      version: "9.9.9",
+      url: "https://example.test/suji-9.9.9.zip",
+      sha256: "",
+      notes: "sdk e2e",
+      pubDate: "2026-05-25T00:00:00Z",
+    }, { currentVersion: "1.0.0" });
+    expect(check.success).toBe(true);
+    expect(check.updateAvailable).toBe(true);
+    expect(check.version).toBe("9.9.9");
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "suji-sdk-updater-"));
+    const file = path.join(dir, "payload.bin");
+    const payload = Buffer.from("suji updater sdk payload");
+    fs.writeFileSync(file, payload);
+    const expected = createHash("sha256").update(payload).digest("hex");
+    try {
+      const verified = await sdk<any>("autoUpdater.verifyFile", file, expected);
+      expect(verified.success).toBe(true);
+      expect(verified.actualSha256).toBe(expected);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 

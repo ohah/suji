@@ -1464,6 +1464,48 @@ pub const safeStorage = struct {
     }
 };
 
+pub const autoUpdater = struct {
+    /// 업데이트 manifest 필드 비교. 최신 version이 current_version보다 높으면
+    /// `updateAvailable:true`. 설치 적용은 아직 caller 정책.
+    pub fn checkForUpdates(
+        current_version: []const u8,
+        latest_version: []const u8,
+        url: []const u8,
+        sha256: []const u8,
+    ) ?[]const u8 {
+        var current_buf: [128]u8 = undefined;
+        var latest_buf: [128]u8 = undefined;
+        var url_buf: [4096]u8 = undefined;
+        var sha_buf: [128]u8 = undefined;
+        const current_n = util.escapeJsonStrFull(current_version, &current_buf) orelse return null;
+        const latest_n = util.escapeJsonStrFull(latest_version, &latest_buf) orelse return null;
+        const url_n = util.escapeJsonStrFull(url, &url_buf) orelse return null;
+        const sha_n = util.escapeJsonStrFull(sha256, &sha_buf) orelse return null;
+        var fields_buf: [4600]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"currentVersion\":\"{s}\",\"latestVersion\":\"{s}\",\"url\":\"{s}\",\"sha256\":\"{s}\"",
+            .{ current_buf[0..current_n], latest_buf[0..latest_n], url_buf[0..url_n], sha_buf[0..sha_n] },
+        ) catch return null;
+        return coreCmd("auto_updater_check_update", fields);
+    }
+
+    /// 다운로드된 파일의 SHA-256 검증. 응답: `{"success":bool,"actualSha256":"..."}`.
+    pub fn verifyFile(path: []const u8, sha256: []const u8) ?[]const u8 {
+        var path_buf: [2048]u8 = undefined;
+        var sha_buf: [128]u8 = undefined;
+        const path_n = util.escapeJsonStrFull(path, &path_buf) orelse return null;
+        const sha_n = util.escapeJsonStrFull(sha256, &sha_buf) orelse return null;
+        var fields_buf: [2300]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"path\":\"{s}\",\"sha256\":\"{s}\"",
+            .{ path_buf[0..path_n], sha_buf[0..sha_n] },
+        ) catch return null;
+        return coreCmd("auto_updater_verify_file", fields);
+    }
+};
+
 // app() 함수와 이름 충돌 방지를 위해 dock/attention을 top-level namespace로 분리.
 pub const dock = struct {
     /// dock 배지 텍스트 (빈 문자열 = 제거). 응답: `{"success":bool}`.

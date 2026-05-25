@@ -1740,6 +1740,76 @@ export const crashReporter = {
 };
 
 // ============================================
+// autoUpdater — manifest 기반 업데이트 확인 + 다운로드 파일 checksum 검증
+// ============================================
+// v1은 설치/재시작 적용을 하지 않는다. 앱이 manifest를 받아 새 버전 여부를
+// 판단하고, 별도 다운로드된 artifact의 SHA-256을 검증하는 안전 프리미티브.
+
+export interface AutoUpdaterManifest {
+  version: string;
+  url: string;
+  sha256?: string;
+  notes?: string;
+  pubDate?: string;
+}
+
+export interface AutoUpdaterCheckOptions {
+  currentVersion?: string;
+}
+
+export interface AutoUpdaterCheckResult {
+  success: boolean;
+  updateAvailable: boolean;
+  currentVersion: string;
+  version: string;
+  url: string;
+  sha256: string;
+  notes: string;
+  pubDate: string;
+}
+
+export interface AutoUpdaterVerifyResult {
+  success: boolean;
+  actualSha256: string;
+}
+
+async function resolveAutoUpdaterManifest(input: string | AutoUpdaterManifest): Promise<AutoUpdaterManifest> {
+  if (typeof input !== "string") return input;
+  const res = await fetch(input);
+  if (!res.ok) throw new Error(`autoUpdater manifest request failed: ${res.status}`);
+  return (await res.json()) as AutoUpdaterManifest;
+}
+
+export const autoUpdater = {
+  /** manifest 객체 또는 manifest URL을 확인해 새 버전 여부를 반환. */
+  async checkForUpdates(
+    input: string | AutoUpdaterManifest,
+    options: AutoUpdaterCheckOptions = {},
+  ): Promise<AutoUpdaterCheckResult> {
+    const manifest = await resolveAutoUpdaterManifest(input);
+    const currentVersion = options.currentVersion ?? (await app.getVersion());
+    return coreCall<AutoUpdaterCheckResult>({
+      cmd: "auto_updater_check_update",
+      currentVersion,
+      latestVersion: manifest.version,
+      url: manifest.url,
+      sha256: manifest.sha256 ?? "",
+      notes: manifest.notes ?? "",
+      pubDate: manifest.pubDate ?? "",
+    });
+  },
+
+  /** 다운로드된 파일의 SHA-256을 검증. mismatch면 success=false와 actualSha256 반환. */
+  async verifyFile(path: string, sha256: string): Promise<AutoUpdaterVerifyResult> {
+    return coreCall<AutoUpdaterVerifyResult>({
+      cmd: "auto_updater_verify_file",
+      path,
+      sha256,
+    });
+  },
+};
+
+// ============================================
 // powerSaveBlocker — 화면/시스템 sleep 차단 (Electron `powerSaveBlocker`)
 // ============================================
 

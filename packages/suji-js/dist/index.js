@@ -1082,6 +1082,38 @@ export const crashReporter = {
         return r.report ?? null;
     },
 };
+async function resolveAutoUpdaterManifest(input) {
+    if (typeof input !== "string")
+        return input;
+    const res = await fetch(input);
+    if (!res.ok)
+        throw new Error(`autoUpdater manifest request failed: ${res.status}`);
+    return (await res.json());
+}
+export const autoUpdater = {
+    /** manifest 객체 또는 manifest URL을 확인해 새 버전 여부를 반환. */
+    async checkForUpdates(input, options = {}) {
+        const manifest = await resolveAutoUpdaterManifest(input);
+        const currentVersion = options.currentVersion ?? (await app.getVersion());
+        return coreCall({
+            cmd: "auto_updater_check_update",
+            currentVersion,
+            latestVersion: manifest.version,
+            url: manifest.url,
+            sha256: manifest.sha256 ?? "",
+            notes: manifest.notes ?? "",
+            pubDate: manifest.pubDate ?? "",
+        });
+    },
+    /** 다운로드된 파일의 SHA-256을 검증. mismatch면 success=false와 actualSha256 반환. */
+    async verifyFile(path, sha256) {
+        return coreCall({
+            cmd: "auto_updater_verify_file",
+            path,
+            sha256,
+        });
+    },
+};
 export const powerSaveBlocker = {
     /** sleep 차단 시작. 반환된 id로 stop. 0이면 실패. */
     async start(type) {

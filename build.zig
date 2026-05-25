@@ -80,6 +80,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const auto_updater_module = b.createModule(.{
+        .root_source_file = b.path("src/core/auto_updater.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
 
     // Suji CLI
     const root_module = b.createModule(.{
@@ -97,6 +102,7 @@ pub fn build(b: *std.Build) void {
     root_module.addImport("window_stack", window_stack_module);
     root_module.addImport("window_ipc", window_ipc_module);
     root_module.addImport("logger", logger_module);
+    root_module.addImport("auto_updater", auto_updater_module);
 
     // CEF 헤더 + 라이브러리 경로 (OS/arch별)
     const os_tag = @import("builtin").os.tag;
@@ -607,6 +613,10 @@ pub fn build(b: *std.Build) void {
     logger_test_mod.addImport("logger", logger_module);
     const logger_test = b.addTest(.{ .root_module = logger_test_mod });
     test_step.dependOn(&b.addRunArtifact(logger_test).step);
+
+    // autoUpdater — manifest version checks + SHA-256 verification primitives.
+    const auto_updater_test = b.addTest(.{ .root_module = auto_updater_module });
+    test_step.dependOn(&b.addRunArtifact(auto_updater_test).step);
 
     // State plugin tests
     const state_test_mod = b.createModule(.{

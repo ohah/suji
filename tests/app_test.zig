@@ -1596,6 +1596,30 @@ test "crashReporter SDK: start/extra/upload/report cmd 조립" {
     }.run);
 }
 
+test "autoUpdater SDK: checkForUpdates/verifyFile cmd 조립" {
+    try withInvokeCore(struct {
+        fn run() !void {
+            _ = app_mod.autoUpdater.checkForUpdates(
+                "1.0.0",
+                "1.1.0",
+                "https://example.test/app.zip",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            );
+            const r1 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"cmd\":\"auto_updater_check_update\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"currentVersion\":\"1.0.0\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"latestVersion\":\"1.1.0\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r1, "\"url\":\"https://example.test/app.zip\"") != null);
+
+            _ = app_mod.autoUpdater.verifyFile("/tmp/app.zip", "0000000000000000000000000000000000000000000000000000000000000000");
+            const r2 = InvokeSpy.lastRequest();
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"cmd\":\"auto_updater_verify_file\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"path\":\"/tmp/app.zip\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, r2, "\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"") != null);
+        }
+    }.run);
+}
+
 test "powerSaveBlocker.start/stop: type 문자열 + id" {
     try withInvokeCore(struct {
         fn run() !void {
