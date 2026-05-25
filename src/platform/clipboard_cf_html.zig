@@ -94,3 +94,48 @@ pub fn readFragment(data: []const u8) ?[]const u8 {
     if (start > end or end > data.len) return null;
     return data[start..end];
 }
+
+test "CF_HTML document offsets round-trip exact UTF-8 fragment" {
+    const html = "<section data-x=\"1\">한글 <b>HTML</b> 🚀</section>";
+    var buf: [1024]u8 = undefined;
+    const doc = writeDocument(&buf, html).?;
+
+    try std.testing.expect(std.mem.startsWith(u8, doc, "Version:0.9\r\nStartHTML:"));
+    try std.testing.expect(std.mem.indexOf(u8, doc, start_marker) != null);
+    try std.testing.expect(std.mem.indexOf(u8, doc, end_marker) != null);
+    try std.testing.expectEqualStrings(html, readFragment(doc).?);
+}
+
+test "CF_HTML parser accepts extra header fields" {
+    const source_url = "SourceURL:https://example.test/\r\n";
+    const prefix = "<html><body>" ++ start_marker;
+    const fragment = "<b>x</b>";
+    const suffix = end_marker ++ "</body></html>";
+    const start_html = headerLen() + source_url.len;
+    const start_fragment = start_html + prefix.len;
+    const end_fragment = start_fragment + fragment.len;
+    const end_html = end_fragment + suffix.len;
+    var buf: [512]u8 = undefined;
+    const doc = try std.fmt.bufPrint(
+        &buf,
+        "Version:0.9\r\n" ++
+            "StartHTML:{d:0>10}\r\n" ++
+            "EndHTML:{d:0>10}\r\n" ++
+            "StartFragment:{d:0>10}\r\n" ++
+            "EndFragment:{d:0>10}\r\n" ++
+            source_url ++
+            prefix ++ fragment ++ suffix,
+        .{ start_html, end_html, start_fragment, end_fragment },
+    );
+    try std.testing.expectEqualStrings(fragment, readFragment(doc).?);
+}
+
+test "CF_HTML helper rejects empty, small, and malformed data" {
+    var empty: [0]u8 = .{};
+    try std.testing.expect(writeDocument(&empty, "<b>x</b>") == null);
+    var too_small: [32]u8 = undefined;
+    try std.testing.expect(writeDocument(&too_small, "<b>x</b>") == null);
+    try std.testing.expect(readFragment("StartFragment:abc\r\nEndFragment:0000000010\r\n") == null);
+    try std.testing.expect(readFragment("StartFragment:0000000010\r\nEndFragment:0000009999\r\nx") == null);
+    try std.testing.expect(readFragment("StartFragment:0000000020\r\nEndFragment:0000000010\r\nx") == null);
+}

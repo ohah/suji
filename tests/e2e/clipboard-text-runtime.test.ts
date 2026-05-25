@@ -35,7 +35,7 @@ describe("clipboard text/HTML runtime APIs", () => {
   test("writeText/readText/has/availableFormats/clear round-trip", async () => {
     await core({ cmd: "clipboard_clear" });
 
-    const text = "Linux clipboard text\n한글 🚀 \\ \"";
+    const text = "Clipboard runtime text\n한글 🚀 \\ \"";
     const write = await core<{ success: boolean }>({ cmd: "clipboard_write_text", text });
     expect(write.success).toBe(true);
 

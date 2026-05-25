@@ -964,6 +964,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const clipboard_cf_html_test = b.addTest(.{ .root_module = clipboard_cf_html_test_mod });
+    test_step.dependOn(&b.addRunArtifact(clipboard_cf_html_test).step);
     cef_ipc_test_mod.addImport("clipboard_cf_html", clipboard_cf_html_test_mod);
     const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
