@@ -35,6 +35,7 @@ const window_ipc = @import("window_ipc");
 const logger = @import("logger");
 const util = @import("util");
 const drag_region = @import("cef_drag_region.zig");
+const cef_window_options = @import("cef_window_options.zig");
 const cef_views_policy = @import("cef_views_policy.zig");
 const cef_command_line_policy = @import("cef_command_line_policy.zig");
 const cef_pdf_print = @import("cef_pdf_print.zig");
@@ -744,7 +745,7 @@ fn viewsWindowIsFrameless(
 ) callconv(.c) i32 {
     const d = viewsWindowFromSelf(self) orelse return 0;
     releaseWindowRef(@ptrCast(window));
-    return if (!d.appearance.frame or d.appearance.transparent) 1 else 0;
+    return if (cef_window_options.viewsFrameless(d.appearance.frame, d.appearance.transparent)) 1 else 0;
 }
 
 fn viewsWindowStandardButtons(
@@ -753,7 +754,7 @@ fn viewsWindowStandardButtons(
 ) callconv(.c) i32 {
     const d = viewsWindowFromSelf(self) orelse return 1;
     releaseWindowRef(@ptrCast(window));
-    return if (d.appearance.frame and !d.appearance.transparent) 1 else 0;
+    return if (cef_window_options.viewsStandardButtons(d.appearance.frame, d.appearance.transparent)) 1 else 0;
 }
 
 fn viewsWindowCanResize(
@@ -762,7 +763,7 @@ fn viewsWindowCanResize(
 ) callconv(.c) i32 {
     const d = viewsWindowFromSelf(self) orelse return 1;
     releaseWindowRef(@ptrCast(window));
-    return if (d.constraints.resizable) 1 else 0;
+    return if (cef_window_options.viewsCanResize(d.constraints.resizable)) 1 else 0;
 }
 
 fn viewsWindowCanMaximize(
@@ -6991,6 +6992,11 @@ fn traceIpcEnabled() bool {
     return v.len > 0 and !std.mem.eql(u8, v, "0");
 }
 
+fn traceDragRegionEnabled() bool {
+    const v = runtime.env("SUJI_TRACE_DRAG_REGION") orelse return false;
+    return v.len > 0 and !std.mem.eql(u8, v, "0");
+}
+
 fn currentOrLastRendererContext() ?*c.cef_v8_context_t {
     return asPtr(c.cef_v8_context_t, c.cef_v8_context_get_current_context()) orelse g_renderer_context;
 }
@@ -7729,12 +7735,19 @@ fn onDraggableRegionsChanged(
     const handle: u64 = @intCast(br.get_identifier.?(br));
     const entry = native.browsers.getPtr(handle) orelse return;
 
+    const has_views_window = entry.views_window != null;
     if (entry.views_window) |views_window| {
         if (regions_count == 0 or regions_ptr == null) {
             views_window.set_draggable_regions.?(views_window, 0, null);
         } else {
             views_window.set_draggable_regions.?(views_window, regions_count, regions_ptr);
         }
+    }
+    if (traceDragRegionEnabled()) {
+        std.debug.print(
+            "[suji:drag-region] handle={d} count={d} views_window={} applied_to_cef_views={}\n",
+            .{ handle, regions_count, has_views_window, has_views_window },
+        );
     }
 
     native.allocator.free(entry.drag_regions);

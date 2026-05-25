@@ -856,6 +856,7 @@ test "Phase 17-B docs record Linux Windows runtime E2E completion" {
     inline for (.{
         "17. ✅ **`windows.createView`",
         "Linux/Windows runtime E2E(`webcontentsview-cross-platform`)로 검증",
+        "`tests/e2e/run-frameless-drag-region.sh` macOS/Linux runtime E2E",
         "CI에서 초기",
         "`about:blank` 커밋 후 요청 URL navigation이 유실되는 CEF Views 레이스",
     }) |needle| {
@@ -866,6 +867,7 @@ test "Phase 17-B docs record Linux Windows runtime E2E completion" {
         "### 17-B.7 — Linux/Windows (완료)",
         "### 17-B.8 — Documentation & Migration Guide (완료)",
         "GitHub Actions `webcontentsview-cross-platform` matrix",
+        "run-frameless-drag-region.sh",
         "CEF Views top-level 초기 URL 레이스",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, architecture, needle) != null);
@@ -877,6 +879,7 @@ test "Phase 17-B docs record Linux Windows runtime E2E completion" {
     try std.testing.expect(std.mem.indexOf(u8, workflow, "ubuntu-24.04") != null);
     try std.testing.expect(std.mem.indexOf(u8, workflow, "windows-latest") != null);
     try std.testing.expect(std.mem.indexOf(u8, workflow, "bash tests/e2e/run-view-lifecycle.sh") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow, "bash tests/e2e/run-frameless-drag-region.sh") != null);
 }
 
 test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {

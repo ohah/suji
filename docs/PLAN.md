@@ -503,7 +503,9 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] 생명주기 이벤트 payload `{windowId, name?}` 표준화 — created/close/closed 모두 일관.
           name은 destroy 전 캡처해서 closed에도 포함 → 플러그인이 wm 조회 없이 분기.
   - [x] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식, 추가 외형 옵션)
-    - [x] `windows[].frame: false` — NSWindowStyleMaskBorderless. macOS 완료, Linux/Windows는 추후.
+    - [x] `windows[].frame: false` — macOS는 NSWindowStyleMaskBorderless, Linux는 CEF Views
+          `CefWindowDelegate.is_frameless` 경로로 완료(`run-frameless-drag-region.sh` E2E).
+          Windows는 후속.
     - [x] `windows[].transparent: true` — NSWindow.opaque=NO + clearColor + hasShadow=NO + CEF browser background_color=0.
     - [x] `windows[].parent: "<name>"` — NSWindow.addChildWindow:ordered:NSWindowAbove로 시각 관계만 (PLAN 재귀 close X).
           parent name lookup은 main.zig의 wm.fromName으로 처리 — 따라서 부모는 windows[] 배열 순서상 더 앞에 와야.
@@ -515,8 +517,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `windows[].backgroundColor: "#RRGGBB(AA)"` — NSColor.colorWithRed:green:blue:alpha:.
     - [x] `windows[].titleBarStyle: "hidden" | "hiddenInset"` — titlebarAppearsTransparent + NSWindowStyleMaskFullSizeContentView.
     - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만. 실수요 발견 시 SujiCore.get_window_api로 도입.
-    - **플랫폼 한계**: macOS는 frameless의 `-webkit-app-region: drag` 라우팅 완료.
-      Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라 후속 플랫폼 작업 필요.
+    - **플랫폼 한계**: macOS/Linux는 frameless의 `-webkit-app-region: drag` 라우팅 완료.
+      Windows는 아직 별도 native 검증 전이라 후속 플랫폼 작업 필요.
   - [~] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
     - [x] **Phase 4-A 네비/JS** — `load_url`, `reload`(`ignoreCache`), `execute_javascript`,
           `get_url`(캐시), `is_loading` 6개. WM 메서드 + IPC 핸들러 + Frontend SDK
@@ -551,16 +553,17 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     #### Phase 4 백로그 (Phase 5 진입 전 또는 그 이후 처리)
 
     A 사용자 가시 기능 (가치 높음 / 작업 큼):
-    - [x] **frameless drag region (`-webkit-app-region: drag`) — macOS 완료**.
+    - [x] **frameless drag region (`-webkit-app-region: drag`) — macOS/Linux 완료**.
           CEF `cef_drag_handler_t.on_draggable_regions_changed`로 region 수집 +
           macOS `NSWindow.sendEvent:` hit-test → `[window performWindowDragWithEvent:]`
-          라우팅 완료(cef.zig + cef_drag_region.zig + 단위 4). Linux/Windows 잔여는
-          drag 자체가 아니라 `frame:false` native window 미구현이 선결 — 아래
-          전용 backlog 로 분리.
-    - [ ] (backlog) **Linux/Windows frameless native window** — `frame:false`/transparent/
-          parent 등 native 창 외형이 macOS 전용(cef.zig stub + warning). GTK/Win32
-          창 생성 + `gtk_window_begin_move_drag`/`WM_NCHITTEST` drag 라우팅이 후속
-          플랫폼 작업(큰 덩어리, drag region 은 이미 수집됨).
+          라우팅 완료. Linux는 CEF Views top-level `CefWindowDelegate.is_frameless` +
+          `CefWindow.set_draggable_regions` 경로로 native drag/no-drag를 보존.
+          검증: `cef_drag_region.zig` 단위, `cef_window_options.zig` 단위,
+          `tests/e2e/run-frameless-drag-region.sh` macOS/Linux runtime E2E.
+    - [ ] (backlog) **Windows frameless native window + Linux 잔여 native 옵션** —
+          Windows `frame:false`/drag region은 아직 실 런타임 검증 전. Linux도
+          `transparent`/`parent` 같은 macOS NSWindow 기반 옵션은 별도 native parity
+          검증이 필요하다.
     - [x] **`capture_page`** — 구현 완료(상위 Phase 4-D 항목 참조): CDP
           `Page.captureScreenshot` + dev_tools observer → file-path 방식.
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
@@ -1515,7 +1518,8 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 8. ✅ **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
 9. ✅ **보안 모델** (Phase 7: fs sandbox + cache 격리 + IPC 검증 + CSP + contextIsolation audit) — Phase 7 핵심 완료
 10. **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — 진입 장벽 즉각 해소
-11. **frameless drag region Linux/Windows 후속** — macOS 완료. 나머지는 native frameless 적용과 함께
+11. **Windows frameless drag region + Linux 잔여 창 옵션 후속** — macOS/Linux `frame:false`
+    drag/no-drag는 E2E 완료. Windows와 Linux `transparent`/`parent` parity는 후속.
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. 🟡 **자동 업데이트** — manifest check + artifact download + SHA-256 verify + macOS/Linux prepareInstall/quit-and-install 1차 완료. macOS `.zip/.dmg` stage, Linux `.AppImage`/raw 교체 입력, `.deb` package-manager handoff 정책까지 문서화/검증(macOS `.zip` + Linux `.AppImage` E2E). 남은 것: Windows 적용
 14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.

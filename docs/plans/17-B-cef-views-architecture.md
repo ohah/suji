@@ -148,6 +148,8 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - 현재 SujiKeyableWindow.sendEvent: override는 NSWindow 직접 관리 전제
 - CefWindow가 만든 NSWindow에 같은 override 주입 가능한지 검증
 - 안 되면 CEF의 drag handler 콜백 활용 우회
+- macOS는 NSWindow hit-test override, Linux는 CEF Views `set_draggable_regions` 경로로
+  `run-frameless-drag-region.sh` runtime E2E 검증. Windows는 별도 후속.
 
 ### 17-B.5 — multi-WebContentsView 검증 (완료)
 - host는 `CefWindow + CefBrowserView`, child WebContentsView는 CEF-managed child
@@ -170,6 +172,8 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
   - Linux/Windows 기본: overlay child view
 - GitHub Actions `webcontentsview-cross-platform` matrix에서 Linux/Windows 실제 CEF 런타임
   `createView`/bounds/visibility/destroy E2E 완료
+- Linux `frame:false` + drag/no-drag region은 같은 Actions Linux runner에서
+  `run-frameless-drag-region.sh`로 검증
 - CEF Views top-level 초기 URL 레이스는 `forceInitialLoadUrl` + delayed UI-thread retry로 보강
 
 ### 17-B.8 — Documentation & Migration Guide (완료)

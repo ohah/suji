@@ -959,6 +959,15 @@ pub fn build(b: *std.Build) void {
     const cef_views_policy_test = b.addTest(.{ .root_module = cef_views_policy_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_views_policy_test).step);
 
+    // CEF Views window option policy tests (CEF 런타임/헤더 불필요).
+    const cef_window_options_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/cef_window_options.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const cef_window_options_test = b.addTest(.{ .root_module = cef_window_options_test_mod });
+    test_step.dependOn(&b.addRunArtifact(cef_window_options_test).step);
+
     // CEF command-line policy tests (CEF 런타임/헤더 불필요).
     const cef_command_line_policy_test_mod = b.createModule(.{
         .root_source_file = b.path("src/platform/cef_command_line_policy.zig"),
