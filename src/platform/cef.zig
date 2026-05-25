@@ -1965,8 +1965,16 @@ pub const CefNative = struct {
     }
 
     fn setOpacityImpl(ctx: ?*anyopaque, handle: u64, opacity: f64) void {
-        if (!comptime is_macos) return;
         assertUiThread();
+        if (comptime builtin.os.tag == .windows) {
+            const self = fromCtx(ctx);
+            const entry = self.browsers.get(handle) orelse return;
+            const views_window = entry.views_window orelse return;
+            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            win_window.setLayeredOpacity(hwnd, opacity);
+            return;
+        }
+        if (!comptime is_macos) return;
         const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
         const sel = objc.sel_registerName("setAlphaValue:");
         const fn_ptr: *const fn (?*anyopaque, ?*anyopaque, f64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
@@ -1974,6 +1982,13 @@ pub const CefNative = struct {
     }
 
     fn getOpacityImpl(ctx: ?*anyopaque, handle: u64) f64 {
+        if (comptime builtin.os.tag == .windows) {
+            const self = fromCtx(ctx);
+            const entry = self.browsers.get(handle) orelse return 1;
+            const views_window = entry.views_window orelse return 1;
+            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            return win_window.getLayeredOpacity(hwnd);
+        }
         if (!comptime is_macos) return 1;
         const ns = fromCtx(ctx).nsWindowFor(handle) orelse return 1;
         const sel = objc.sel_registerName("alphaValue");
@@ -3293,6 +3308,132 @@ const win_theme = if (builtin.os.tag == .windows) struct {
         );
         if (status != 0) return false; // ERROR_SUCCESS 가 아니면 default light.
         return data == 0;
+    }
+} else struct {};
+
+// ============================================
+// Win32 Window 헬퍼 — setOpacity (layered window).
+// ============================================
+const win_window = if (builtin.os.tag == .windows) struct {
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_LAYERED: i32 = 0x00080000;
+    const LWA_ALPHA: u32 = 0x00000002;
+
+    extern "user32" fn GetWindowLongPtrW(hWnd: ?*anyopaque, nIndex: i32) callconv(.winapi) isize;
+    extern "user32" fn SetWindowLongPtrW(hWnd: ?*anyopaque, nIndex: i32, dwNewLong: isize) callconv(.winapi) isize;
+    extern "user32" fn SetLayeredWindowAttributes(hwnd: ?*anyopaque, crKey: u32, bAlpha: u8, dwFlags: u32) callconv(.winapi) i32;
+    extern "user32" fn GetLayeredWindowAttributes(hwnd: ?*anyopaque, pcrKey: ?*u32, pbAlpha: ?*u8, pdwFlags: ?*u32) callconv(.winapi) i32;
+
+    /// opacity 0.0~1.0 → 0~255 byte. WS_EX_LAYERED extended style 자동 적용.
+    fn setLayeredOpacity(hwnd: ?*anyopaque, opacity: f64) void {
+        if (hwnd == null) return;
+        const clamped = if (opacity < 0) @as(f64, 0) else if (opacity > 1) @as(f64, 1) else opacity;
+        const alpha: u8 = @intFromFloat(@round(clamped * 255.0));
+        // WS_EX_LAYERED 가 없으면 SetLayeredWindowAttributes 실패. 멱등 추가.
+        const cur = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if ((cur & WS_EX_LAYERED) == 0) {
+            _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, cur | WS_EX_LAYERED);
+        }
+        _ = SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+    }
+
+    fn getLayeredOpacity(hwnd: ?*anyopaque) f64 {
+        if (hwnd == null) return 1;
+        const cur = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        if ((cur & WS_EX_LAYERED) == 0) return 1; // layered 아니면 fully opaque
+        var alpha: u8 = 255;
+        if (GetLayeredWindowAttributes(hwnd, null, &alpha, null) == 0) return 1;
+        return @as(f64, @floatFromInt(alpha)) / 255.0;
+    }
+
+    extern "user32" fn MessageBoxW(hwnd: ?*anyopaque, lpText: [*:0]const u16, lpCaption: ?[*:0]const u16, uType: u32) callconv(.winapi) i32;
+    const MB_OK: u32 = 0;
+    const MB_OKCANCEL: u32 = 1;
+    const MB_YESNO: u32 = 4;
+    const MB_YESNOCANCEL: u32 = 3;
+    const MB_ICONERROR: u32 = 0x10;
+    const MB_ICONQUESTION: u32 = 0x20;
+    const MB_ICONWARNING: u32 = 0x30;
+    const MB_ICONINFORMATION: u32 = 0x40;
+    const IDOK: i32 = 1;
+    const IDCANCEL: i32 = 2;
+    const IDYES: i32 = 6;
+    const IDNO: i32 = 7;
+
+    /// utf8 → null-terminated utf16. buf 부족 시 null.
+    fn utf8ToZ16(buf: []u16, src: []const u8) ?[:0]const u16 {
+        const len = std.unicode.calcUtf16LeLen(src) catch return null;
+        if (len + 1 > buf.len) return null;
+        const written = std.unicode.utf8ToUtf16Le(buf[0..len], src) catch return null;
+        buf[written] = 0;
+        return buf[0..written :0];
+    }
+
+    /// macOS NSAlert 의 임의 button text 와 다름 — MessageBoxW 는 standard buttons
+    /// (OK/Cancel/Yes/No 조합) 만. button 수에 따라 dwType 선택. 응답 → button index.
+    /// 빈 buttons → MB_OK (response 0).
+    fn messageBox(opts: MessageBoxOpts) MessageBoxResult {
+        var text_buf: [4096]u16 = undefined;
+        const caption_max: usize = 511;
+        var caption_w_buf: [512]u16 = undefined;
+
+        // message + detail 조합. detail 비어있으면 message 만.
+        var combined_buf: [4096]u8 = undefined;
+        const text_utf8 = if (opts.detail.len > 0) blk: {
+            const combined = std.fmt.bufPrint(&combined_buf, "{s}\n\n{s}", .{ opts.message, opts.detail }) catch opts.message;
+            break :blk combined;
+        } else opts.message;
+        const text_z = utf8ToZ16(&text_buf, text_utf8) orelse return .{};
+
+        const caption_z: ?[*:0]const u16 = if (opts.title.len > 0) blk: {
+            const caption_src = if (opts.title.len > caption_max) opts.title[0..caption_max] else opts.title;
+            const z = utf8ToZ16(&caption_w_buf, caption_src) orelse break :blk null;
+            break :blk z.ptr;
+        } else null;
+
+        const icon: u32 = switch (opts.style) {
+            .info => MB_ICONINFORMATION,
+            .err => MB_ICONERROR,
+            .warning => MB_ICONWARNING,
+            .question => MB_ICONQUESTION,
+            .none => 0,
+        };
+        // button 매핑 — n=0/1 → OK, 2 → OK/Cancel 또는 Yes/No, 3 → YesNoCancel.
+        const button_type: u32 = switch (opts.buttons.len) {
+            0, 1 => MB_OK,
+            2 => if (isYesNoButtons(opts.buttons)) MB_YESNO else MB_OKCANCEL,
+            else => MB_YESNOCANCEL,
+        };
+        const response_id = MessageBoxW(null, text_z.ptr, caption_z, icon | button_type);
+
+        // response id → button index 매핑. 사용자 정의 buttons 순서에 맞춰 매핑 시도.
+        const response_idx: usize = switch (response_id) {
+            IDOK => 0,
+            IDYES => 0,
+            IDNO => 1,
+            IDCANCEL => if (opts.buttons.len >= 3) 2 else 1,
+            else => 0,
+        };
+        return .{ .response = response_idx, .checkbox_checked = opts.checkbox_checked };
+    }
+
+    fn isYesNoButtons(buttons: []const []const u8) bool {
+        if (buttons.len != 2) return false;
+        const b0_yes = std.ascii.eqlIgnoreCase(buttons[0], "yes") or std.ascii.eqlIgnoreCase(buttons[0], "ok");
+        const b1_no = std.ascii.eqlIgnoreCase(buttons[1], "no") or std.ascii.eqlIgnoreCase(buttons[1], "cancel");
+        // "Yes"/"No" 명시 또는 "OK"/"Cancel" 도 같은 매핑.
+        return b0_yes and b1_no;
+    }
+
+    fn errorBox(title: []const u8, content: []const u8) void {
+        var text_buf: [4096]u16 = undefined;
+        var caption_buf: [512]u16 = undefined;
+        const text_z = utf8ToZ16(&text_buf, content) orelse return;
+        const caption_z: ?[*:0]const u16 = if (title.len > 0) blk: {
+            const z = utf8ToZ16(&caption_buf, title) orelse break :blk null;
+            break :blk z.ptr;
+        } else null;
+        _ = MessageBoxW(null, text_z.ptr, caption_z, MB_OK | MB_ICONERROR);
     }
 } else struct {};
 
@@ -5869,6 +6010,7 @@ pub const SaveDialogOpts = struct {
 /// NSAlert 메시지 박스. macOS HIG 기본: 첫 버튼 = default(Enter), 마지막 버튼 = Cancel(ESC).
 /// `default_id`/`cancel_id`로 명시적 변경.
 pub fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
+    if (comptime builtin.os.tag == .windows) return win_window.messageBox(opts);
     if (!comptime is_macos) return .{};
     const NSAlert = getClass("NSAlert") orelse return .{};
     const alloc = msgSend(NSAlert, "alloc") orelse return .{};
@@ -5973,6 +6115,10 @@ pub fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
 
 /// 단순 에러 popup — NSAlert critical style + 단일 OK 버튼 (Electron `dialog.showErrorBox`).
 pub fn showErrorBox(title: []const u8, content: []const u8) void {
+    if (comptime builtin.os.tag == .windows) {
+        win_window.errorBox(title, content);
+        return;
+    }
     if (!comptime is_macos) return;
     _ = showMessageBox(.{
         .style = .err,
