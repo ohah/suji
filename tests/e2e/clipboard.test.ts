@@ -26,7 +26,21 @@ const core = <T = any>(request: Record<string, unknown>): Promise<T> =>
     request as any,
   ) as Promise<T>;
 
+// 호스트 OS 별 clipboard 명령:
+//   macOS  → pbcopy / pbpaste
+//   Win32  → PowerShell Set-Clipboard / Get-Clipboard
+//   Linux  → xclip (현재 미배선 — 추후)
 async function pbcopy(text: string): Promise<void> {
+  if (process.platform === "win32") {
+    // Windows 내장 clip.exe — stdin 으로 raw bytes 받음. 단 ANSI 코드페이지
+    // 기반이라 한글/이모지가 깨질 수 있어 PowerShell `Set-Clipboard` 사용.
+    // -Value 인자로 전달 (escape: single-quote literal, '' = single quote).
+    const escaped = text.replace(/'/g, "''");
+    const cmd = `Set-Clipboard -Value '${escaped}'`;
+    const proc = Bun.spawn(["powershell", "-NoProfile", "-Command", cmd]);
+    await proc.exited;
+    return;
+  }
   const proc = Bun.spawn(["pbcopy"], { stdin: "pipe" });
   proc.stdin.write(text);
   await proc.stdin.end();
@@ -34,6 +48,14 @@ async function pbcopy(text: string): Promise<void> {
 }
 
 async function pbpaste(): Promise<string> {
+  if (process.platform === "win32") {
+    // Get-Clipboard -Raw 는 trailing CRLF 추가 안 함. stdout 캡처 후 trailing \r\n 제거.
+    const proc = Bun.spawn(["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"], { stdout: "pipe" });
+    await proc.exited;
+    const raw = await new Response(proc.stdout).text();
+    // PowerShell 출력은 끝에 \r\n 자동 붙음 — 한 번 제거.
+    return raw.replace(/\r?\n$/, "");
+  }
   const proc = Bun.spawn(["pbpaste"], { stdout: "pipe" });
   await proc.exited;
   return await new Response(proc.stdout).text();
