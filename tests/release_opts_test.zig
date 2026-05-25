@@ -32,9 +32,10 @@ test "flagValue: prefix 충돌 회피(--sign vs --signfoo)" {
 }
 
 test "hasFlag" {
-    const a = [_][:0]const u8{ "build", "--notarize", "--dmg" };
+    const a = [_][:0]const u8{ "build", "--notarize", "--dmg", "--deb" };
     try std.testing.expect(ro.hasFlag(&a, "--notarize"));
     try std.testing.expect(ro.hasFlag(&a, "--dmg"));
+    try std.testing.expect(ro.hasFlag(&a, "--deb"));
     try std.testing.expect(!ro.hasFlag(&a, "--sign"));
     try std.testing.expect(!ro.hasFlag(&a, "--dm"));
 }

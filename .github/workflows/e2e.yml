@@ -288,6 +288,10 @@ jobs:
       - name: Build suji
         run: zig build
 
+      - name: E2E — Linux deb package
+        if: runner.os == 'Linux'
+        run: bash tests/e2e/run-linux-deb-package.sh
+
       - name: Verify CEF runtime layout
         shell: bash
         run: |

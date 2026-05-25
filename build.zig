@@ -441,6 +441,23 @@ pub fn build(b: *std.Build) void {
     const release_opts_test = b.addTest(.{ .root_module = release_opts_test_mod });
     test_step.dependOn(&b.addRunArtifact(release_opts_test).step);
 
+    // Desktop packaging tests (.deb metadata + real ar archive on Unix).
+    const package_desktop_module = b.createModule(.{
+        .root_source_file = b.path("src/package_desktop.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    package_desktop_module.addImport("runtime", runtime_module);
+    const package_desktop_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/package_desktop_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    package_desktop_test_mod.addImport("package_desktop", package_desktop_module);
+    package_desktop_test_mod.addImport("runtime", runtime_module);
+    const package_desktop_test = b.addTest(.{ .root_module = package_desktop_test_mod });
+    test_step.dependOn(&b.addRunArtifact(package_desktop_test).step);
+
     // Release workflow contract tests (YAML structure/docs guard — no GitHub API).
     const release_workflow_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/release_workflow_test.zig"),

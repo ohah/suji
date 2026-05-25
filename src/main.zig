@@ -242,6 +242,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     const identity = flagOrEnv(args, "--identity", "SUJI_SIGN_IDENTITY");
     const want_notarize = release_opts.hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
     const want_dmg = release_opts.hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
+    const want_deb = release_opts.hasFlag(args, "--deb") or runtime.env("SUJI_DEB") != null;
     // App Sandbox(MAS) vs non-sandbox(Developer ID, 기본). 기본 false 라
     // 기존 Developer ID/notarize 배포 무회귀.
     const want_sandbox = release_opts.hasFlag(args, "--sandbox") or runtime.env("SUJI_SANDBOX") != null;
@@ -321,6 +322,10 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         .linux => {
             const archive = try package_desktop.packageLinux(allocator, config.app.name, config.app.version, exe_path, config.frontend.dist_dir);
             allocator.free(archive);
+            if (want_deb) {
+                const deb = try package_desktop.packageLinuxDeb(allocator, config.app.name, config.app.version, exe_path, config.frontend.dist_dir);
+                allocator.free(deb);
+            }
         },
         .windows => {
             const archive = try package_desktop.packageWindows(
@@ -336,7 +341,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         },
         else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
-    _ = .{ signing, identity, want_notarize, want_dmg, want_sandbox }; // 비-macOS arm 미사용 해소
+    _ = .{ signing, identity, want_notarize, want_dmg, want_deb, want_sandbox }; // 비-macOS arm 미사용 해소
 }
 
 // ============================================
