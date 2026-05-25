@@ -583,7 +583,7 @@ describe("Zoom API (Phase 4-B)", () => {
 describe("Opacity / Background / Shadow API", () => {
   // NSWindow.alphaValue 는 macOS-only. Windows 는 layered window
   // (SetLayeredWindowAttributes) 별도 impl 필요 — 미배선.
-  test.skipIf(process.platform !== "darwin")("setOpacity 0.5 → getOpacity 0.5 (NSWindow alphaValue round-trip)", async () => {
+  test("setOpacity 0.5 → getOpacity 0.5 (NSWindow alphaValue round-trip)", async () => {
     const created = await coreCall({ cmd: "create_window", title: "opacity", url: "about:blank" });
     const id = created.windowId;
     const evalCmd = (req: object): Promise<any> =>
@@ -595,7 +595,11 @@ describe("Opacity / Background / Shadow API", () => {
 
     const get = await evalCmd({ cmd: "get_opacity", windowId: id });
     expect(get.ok).toBe(true);
-    expect(get.opacity).toBeCloseTo(0.5, 4);
+    // Win32 SetLayeredWindowAttributes 는 alpha 가 byte(0-255) 라 0.5 round-trip
+    // 시 ±1/255 (~0.004) 손실. macOS NSWindow.alphaValue 는 native float — 4
+    // decimal 정확. tolerance 를 OS 에 맞춰 완화.
+    const precision = process.platform === "win32" ? 2 : 4;
+    expect(get.opacity).toBeCloseTo(0.5, precision);
   });
 
   test("setBackgroundColor 응답 ok (#RRGGBB hex)", async () => {
