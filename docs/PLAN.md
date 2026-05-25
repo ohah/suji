@@ -608,9 +608,9 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `__suji__.core` 와이어 포맷 변경 필요 → 200회 stress·chain/fanout e2e 회귀 위험 大.
           가치 낮음(plan 명시) 대비 위험 과다 → **보류 유지**(억지 단일화 안 함).
   - [~] **Phase 5-A: Native API (Clipboard / Shell / Dialog)** — 5개 진입점 모두 노출 완료.
-        - [x] **Clipboard** (`readText/writeText/clear`) — macOS NSPasteboard + Linux GTK clipboard text + Windows CF_UNICODETEXT. Frontend `@suji/api` +
+        - [x] **Clipboard** (`readText/writeText/clear`, `readHTML/writeHTML`) — macOS NSPasteboard + Linux GTK clipboard text/HTML + Windows CF_UNICODETEXT. Frontend `@suji/api` +
               Zig/Rust/Go/Node SDK 4개. macOS E2E 37 케이스(write/read/clear, 길이 한도, JSON wire,
-              Unicode/RTL/이모지/ZWJ, 200회 stress, 다중 창) + Linux Xvfb text round-trip E2E
+              Unicode/RTL/이모지/ZWJ, 200회 stress, 다중 창) + Linux Xvfb text/HTML round-trip E2E
               (`tests/e2e/run-clipboard-text-runtime.sh`). `documents/clipboard-shell.mdx`.
         - [x] **Shell** (`openExternal/showItemInFolder/beep/trashItem`) — macOS NSWorkspace + NSBeep + NSFileManager,
               Linux GIO `g_app_info_launch_default_for_uri`/`g_file_get_uri`/`g_file_trash` + FileManager1 D-Bus + GDK beep, Windows ShellExecute/SHFileOperation.
@@ -1414,7 +1414,7 @@ suji build → 결과물:
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 중앙 상태 스토어 | Redux 등 자유 | Tauri state 관리 | ✅ (`plugins/state`, 첫 공식 플러그인) |
-| 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. macOS NSPasteboard + Linux GTK clipboard text + Windows CF_UNICODETEXT. 4 SDK + macOS E2E 37 케이스 + Linux Xvfb text E2E |
+| 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. macOS NSPasteboard + Linux GTK clipboard text/HTML + Windows CF_UNICODETEXT. 4 SDK + macOS E2E 37 케이스 + Linux Xvfb text/HTML E2E |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
 | 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
