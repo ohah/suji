@@ -352,6 +352,21 @@ pub fn build(b: *std.Build) void {
                 @panic("libstdc++.so.6 not found; install the GNU libstdc++ runtime");
             };
             root_module.addObjectFile(.{ .cwd_relative = libstdcxx_path });
+            const libgcc_s_path = blk: {
+                const candidates = [_][]const u8{
+                    "/lib/x86_64-linux-gnu/libgcc_s.so.1",
+                    "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+                    "/lib64/libgcc_s.so.1",
+                    "/usr/lib64/libgcc_s.so.1",
+                    "/usr/lib/libgcc_s.so.1",
+                };
+                for (candidates) |candidate| {
+                    std.Io.Dir.accessAbsolute(b.graph.io, candidate, .{}) catch continue;
+                    break :blk candidate;
+                }
+                @panic("libgcc_s.so.1 not found; install the GNU libgcc runtime");
+            };
+            root_module.addObjectFile(.{ .cwd_relative = libgcc_s_path });
         } else {
             root_module.addCSourceFile(.{
                 .file = b.path("src/platform/node/bridge.cc"),

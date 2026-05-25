@@ -301,6 +301,8 @@ test "build.zig: Linux Node bridge uses g++ and libstdc++ ABI" {
         "root_module.linkSystemLibrary(\"node\", .{})",
         "\"/usr/lib/x86_64-linux-gnu/libstdc++.so.6\"",
         "root_module.addObjectFile(.{ .cwd_relative = libstdcxx_path })",
+        "\"/lib/x86_64-linux-gnu/libgcc_s.so.1\"",
+        "root_module.addObjectFile(.{ .cwd_relative = libgcc_s_path })",
     };
     for (needles) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, branch, needle) != null);
