@@ -441,6 +441,15 @@ pub fn build(b: *std.Build) void {
     const release_opts_test = b.addTest(.{ .root_module = release_opts_test_mod });
     test_step.dependOn(&b.addRunArtifact(release_opts_test).step);
 
+    // Release workflow contract tests (YAML structure/docs guard — no GitHub API).
+    const release_workflow_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/release_workflow_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const release_workflow_test = b.addTest(.{ .root_module = release_workflow_test_mod });
+    dependOnTestWithProjectCwd(b, test_step, release_workflow_test);
+
     // init tests (suji init — BackendLang/FrontendTemplate 파싱 + create-vite 매핑)
     const init_module = b.createModule(.{
         .root_source_file = b.path("src/core/init.zig"),

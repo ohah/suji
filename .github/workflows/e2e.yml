@@ -88,6 +88,9 @@ jobs:
       - name: E2E — Init CLI
         run: bash tests/e2e/run-init-cli.sh
 
+      - name: E2E — Release workflow contract
+        run: bash tests/e2e/run-release-workflow.sh
+
       - name: E2E — Rust TypeScript helper
         env:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-rust-types-helper.log
