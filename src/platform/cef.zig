@@ -386,16 +386,27 @@ pub fn initialize(config: CefConfig) !void {
     };
 
     var fw_buf: [1024]u8 = undefined;
-    var res_buf: [1024]u8 = undefined;
-    var loc_buf: [1024]u8 = undefined;
     var user_data_buf: [1024]u8 = undefined;
     var cache_buf: [1024]u8 = undefined;
 
     if (is_macos) {
         setCefString(&settings.framework_dir_path, std.fmt.bufPrint(&fw_buf, "{s}/.suji/cef/{s}/Release/Chromium Embedded Framework.framework", .{ home, cef_platform }) catch return error.PathTooLong);
     }
-    setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/{s}/Resources", .{ home, cef_platform }) catch return error.PathTooLong);
-    setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/{s}/Resources/locales", .{ home, cef_platform }) catch return error.PathTooLong);
+    // Windows: resources_dir_path / locales_dir_path 를 명시하면 (backslash
+    // 든 mixed-slash 든) cef_initialize 가 0 반환 + log_file 미오픈 (원인 미상,
+    // CEF 자체가 로그를 못 씀 — 실증: 0 export 인 줄 알았던 libnode.dll 진단처럼
+    // 도구 한계가 아닌 진짜 CEF 내부 거부). 대신 CEF Windows 가 .exe 옆 dir
+    // 에서 *.pak/icudtl.dat/locales/ 를 자동 발견 — build.zig
+    // addInstallCefRuntimeStep 이 zig-out/bin/ 으로 복사하고 .github/workflows/
+    // e2e.yml `Verify CEF runtime layout` step 이 4개 asset+locales/ 존재 보장.
+    // → 자동 발견 경로가 build/배포 단계의 guard 로 covered.
+    // 만약 suji.exe 를 install 폴더가 아닌 다른 위치로 옮겨 실행하면 fail.
+    if (comptime builtin.os.tag != .windows) {
+        var res_buf: [1024]u8 = undefined;
+        var loc_buf: [1024]u8 = undefined;
+        setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/{s}/Resources", .{ home, cef_platform }) catch return error.PathTooLong);
+        setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/{s}/Resources/locales", .{ home, cef_platform }) catch return error.PathTooLong);
+    }
     // OS 표준 앱별 user-data 디렉토리. Electron app.getPath('userData') 동등:
     //   macOS:   ~/Library/Application Support/<app_name>
     //   Linux:   $XDG_CONFIG_HOME or ~/.config/<app_name>
@@ -5104,7 +5115,10 @@ pub const WindowLifecycleHandlers = struct {
 };
 
 pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
-    if (!comptime is_macos) return;
+    // handler 변수 set 은 모든 OS — CEF Views 콜백(on_window_bounds_changed 등)이
+    // Windows/Linux 에서도 emit 하지만, 기존엔 macOS 가드로 handler 가 null 이라
+    // payload 가 frontend 에 도달 못 했음. 가드 해제로 cross-platform window 이벤트
+    // 활성화. macOS 전용 NSWindowDelegate native callback bridge 만 가드 유지.
     g_window_resized_handler = h.resized;
     g_window_moved_handler = h.moved;
     g_window_focus_handler = h.focus;
@@ -5116,6 +5130,7 @@ pub fn setWindowLifecycleHandlers(h: WindowLifecycleHandlers) void {
     g_window_enter_fullscreen_handler = h.enter_fullscreen;
     g_window_leave_fullscreen_handler = h.leave_fullscreen;
     g_window_will_resize_handler = h.will_resize;
+    if (!comptime is_macos) return;
     const cbs: SujiWindowLifecycleCallbacks = .{
         .resized = &windowResizedC,
         .moved = &windowMovedC,
