@@ -1954,26 +1954,36 @@ pub mod screen {
 
 /// Electron `desktopCapturer`. 화면/창 소스 열거(썸네일 미포함 — 정직 경계).
 pub mod desktop_capturer {
-    use crate::invoke;
+    use crate::{invoke, serde_json};
+
+    pub(crate) fn get_sources_request(types: &str) -> String {
+        serde_json::json!({
+            "cmd": "desktop_capturer_get_sources",
+            "types": types,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn capture_thumbnail_request(source_id: &str, path: &str) -> String {
+        serde_json::json!({
+            "cmd": "desktop_capturer_capture_thumbnail",
+            "sourceId": source_id,
+            "path": path,
+        })
+        .to_string()
+    }
 
     /// 소스 목록 raw JSON. types: "screen" | "window" | "screen,window".
     /// `{"sources":[{id,name,type,x,y,width,height,displayId?}]}`.
     pub fn get_sources(types: &str) -> Option<String> {
-        invoke("__core__", &crate::serde_json::json!({
-            "cmd": "desktop_capturer_get_sources",
-            "types": types,
-        }).to_string())
+        invoke("__core__", &get_sources_request(types))
     }
 
     /// 소스 썸네일을 PNG 로 `path` 에 캡처(파일경로 — base64 IPC 한도 우회).
     /// raw JSON `{"success":bool}`. ⚠️ Screen Recording TCC 권한 필요 —
     /// 미부여 시 success:false(정직 경계).
     pub fn capture_thumbnail(source_id: &str, path: &str) -> Option<String> {
-        invoke("__core__", &crate::serde_json::json!({
-            "cmd": "desktop_capturer_capture_thumbnail",
-            "sourceId": source_id,
-            "path": path,
-        }).to_string())
+        invoke("__core__", &capture_thumbnail_request(source_id, path))
     }
 }
 
@@ -2736,6 +2746,24 @@ mod tests {
             serde_json::from_str(&crate::power_save_blocker::stop_request(7)).unwrap();
         assert_eq!(s["cmd"], "power_save_blocker_stop");
         assert_eq!(s["id"], 7);
+    }
+
+    #[test]
+    fn desktop_capturer_requests_build_valid_json_with_escape() {
+        let sources: serde_json::Value = serde_json::from_str(
+            &crate::desktop_capturer::get_sources_request("screen,window"),
+        )
+        .unwrap();
+        assert_eq!(sources["cmd"], "desktop_capturer_get_sources");
+        assert_eq!(sources["types"], "screen,window");
+
+        let capture: serde_json::Value = serde_json::from_str(
+            &crate::desktop_capturer::capture_thumbnail_request("screen:1:0", "/tmp/a\"b\\c.png"),
+        )
+        .unwrap();
+        assert_eq!(capture["cmd"], "desktop_capturer_capture_thumbnail");
+        assert_eq!(capture["sourceId"], "screen:1:0");
+        assert_eq!(capture["path"], "/tmp/a\"b\\c.png");
     }
 
     #[test]
