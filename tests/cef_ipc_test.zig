@@ -1841,6 +1841,9 @@ test "shell.openPath / nativeTheme / screen.getCursorPoint IPC + cef.zig 함수"
     defer std.testing.allocator.free(cef_src);
     inline for (.{
         "pub fn shellOpenPath",
+        "linux_shell.openPath",
+        "g_file_query_exists",
+        "g_file_get_uri",
         "pub fn nativeThemeIsDark",
         "pub fn screenGetCursorPoint",
         "XQueryPointer",
@@ -1913,6 +1916,45 @@ test "shell.openExternal Linux GIO handler wiring + runtime E2E" {
     defer std.testing.allocator.free(workflow_src);
     try std.testing.expect(std.mem.indexOf(u8, workflow_src, "E2E — shell openExternal (Linux)") != null);
     try std.testing.expect(std.mem.indexOf(u8, workflow_src, "run-shell-open-external-runtime.sh") != null);
+}
+
+test "shell.openPath Linux GIO file handler wiring + runtime E2E" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "g_file_query_exists",
+        "g_file_get_uri",
+        "linux_shell.openPath",
+        "g_app_info_launch_default_for_uri",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const e2e_src = try readProjectFile(
+        "tests/e2e/shell-open-path-runtime.test.ts",
+        1024 * 1024,
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "xdg-mime",
+        "MimeType=",
+        "shell_open_path",
+        "pathToFileURL",
+        "waitForMarker",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    inline for (.{
+        "E2E — shell openPath (Linux)",
+        "run-shell-open-path-runtime.sh",
+        "shared-mime-info",
+        "desktop-file-utils",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
+    }
 }
 
 test "app.requestUserAttention IPC — NSApp request/cancel" {

@@ -138,7 +138,7 @@ fn onAllClosed(_: suji.Event) void {
 // suji.powerMonitor.getSystemIdleState(60)  — "active"|"idle"|"locked"
 //   (잠금 시 "locked" 우선, 아니면 idle_seconds ≥ threshold)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
-//   (openExternal: macOS NSWorkspace / Linux GIO default URI handler,
+//   (openExternal/openPath: macOS NSWorkspace / Linux GIO default handler,
 //    trashItem: macOS NSFileManager / Linux GIO / Windows SHFileOperation)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")
@@ -355,7 +355,7 @@ suji.platform                                                // "macos" | "linux
 // import { clipboard, shell, dialog } from '@suji/api';
 // await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard / Linux GTK / Windows CF_UNICODETEXT)
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
-//   (macOS NSWorkspace + NSFileManager, Linux GIO openExternal/trashItem)
+//   (macOS NSWorkspace + NSFileManager, Linux GIO openExternal/openPath/trashItem)
 // await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert)
 // await dialog.showMessageBox(windowId, options)  — sheet (부모 창 attach, dialog.m)
 // await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel)
@@ -448,7 +448,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // import { clipboard, shell, dialog } from '@suji/node'
 // await clipboard.readText() / writeText("hi")
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
-//   (Linux: openExternal/trashItem = GIO, file-manager APIs still graceful false)
+//   (Linux: openExternal/openPath/trashItem = GIO, showItemInFolder/beep still graceful false)
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
 // await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
 // await dialog.showErrorBox(title, content)

@@ -3173,10 +3173,13 @@ const win_shell = if (builtin.os.tag == .windows) struct {
 
 const linux_shell = if (is_linux) struct {
     extern "c" fn g_file_new_for_path(path: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn g_file_query_exists(file: ?*anyopaque, cancellable: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn g_file_get_uri(file: ?*anyopaque) callconv(.c) ?[*:0]u8;
     extern "c" fn g_file_trash(file: ?*anyopaque, cancellable: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) c_int;
     extern "c" fn g_app_info_launch_default_for_uri(uri: [*:0]const u8, context: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) c_int;
     extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
     extern "c" fn g_error_free(err: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_free(mem: ?*anyopaque) callconv(.c) void;
 
     fn toZText(text: []const u8, buf: *[SHELL_MAX_PATH]u8) ?[*:0]const u8 {
         if (text.len == 0 or text.len + 1 > buf.len) return null;
@@ -3212,6 +3215,24 @@ const linux_shell = if (is_linux) struct {
 
         var gerr: ?*anyopaque = null;
         const ok = g_app_info_launch_default_for_uri(uri_z, null, &gerr) != 0;
+        if (gerr) |err| g_error_free(err);
+        return ok;
+    }
+
+    /// Convert an existing path to a file:// URI with GFile and launch the
+    /// registered default application for that MIME type.
+    fn openPath(path: []const u8) bool {
+        var path_buf: [SHELL_MAX_PATH]u8 = undefined;
+        const path_z = toZText(path, &path_buf) orelse return false;
+        const file = g_file_new_for_path(path_z) orelse return false;
+        defer g_object_unref(file);
+        if (g_file_query_exists(file, null) == 0) return false;
+
+        const uri = g_file_get_uri(file) orelse return false;
+        defer g_free(@ptrCast(uri));
+
+        var gerr: ?*anyopaque = null;
+        const ok = g_app_info_launch_default_for_uri(uri, null, &gerr) != 0;
         if (gerr) |err| g_error_free(err);
         return ok;
     }
@@ -3333,6 +3354,7 @@ pub fn shellOpenPath(path: []const u8) bool {
         if (!win_shell.pathExists(path)) return false;
         return win_shell.execOpen(path, null);
     }
+    if (comptime is_linux) return linux_shell.openPath(path);
     if (!comptime is_macos) return false;
     const ns_url = nsFileUrlIfExists(path) orelse return false;
     const NSWorkspace = getClass("NSWorkspace") orelse return false;
