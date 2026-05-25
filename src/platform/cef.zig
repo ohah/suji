@@ -6465,9 +6465,9 @@ fn globalShortcutTriggerC(accel_cstr: [*:0]const u8, click_cstr: [*:0]const u8) 
 }
 
 pub fn setGlobalShortcutEmitHandler(handler: GlobalShortcutEmitHandler) void {
-    if (!comptime is_macos) return;
     g_global_shortcut_emit_handler = handler;
-    suji_global_shortcut_set_callback(&globalShortcutTriggerC);
+    if (comptime is_macos) suji_global_shortcut_set_callback(&globalShortcutTriggerC);
+    if (comptime builtin.os.tag == .windows) win_pump.ensureRunning();
 }
 
 /// Zig slice → null-terminated C string in caller-supplied buffer.
@@ -6495,6 +6495,136 @@ pub const GlobalShortcutStatus = enum(i32) {
 // 실 키 trigger (WM_HOTKEY → emit) 는 별도 후속 PR — message pump thread 필요.
 // e2e (run-global-shortcut) 의 9 케이스는 wire-level register/parse 만 검증하므로
 // PoC 만으로도 100% 통과 가능.
+// ============================================
+// Win32 message pump thread — RegisterHotKey 가 호출-스레드 큐에 WM_HOTKEY 를
+// post 하므로, hotkey 등록/수신 둘 다 같은 스레드여야 한다. CEF UI 스레드는
+// 우리가 점유 못 하니 별도 thread 를 띄우고 모든 win_gs 작업을 그 스레드로
+// proxy한다. WM_HOTKEY 도 그 스레드 큐에서 받아 globalShortcut 이벤트로 emit.
+// ============================================
+const win_pump = if (builtin.os.tag == .windows) struct {
+    const WM_HOTKEY: u32 = 0x0312;
+    const WM_APP_REQ: u32 = 0x8000 + 1;
+    const INFINITE: u32 = 0xFFFFFFFF;
+
+    extern "kernel32" fn CreateThread(lpThreadAttributes: ?*anyopaque, dwStackSize: usize, lpStartAddress: *const anyopaque, lpParameter: ?*anyopaque, dwCreationFlags: u32, lpThreadId: ?*u32) callconv(.winapi) ?*anyopaque;
+    extern "kernel32" fn CreateEventW(lpEventAttributes: ?*anyopaque, bManualReset: i32, bInitialState: i32, lpName: ?[*:0]const u16) callconv(.winapi) ?*anyopaque;
+    extern "kernel32" fn SetEvent(hEvent: ?*anyopaque) callconv(.winapi) i32;
+    extern "kernel32" fn ResetEvent(hEvent: ?*anyopaque) callconv(.winapi) i32;
+    extern "kernel32" fn WaitForSingleObject(hHandle: ?*anyopaque, dwMilliseconds: u32) callconv(.winapi) u32;
+    extern "kernel32" fn CloseHandle(hObject: ?*anyopaque) callconv(.winapi) i32;
+    extern "user32" fn PostThreadMessageW(idThread: u32, Msg: u32, wParam: usize, lParam: isize) callconv(.winapi) i32;
+    extern "user32" fn GetMessageW(lpMsg: *MSG, hWnd: ?*anyopaque, wMsgFilterMin: u32, wMsgFilterMax: u32) callconv(.winapi) i32;
+    extern "user32" fn TranslateMessage(lpMsg: *const MSG) callconv(.winapi) i32;
+    extern "user32" fn DispatchMessageW(lpMsg: *const MSG) callconv(.winapi) isize;
+    extern "user32" fn PeekMessageW(lpMsg: *MSG, hWnd: ?*anyopaque, wMsgFilterMin: u32, wMsgFilterMax: u32, wRemoveMsg: u32) callconv(.winapi) i32;
+
+    const POINT = extern struct { x: i32 = 0, y: i32 = 0 };
+    const MSG = extern struct {
+        hwnd: ?*anyopaque = null,
+        message: u32 = 0,
+        wParam: usize = 0,
+        lParam: isize = 0,
+        time: u32 = 0,
+        pt: POINT = .{},
+        lPrivate: u32 = 0,
+    };
+
+    const ReqKind = enum(u32) { register, unregister, unregister_all };
+    const Req = extern struct {
+        kind: u32 = 0,
+        id: i32 = 0,
+        mods: u32 = 0,
+        vk: u32 = 0,
+        result: i32 = 0,
+    };
+
+    var thread_handle: ?*anyopaque = null;
+    var thread_id: u32 = 0;
+    var ready_event: ?*anyopaque = null;
+    var response_event: ?*anyopaque = null;
+    // request mutex — 직렬화 (등록/해제 동시 호출 금지). lock_flag = atomic spinlock.
+    var req_lock: std.atomic.Value(bool) = .init(false);
+    var current_req: Req = .{};
+    var started: std.atomic.Value(bool) = .init(false);
+
+    fn lock() void {
+        while (req_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+    }
+    fn unlock() void {
+        req_lock.store(false, .release);
+    }
+
+    fn pumpEntry(_: ?*anyopaque) callconv(.winapi) u32 {
+        // 첫 msg 받기 전에 thread message queue 가 형성되도록 PeekMessage 강제.
+        var dummy: MSG = .{};
+        _ = PeekMessageW(&dummy, null, WM_APP_REQ, WM_APP_REQ, 0);
+        _ = SetEvent(ready_event);
+        var msg: MSG = .{};
+        while (GetMessageW(&msg, null, 0, 0) > 0) {
+            if (msg.message == WM_HOTKEY) {
+                const hkid: i32 = @intCast(msg.wParam);
+                for (&win_gs.slots) |*s| {
+                    if (s.used and s.id == hkid) {
+                        if (g_global_shortcut_emit_handler) |emit| {
+                            emit(s.accel[0..s.accel_len], s.click[0..s.click_len]);
+                        }
+                        break;
+                    }
+                }
+            } else if (msg.message == WM_APP_REQ) {
+                executeReq();
+                _ = SetEvent(response_event);
+            } else {
+                _ = TranslateMessage(&msg);
+                _ = DispatchMessageW(&msg);
+            }
+        }
+        return 0;
+    }
+
+    fn executeReq() void {
+        const kind: ReqKind = @enumFromInt(current_req.kind);
+        switch (kind) {
+            .register => {
+                current_req.result = win_gs.RegisterHotKey(null, current_req.id, current_req.mods, current_req.vk);
+            },
+            .unregister => {
+                current_req.result = win_gs.UnregisterHotKey(null, current_req.id);
+            },
+            .unregister_all => {
+                for (&win_gs.slots) |*s| {
+                    if (s.used) _ = win_gs.UnregisterHotKey(null, s.id);
+                }
+                current_req.result = 1;
+            },
+        }
+    }
+
+    /// Idempotent — 첫 호출에 thread + events 생성 후 ready 까지 wait.
+    pub fn ensureRunning() void {
+        if (started.load(.acquire)) return;
+        // Double-check + take ownership via cmpxchg.
+        if (started.cmpxchgStrong(false, true, .acq_rel, .monotonic) != null) return;
+        ready_event = CreateEventW(null, 1, 0, null) orelse return;
+        response_event = CreateEventW(null, 1, 0, null) orelse return;
+        thread_handle = CreateThread(null, 0, &pumpEntry, null, 0, &thread_id);
+        if (thread_handle == null) return;
+        _ = WaitForSingleObject(ready_event, 2000);
+    }
+
+    pub fn submitSync(req: Req) i32 {
+        ensureRunning();
+        if (thread_id == 0) return 0;
+        lock();
+        defer unlock();
+        current_req = req;
+        _ = ResetEvent(response_event);
+        if (PostThreadMessageW(thread_id, WM_APP_REQ, 0, 0) == 0) return 0;
+        _ = WaitForSingleObject(response_event, INFINITE);
+        return current_req.result;
+    }
+} else struct {};
+
 const win_gs = if (builtin.os.tag == .windows) struct {
     const MOD_ALT: u32 = 1;
     const MOD_CONTROL: u32 = 2;
@@ -6600,7 +6730,15 @@ const win_gs = if (builtin.os.tag == .windows) struct {
         const parsed = parse(accel) orelse return .parse;
         const idx = freeSlot() orelse return .capacity;
         const id = next_id;
-        if (RegisterHotKey(null, id, parsed.mods, parsed.vk) == 0) return .os_reject;
+        // pump thread 에 RegisterHotKey 위임 — WM_HOTKEY 가 pump thread 큐로 전달돼야
+        // 우리가 receive 한다.
+        const rc = win_pump.submitSync(.{
+            .kind = @intFromEnum(win_pump.ReqKind.register),
+            .id = id,
+            .mods = parsed.mods,
+            .vk = parsed.vk,
+        });
+        if (rc == 0) return .os_reject;
         next_id += 1;
         var s = &slots[idx];
         s.used = true;
@@ -6615,7 +6753,7 @@ const win_gs = if (builtin.os.tag == .windows) struct {
     fn unregister(accel: []const u8) bool {
         const idx = findSlot(accel) orelse return false;
         var s = &slots[idx];
-        _ = UnregisterHotKey(null, s.id);
+        _ = win_pump.submitSync(.{ .kind = @intFromEnum(win_pump.ReqKind.unregister), .id = s.id });
         s.used = false;
         s.accel_len = 0;
         s.click_len = 0;
@@ -6623,13 +6761,11 @@ const win_gs = if (builtin.os.tag == .windows) struct {
     }
 
     fn unregisterAll() void {
+        _ = win_pump.submitSync(.{ .kind = @intFromEnum(win_pump.ReqKind.unregister_all) });
         for (&slots) |*s| {
-            if (s.used) {
-                _ = UnregisterHotKey(null, s.id);
-                s.used = false;
-                s.accel_len = 0;
-                s.click_len = 0;
-            }
+            s.used = false;
+            s.accel_len = 0;
+            s.click_len = 0;
         }
     }
 
