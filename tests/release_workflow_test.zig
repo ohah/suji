@@ -48,6 +48,40 @@ test "release workflow builds expected desktop and embed artifacts" {
     }
 }
 
+test "release workflow generates Homebrew formula and can publish an external tap" {
+    const allocator = std.testing.allocator;
+    const workflow = try slurp(allocator, ".github/workflows/release.yml");
+    defer allocator.free(workflow);
+    const formula_script = try slurp(allocator, "scripts/homebrew-formula.sh");
+    defer allocator.free(formula_script);
+
+    inline for (.{
+        "homebrew:",
+        "needs: [version, cli]",
+        "bash scripts/homebrew-formula.sh",
+        "homebrew/Formula/suji.rb",
+        "ruby -c homebrew/Formula/suji.rb",
+        "name: homebrew-formula",
+        "HOMEBREW_TAP_REPO",
+        "HOMEBREW_TAP_TOKEN",
+        "git clone \"https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${HOMEBREW_TAP_REPO}.git\" tap",
+        "needs: [version, cli, embed-libs, homebrew]",
+    }) |needle| {
+        try expectContains(workflow, needle);
+    }
+
+    inline for (.{
+        "class Suji < Formula",
+        "suji-macos-arm64.tar.gz",
+        "suji-linux-x64.tar.gz",
+        "sha256",
+        "bin.install \"suji\"",
+        "shell_output(\"#{bin}/suji 2>&1\")",
+    }) |needle| {
+        try expectContains(formula_script, needle);
+    }
+}
+
 test "release docs and PLAN agree that GitHub Releases automation exists" {
     const allocator = std.testing.allocator;
     const plan = try slurp(allocator, "docs/PLAN.md");
@@ -59,8 +93,10 @@ test "release docs and PLAN agree that GitHub Releases automation exists" {
 
     try expectContains(plan, "GitHub Releases CI 자동 빌드");
     try expectContains(plan, "release.yml");
-    try expectContains(releasing, "GitHub Releases 자동화");
+    try expectContains(releasing, "GitHub Releases / Homebrew");
     try expectContains(releasing, "release.yml");
     try expectContains(claude, "GitHub Releases");
     try expectContains(claude, "release.yml");
+    try expectContains(claude, "Homebrew");
+    try expectContains(releasing, "Homebrew tap");
 }
