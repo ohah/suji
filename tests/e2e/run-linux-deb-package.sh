@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [ "$(uname -s)" != "Linux" ]; then
-  echo "linux deb package e2e skipped on $(uname -s)"
+  echo "linux package e2e skipped on $(uname -s)"
   exit 0
 fi
 
@@ -12,6 +12,18 @@ test -x "$SUJI_BIN"
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+
+if [ -z "${SUJI_APPIMAGETOOL:-}" ]; then
+  SUJI_APPIMAGETOOL="$TMP/appimagetool-x86_64.AppImage"
+  curl -fsSL \
+    "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
+    -o "$SUJI_APPIMAGETOOL"
+  chmod +x "$SUJI_APPIMAGETOOL"
+fi
+test -x "$SUJI_APPIMAGETOOL"
+export SUJI_APPIMAGETOOL
+export APPIMAGE_EXTRACT_AND_RUN=1
+export ARCH=x86_64
 
 mkdir -p "$TMP/frontend"
 cat > "$TMP/suji.json" <<'JSON'
@@ -38,9 +50,10 @@ JSON
 
 (
   cd "$TMP"
-  "$SUJI_BIN" build --deb
+  "$SUJI_BIN" build --deb --appimage
   test -f deb-e2e-app-1.2.3-linux-x64.tar.gz
   test -f deb-e2e-app_1.2.3_amd64.deb
+  test -x deb-e2e-app-1.2.3-linux-x64.AppImage
 
   mkdir -p inspect/control inspect/data
   ar p deb-e2e-app_1.2.3_amd64.deb debian-binary | grep -qx '2.0'
@@ -55,4 +68,13 @@ JSON
   test -x inspect/data/opt/deb-e2e-app/bin/deb-e2e-app
   test -f inspect/data/opt/deb-e2e-app/resources/frontend/index.html
   grep -qx 'Exec=/opt/deb-e2e-app/bin/deb-e2e-app' inspect/data/usr/share/applications/deb-e2e-app.desktop
+
+  ./deb-e2e-app-1.2.3-linux-x64.AppImage --appimage-extract >/dev/null
+  test -x squashfs-root/AppRun
+  test -x squashfs-root/usr/bin/deb-e2e-app
+  test -f squashfs-root/usr/resources/frontend/index.html
+  grep -qx 'Name=deb-e2e-app' squashfs-root/deb-e2e-app.desktop
+  grep -qx 'Exec=AppRun' squashfs-root/deb-e2e-app.desktop
+  grep -qx 'Icon=app-icon' squashfs-root/deb-e2e-app.desktop
+  test -f squashfs-root/app-icon.svg
 )

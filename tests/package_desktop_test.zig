@@ -39,6 +39,69 @@ test "renderDebControl emits required Debian control fields without line injecti
     try std.testing.expect(std.mem.indexOf(u8, control, "Description: My App Oops desktop application\n") != null);
 }
 
+test "renderAppRun execs packaged binary in run mode and quotes names" {
+    const a = std.testing.allocator;
+    const app_run = try package_desktop.renderAppRun(a, "App's Name");
+    defer a.free(app_run);
+
+    try std.testing.expect(std.mem.indexOf(u8, app_run, "APPDIR=\"${APPDIR:-$(dirname \"$(readlink -f \"$0\")\")}\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_run, "APP_EXEC='App'\\''s Name'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, app_run, "exec \"$APPDIR/usr/bin/$APP_EXEC\" run \"$@\"") != null);
+}
+
+test "stageLinuxAppDirAt creates AppDir metadata and bundled resources" {
+    if (builtin.os.tag == .windows) return error.SkipZigTest;
+    runtime.io = std.testing.io;
+
+    const a = std.testing.allocator;
+    const root = try a.dupe(u8, "/tmp/suji-package-appdir-test");
+    defer a.free(root);
+    std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    defer std.Io.Dir.cwd().deleteTree(std.testing.io, root) catch {};
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, root);
+
+    const exe = try std.fmt.allocPrint(a, "{s}/fake-suji", .{root});
+    defer a.free(exe);
+    try writeFile(exe, "#!/usr/bin/env sh\necho fake\n");
+
+    const frontend = try std.fmt.allocPrint(a, "{s}/frontend-dist", .{root});
+    defer a.free(frontend);
+    try std.Io.Dir.cwd().createDirPath(std.testing.io, frontend);
+    const index = try std.fmt.allocPrint(a, "{s}/index.html", .{frontend});
+    defer a.free(index);
+    try writeFile(index, "<!doctype html><title>appdir</title>\n");
+
+    const app_dir = try std.fmt.allocPrint(a, "{s}/AppDir E2E.AppDir", .{root});
+    defer a.free(app_dir);
+    try package_desktop.stageLinuxAppDirAt(a, app_dir, "AppDir E2E App", exe, frontend);
+
+    const app_run_path = try std.fmt.allocPrint(a, "{s}/AppRun", .{app_dir});
+    defer a.free(app_run_path);
+    const app_run = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, app_run_path, a, .limited(4096));
+    defer a.free(app_run);
+    try std.testing.expect(std.mem.indexOf(u8, app_run, "APP_EXEC='AppDir E2E App'") != null);
+
+    const desktop_path = try std.fmt.allocPrint(a, "{s}/appdir-e2e-app.desktop", .{app_dir});
+    defer a.free(desktop_path);
+    const desktop = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, desktop_path, a, .limited(4096));
+    defer a.free(desktop);
+    try std.testing.expect(std.mem.indexOf(u8, desktop, "Name=AppDir E2E App\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, desktop, "Exec=AppRun\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, desktop, "Icon=app-icon\n") != null);
+
+    const copied_index = try std.fmt.allocPrint(a, "{s}/usr/resources/frontend/index.html", .{app_dir});
+    defer a.free(copied_index);
+    const index_bytes = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, copied_index, a, .limited(4096));
+    defer a.free(index_bytes);
+    try std.testing.expect(std.mem.indexOf(u8, index_bytes, "appdir") != null);
+
+    const icon_path = try std.fmt.allocPrint(a, "{s}/app-icon.svg", .{app_dir});
+    defer a.free(icon_path);
+    const icon = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, icon_path, a, .limited(4096));
+    defer a.free(icon);
+    try std.testing.expect(std.mem.indexOf(u8, icon, "<svg") != null);
+}
+
 test "packageLinuxDebAt creates a Debian ar archive with control and data members" {
     if (builtin.os.tag == .windows) return error.SkipZigTest;
     runtime.io = std.testing.io;

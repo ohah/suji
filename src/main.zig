@@ -243,6 +243,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     const want_notarize = release_opts.hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
     const want_dmg = release_opts.hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
     const want_deb = release_opts.hasFlag(args, "--deb") or runtime.env("SUJI_DEB") != null;
+    const want_appimage = release_opts.hasFlag(args, "--appimage") or runtime.env("SUJI_APPIMAGE") != null;
     // App Sandbox(MAS) vs non-sandbox(Developer ID, 기본). 기본 false 라
     // 기존 Developer ID/notarize 배포 무회귀.
     const want_sandbox = release_opts.hasFlag(args, "--sandbox") or runtime.env("SUJI_SANDBOX") != null;
@@ -326,6 +327,10 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                 const deb = try package_desktop.packageLinuxDeb(allocator, config.app.name, config.app.version, exe_path, config.frontend.dist_dir);
                 allocator.free(deb);
             }
+            if (want_appimage) {
+                const appimage = try package_desktop.packageLinuxAppImage(allocator, config.app.name, config.app.version, exe_path, config.frontend.dist_dir);
+                allocator.free(appimage);
+            }
         },
         .windows => {
             const archive = try package_desktop.packageWindows(
@@ -341,7 +346,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         },
         else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
-    _ = .{ signing, identity, want_notarize, want_dmg, want_deb, want_sandbox }; // 비-macOS arm 미사용 해소
+    _ = .{ signing, identity, want_notarize, want_dmg, want_deb, want_appimage, want_sandbox }; // 비-macOS arm 미사용 해소
 }
 
 // ============================================
@@ -4112,7 +4117,7 @@ fn cefEmitHandler(target: ?u32, event: []const u8, data: []const u8) void {
     }
 }
 
-/// dist 디렉토리 절대 경로 탐색 (로컬 → .app 번들)
+/// dist 디렉토리 절대 경로 탐색 (로컬 → .app/AppImage 번들)
 fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 {
     // 1. CWD 기준 (로컬 개발)
     if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, dist_dir, allocator)) |p| return p else |_| {}
@@ -4132,6 +4137,19 @@ fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 
     const bundle_frontend = std.fmt.allocPrint(allocator, "{s}/Resources/frontend", .{contents_dir}) catch return null;
     defer allocator.free(bundle_frontend);
     if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_frontend, allocator)) |p| return p else |_| {}
+
+    // 4. Linux AppImage/AppDir: AppDir/usr/bin/<exe> + AppDir/usr/resources/frontend.
+    if (builtin.os.tag == .linux) {
+        const bin_dir = std.fs.path.dirname(exe_path) orelse return null;
+        const usr_dir = std.fs.path.dirname(bin_dir) orelse return null;
+        const appdir_resources_dist = std.fmt.allocPrint(allocator, "{s}/resources/frontend/dist", .{usr_dir}) catch return null;
+        defer allocator.free(appdir_resources_dist);
+        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, appdir_resources_dist, allocator)) |p| return p else |_| {}
+
+        const appdir_resources_frontend = std.fmt.allocPrint(allocator, "{s}/resources/frontend", .{usr_dir}) catch return null;
+        defer allocator.free(appdir_resources_frontend);
+        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, appdir_resources_frontend, allocator)) |p| return p else |_| {}
+    }
 
     return null;
 }

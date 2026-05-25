@@ -288,7 +288,7 @@ jobs:
       - name: Build suji
         run: zig build
 
-      - name: E2E — Linux deb package
+      - name: E2E — Linux packages
         if: runner.os == 'Linux'
         run: bash tests/e2e/run-linux-deb-package.sh
 

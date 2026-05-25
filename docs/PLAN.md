@@ -1344,7 +1344,7 @@ suji build → 결과물:
 ```
 - macOS: .app 번들 (Code Sign + Notarize)
 - Windows: .msi 인스톨러
-- Linux: tar.gz + 선택적 .deb(`suji build --deb`), AppImage 미구현
+- Linux: tar.gz + 선택적 .deb(`suji build --deb`) + 선택적 AppImage(`suji build --appimage`)
 
 ---
 
@@ -1389,7 +1389,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | macOS .app 번들 | electron-builder | `tauri build` | ✅ (`bundle_macos.zig`, Helper 4개, Info.plist) |
 | Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
-| Linux .deb/.AppImage | electron-builder | `tauri build` | 🟡 `.deb` 구현(`suji build --deb`/`SUJI_DEB`, `/opt/<package>` + `.desktop`, Debian control/data ar archive). 유닛 + Linux Actions E2E로 control/data 구조 검증. AppImage 미구현 |
+| Linux .deb/.AppImage | electron-builder | `tauri build` | ✅ `.deb` 구현(`suji build --deb`/`SUJI_DEB`, `/opt/<package>` + `.desktop`, Debian control/data ar archive) + AppImage 구현(`suji build --appimage`/`SUJI_APPIMAGE`, `SUJI_APPIMAGETOOL` 지원, AppDir/usr/bin + resources/frontend). 유닛 + Linux Actions E2E로 `.deb` control/data와 `.AppImage` 생성/추출 검증 |
 | 코드 서명 & 공증 | electron-notarize | 빌트인 | ✅ codesign(none/adhoc/identity)+`notarytool`+stapler+DMG 구현(`bundle_macos.zig`), Win signtool(`package_desktop.zig`). `suji build --sign/--identity/--notarize/--dmg`. **adhoc 로컬 실증**(codesign --verify --deep --strict exit=0·Designated Req 만족·helper entitlements 부착·spctl 은 adhoc 이라 reject=정직 경계). identity/notarize/signtool 은 자격증명·Win 환경 필요로 미검증(CI secret 시) |
 | 자동 업데이트 | autoUpdater | `updater` 플러그인 | ❌ |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ✅ `.github/workflows/release.yml` — `v*.*.*` 태그 정식 릴리스 + `workflow_dispatch dry_run=true` 검증 모드. macOS/Linux/Windows CLI 패키지 + checksums + embed core libs 크로스빌드 아티팩트, 태그↔`build.zig.zon` 버전 일치 검증, release publish gate. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 workflow 계약 고정 |

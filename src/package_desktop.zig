@@ -3,7 +3,8 @@
 //! macOS 는 bundle_macos.zig(.app/.dmg)가 담당. 이쪽은 CEF self-contained
 //! 바이너리를 OS 표준 레이아웃으로 배치 후 아카이브:
 //! - Linux : <name>-<ver>-linux-<arch>/{bin/<name>, resources/frontend,
-//!           <name>.desktop} → tar.gz. 선택적 Debian .deb(`--deb`)도 생성.
+//!           <name>.desktop} → tar.gz. 선택적 Debian .deb(`--deb`)와
+//!           AppImage(`--appimage`)도 생성.
 //! - Windows: <name>-<ver>-windows-<arch>/{bin/<name>.exe,
 //!           resources/frontend} → zip. 선택적 signtool 서명 훅.
 //!
@@ -148,6 +149,22 @@ fn controlLineSafe(allocator: std.mem.Allocator, value: []const u8, fallback: []
     return out.toOwnedSlice(allocator);
 }
 
+fn shellSingleQuote(allocator: std.mem.Allocator, value: []const u8) ![]u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+
+    try out.append(allocator, '\'');
+    for (value) |c| {
+        if (c == '\'') {
+            try out.appendSlice(allocator, "'\\''");
+        } else {
+            try out.append(allocator, c);
+        }
+    }
+    try out.append(allocator, '\'');
+    return out.toOwnedSlice(allocator);
+}
+
 pub fn renderDesktopEntry(
     allocator: std.mem.Allocator,
     display_name: []const u8,
@@ -198,6 +215,30 @@ pub fn renderDebControl(
     , .{ package_name, safe_version, safe_arch, safe_app_name });
 }
 
+pub fn renderAppRun(allocator: std.mem.Allocator, exe_name: []const u8) ![]u8 {
+    const quoted_exe = try shellSingleQuote(allocator, exe_name);
+    defer allocator.free(quoted_exe);
+
+    return std.fmt.allocPrint(allocator,
+        \\#!/bin/sh
+        \\set -eu
+        \\APPDIR="${{APPDIR:-$(dirname "$(readlink -f "$0")")}}"
+        \\APP_EXEC={s}
+        \\exec "$APPDIR/usr/bin/$APP_EXEC" run "$@"
+        \\
+    , .{quoted_exe});
+}
+
+const default_app_icon_svg =
+    \\<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+    \\  <rect width="128" height="128" rx="24" fill="#1f7a5c"/>
+    \\  <path d="M34 72c10 18 50 18 60 0" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round"/>
+    \\  <circle cx="45" cy="50" r="8" fill="#ffffff"/>
+    \\  <circle cx="83" cy="50" r="8" fill="#ffffff"/>
+    \\</svg>
+    \\
+;
+
 /// Linux: stage + .desktop + tar.gz. 반환 아카이브 경로(caller free).
 pub fn packageLinux(
     allocator: std.mem.Allocator,
@@ -222,6 +263,93 @@ pub fn packageLinux(
     errdefer allocator.free(archive);
     std.debug.print("[suji] packaging linux: {s}\n", .{archive});
     try runCmd(&.{ "tar", "czf", archive, stage });
+    std.debug.print("[suji] packaged: {s}\n", .{archive});
+    return archive;
+}
+
+pub fn stageLinuxAppDirAt(
+    allocator: std.mem.Allocator,
+    app_dir: []const u8,
+    name: []const u8,
+    exe_path: []const u8,
+    frontend_dist: []const u8,
+) !void {
+    const package_name = try sanitizeDebPackageName(allocator, name);
+    defer allocator.free(package_name);
+
+    runCmd(&.{ "rm", "-rf", app_dir }) catch {};
+    const bin_dir = try std.fmt.allocPrint(allocator, "{s}/usr/bin", .{app_dir});
+    defer allocator.free(bin_dir);
+    const resources_dir = try std.fmt.allocPrint(allocator, "{s}/usr/resources", .{app_dir});
+    defer allocator.free(resources_dir);
+    try Dir.cwd().createDirPath(runtime.io, bin_dir);
+    try Dir.cwd().createDirPath(runtime.io, resources_dir);
+
+    const bin_dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ bin_dir, name });
+    defer allocator.free(bin_dst);
+    try runCmd(&.{ "cp", exe_path, bin_dst });
+    try runCmd(&.{ "chmod", "+x", bin_dst });
+
+    const frontend_dst = try std.fmt.allocPrint(allocator, "{s}/frontend", .{resources_dir});
+    defer allocator.free(frontend_dst);
+    runCmd(&.{ "cp", "-R", frontend_dist, frontend_dst }) catch {};
+
+    const app_run = try renderAppRun(allocator, name);
+    defer allocator.free(app_run);
+    const app_run_path = try std.fmt.allocPrint(allocator, "{s}/AppRun", .{app_dir});
+    defer allocator.free(app_run_path);
+    try writeFile(app_run_path, app_run);
+    try runCmd(&.{ "chmod", "+x", app_run_path });
+
+    const desktop = try renderDesktopEntry(allocator, name, "AppRun", "app-icon");
+    defer allocator.free(desktop);
+    const desktop_path = try std.fmt.allocPrint(allocator, "{s}/{s}.desktop", .{ app_dir, package_name });
+    defer allocator.free(desktop_path);
+    try writeFile(desktop_path, desktop);
+
+    const icon_path = try std.fmt.allocPrint(allocator, "{s}/app-icon.svg", .{app_dir});
+    defer allocator.free(icon_path);
+    try writeFile(icon_path, default_app_icon_svg);
+    const dir_icon_path = try std.fmt.allocPrint(allocator, "{s}/.DirIcon", .{app_dir});
+    defer allocator.free(dir_icon_path);
+    try writeFile(dir_icon_path, default_app_icon_svg);
+}
+
+/// Linux AppImage. Requires appimagetool via SUJI_APPIMAGETOOL or PATH.
+pub fn packageLinuxAppImage(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    version: []const u8,
+    exe_path: []const u8,
+    frontend_dist: []const u8,
+) ![]const u8 {
+    return packageLinuxAppImageAt(allocator, ".", name, version, exe_path, frontend_dist);
+}
+
+pub fn packageLinuxAppImageAt(
+    allocator: std.mem.Allocator,
+    output_dir: []const u8,
+    name: []const u8,
+    version: []const u8,
+    exe_path: []const u8,
+    frontend_dist: []const u8,
+) ![]const u8 {
+    const package_name = try sanitizeDebPackageName(allocator, name);
+    defer allocator.free(package_name);
+    const arch = archName();
+
+    Dir.cwd().createDirPath(runtime.io, output_dir) catch {};
+    const app_dir = try std.fmt.allocPrint(allocator, "{s}/{s}-{s}-linux-{s}.AppDir", .{ output_dir, package_name, version, arch });
+    defer allocator.free(app_dir);
+    try stageLinuxAppDirAt(allocator, app_dir, name, exe_path, frontend_dist);
+
+    const archive = try std.fmt.allocPrint(allocator, "{s}/{s}-{s}-linux-{s}.AppImage", .{ output_dir, package_name, version, arch });
+    errdefer allocator.free(archive);
+    runCmd(&.{ "rm", "-f", archive }) catch {};
+    const appimage_tool = runtime.env("SUJI_APPIMAGETOOL") orelse "appimagetool";
+    std.debug.print("[suji] packaging linux appimage: {s}\n", .{archive});
+    try runCmd(&.{ appimage_tool, app_dir, archive });
+    try runCmd(&.{ "chmod", "+x", archive });
     std.debug.print("[suji] packaged: {s}\n", .{archive});
     return archive;
 }
