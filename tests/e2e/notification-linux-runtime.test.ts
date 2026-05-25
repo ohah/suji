@@ -81,7 +81,7 @@ async function startFakeNotifications(): Promise<void> {
       "                'summary': str(summary),",
       "                'body': str(body),",
       "                'actions': [str(a) for a in actions],",
-      "                'hints': {str(k): str(v) for k, v in hints.items()},",
+      "                'hints': {str(k): (bool(v) if str(k) == 'suppress-sound' else str(v)) for k, v in hints.items()},",
       "                'expireTimeout': int(expire_timeout),",
       "            }, f)",
       "        return dbus.UInt32(77)",
@@ -172,7 +172,7 @@ describe("notification Linux runtime APIs", () => {
         summary: string;
         body: string;
         actions: string[];
-        hints: Record<string, string>;
+        hints: Record<string, unknown>;
         expireTimeout: number;
       };
       expect(notify).toEqual({
@@ -182,7 +182,7 @@ describe("notification Linux runtime APIs", () => {
         summary: "Linux title",
         body: "Linux body",
         actions: [],
-        hints: {},
+        hints: { "suppress-sound": true },
         expireTimeout: -1,
       });
 

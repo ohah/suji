@@ -43,7 +43,7 @@ Linux는 `org.freedesktop.Notifications` 서비스가 없으면 graceful false.
 | **Actions / 버튼** | UNNotificationCategory 작업 — v2 |
 | **Reply input** | macOS only, hasReply: true — v2 |
 | **커스텀 icon** | 앱 아이콘만 자동 (NSImage attachment v2) |
-| **커스텀 sound** | macOS default/silent. Linux sound/silent는 notification daemon 정책 의존 |
+| **커스텀 sound** | macOS default/silent. Linux `silent`는 `suppress-sound` hint를 보내지만 최종 정책은 notification daemon 의존 |
 
 ## API
 
@@ -145,8 +145,9 @@ await notification.close(notificationId);
 
 - `isSupported()` / `requestPermission()`은 `org.freedesktop.Notifications.GetServerInformation`
   호출 성공 여부를 반환. freedesktop notification spec에는 권한 프롬프트가 없다.
-- `show()`는 `Notify("Suji", 0, "", title, body, [], {}, -1)` 호출 후 반환된 D-Bus
-  `uint32` id를 Suji `notificationId`와 매핑한다.
+- `show()`는 `Notify("Suji", 0, "", title, body, [], hints, -1)` 호출 후 반환된 D-Bus
+  `uint32` id를 Suji `notificationId`와 매핑한다. `silent:true`면
+  `hints["suppress-sound"] = true`를 전달한다.
 - `close()`는 Suji `notificationId`로 저장된 D-Bus id를 찾아 `CloseNotification(uint32)` 호출.
 - Linux click/action signal 라우팅, custom icon, reply, action button은 v1 범위 밖.
 

@@ -6004,6 +6004,9 @@ const linux_notify = if (is_linux) struct {
     extern "c" fn g_variant_new_string(string: [*:0]const u8) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_new_uint32(value: u32) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_new_int32(value: i32) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_boolean(value: c_int) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_variant(value: ?*anyopaque) callconv(.c) ?*anyopaque;
+    extern "c" fn g_variant_new_dict_entry(key: ?*anyopaque, value: ?*anyopaque) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_new_strv(strv: [*]const ?[*:0]const u8, length: isize) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_new_array(child_type: ?*anyopaque, children: ?[*]const ?*anyopaque, n_children: usize) callconv(.c) ?*anyopaque;
     extern "c" fn g_variant_new_tuple(children: [*]const ?*anyopaque, n_children: usize) callconv(.c) ?*anyopaque;
@@ -6095,8 +6098,17 @@ const linux_notify = if (is_linux) struct {
         return true;
     }
 
+    fn makeHints(silent: bool, hint_entry_type: ?*anyopaque) ?*anyopaque {
+        if (!silent) return g_variant_new_array(hint_entry_type, null, 0);
+        const key = g_variant_new_string("suppress-sound") orelse return null;
+        const bool_value = g_variant_new_boolean(1) orelse return null;
+        const variant_value = g_variant_new_variant(bool_value) orelse return null;
+        const entry = g_variant_new_dict_entry(key, variant_value) orelse return null;
+        const hint_entries = [_]?*anyopaque{entry};
+        return g_variant_new_array(hint_entry_type, &hint_entries, hint_entries.len);
+    }
+
     fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
-        _ = silent; // Sound policy is notification-daemon specific on Linux.
         var id_buf: [64]u8 = undefined;
         var title_buf: [4096]u8 = undefined;
         var body_buf: [4096]u8 = undefined;
@@ -6108,7 +6120,7 @@ const linux_notify = if (is_linux) struct {
         const actions = g_variant_new_strv(&no_actions, 0) orelse return false;
         const hint_entry_type = g_variant_type_new("{sv}") orelse return false;
         defer g_variant_type_free(hint_entry_type);
-        const hints = g_variant_new_array(hint_entry_type, null, 0) orelse return false;
+        const hints = makeHints(silent, hint_entry_type) orelse return false;
 
         const children = [_]?*anyopaque{
             g_variant_new_string("Suji") orelse return false,

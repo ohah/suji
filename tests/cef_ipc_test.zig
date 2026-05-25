@@ -2042,6 +2042,8 @@ test "notification Linux D-Bus wiring + runtime E2E" {
         "Notify",
         "CloseNotification",
         "g_dbus_connection_call_sync",
+        "g_variant_new_boolean",
+        "suppress-sound",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
@@ -2058,6 +2060,7 @@ test "notification Linux D-Bus wiring + runtime E2E" {
         "notification_show",
         "notification_close",
         "CloseNotification",
+        "suppress-sound",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
     }
@@ -2079,6 +2082,7 @@ test "notification Linux D-Bus wiring + runtime E2E" {
         "Linux D-Bus backend",
         "D-Bus `Notify`",
         "D-Bus `CloseNotification`",
+        "hints[\"suppress-sound\"] = true",
         "fake `org.freedesktop.Notifications` daemon",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, notification_doc, needle) != null);
