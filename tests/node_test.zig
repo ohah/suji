@@ -277,3 +277,31 @@ test "bridge.cc: uv_close all 3 async handles before g_setup.reset()" {
     const drain_pos = std.mem.indexOf(u8, source, "uv_run(loop, UV_RUN_NOWAIT)") orelse return error.UvRunDrainMissing;
     try std.testing.expect(drain_pos < reset_pos);
 }
+
+test "build.zig: Linux Node bridge uses g++ and libstdc++ ABI" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    try std.testing.expect(std.mem.indexOf(u8, source, "root_module.link_libcpp = (os_tag == .macos);") != null);
+
+    const branch_start = std.mem.indexOf(u8, source, "} else if (os_tag == .linux) {") orelse return error.LinuxNodeBridgeBranchMissing;
+    const branch_end = std.mem.indexOfPos(u8, source, branch_start, "} else {") orelse return error.LinuxNodeBridgeBranchEndMissing;
+    const branch = source[branch_start..branch_end];
+
+    const needles = [_][]const u8{
+        "\"g++\"",
+        "\"-std=c++20\"",
+        "b.path(\"src/platform/node/bridge.cc\").getPath(b)",
+        "root_module.addObjectFile(.{ .cwd_relative = bridge_obj })",
+        "root_module.linkSystemLibrary(\"node\", .{})",
+        "root_module.linkSystemLibrary(\"stdc++\", .{})",
+    };
+    for (needles) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, branch, needle) != null);
+    }
+}

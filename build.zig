@@ -122,10 +122,10 @@ pub fn build(b: *std.Build) void {
 
     const cef_base = std.fmt.allocPrint(b.allocator, "{s}/.suji/cef/{s}", .{ home, cef_platform }) catch @panic("OOM");
     root_module.addIncludePath(.{ .cwd_relative = cef_base });
-    // Windows: libnode 가 mingw libstdc++ 라 zig libcxx 와 ABI 충돌. 우리가
-    // 명시적으로 mingw libstdc++ 만 link 하도록 zig 의 auto libcxx 비활성.
-    // macOS/Linux 는 시스템 libc++ / libstdc++ 자동 매칭이라 그대로 유지.
-    root_module.link_libcpp = (os_tag != .windows);
+    // Node bridge C++ ABI는 플랫폼별 libnode와 맞춰야 한다. macOS만 Zig의
+    // libc++ 경로를 쓰고, Linux/Windows는 외부 g++로 만든 object와 libstdc++
+    // 경로를 명시한다.
+    root_module.link_libcpp = (os_tag == .macos);
 
     if (os_tag == .macos) {
         // macOS: CEF framework + Objective-C
@@ -271,14 +271,15 @@ pub fn build(b: *std.Build) void {
             const bridge_obj = b.cache_root.join(b.allocator, &.{ "bridge-mingw", "bridge.o" }) catch @panic("OOM");
             const obj_dir = std.fs.path.dirname(bridge_obj) orelse @panic("path");
             const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
-            const ps_script = std.fmt.allocPrint(b.allocator,
+            const ps_script = std.fmt.allocPrint(
+                b.allocator,
                 \\$ErrorActionPreference = 'Stop'
                 \\$gpp = 'C:\mingw-w64-16\mingw64\bin\g++.exe'
                 \\if (-not (Test-Path $gpp)) {{ throw "mingw g++ 16+ missing at $gpp. winlibs gcc 16.1.0 MSVCRT zip 풀어두기." }}
                 \\New-Item -ItemType Directory -Force -Path '{s}' | Out-Null
                 \\& $gpp -c -std=c++20 -I $env:SUJI_NODE_INC -I $env:SUJI_BRIDGE_INC $env:SUJI_BRIDGE_SRC -o '{s}'
                 \\if ($LASTEXITCODE -ne 0) {{ throw "g++ failed: exit $LASTEXITCODE" }}
-                ,
+            ,
                 .{ obj_dir, bridge_obj },
             ) catch @panic("OOM");
             const gpp_step = b.addSystemCommand(&.{
@@ -308,6 +309,32 @@ pub fn build(b: *std.Build) void {
                 const lib_path = std.fmt.allocPrint(b.allocator, "{s}\\{s}", .{ mingw_target_lib, lib_name }) catch @panic("OOM");
                 root_module.addObjectFile(.{ .cwd_relative = lib_path });
             }
+        } else if (os_tag == .linux) {
+            // Linux official libnode is built with libstdc++. Compiling bridge.cc
+            // with Zig clang/libc++ emits std::__1 symbols and fails to link.
+            const bridge_obj = b.cache_root.join(b.allocator, &.{ "bridge-linux", "bridge.o" }) catch @panic("OOM");
+            const obj_dir = std.fs.path.dirname(bridge_obj) orelse @panic("path");
+            const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
+            const mkdir_step = b.addSystemCommand(&.{ "mkdir", "-p", obj_dir });
+            const gpp_step = b.addSystemCommand(&.{
+                "g++",
+                "-c",
+                "-std=c++20",
+                "-I",
+                node_include,
+                "-I",
+                b.path("src/platform/node").getPath(b),
+                b.path("src/platform/node/bridge.cc").getPath(b),
+                "-o",
+                bridge_obj,
+            });
+            gpp_step.step.dependOn(&mkdir_step.step);
+            gpp_bridge_step = &gpp_step.step;
+
+            root_module.addObjectFile(.{ .cwd_relative = bridge_obj });
+            root_module.addLibraryPath(.{ .cwd_relative = node_path });
+            root_module.linkSystemLibrary("node", .{});
+            root_module.linkSystemLibrary("stdc++", .{});
         } else {
             root_module.addCSourceFile(.{
                 .file = b.path("src/platform/node/bridge.cc"),
@@ -1036,4 +1063,3 @@ fn dependOnTestWithProjectCwd(b: *std.Build, test_step: *std.Build.Step, t: *std
     r.setCwd(b.path("."));
     test_step.dependOn(&r.step);
 }
-
