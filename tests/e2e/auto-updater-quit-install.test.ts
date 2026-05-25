@@ -34,12 +34,16 @@ async function run(cmd: string, args: string[], cwd?: string) {
 
 async function waitForReplacement(verifyPath: string, expected: Buffer, source: string, helper: string) {
   const deadline = Date.now() + 12000;
+  let replaced = false;
   while (Date.now() < deadline) {
-    if (fs.existsSync(verifyPath) && fs.readFileSync(verifyPath).equals(expected) && !fs.existsSync(source)) {
-      expect(fs.existsSync(helper)).toBe(false);
+    replaced = fs.existsSync(verifyPath) && fs.readFileSync(verifyPath).equals(expected) && !fs.existsSync(source);
+    if (replaced && !fs.existsSync(helper)) {
       return;
     }
     await wait(100);
+  }
+  if (replaced) {
+    throw new Error(`quitAndInstall helper replaced target but did not clean up: ${helper}`);
   }
   throw new Error(`quitAndInstall helper did not replace target within timeout: ${verifyPath}`);
 }

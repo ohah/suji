@@ -993,6 +993,8 @@ test "quitAndInstall helper script quotes paths and encodes relaunch policy" {
     try std.testing.expect(std.mem.indexOf(u8, script, "TARGET='/Applications/Suji App.app'") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "WAIT_PID=12345") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "RELAUNCH=0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "cleanup() { rm -f \"$0\"; }") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "trap cleanup EXIT") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "while kill -0 \"$WAIT_PID\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "mv \"$SOURCE\" \"$TARGET\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "open -n \"$TARGET\"") != null);
