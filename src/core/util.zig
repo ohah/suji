@@ -776,3 +776,39 @@ test "urlAllowedInList: glob + escape hatch" {
     try std.testing.expect(urlAllowedInList("anything://x", &star));
     try std.testing.expect(!urlAllowedInList("x", &[_][:0]const u8{}));
 }
+
+/// UTF-16LE substring 검색 where needle 은 ASCII (각 byte → UTF-16 unit, high byte 0).
+/// Windows PEB cmdline 같은 짧은 UTF-16 buffer 안에서 switch flag 찾는 용도.
+/// haystack 빈 + needle 비어있으면 true, haystack 짧으면 false (underflow 가드).
+pub fn utf16ContainsAscii(haystack: []const u16, needle_ascii: []const u8) bool {
+    if (needle_ascii.len == 0) return true;
+    if (haystack.len < needle_ascii.len) return false;
+    const end = haystack.len - needle_ascii.len;
+    var i: usize = 0;
+    while (i <= end) : (i += 1) {
+        var j: usize = 0;
+        while (j < needle_ascii.len) : (j += 1) {
+            if (haystack[i + j] != @as(u16, needle_ascii[j])) break;
+        }
+        if (j == needle_ascii.len) return true;
+    }
+    return false;
+}
+
+test "utf16ContainsAscii: cmdline switch 검색 + 경계 케이스" {
+    const cmd = std.unicode.utf8ToUtf16LeStringLiteral("suji.exe dev --do-not-de-elevate");
+    try std.testing.expect(utf16ContainsAscii(cmd, "--do-not-de-elevate"));
+    try std.testing.expect(utf16ContainsAscii(cmd, "dev"));
+    try std.testing.expect(utf16ContainsAscii(cmd, "suji.exe"));
+    try std.testing.expect(!utf16ContainsAscii(cmd, "--type="));
+    try std.testing.expect(!utf16ContainsAscii(cmd, "build"));
+    // 빈 needle 은 항상 매칭. 빈 haystack + 빈 needle 도 true (관례).
+    try std.testing.expect(utf16ContainsAscii(&[_]u16{}, ""));
+    try std.testing.expect(utf16ContainsAscii(cmd, ""));
+    // haystack 짧으면 underflow 없이 false.
+    try std.testing.expect(!utf16ContainsAscii(&[_]u16{}, "x"));
+    const short = std.unicode.utf8ToUtf16LeStringLiteral("ab");
+    try std.testing.expect(!utf16ContainsAscii(short, "abc"));
+    // 끝에 매칭.
+    try std.testing.expect(utf16ContainsAscii(cmd, "elevate"));
+}

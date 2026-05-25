@@ -34,6 +34,16 @@ pub fn main(init: std.process.Init) !void {
         .args_vector = init.minimal.args.vector,
     });
 
+    // Windows: CEF 146 이 medium-integrity 사용자 세션에서도 de-elevation 을
+    // 시도(`MaybeDeElevateOnStartup`) → de-elevation child 를 spawn 하고 parent
+    // 의 cef_initialize 는 0 반환 → CefInitFailed. cmdline 에 `--do-not-de-elevate`
+    // 가 있으면 이 로직이 비활성. 사용자가 직접 플래그 붙일 필요 없도록 main
+    // 진입 시 자동 self-relaunch. (CI 의 Server 2022 runneradmin 환경에선
+    // 발현 안 함 — 정직 한계: 어떤 integrity 조합에서 발현되는지 미상.)
+    if (comptime builtin.os.tag == .windows) {
+        maybeRelaunchWithNoDeElevate();
+    }
+
     // CEF 서브프로세스 처리 (렌더러/GPU 등 — 메인이면 통과)
     cef.executeSubprocess();
 
@@ -118,6 +128,77 @@ fn getCurrentPid() i32 {
         return @intCast(k32.GetCurrentProcessId());
     }
     return @intCast(std.c.getpid());
+}
+
+/// Windows local 환경(Win10/11 user session)에서 CEF 146 의 `MaybeDeElevateOnStartup`
+/// 가 medium-integrity 사용자 세션을 elevated 라고 잘못 판단해서 de-elevation
+/// child 를 spawn → parent 의 cef_initialize 가 0 반환 → CefInitFailed.
+///
+/// cmdline 에 `--do-not-de-elevate` switch 가 있으면 이 로직이 비활성. 사용자가
+/// 매번 플래그를 붙일 필요 없도록 main 진입 시 자동 self-relaunch.
+///
+/// 호출 조건: Windows + cmdline 에 `--do-not-de-elevate` 와 `--type=` 둘 다 없음
+///   - `--type=` 가 있으면 CEF subprocess (renderer/gpu/utility/...) → relaunch X
+///   - `--do-not-de-elevate` 가 있으면 이미 우회 적용된 child → relaunch X
+/// 처리: CreateProcessW 로 자기자신을 cmdline + ` --do-not-de-elevate` 로 spawn,
+///   stdin/stdout/stderr inherit, WaitForSingleObject → exit code 그대로 종료.
+///
+/// CI (Windows Server 2022 runneradmin) 환경에선 발현 안 함 → 그쪽은 우회 코드
+/// 가 no-op (이미 정상 path). 로컬 user 세션에서 발현됨.
+fn maybeRelaunchWithNoDeElevate() void {
+    if (comptime builtin.os.tag != .windows) return;
+
+    const w = std.os.windows;
+    const cmdline_w = w.peb().ProcessParameters.CommandLine.slice();
+
+    // utf16 substring search (ASCII-only needle 만 사용 — `--do-not-de-elevate` /
+    // `--type=`).
+    if (util.utf16ContainsAscii(cmdline_w, "--do-not-de-elevate")) return;
+    if (util.utf16ContainsAscii(cmdline_w, "--type=")) return;
+
+    // 새 cmdline: 원본 + ` --do-not-de-elevate\0`. 합쳐서 4KB cmdline 한도 안에 들어감.
+    const append = std.unicode.utf8ToUtf16LeStringLiteral(" --do-not-de-elevate");
+    var new_cmdline: [4096]u16 = undefined;
+    const total = cmdline_w.len + append.len;
+    if (total + 1 > new_cmdline.len) return; // bail — relaunch 안 함, 원본 동작
+    @memcpy(new_cmdline[0..cmdline_w.len], cmdline_w);
+    @memcpy(new_cmdline[cmdline_w.len .. cmdline_w.len + append.len], append);
+    new_cmdline[total] = 0;
+
+    var startup: w.STARTUPINFOW = std.mem.zeroes(w.STARTUPINFOW);
+    startup.cb = @sizeOf(w.STARTUPINFOW);
+    var info: w.PROCESS.INFORMATION = undefined;
+
+    const flags: w.CreateProcessFlags = .{ .create_unicode_environment = true };
+    const ok = w.kernel32.CreateProcessW(
+        null,
+        @ptrCast(&new_cmdline),
+        null,
+        null,
+        w.BOOL.TRUE, // bInheritHandles → stdio 상속 (vite/CEF 로그가 부모 stdout 으로)
+        flags,
+        null,
+        null,
+        &startup,
+        &info,
+    );
+    if (!ok.toBool()) return; // CreateProcess 실패 시 fallback — 원본 path 그대로 진행
+
+    const k32 = struct {
+        extern "kernel32" fn WaitForSingleObject(hHandle: w.HANDLE, dwMilliseconds: w.DWORD) callconv(.winapi) w.DWORD;
+        extern "kernel32" fn GetExitCodeProcess(hProcess: w.HANDLE, lpExitCode: *w.DWORD) callconv(.winapi) w.BOOL;
+        extern "kernel32" fn ExitProcess(uExitCode: w.DWORD) callconv(.winapi) noreturn;
+    };
+    const INFINITE: w.DWORD = 0xFFFFFFFF;
+    _ = k32.WaitForSingleObject(info.hProcess, INFINITE);
+    var exit_code: w.DWORD = 0;
+    _ = k32.GetExitCodeProcess(info.hProcess, &exit_code);
+    w.CloseHandle(info.hThread);
+    w.CloseHandle(info.hProcess);
+    // std.process.exit 는 u8 만 받아 DWORD 상위 바이트를 잘라먹음 (예: 자식이
+    // NTSTATUS 0xC0000005 access violation 으로 죽으면 0x05 만 보고됨 →
+    // 진단 손실). ExitProcess 로 전체 u32 보존.
+    k32.ExitProcess(exit_code);
 }
 
 /// `~/.suji/logs/` 에 실행별 로그 파일 생성 + 7일 지난 오래된 로그 cleanup.
