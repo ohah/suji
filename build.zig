@@ -336,11 +336,22 @@ pub fn build(b: *std.Build) void {
             root_module.addObjectFile(.{ .cwd_relative = bridge_obj });
             root_module.addLibraryPath(.{ .cwd_relative = node_path });
             root_module.linkSystemLibrary("node", .{});
-            // `linkSystemLibrary("stdc++")` is treated by Zig as "the target
-            // C++ runtime" and becomes libc++ on Linux. bridge.o is compiled
-            // by g++ and needs libstdc++ symbols, so pass GNU ld's exact-name
-            // form through as an ordinary system library.
-            root_module.linkSystemLibrary(":libstdc++.so.6", .{ .needed = true, .use_pkg_config = .no });
+            // `linkSystemLibrary("stdc++")` is treated by Zig as the target
+            // C++ runtime and becomes libc++. Pass the actual GNU libstdc++
+            // soname file instead of a library name so Zig does not rewrite it.
+            const libstdcxx_path = blk: {
+                const candidates = [_][]const u8{
+                    "/usr/lib/x86_64-linux-gnu/libstdc++.so.6",
+                    "/usr/lib64/libstdc++.so.6",
+                    "/usr/lib/libstdc++.so.6",
+                };
+                for (candidates) |candidate| {
+                    std.Io.Dir.accessAbsolute(b.graph.io, candidate, .{}) catch continue;
+                    break :blk candidate;
+                }
+                @panic("libstdc++.so.6 not found; install the GNU libstdc++ runtime");
+            };
+            root_module.addObjectFile(.{ .cwd_relative = libstdcxx_path });
         } else {
             root_module.addCSourceFile(.{
                 .file = b.path("src/platform/node/bridge.cc"),
