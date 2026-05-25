@@ -874,7 +874,7 @@ fn startFrontendDev(allocator: std.mem.Allocator, frontend_dir: []const u8) !std
 
     _ = allocator;
     const argv: []const []const u8 = if (has_bun)
-        &.{ "bun", "--cwd", frontend_dir, "dev" }
+        &.{ "bun", "run", "--cwd", frontend_dir, "dev" }
     else
         &.{ "npm", "--prefix", frontend_dir, "run", "dev" };
     return try std.process.spawn(runtime.io, .{ .argv = argv });
@@ -889,7 +889,7 @@ fn buildFrontend(allocator: std.mem.Allocator, frontend_dir: []const u8) !void {
     };
 
     if (has_bun) {
-        try runCmd(allocator, &.{ "bun", "--cwd", frontend_dir, "run", "build" });
+        try runCmd(allocator, &.{ "bun", "run", "--cwd", frontend_dir, "build" });
     } else {
         try runCmd(allocator, &.{ "npm", "--prefix", frontend_dir, "run", "build" });
     }
