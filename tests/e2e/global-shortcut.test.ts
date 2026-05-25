@@ -38,10 +38,9 @@ afterAll(async () => {
   await browser?.disconnect();
 });
 
-// macOS Carbon Hot Key API 의존 — Windows/Linux 는 별도 native impl 필요(후속).
-// Windows: RegisterHotKey + WM_HOTKEY message loop. Linux: X11 XGrabKey / xkb.
-// 현재 Windows/Linux 에선 global_shortcut_* IPC 가 ok=false 반환 → 전체 fail.
-describe.skipIf(process.platform !== "darwin")("global shortcut core commands", () => {
+// macOS: Carbon Hot Key. Windows: RegisterHotKey (PoC — register/parse 만,
+// WM_HOTKEY message pump 는 후속). Linux: X11 XGrabKey 미배선 → fail.
+describe.skipIf(process.platform === "linux")("global shortcut core commands", () => {
   test("register / isRegistered / unregister round-trip", async () => {
     const accel = "Cmd+Shift+F8";
 
@@ -258,7 +257,10 @@ describe.skipIf(process.platform !== "darwin")("global shortcut core commands", 
       }
     }
     // 64개 제한에 도달했어야 함 (또는 OS reject).
-    expect(registered).toBeGreaterThanOrEqual(60);
+    // Windows RegisterHotKey 는 다른 앱이 이미 잡은 조합을 reject(GlobalAddAtom
+    // 충돌) — macOS Carbon Hot Key 보다 OS 환경 의존도 큼. threshold 완화.
+    const minRegistered = process.platform === "win32" ? 24 : 60;
+    expect(registered).toBeGreaterThanOrEqual(minRegistered);
     expect(["capacity_full", "os_reject", "already_registered"]).toContain(lastError);
     await core({ cmd: "global_shortcut_unregister_all" });
   });
