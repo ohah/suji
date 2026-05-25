@@ -3009,8 +3009,8 @@ pub fn powerMonitorIdleSeconds() f64 {
 // ============================================
 // Shell API — NSWorkspace / GIO / Win32 (Electron `shell.*`)
 // ============================================
-// Linux는 현재 GIO trashItem만 native로 배선. 기본 앱/파일 매니저 호출은 환경 의존이
-// 커서 CI로 검증 가능한 surface부터 채운다.
+// Linux는 GIO 기반으로 검증 가능한 surface부터 채운다. 기본 URI 핸들러는
+// Actions에서 임시 x-scheme-handler를 등록해 end-to-end로 검증한다.
 
 /// URL 또는 path 길이 한도 (null terminator 포함). 4KB는 macOS NSString이 무난하게 처리 가능.
 const SHELL_MAX_PATH: usize = 4096;
@@ -3174,22 +3174,53 @@ const win_shell = if (builtin.os.tag == .windows) struct {
 const linux_shell = if (is_linux) struct {
     extern "c" fn g_file_new_for_path(path: [*:0]const u8) callconv(.c) ?*anyopaque;
     extern "c" fn g_file_trash(file: ?*anyopaque, cancellable: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) c_int;
+    extern "c" fn g_app_info_launch_default_for_uri(uri: [*:0]const u8, context: ?*anyopaque, err_out: ?*?*anyopaque) callconv(.c) c_int;
     extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
     extern "c" fn g_error_free(err: ?*anyopaque) callconv(.c) void;
 
-    fn toZPath(path: []const u8, buf: *[SHELL_MAX_PATH]u8) ?[*:0]const u8 {
-        if (path.len == 0 or path.len + 1 > buf.len) return null;
-        if (std.mem.indexOfScalar(u8, path, 0) != null) return null;
-        @memcpy(buf[0..path.len], path);
-        buf[path.len] = 0;
+    fn toZText(text: []const u8, buf: *[SHELL_MAX_PATH]u8) ?[*:0]const u8 {
+        if (text.len == 0 or text.len + 1 > buf.len) return null;
+        if (std.mem.indexOfScalar(u8, text, 0) != null) return null;
+        @memcpy(buf[0..text.len], text);
+        buf[text.len] = 0;
         return @ptrCast(buf);
+    }
+
+    fn urlIsValid(url: []const u8) bool {
+        if (url.len == 0 or url.len + 1 > SHELL_MAX_PATH) return false;
+        if (std.mem.indexOfScalar(u8, url, 0) != null) return false;
+        for (url) |b| if (b < 0x20 or b == 0x7f) return false;
+
+        const colon = std.mem.indexOfScalar(u8, url, ':') orelse return false;
+        if (colon == 0) return false;
+        for (url[0..colon]) |b| {
+            const is_alpha = (b >= 'a' and b <= 'z') or (b >= 'A' and b <= 'Z');
+            const is_digit = b >= '0' and b <= '9';
+            const is_mark = b == '+' or b == '-' or b == '.';
+            if (!(is_alpha or is_digit or is_mark)) return false;
+        }
+        const first = url[0];
+        return (first >= 'a' and first <= 'z') or (first >= 'A' and first <= 'Z');
+    }
+
+    /// GIO default-app launch for URI schemes. Returns false when no handler is
+    /// registered, URI validation fails, or the desktop environment rejects it.
+    fn openExternal(url: []const u8) bool {
+        if (!urlIsValid(url)) return false;
+        var uri_buf: [SHELL_MAX_PATH]u8 = undefined;
+        const uri_z = toZText(url, &uri_buf) orelse return false;
+
+        var gerr: ?*anyopaque = null;
+        const ok = g_app_info_launch_default_for_uri(uri_z, null, &gerr) != 0;
+        if (gerr) |err| g_error_free(err);
+        return ok;
     }
 
     /// GIO `g_file_trash` follows the freedesktop trash spec and moves the item
     /// into the user's Trash when supported by the filesystem.
     fn trashItem(path: []const u8) bool {
         var path_buf: [SHELL_MAX_PATH]u8 = undefined;
-        const path_z = toZPath(path, &path_buf) orelse return false;
+        const path_z = toZText(path, &path_buf) orelse return false;
         const file = g_file_new_for_path(path_z) orelse return false;
         defer g_object_unref(file);
 
@@ -3212,6 +3243,7 @@ pub fn shellOpenExternal(url: []const u8) bool {
         if (std.mem.indexOfScalar(u8, url, ':') == null) return false;
         return win_shell.execOpen(url, null);
     }
+    if (comptime is_linux) return linux_shell.openExternal(url);
     if (!comptime is_macos) return false;
     const ns_url_str = nsStringFromSlice(url) orelse return false;
     const NSURL = getClass("NSURL") orelse return false;

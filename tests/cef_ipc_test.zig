@@ -1883,6 +1883,38 @@ test "shell.trashItem IPC — main.zig dispatch + cef.zig 함수" {
     }
 }
 
+test "shell.openExternal Linux GIO handler wiring + runtime E2E" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "g_app_info_launch_default_for_uri",
+        "linux_shell.openExternal",
+        "fn urlIsValid(url: []const u8) bool",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const e2e_src = try readProjectFile(
+        "tests/e2e/shell-open-external-runtime.test.ts",
+        1024 * 1024,
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "x-scheme-handler",
+        "xdg-mime",
+        "gio",
+        "shell_open_external",
+        "waitForMarker",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const workflow_src = try readProjectFile(".github/workflows/e2e.yml", 1024 * 1024);
+    defer std.testing.allocator.free(workflow_src);
+    try std.testing.expect(std.mem.indexOf(u8, workflow_src, "E2E — shell openExternal (Linux)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, workflow_src, "run-shell-open-external-runtime.sh") != null);
+}
+
 test "app.requestUserAttention IPC — NSApp request/cancel" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

@@ -613,10 +613,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               Unicode/RTL/이모지/ZWJ, 200회 stress, 다중 창) + Linux Xvfb text round-trip E2E
               (`tests/e2e/run-clipboard-text-runtime.sh`). `documents/clipboard-shell.mdx`.
         - [x] **Shell** (`openExternal/showItemInFolder/beep/trashItem`) — macOS NSWorkspace + NSBeep + NSFileManager,
-              Linux GIO `g_file_trash`, Windows ShellExecute/SHFileOperation.
+              Linux GIO `g_app_info_launch_default_for_uri`/`g_file_trash`, Windows ShellExecute/SHFileOperation.
               modern API `activateFileViewerSelectingURLs:` (deprecated `selectFile:` 회피).
               scheme 사전 검사 + `fileExistsAtPath:` 사전 검증으로 LaunchServices `-50` dialog 회피.
-              E2E 32 케이스 + Linux Xvfb/dbus trashItem round-trip E2E. 4개 SDK 노출.
+              E2E 32 케이스 + Linux Xvfb/dbus openExternal x-scheme-handler + trashItem round-trip E2E. 4개 SDK 노출.
         - [x] **Dialog** (`showMessageBox/showErrorBox/showOpenDialog/showSaveDialog` + Sync 변종 3개) —
               NSAlert/NSOpenPanel/NSSavePanel + sheet modal. `src/platform/dialog.m` ObjC block
               completion handler + nested NSApp event loop. windowId 첫 인자로 sheet vs
@@ -1416,7 +1416,7 @@ suji build → 결과물:
 | 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter |
-| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + scheme 사전 검사 + 4 SDK |
+| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + scheme 사전 검사 + 4 SDK + Linux x-scheme-handler E2E |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
