@@ -4315,6 +4315,7 @@ fn globalShortcutStatusToErrorCode(status: cef.GlobalShortcutStatus) []const u8 
         .parse => "parse_failed",
         .os_reject => "os_reject",
         .too_long => "too_long",
+        .timed_out => "timed_out",
     };
 }
 
