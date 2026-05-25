@@ -1616,6 +1616,83 @@ fn crashParametersResponse(response_buf: []u8) ?[]const u8 {
     return response_buf[0..w];
 }
 
+fn currentCrashpadDirPath(buf: []u8) ?[]const u8 {
+    const cfg = g_config orelse return null;
+    const app_name = cfg.app.name;
+    const sep: []const u8 = if (builtin.os.tag == .windows) "\\" else "/";
+
+    if (comptime builtin.os.tag == .windows) {
+        var fallback_buf: [2048]u8 = undefined;
+        const base = runtime.env("LOCALAPPDATA") orelse blk: {
+            const home = runtime.env("USERPROFILE") orelse return null;
+            break :blk std.fmt.bufPrint(&fallback_buf, "{s}\\AppData\\Local", .{home}) catch return null;
+        };
+        // CEF crash_util.h: Windows uses AppName under LocalAppData, not root_cache_path.
+        return std.fmt.bufPrint(buf, "{s}\\{s}\\User Data\\Crashpad", .{ base, app_name }) catch null;
+    }
+
+    var user_data_buf: [2048]u8 = undefined;
+    const user_data = cef.appGetPath(&user_data_buf, "userData", app_name) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}{s}Crashpad", .{ user_data, sep }) catch null;
+}
+
+fn collectCurrentCrashReports(include_pending: bool, out: []crash_reporter.CrashReport) usize {
+    var path_buf: [4096]u8 = undefined;
+    const path = currentCrashpadDirPath(&path_buf) orelse return 0;
+    var dir = std.Io.Dir.cwd().openDir(runtime.io, path, .{ .iterate = true }) catch return 0;
+    defer dir.close(runtime.io);
+    return crash_reporter.collectReports(&dir, runtime.io, include_pending, out);
+}
+
+fn appendCrashReportJson(response_buf: []u8, w: *usize, report: *const crash_reporter.CrashReport) bool {
+    const part = std.fmt.bufPrint(
+        response_buf[w.*..],
+        "{{\"date\":\"{s}\",\"id\":\"{s}\"}}",
+        .{ report.date(), report.id() },
+    ) catch return false;
+    w.* += part.len;
+    return true;
+}
+
+fn crashUploadedReportsResponse(response_buf: []u8) ?[]const u8 {
+    var reports: [crash_reporter.MAX_REPORTS]crash_reporter.CrashReport = undefined;
+    const count = collectCurrentCrashReports(false, &reports);
+
+    var w: usize = 0;
+    const head = std.fmt.bufPrint(response_buf[w..], "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_uploaded_reports\",\"reports\":[", .{}) catch return null;
+    w += head.len;
+    for (reports[0..count], 0..) |*report, i| {
+        if (i != 0) {
+            response_buf[w] = ',';
+            w += 1;
+        }
+        if (!appendCrashReportJson(response_buf, &w, report)) return null;
+    }
+    const tail = std.fmt.bufPrint(response_buf[w..], "]}}", .{}) catch return null;
+    w += tail.len;
+    return response_buf[0..w];
+}
+
+fn crashLastReportResponse(response_buf: []u8) ?[]const u8 {
+    var reports: [crash_reporter.MAX_REPORTS]crash_reporter.CrashReport = undefined;
+    const count = collectCurrentCrashReports(true, &reports);
+    if (count == 0) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_last_crash_report\",\"report\":null}}",
+            .{},
+        ) catch null;
+    }
+
+    var w: usize = 0;
+    const head = std.fmt.bufPrint(response_buf[w..], "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_last_crash_report\",\"report\":", .{}) catch return null;
+    w += head.len;
+    if (!appendCrashReportJson(response_buf, &w, &reports[0])) return null;
+    const tail = std.fmt.bufPrint(response_buf[w..], "}}", .{}) catch return null;
+    w += tail.len;
+    return response_buf[0..w];
+}
+
 fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf: []u8) ?[]const u8 {
     if (data.len > MAX_CORE_PAYLOAD) return coreError(response_buf, "__core__", "payload_too_large");
     var req_buf: [MAX_CORE_PAYLOAD]u8 = undefined;
@@ -2312,18 +2389,10 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return respondSuccess(response_buf, "crash_reporter_set_upload_to_server", g_crash_reporter_started);
     }
     if (std.mem.eql(u8, cmd, "crash_reporter_get_uploaded_reports")) {
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_uploaded_reports\",\"reports\":[]}}",
-            .{},
-        ) catch null;
+        return crashUploadedReportsResponse(response_buf);
     }
     if (std.mem.eql(u8, cmd, "crash_reporter_get_last_crash_report")) {
-        return std.fmt.bufPrint(
-            response_buf,
-            "{{\"from\":\"zig-core\",\"cmd\":\"crash_reporter_get_last_crash_report\",\"report\":null}}",
-            .{},
-        ) catch null;
+        return crashLastReportResponse(response_buf);
     }
 
     // Dock badge API. extractJsonString은 wire escape를 안 풀어주므로 unescape 후 NSDockTile에.

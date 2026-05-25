@@ -83,6 +83,8 @@ interface InvokeOptions {
 | `crash_reporter_get_parameters` | — | `{parameters:{...}}` |
 | `crash_reporter_add_extra_parameter` | `key`, `value` | `{success:bool}` |
 | `crash_reporter_remove_extra_parameter` | `key` | `{success:bool}` |
+| `crash_reporter_get_uploaded_reports` | — | `{reports:[{id,date}]}` |
+| `crash_reporter_get_last_crash_report` | — | `{report:{id,date}\|null}` |
 | `quit` | — | `{cmd:"quit"}` |
 | `core_info` | — | `{backends:[...]}` |
 

@@ -172,12 +172,32 @@ describe("crashReporter", () => {
     expect(params.parameters[key]).toBeUndefined();
   });
 
-  test("reports APIs return stable empty/null shape when no crash uploaded", async () => {
-    const reports = await core<{ reports: any[] }>({ cmd: "crash_reporter_get_uploaded_reports" });
-    expect(Array.isArray(reports.reports)).toBe(true);
+  test("reports APIs expose local Crashpad completed dump files", async () => {
+    const userData = await core<{ path: string }>({ cmd: "app_get_path", name: "userData" });
+    expect(typeof userData.path).toBe("string");
+    expect(userData.path.length).toBeGreaterThan(0);
 
-    const last = await core<{ report: any | null }>({ cmd: "crash_reporter_get_last_crash_report" });
-    expect(last.report).toBeNull();
+    const id = `suji-e2e-${Date.now()}`;
+    const completed = path.join(userData.path, "Crashpad", "completed");
+    const dump = path.join(completed, `${id}.dmp`);
+    fs.mkdirSync(completed, { recursive: true });
+    fs.writeFileSync(dump, "fake-minidump");
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(dump, future, future);
+
+    try {
+      const reports = await core<{ reports: any[] }>({ cmd: "crash_reporter_get_uploaded_reports" });
+      expect(Array.isArray(reports.reports)).toBe(true);
+      const report = reports.reports.find((r) => r.id === id);
+      expect(report).toBeTruthy();
+      expect(typeof report.date).toBe("string");
+      expect(report.date).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+
+      const last = await core<{ report: any | null }>({ cmd: "crash_reporter_get_last_crash_report" });
+      expect(last.report?.id).toBe(id);
+    } finally {
+      fs.rmSync(dump, { force: true });
+    }
   });
 });
 
@@ -1197,8 +1217,13 @@ describe("@suji/api SDK — round-trip", () => {
     expect(await sdk<boolean>("crashReporter.removeExtraParameter", `${key}_2`)).toBe(true);
     expect(await sdk<boolean>("crashReporter.setUploadToServer", false)).toBe(true);
     expect(await sdk<boolean>("crashReporter.getUploadToServer")).toBe(false);
-    expect(await sdk<any[]>("crashReporter.getUploadedReports")).toEqual([]);
-    expect(await sdk<any | null>("crashReporter.getLastCrashReport")).toBeNull();
+    const reports = await sdk<any[]>("crashReporter.getUploadedReports");
+    expect(Array.isArray(reports)).toBe(true);
+    const last = await sdk<any | null>("crashReporter.getLastCrashReport");
+    if (last !== null) {
+      expect(typeof last.id).toBe("string");
+      expect(typeof last.date).toBe("string");
+    }
   });
 
   test("app.dock setBadge → getBadge round-trip", async () => {

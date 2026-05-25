@@ -963,8 +963,10 @@ test "crashReporter IPC + CEF crash util + cfg renderer 연결" {
         "\"crash_reporter_add_extra_parameter\"",
         "\"crash_reporter_remove_extra_parameter\"",
         "\"crash_reporter_get_uploaded_reports\"",
+        "collectCurrentCrashReports",
         "writeStartupCrashReporterConfig",
         "crash_reporter.renderConfig",
+        "crash_reporter.collectReports",
         "cef.crashReporterEnabled",
         "cef.crashReporterSetKeyValue",
     }) |needle| {

@@ -44,6 +44,7 @@ bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
 bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows.create + isLoading polling)
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
+bash tests/e2e/run-system-integration.sh # screen/desktopCapturer/crashReporter/app 등 통합
 bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
@@ -169,7 +170,8 @@ fn onAllClosed(_: suji.Event) void {
 //   / addExtraParameter(key,value) / removeExtraParameter(key)
 //   / getUploadToServer() / setUploadToServer(false)
 //   (CEF Crashpad/Breakpad 1차. 첫 프로세스 enable은 app.crashReporter cfg 필요,
-//   실제 dump upload/DB 조회는 후속 정직 경계)
+//   getUploadedReports/getLastCrashReport는 로컬 Crashpad DB(completed dumps) 조회,
+//   실제 crash 유발/upload 서버 검증은 후속 정직 경계)
 // suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)
 //   (macOS IOPMAssertion, Linux XScreenSaverSuspend, Windows Power Request API)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
