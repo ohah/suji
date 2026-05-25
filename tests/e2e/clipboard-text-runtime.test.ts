@@ -57,4 +57,24 @@ describe("clipboard text runtime APIs", () => {
     const afterClear = await core<{ text: string }>({ cmd: "clipboard_read_text" });
     expect(afterClear.text).toBe("");
   });
+
+  test("writeHTML/readHTML/has/availableFormats round-trip", async () => {
+    await core({ cmd: "clipboard_clear" });
+
+    const html = '<section data-suji="linux">Hello <b>HTML</b> 한글 🚀</section>';
+    const write = await core<{ success: boolean }>({ cmd: "clipboard_write_html", html });
+    expect(write.success).toBe(true);
+
+    const read = await core<{ html: string }>({ cmd: "clipboard_read_html" });
+    expect(read.html).toBe(html);
+
+    const has = await core<{ present: boolean }>({
+      cmd: "clipboard_has",
+      format: "public.html",
+    });
+    expect(has.present).toBe(true);
+
+    const formats = await core<{ formats: string[] }>({ cmd: "clipboard_available_formats" });
+    expect(formats.formats).toContain("public.html");
+  });
 });

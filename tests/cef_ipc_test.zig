@@ -1692,6 +1692,9 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
         "const linux_clip",
         "gtk_clipboard_get",
         "gtk_clipboard_set_text",
+        "gtk_clipboard_set_with_data",
+        "gtk_clipboard_wait_for_contents",
+        "text/html",
         "gtk_clipboard_wait_for_text",
         "gtk_clipboard_wait_is_text_available",
         "pub fn clipboardHas",
@@ -1701,6 +1704,16 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
         "activateIgnoringOtherApps:",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const linux_e2e_src = try readProjectFile("tests/e2e/clipboard-text-runtime.test.ts", 1024 * 1024);
+    defer std.testing.allocator.free(linux_e2e_src);
+    inline for (.{
+        "clipboard_write_html",
+        "clipboard_read_html",
+        "public.html",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, linux_e2e_src, needle) != null);
     }
 }
 
