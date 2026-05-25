@@ -216,6 +216,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("advapi32", .{});
         // shcore — GetDpiForMonitor (screen.getAllDisplays scaleFactor).
         root_module.linkSystemLibrary("shcore", .{});
+        // comdlg32 — GetOpenFileNameW/GetSaveFileNameW (dialog showOpen/Save).
+        root_module.linkSystemLibrary("comdlg32", .{});
         // Power Request API — powerSaveBlocker sleep/display inhibition handles.
         root_module.linkSystemLibrary("kernel32", .{});
         // power_monitor_win.c — WM_POWERBROADCAST + WTS session lock/unlock events.
