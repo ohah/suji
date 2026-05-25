@@ -221,6 +221,8 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("shcore", .{});
         // comdlg32 — GetOpenFileNameW/GetSaveFileNameW (dialog showOpen/Save).
         root_module.linkSystemLibrary("comdlg32", .{});
+        // dwmapi — DwmSetWindowAttribute (window setHasShadow via NCRP policy).
+        root_module.linkSystemLibrary("dwmapi", .{});
         // Power Request API — powerSaveBlocker sleep/display inhibition handles.
         root_module.linkSystemLibrary("kernel32", .{});
         // power_monitor_win.c — WM_POWERBROADCAST + WTS session lock/unlock events.

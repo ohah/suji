@@ -2016,13 +2016,28 @@ pub const CefNative = struct {
     }
 
     fn setHasShadowImpl(ctx: ?*anyopaque, handle: u64, has: bool) void {
-        if (!comptime is_macos) return;
         assertUiThread();
+        if (comptime builtin.os.tag == .windows) {
+            const self = fromCtx(ctx);
+            const entry = self.browsers.get(handle) orelse return;
+            const views_window = entry.views_window orelse return;
+            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            win_window.setShadow(hwnd, has);
+            return;
+        }
+        if (!comptime is_macos) return;
         const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
         msgSendVoidBool(ns, "setHasShadow:", has);
     }
 
     fn hasShadowImpl(ctx: ?*anyopaque, handle: u64) bool {
+        if (comptime builtin.os.tag == .windows) {
+            const self = fromCtx(ctx);
+            const entry = self.browsers.get(handle) orelse return false;
+            const views_window = entry.views_window orelse return false;
+            const hwnd: ?*anyopaque = @ptrCast(views_window.get_window_handle.?(views_window));
+            return win_window.hasShadow(hwnd);
+        }
         if (!comptime is_macos) return false;
         const ns = fromCtx(ctx).nsWindowFor(handle) orelse return false;
         const sel = objc.sel_registerName("hasShadow");
@@ -3753,6 +3768,32 @@ const win_window = if (builtin.os.tag == .windows) struct {
         var alpha: u8 = 255;
         if (GetLayeredWindowAttributes(hwnd, null, &alpha, null) == 0) return 1;
         return @as(f64, @floatFromInt(alpha)) / 255.0;
+    }
+
+    // ============================================
+    // DWM 그림자 토글 — macOS NSWindow.setHasShadow 동등.
+    // DWMWA_NCRENDERING_POLICY = DWMNCRP_DISABLED 면 그림자 제거,
+    // DWMNCRP_USEWINDOWSTYLE 이면 시스템 default.
+    // ============================================
+    extern "dwmapi" fn DwmSetWindowAttribute(hwnd: ?*anyopaque, dwAttribute: u32, pvAttribute: *const anyopaque, cbAttribute: u32) callconv(.winapi) i32;
+    extern "dwmapi" fn DwmGetWindowAttribute(hwnd: ?*anyopaque, dwAttribute: u32, pvAttribute: *anyopaque, cbAttribute: u32) callconv(.winapi) i32;
+    const DWMWA_NCRENDERING_ENABLED: u32 = 1;
+    const DWMWA_NCRENDERING_POLICY: u32 = 2;
+    const DWMNCRP_USEWINDOWSTYLE: u32 = 0;
+    const DWMNCRP_DISABLED: u32 = 1;
+    const DWMNCRP_ENABLED: u32 = 2;
+
+    fn setShadow(hwnd: ?*anyopaque, has: bool) void {
+        if (hwnd == null) return;
+        const policy: u32 = if (has) DWMNCRP_USEWINDOWSTYLE else DWMNCRP_DISABLED;
+        _ = DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, &policy, @sizeOf(u32));
+    }
+
+    fn hasShadow(hwnd: ?*anyopaque) bool {
+        if (hwnd == null) return false;
+        var enabled: u32 = 0;
+        if (DwmGetWindowAttribute(hwnd, DWMWA_NCRENDERING_ENABLED, &enabled, @sizeOf(u32)) != 0) return false;
+        return enabled != 0;
     }
 
     extern "user32" fn MessageBoxW(hwnd: ?*anyopaque, lpText: [*:0]const u16, lpCaption: ?[*:0]const u16, uType: u32) callconv(.winapi) i32;
