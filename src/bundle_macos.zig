@@ -71,6 +71,8 @@ pub fn createBundle(
     exe_path: []const u8,
     frontend_dist: []const u8,
     opts: BundleOptions,
+    backends: []const @import("package_desktop.zig").BackendArtifact,
+    plugins: []const @import("package_desktop.zig").BackendArtifact,
 ) !void {
     const app_name = try std.fmt.allocPrint(allocator, "{s}.app", .{name});
     defer allocator.free(app_name);
@@ -111,6 +113,14 @@ pub fn createBundle(
 
     // 6. 프론트엔드 dist 복사
     try copyDir(allocator, frontend_dist, try std.fmt.allocPrint(allocator, "{s}/Contents/Resources/frontend", .{app_name}));
+
+    // 6.5. backend/plugin dylib + sentinel — packagedExeDir 의 macOS 분기가
+    // Contents/Resources/.suji-packaged 를 probe + 같은 디렉토리에 backends/
+    // plugins/ 평탄 배치 기대.
+    const resources_path = try std.fmt.allocPrint(allocator, "{s}/Contents/Resources", .{app_name});
+    defer allocator.free(resources_path);
+    @import("package_desktop.zig").writePackagedSentinel(allocator, resources_path);
+    try @import("package_desktop.zig").stageBackendArtifacts(allocator, resources_path, backends, plugins);
 
     // 7. 메인 바이너리 install_name_tool
     try fixMainBinaryRpath(allocator, app_name, name);
@@ -411,11 +421,42 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
         try codesignWithEntitlements(allocator, helper, h.plist, opts, entitlements_dir);
     }
 
+    // 2.5. backend/plugin dylib — Resources/backends/<name>/<basename> 와
+    // Resources/plugins/<name>/<basename> 각각 sign. inherit entitlements
+    // 라(receiver process), 명시적 entitlements 없이.  --deep 대신 명시 sign
+    // (Apple 권장; --deep 은 deprecated). 디렉토리 부재면 skip.
+    try codesignDylibsIn(allocator, app_name, "Contents/Resources/backends", opts);
+    try codesignDylibsIn(allocator, app_name, "Contents/Resources/plugins", opts);
+
     // 3. 메인 바이너리 + 4. 전체 앱 번들 — 둘 다 main.plist.
     const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
     defer allocator.free(exe);
     try codesignWithEntitlements(allocator, exe, "main.plist", opts, entitlements_dir);
     try codesignWithEntitlements(allocator, app_name, "main.plist", opts, entitlements_dir);
+}
+
+/// Iterate over `<app_name>/<sub_path>/*/*` and sign each regular file as a
+/// dylib (helper sign, no entitlements). 디렉토리 부재면 silent skip.
+fn codesignDylibsIn(allocator: std.mem.Allocator, app_name: []const u8, sub_path: []const u8, opts: BundleOptions) !void {
+    const root = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ app_name, sub_path });
+    defer allocator.free(root);
+    var root_dir = Dir.cwd().openDir(runtime.io, root, .{ .iterate = true }) catch return;
+    defer root_dir.close(runtime.io);
+    var root_it = root_dir.iterate();
+    while (try root_it.next(runtime.io)) |entry| {
+        if (entry.kind != .directory) continue;
+        const child = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, entry.name });
+        defer allocator.free(child);
+        var child_dir = Dir.cwd().openDir(runtime.io, child, .{ .iterate = true }) catch continue;
+        defer child_dir.close(runtime.io);
+        var child_it = child_dir.iterate();
+        while (try child_it.next(runtime.io)) |f| {
+            if (f.kind != .file) continue;
+            const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ child, f.name });
+            defer allocator.free(path);
+            try codesignNoEntitlements(allocator, path, opts);
+        }
+    }
 }
 
 /// 서명 ID — adhoc="-", identity=opts.identity (none 은 호출 전 차단됨).

@@ -246,6 +246,8 @@ pub fn packageLinux(
     version: []const u8,
     exe_path: []const u8,
     frontend_dist: []const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
 ) ![]const u8 {
     const stage = try std.fmt.allocPrint(allocator, "{s}-{s}-linux-{s}", .{ name, version, archName() });
     defer allocator.free(stage);
@@ -258,6 +260,12 @@ pub fn packageLinux(
     const desktop_path = try std.fmt.allocPrint(allocator, "{s}/{s}.desktop", .{ stage, name });
     defer allocator.free(desktop_path);
     try writeFile(desktop_path, desktop);
+
+    // packaged sentinel + backend/plugin dylib (Windows 동등 layout) —
+    // runtime 의 packagedExeDir 가 동일 probe 사용. backends/plugins root
+    // 가 stage 자체.
+    writePackagedSentinel(allocator, stage);
+    try stageBackendArtifacts(allocator, stage, backends, plugins);
 
     const archive = try std.fmt.allocPrint(allocator, "{s}.tar.gz", .{stage});
     errdefer allocator.free(archive);
@@ -322,8 +330,10 @@ pub fn packageLinuxAppImage(
     version: []const u8,
     exe_path: []const u8,
     frontend_dist: []const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
 ) ![]const u8 {
-    return packageLinuxAppImageAt(allocator, ".", name, version, exe_path, frontend_dist);
+    return packageLinuxAppImageAt(allocator, ".", name, version, exe_path, frontend_dist, backends, plugins);
 }
 
 pub fn packageLinuxAppImageAt(
@@ -333,6 +343,8 @@ pub fn packageLinuxAppImageAt(
     version: []const u8,
     exe_path: []const u8,
     frontend_dist: []const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
 ) ![]const u8 {
     const package_name = try sanitizeDebPackageName(allocator, name);
     defer allocator.free(package_name);
@@ -342,6 +354,14 @@ pub fn packageLinuxAppImageAt(
     const app_dir = try std.fmt.allocPrint(allocator, "{s}/{s}-{s}-linux-{s}.AppDir", .{ output_dir, package_name, version, arch });
     defer allocator.free(app_dir);
     try stageLinuxAppDirAt(allocator, app_dir, name, exe_path, frontend_dist);
+    // AppImage runtime: AppRun → usr/bin/<exe>. <exe_dir> = <AppDir>/usr/bin.
+    // sentinel + backends/plugins 도 거기에 둬야 runtime packagedExeDir 가
+    // `<exe_dir>/.suji-packaged` probe → `<exe_dir>/backends/<name>/<basename>`
+    // resolution 모두 일치.
+    const app_bin = try std.fmt.allocPrint(allocator, "{s}/usr/bin", .{app_dir});
+    defer allocator.free(app_bin);
+    writePackagedSentinel(allocator, app_bin);
+    try stageBackendArtifacts(allocator, app_bin, backends, plugins);
 
     const archive = try std.fmt.allocPrint(allocator, "{s}/{s}-{s}-linux-{s}.AppImage", .{ output_dir, package_name, version, arch });
     errdefer allocator.free(archive);
@@ -361,8 +381,10 @@ pub fn packageLinuxDeb(
     version: []const u8,
     exe_path: []const u8,
     frontend_dist: []const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
 ) ![]const u8 {
-    return packageLinuxDebAt(allocator, ".", name, version, exe_path, frontend_dist);
+    return packageLinuxDebAt(allocator, ".", name, version, exe_path, frontend_dist, backends, plugins);
 }
 
 /// 테스트/호출자가 output_dir를 고정할 수 있는 .deb 생성 경로.
@@ -373,6 +395,8 @@ pub fn packageLinuxDebAt(
     version: []const u8,
     exe_path: []const u8,
     frontend_dist: []const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
 ) ![]const u8 {
     const package_name = try sanitizeDebPackageName(allocator, name);
     defer allocator.free(package_name);
@@ -410,6 +434,12 @@ pub fn packageLinuxDebAt(
     const frontend_dst = try std.fmt.allocPrint(allocator, "{s}/frontend", .{app_resources});
     defer allocator.free(frontend_dst);
     runCmd(&.{ "cp", "-R", frontend_dist, frontend_dst }) catch {};
+
+    // .deb layout: /opt/<pkg>/bin/<exe> + backends/plugins 평탄 배치 — `<exe_dir>/
+    // backends/<name>/<basename>` 패턴(runtime packagedExeDir 가 그대로 동작).
+    // sentinel 도 같은 dir.
+    writePackagedSentinel(allocator, app_bin);
+    try stageBackendArtifacts(allocator, app_bin, backends, plugins);
 
     const control = try renderDebControl(allocator, package_name, version, deb_arch, name);
     defer allocator.free(control);
@@ -462,7 +492,7 @@ pub fn packageLinuxDebAt(
 ///
 /// Linux 와 달리 Windows 는 bash/cp/zip 의존 제거 — PowerShell Compress-Archive
 /// 가 OS native. signtool 도 정식 Windows 도구로 PATH 에 있어야.
-/// 백엔드/플러그인 dylib 아티팩트 — packageWindows 가 stage 로 복사.
+/// 백엔드/플러그인 dylib 아티팩트 — packageWindows/Linux/macOS 가 stage 로 복사.
 /// is_node = true 면 source_path 는 디렉토리(main.js + package.json + node_modules)
 /// 통째 복사. 그렇지 않으면 단일 dylib 파일.
 pub const BackendArtifact = struct {
@@ -471,6 +501,70 @@ pub const BackendArtifact = struct {
     source_path: []const u8,
     is_node: bool,
 };
+
+/// stage 디렉토리에 빈 `.suji-packaged` sentinel 작성 — runtime 의 packagedExeDir
+/// probe 의 짝. OS 공통.
+pub fn writePackagedSentinel(allocator: std.mem.Allocator, root_dir: []const u8) void {
+    const sentinel_path = std.fmt.allocPrint(allocator, "{s}/.suji-packaged", .{root_dir}) catch return;
+    defer allocator.free(sentinel_path);
+    if (Dir.cwd().createFile(runtime.io, sentinel_path, .{})) |sentinel_file_const| {
+        var sentinel_file = sentinel_file_const;
+        sentinel_file.close(runtime.io);
+    } else |err| {
+        std.debug.print("[suji] sentinel write failed: {s}\n", .{@errorName(err)});
+    }
+}
+
+/// backends/plugins dylib 들을 `<root>/backends/<name>/<basename>` 와
+/// `<root>/plugins/<name>/<basename>` 로 평탄 배치. Node entry 면 디렉토리 통째.
+/// runtime path resolution 이 packaged 환경에서 동일 layout 을 기대.
+/// (root = Windows/Linux 의 stage, macOS .app/Contents/Resources)
+pub fn stageBackendArtifacts(
+    allocator: std.mem.Allocator,
+    root_dir: []const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
+) !void {
+    if (backends.len > 0) {
+        const be_root = try std.fmt.allocPrint(allocator, "{s}/backends", .{root_dir});
+        defer allocator.free(be_root);
+        try Dir.cwd().createDirPath(runtime.io, be_root);
+        for (backends) |art| {
+            const be_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_root, art.name });
+            defer allocator.free(be_dir);
+            try Dir.cwd().createDirPath(runtime.io, be_dir);
+            if (art.is_node) {
+                copyDirContents(allocator, art.source_path, be_dir) catch |err| {
+                    std.debug.print("[suji] node backend '{s}' copy failed: {s}\n", .{ art.name, @errorName(err) });
+                };
+            } else {
+                const basename = std.fs.path.basename(art.source_path);
+                const dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_dir, basename });
+                defer allocator.free(dst);
+                Dir.cwd().copyFile(art.source_path, Dir.cwd(), dst, runtime.io, .{}) catch |err| {
+                    std.debug.print("[suji] backend '{s}' dylib copy failed: {s}\n", .{ art.name, @errorName(err) });
+                };
+            }
+        }
+    }
+
+    if (plugins.len > 0) {
+        const pl_root = try std.fmt.allocPrint(allocator, "{s}/plugins", .{root_dir});
+        defer allocator.free(pl_root);
+        try Dir.cwd().createDirPath(runtime.io, pl_root);
+        for (plugins) |art| {
+            const pl_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pl_root, art.name });
+            defer allocator.free(pl_dir);
+            try Dir.cwd().createDirPath(runtime.io, pl_dir);
+            const basename = std.fs.path.basename(art.source_path);
+            const dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pl_dir, basename });
+            defer allocator.free(dst);
+            Dir.cwd().copyFile(art.source_path, Dir.cwd(), dst, runtime.io, .{}) catch |err| {
+                std.debug.print("[suji] plugin '{s}' dylib copy failed: {s}\n", .{ art.name, @errorName(err) });
+            };
+        }
+    }
+}
 
 pub fn packageWindows(
     allocator: std.mem.Allocator,
@@ -520,62 +614,12 @@ pub fn packageWindows(
         std.debug.print("[suji] frontend dist copy failed: {s}\n", .{@errorName(err)});
     };
 
-    // 4b) packaged sentinel — runtime 의 packagedExeDir 가 이걸 probe 해서
-    // packaged 환경 판단. stale resources/frontend 만 가지고 false-positive
-    // 되는 걸 봉쇄. 빈 파일이면 충분.
-    const sentinel_path = try std.fmt.allocPrint(allocator, "{s}/.suji-packaged", .{stage});
-    defer allocator.free(sentinel_path);
-    if (Dir.cwd().createFile(runtime.io, sentinel_path, .{})) |sentinel_file_const| {
-        var sentinel_file = sentinel_file_const;
-        sentinel_file.close(runtime.io);
-    } else |err| {
-        std.debug.print("[suji] sentinel write failed: {s}\n", .{@errorName(err)});
-    }
+    // 4b) packaged sentinel — runtime 의 packagedExeDir 가 이걸 probe.
+    writePackagedSentinel(allocator, stage);
 
-    // 5a) backend dylib / node entry → <stage>/backends/<name>/ 평탄 배치.
-    //     runtime path resolution 이 packaged 환경에서 이 경로를 찾음.
-    if (backends.len > 0) {
-        const be_root = try std.fmt.allocPrint(allocator, "{s}/backends", .{stage});
-        defer allocator.free(be_root);
-        try Dir.cwd().createDirPath(runtime.io, be_root);
-        for (backends) |art| {
-            const be_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_root, art.name });
-            defer allocator.free(be_dir);
-            try Dir.cwd().createDirPath(runtime.io, be_dir);
-            if (art.is_node) {
-                // Node 백엔드: main.js + package.json + node_modules 전체.
-                copyDirContents(allocator, art.source_path, be_dir) catch |err| {
-                    std.debug.print("[suji] node backend '{s}' copy failed: {s}\n", .{ art.name, @errorName(err) });
-                };
-            } else {
-                // dylib 파일 — basename 보존해서 copy.
-                const basename = std.fs.path.basename(art.source_path);
-                const dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_dir, basename });
-                defer allocator.free(dst);
-                Dir.cwd().copyFile(art.source_path, Dir.cwd(), dst, runtime.io, .{}) catch |err| {
-                    std.debug.print("[suji] backend '{s}' dylib copy failed: {s}\n", .{ art.name, @errorName(err) });
-                };
-            }
-        }
-    }
-
-    // 5b) plugin dylib → <stage>/plugins/<name>/ 평탄 배치.
-    if (plugins.len > 0) {
-        const pl_root = try std.fmt.allocPrint(allocator, "{s}/plugins", .{stage});
-        defer allocator.free(pl_root);
-        try Dir.cwd().createDirPath(runtime.io, pl_root);
-        for (plugins) |art| {
-            const pl_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pl_root, art.name });
-            defer allocator.free(pl_dir);
-            try Dir.cwd().createDirPath(runtime.io, pl_dir);
-            const basename = std.fs.path.basename(art.source_path);
-            const dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pl_dir, basename });
-            defer allocator.free(dst);
-            Dir.cwd().copyFile(art.source_path, Dir.cwd(), dst, runtime.io, .{}) catch |err| {
-                std.debug.print("[suji] plugin '{s}' dylib copy failed: {s}\n", .{ art.name, @errorName(err) });
-            };
-        }
-    }
+    // 5) backend / plugin dylib 들을 <stage>/backends/<name>/<basename> +
+    //    <stage>/plugins/<name>/<basename> 로 평탄 배치 (OS 공통 helper).
+    try stageBackendArtifacts(allocator, stage, backends, plugins);
 
     // 6) 선택적 Authenticode 서명 (signtool.exe — Windows SDK).
     if (sign_cert) |cert| {
