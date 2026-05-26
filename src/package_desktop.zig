@@ -462,6 +462,16 @@ pub fn packageLinuxDebAt(
 ///
 /// Linux 와 달리 Windows 는 bash/cp/zip 의존 제거 — PowerShell Compress-Archive
 /// 가 OS native. signtool 도 정식 Windows 도구로 PATH 에 있어야.
+/// 백엔드/플러그인 dylib 아티팩트 — packageWindows 가 stage 로 복사.
+/// is_node = true 면 source_path 는 디렉토리(main.js + package.json + node_modules)
+/// 통째 복사. 그렇지 않으면 단일 dylib 파일.
+pub const BackendArtifact = struct {
+    name: []const u8,
+    lang: []const u8,
+    source_path: []const u8,
+    is_node: bool,
+};
+
 pub fn packageWindows(
     allocator: std.mem.Allocator,
     name: []const u8,
@@ -470,6 +480,8 @@ pub fn packageWindows(
     frontend_dist: []const u8,
     sign_cert: ?[]const u8,
     sign_password: ?[]const u8,
+    backends: []const BackendArtifact,
+    plugins: []const BackendArtifact,
 ) ![]const u8 {
     const stage = try std.fmt.allocPrint(allocator, "{s}-{s}-windows-{s}", .{ name, version, archName() });
     defer allocator.free(stage);
@@ -508,7 +520,52 @@ pub fn packageWindows(
         std.debug.print("[suji] frontend dist copy failed: {s}\n", .{@errorName(err)});
     };
 
-    // 5) 선택적 Authenticode 서명 (signtool.exe — Windows SDK).
+    // 5a) backend dylib / node entry → <stage>/backends/<name>/ 평탄 배치.
+    //     runtime path resolution 이 packaged 환경에서 이 경로를 찾음.
+    if (backends.len > 0) {
+        const be_root = try std.fmt.allocPrint(allocator, "{s}/backends", .{stage});
+        defer allocator.free(be_root);
+        try Dir.cwd().createDirPath(runtime.io, be_root);
+        for (backends) |art| {
+            const be_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_root, art.name });
+            defer allocator.free(be_dir);
+            try Dir.cwd().createDirPath(runtime.io, be_dir);
+            if (art.is_node) {
+                // Node 백엔드: main.js + package.json + node_modules 전체.
+                copyDirContents(allocator, art.source_path, be_dir) catch |err| {
+                    std.debug.print("[suji] node backend '{s}' copy failed: {s}\n", .{ art.name, @errorName(err) });
+                };
+            } else {
+                // dylib 파일 — basename 보존해서 copy.
+                const basename = std.fs.path.basename(art.source_path);
+                const dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_dir, basename });
+                defer allocator.free(dst);
+                Dir.cwd().copyFile(art.source_path, Dir.cwd(), dst, runtime.io, .{}) catch |err| {
+                    std.debug.print("[suji] backend '{s}' dylib copy failed: {s}\n", .{ art.name, @errorName(err) });
+                };
+            }
+        }
+    }
+
+    // 5b) plugin dylib → <stage>/plugins/<name>/ 평탄 배치.
+    if (plugins.len > 0) {
+        const pl_root = try std.fmt.allocPrint(allocator, "{s}/plugins", .{stage});
+        defer allocator.free(pl_root);
+        try Dir.cwd().createDirPath(runtime.io, pl_root);
+        for (plugins) |art| {
+            const pl_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pl_root, art.name });
+            defer allocator.free(pl_dir);
+            try Dir.cwd().createDirPath(runtime.io, pl_dir);
+            const basename = std.fs.path.basename(art.source_path);
+            const dst = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ pl_dir, basename });
+            defer allocator.free(dst);
+            Dir.cwd().copyFile(art.source_path, Dir.cwd(), dst, runtime.io, .{}) catch |err| {
+                std.debug.print("[suji] plugin '{s}' dylib copy failed: {s}\n", .{ art.name, @errorName(err) });
+            };
+        }
+    }
+
+    // 6) 선택적 Authenticode 서명 (signtool.exe — Windows SDK).
     if (sign_cert) |cert| {
         const exe_in_stage = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ stage, exe_name });
         defer allocator.free(exe_in_stage);
@@ -563,7 +620,16 @@ fn copyDirContents(allocator: std.mem.Allocator, src: []const u8, dst: []const u
         defer allocator.free(src_path);
         const dst_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dst, entry.name });
         defer allocator.free(dst_path);
-        switch (entry.kind) {
+        // sym_link 가 디렉토리 가리키는 경우(npm `file:` 의존성 같은) 도 재귀 복사
+        // 해야 함 — entry.kind 만 보면 sym_link 라 file 로 처리되어 IsDir 실패.
+        // statFile 로 target kind 확인 후 분기.
+        var effective_kind = entry.kind;
+        if (entry.kind == .sym_link) {
+            if (Dir.cwd().statFile(io, src_path, .{})) |st| {
+                effective_kind = st.kind;
+            } else |_| {}
+        }
+        switch (effective_kind) {
             .directory => {
                 try Dir.cwd().createDirPath(io, dst_path);
                 try copyDirContents(allocator, src_path, dst_path);
