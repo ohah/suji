@@ -520,6 +520,18 @@ pub fn packageWindows(
         std.debug.print("[suji] frontend dist copy failed: {s}\n", .{@errorName(err)});
     };
 
+    // 4b) packaged sentinel — runtime 의 packagedExeDir 가 이걸 probe 해서
+    // packaged 환경 판단. stale resources/frontend 만 가지고 false-positive
+    // 되는 걸 봉쇄. 빈 파일이면 충분.
+    const sentinel_path = try std.fmt.allocPrint(allocator, "{s}/.suji-packaged", .{stage});
+    defer allocator.free(sentinel_path);
+    if (Dir.cwd().createFile(runtime.io, sentinel_path, .{})) |sentinel_file_const| {
+        var sentinel_file = sentinel_file_const;
+        sentinel_file.close(runtime.io);
+    } else |err| {
+        std.debug.print("[suji] sentinel write failed: {s}\n", .{@errorName(err)});
+    }
+
     // 5a) backend dylib / node entry → <stage>/backends/<name>/ 평탄 배치.
     //     runtime path resolution 이 packaged 환경에서 이 경로를 찾음.
     if (backends.len > 0) {
