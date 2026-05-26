@@ -3477,10 +3477,12 @@ fn hasProp(props: []const []const u8, name: []const u8) bool {
     return false;
 }
 
-/// windowId(u32 WM id) → NSWindow 포인터. 못 찾으면 null → free-floating fallback.
-/// stale/잘못된 windowId가 무성하게 묻히지 않도록 명시 lookup 실패는 warn 로그.
+/// macOS sheet용 windowId(u32 WM id) → NSWindow 포인터.
+/// Linux/Windows는 native sheet attach가 없어 null → free-floating fallback.
+/// macOS에서 stale/잘못된 windowId가 무성하게 묻히지 않도록 명시 lookup 실패는 warn 로그.
 fn dialogParentNSWindow(window_id: ?u32) ?*anyopaque {
     const id = window_id orelse return null;
+    if (!comptime (builtin.os.tag == .macos)) return null;
     const wm = window_mod.WindowManager.global orelse return null;
     const win = wm.get(id) orelse {
         std.log.warn("dialog: windowId={d} not found in WindowManager — sheet fallback to free-floating", .{id});

@@ -2570,7 +2570,7 @@ test "회귀: onPreKeyEvent에서 sender가 DevTools면 closeDevTools(inspectee)
     try std.testing.expect(close_pos < toggle_pos);
 }
 
-test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpenPanel/NSSavePanel" {
+test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + native dialog backends" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/platform/cef.zig",
@@ -2589,6 +2589,13 @@ test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpe
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSAlert") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSOpenPanel") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSSavePanel") != null);
+    // Linux GTK backend.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "const linux_dlg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_file_chooser_get_filenames") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE") != null);
+    // Windows Win32 backend.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "const win_dlg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "GetOpenFileNameW") != null);
     // runModal 동기 호출 패턴.
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"runModal\"") != null);
     // setMessageText/setInformativeText/addButtonWithTitle.
@@ -2626,6 +2633,68 @@ test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + NSAlert/NSOpe
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "setShowsTagField:") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "shows_tag_field") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "showsTagField") != null);
+}
+
+test "회귀: Linux GTK dialog backend — C wrapper + CI auto-close E2E wiring" {
+    const c_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/dialog_linux.c",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(c_src);
+    inline for (.{
+        "suji_gtk_message_dialog_new",
+        "gtk_message_dialog_new",
+        "suji_gtk_file_chooser_dialog_new",
+        "gtk_file_chooser_dialog_new",
+        "suji_gtk_dialog_auto_cancel",
+        "g_timeout_add",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, c_src, needle) != null);
+    }
+
+    const build_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(128 * 1024),
+    );
+    defer std.testing.allocator.free(build_src);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/dialog_linux.c") != null);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "gtk-3") != null);
+
+    const e2e_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "tests/e2e/dialog.test.ts",
+        std.testing.allocator,
+        .limited(128 * 1024),
+    );
+    defer std.testing.allocator.free(e2e_src);
+    inline for (.{
+        "SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE",
+        "Linux GTK runtime",
+        "showMessageBox: 실제 GTK dialog 생성 후 자동 cancel",
+        "showOpenDialog: 실제 GTK file chooser 생성 후 자동 cancel",
+        "showSaveDialog: 실제 GTK save chooser 생성 후 자동 cancel",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, e2e_src, needle) != null);
+    }
+
+    const workflow_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        ".github/workflows/e2e.yml",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(workflow_src);
+    inline for (.{
+        "E2E — dialog GTK auto-close (Linux)",
+        "SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE: \"1\"",
+        "bash tests/e2e/run-dialog.sh",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
+    }
 }
 
 test "회귀: Dialog 옵션 파싱 — std.json filters/properties nested 배열 정상 처리" {

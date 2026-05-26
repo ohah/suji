@@ -650,6 +650,27 @@ jobs:
             xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
             dbus-run-session -- bash tests/e2e/run-notification-linux-runtime.sh
 
+      - name: E2E — dialog GTK auto-close (Linux)
+        if: runner.os == 'Linux'
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          NO_AT_BRIDGE: "1"
+          GDK_BACKEND: "x11"
+          GTK_USE_PORTAL: "0"
+          SUJI_CEF_CI: "1"
+          SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE: "1"
+          SUJI_CEF_LOG: ${{ github.workspace }}/e2e-logs/cef-debug.log
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-dialog-linux-runtime.log
+        run: |
+          mkdir -p e2e-logs
+          mkdir -p "$RUNNER_TEMP/xdg-runtime"
+          chmod 700 "$RUNNER_TEMP/xdg-runtime"
+          export LD_LIBRARY_PATH="$HOME/.suji/cef/linux-x86_64/Release:${LD_LIBRARY_PATH:-}"
+          export LD_PRELOAD="$HOME/.suji/cef/linux-x86_64/Release/libcef.so${LD_PRELOAD:+:$LD_PRELOAD}"
+          XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg-runtime" \
+            xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
+            dbus-run-session -- bash tests/e2e/run-dialog.sh
+
       - name: E2E — safeStorage (Linux)
         if: runner.os == 'Linux'
         env:

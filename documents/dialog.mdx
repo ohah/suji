@@ -12,14 +12,14 @@ API와 호환되는 응답 형식.
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `showMessageBox` | ✓ NSAlert | stub (response:0) | ✓ TaskDialogIndirect, MessageBoxW fallback |
-| `showErrorBox` | ✓ NSAlert (critical) | no-op | ✓ MessageBoxW |
-| `showOpenDialog` | ✓ NSOpenPanel | stub (canceled:true) | ✓ GetOpenFileNameW / IFileOpenDialog(folder) |
-| `showSaveDialog` | ✓ NSSavePanel | stub (canceled:true) | ✓ GetSaveFileNameW |
+| `showMessageBox` | ✓ NSAlert | ✓ GTK MessageDialog | ✓ TaskDialogIndirect, MessageBoxW fallback |
+| `showErrorBox` | ✓ NSAlert (critical) | ✓ GTK MessageDialog(error) | ✓ MessageBoxW |
+| `showOpenDialog` | ✓ NSOpenPanel | ✓ GTK FileChooserDialog | ✓ GetOpenFileNameW / IFileOpenDialog(folder) |
+| `showSaveDialog` | ✓ NSSavePanel | ✓ GTK FileChooserDialog | ✓ GetSaveFileNameW |
 
-Linux는 향후 GTK file chooser/message dialog 작업 전까지 graceful stub이다.
+Linux는 GTK3 `GtkMessageDialog` / `GtkFileChooserDialog` 경로를 사용한다.
 Windows는 Win32 native dialog를 사용한다. 단, parent window에 attach되는 sheet modal은
-macOS 전용이며 Windows dialog는 free-floating modal로 뜬다.
+macOS 전용이며 Linux/Windows dialog는 free-floating modal로 뜬다.
 
 ## 모달 동작 — Sheet vs Free-floating
 
@@ -124,6 +124,14 @@ Windows는 가능한 경우 `TaskDialogIndirect`를 런타임 해상도(`LoadLib
 `MessageBoxW`로 fallback한다. TaskDialog path는 커스텀 버튼 라벨을 보존하지만,
 fallback path는 Win32 표준 버튼 조합(`OK`, `OK/Cancel`, `Yes/No`, `Yes/No/Cancel`)으로 축약된다.
 
+### Linux GTK 메시지 박스
+
+Linux는 `GtkMessageDialog`를 사용한다. 버튼은 custom response id로 추가해
+Electron식 button index를 보존하고, `checkboxLabel`은 message area에 `GtkCheckButton`을
+붙여 `checkboxChecked`로 되돌린다. CI/헤드리스 자동화에서는
+`SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE=1`로 실제 dialog를 생성한 뒤 GTK timeout에서
+cancel response를 보내 nested main loop를 빠져나온다.
+
 ## showErrorBox
 
 단순 에러 popup — 단일 OK 버튼, critical 스타일.
@@ -176,8 +184,8 @@ if (!canceled) {
 
 `{ name, extensions }` 배열. macOS UI는 필터 그룹 dropdown을 더 이상 노출하지
 않아 (Big Sur부터) **모든 그룹의 extensions가 통합되어 허용** — `name` 필드는
-호환성용이며 화면에 표시되지 않음. Windows는 `OPENFILENAMEW.lpstrFilter` 형식으로
-필터 그룹을 전달한다. 확장자는 점 없이.
+호환성용이며 화면에 표시되지 않음. Linux는 `GtkFileFilter`, Windows는
+`OPENFILENAMEW.lpstrFilter` 형식으로 필터 그룹을 전달한다. 확장자는 점 없이.
 
 `extensions: ['*']`이거나 빈 배열이면 모든 파일 허용.
 
@@ -220,6 +228,7 @@ if (!canceled) {
 
 NSSavePanel은 기본적으로 overwrite confirmation을 사용자가 끄지 못하게 함 — Electron의
 `'showOverwriteConfirmation'` 옵션은 macOS에서 항상 ON 상태로 무시됨.
+Linux GTK와 Windows Win32 path는 overwrite confirmation 옵션을 native dialog에 전달한다.
 Windows는 `showOverwriteConfirmation`이 true일 때 `OFN_OVERWRITEPROMPT`를 사용한다.
 
 ### showsTagField
@@ -329,21 +338,25 @@ Electron 대비 아직 노출하지 않거나 플랫폼별 native backend에서 
 
 ## 알려진 한계 (구현 제약)
 
-- **Linux는 stub**: showOpen/Save는 canceled 응답, messageBox는 default 응답, errorBox는 no-op.
-- **Sheet modal은 macOS 전용**: Windows는 parent window attach 없이 free-floating dialog를 사용한다.
+- **Sheet modal은 macOS 전용**: Linux/Windows는 parent window attach 없이 free-floating dialog를 사용한다.
 - **`buttons` 제한**: macOS NSAlert path는 16개, Windows TaskDialog path는 8개까지 커스텀 버튼을 보존한다.
 - **Dialog 텍스트 4KB 제한**: `nsStringFromSlice` 한도 — 그 이상 긴 메시지는 잘림.
 - **filters `name` UI 미표시**: macOS Big Sur+에서 NSOpenPanel은 필터 그룹 dropdown
   미노출 — 모든 extensions가 통합 허용.
 - **Windows 파일 dialog 옵션 일부 제한**: `buttonLabel`, `message`, `showsTagField`,
   `treatPackageAsDirectory`, alias 처리 같은 macOS 전용 옵션은 Win32 dialog에서 무시된다.
+- **Linux 파일 dialog 옵션 일부 제한**: `message`, `nameFieldLabel`, `showsTagField`,
+  `treatPackageAsDirectory`, alias 처리 같은 macOS 전용 옵션은 GTK dialog에서 무시된다.
 
 ## E2E 자동화 한계
 
-OS modal은 puppeteer로 직접 클릭 불가. `osascript` + System Events 키 이벤트로
+OS modal은 puppeteer로 직접 클릭 불가. macOS `osascript` + System Events 키 이벤트로
 ESC/Enter dismiss 자동화는 Accessibility 권한 + dialog focus 의존이라 일관 동작
-어려움. 자동 회귀는 다음 정도까지:
+어려움. Linux GTK path는 `SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE=1`에서 native dialog를
+생성한 뒤 timeout cancel로 nested loop를 빠져나오는 runtime E2E를 실행한다.
+자동 회귀는 다음 정도까지:
 
 - 잘못된 옵션 → graceful parse error 응답 (modal 미발생)
 - 정적 wiring 검증 (`tests/window_manager_test.zig`)
+- Linux GTK auto-cancel runtime (`tests/e2e/dialog.test.ts`)
 - 응답 형식 — `examples/dialogs-demo`로 수동 검증 권장

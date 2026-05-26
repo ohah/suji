@@ -424,7 +424,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 **목표**: Zig 전용 프레임워크로 완성도 올리기
 
 - [x] fs — 파일 시스템 (Phase 5-F: 코어 API + 5 SDK 노출 + sandbox + typed wrapper)
-- [x] dialog — 시스템 다이얼로그 (Phase 5-A: macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Windows TaskDialog/commdlg + 5 SDK)
+- [x] dialog — 시스템 다이얼로그 (Phase 5-A: macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3, Windows TaskDialog/commdlg + 5 SDK)
 - [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
 - [x] menu — 메뉴바 (Phase 5-D: macOS NSMenu + submenu/item/checkbox/separator + click + 5 SDK)
   > **옛 스펙 vs 실제 구현**: 옛 PLAN은 `plugins/{fs,dialog,tray,menu}/` 분리 dylib을
@@ -438,7 +438,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   > |---|---|---|---|
   > | clipboard | `clipboardReadText/WriteText/Clear` | — | `clipboard_read_text` 등 |
   > | shell | `shellOpenExternal/ShowItemInFolder/Beep` | — | `shell_*` |
-  > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (macOS sheet modal; Windows Win32 path는 cef.zig) | `handleDialog*` |
+  > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (macOS sheet modal), `src/platform/dialog_linux.c` (GTK varargs wrapper; Linux/Windows main path는 cef.zig) | `handleDialog*` |
   > | tray | `createTray/setTrayMenu/destroyTray` | — (macOS Cocoa / Windows Win32 직접) | `tray_*` |
   > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
   > | menu | `setApplicationMenu/resetApplicationMenu/menu_popup` | — (macOS Cocoa 직접) | `handleMenu*` |
@@ -619,11 +619,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               E2E 32 케이스 + Linux Xvfb/dbus openExternal x-scheme-handler + openPath MIME handler +
               showItemInFolder fake FileManager1 + beep 반복 호출 + trashItem round-trip E2E. 4개 SDK 노출.
         - [x] **Dialog** (`showMessageBox/showErrorBox/showOpenDialog/showSaveDialog` + Sync 변종 3개) —
-              macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Windows TaskDialogIndirect/
-              MessageBoxW/GetOpenFileNameW/IFileOpenDialog/GetSaveFileNameW. `src/platform/dialog.m`
-              ObjC block completion handler + nested NSApp event loop. windowId 첫 인자는 macOS에서
-              sheet, Windows에서는 free-floating native dialog. showsTagField + filters + checkbox.
-              Linux는 graceful stub. `documents/dialog.mdx`. 5개 SDK 노출.
+              macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3 GtkMessageDialog/
+              GtkFileChooserDialog, Windows TaskDialogIndirect/MessageBoxW/GetOpenFileNameW/
+              IFileOpenDialog/GetSaveFileNameW. `src/platform/dialog.m` ObjC block completion
+              handler + nested NSApp event loop, `src/platform/dialog_linux.c` GTK varargs wrapper.
+              windowId 첫 인자는 macOS에서 sheet, Linux/Windows에서는 free-floating native dialog.
+              showsTagField + filters + checkbox. `documents/dialog.mdx`. 5개 SDK 노출.
         - **새로 깔린 인프라**: `.m` 파일 컴파일 룰 (build.zig + `-fobjc-arc`) — 향후 ObjC block
               필요 API (Notification completion, NSAnimation, vibrancy 등) 재사용 가능.
   - [x] **Phase 5: 라이프사이클 이벤트** — close/closed/all-closed/resized/moved/focus/blur는
@@ -1376,7 +1377,7 @@ suji build → 결과물:
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat(mtime ms)/mkdir/readdir/rm + 5 SDK 노출 |
-| 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Windows TaskDialog/commdlg, Linux stub + 5 SDK 노출 |
+| 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3, Windows TaskDialog/commdlg + 5 SDK 노출 |
 | 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |

@@ -367,12 +367,12 @@ suji.platform                                                // "macos" | "linux
 // await clipboard.readHTML() / writeHTML(html)                            (macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML)
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
 //   (macOS NSWorkspace + NSFileManager, Linux GIO/FileManager1, Windows ShellExecute/explorer/MessageBeep/SHFileOperation)
-// await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert / Windows TaskDialog)
-// await dialog.showMessageBox(windowId, options)  — macOS sheet, Windows free-floating
-// await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel / Win32 file dialog)
-// await dialog.showOpenDialog(windowId, options) — macOS sheet, Windows free-floating
-// await dialog.showSaveDialog({ defaultPath:'~/x.txt', nameFieldLabel })  (NSSavePanel / Win32 file dialog)
-// await dialog.showSaveDialog(windowId, options) — macOS sheet, Windows free-floating
+// await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert / Linux GTK / Windows TaskDialog)
+// await dialog.showMessageBox(windowId, options)  — macOS sheet, Linux/Windows free-floating
+// await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel / GTK FileChooser / Win32 file dialog)
+// await dialog.showOpenDialog(windowId, options) — macOS sheet, Linux/Windows free-floating
+// await dialog.showSaveDialog({ defaultPath:'~/x.txt', nameFieldLabel })  (NSSavePanel / GTK FileChooser / Win32 file dialog)
+// await dialog.showSaveDialog(windowId, options) — macOS sheet, Linux/Windows free-floating
 // await dialog.showErrorBox(title, content)                               (간이 에러 popup)
 
 // import { globalShortcut } from '@suji/api';

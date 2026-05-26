@@ -7912,10 +7912,310 @@ pub const SaveDialogOpts = struct {
     parent_window: ?*anyopaque = null,
 };
 
+const linux_dlg = if (is_linux) struct {
+    const GTK_DIALOG_RESPONSE_BASE: c_int = 1000;
+    const GTK_RESPONSE_ACCEPT: c_int = -3;
+    const GTK_RESPONSE_CANCEL: c_int = -6;
+    const GTK_RESPONSE_DELETE_EVENT: c_int = -4;
+    const GTK_FILE_CHOOSER_ACTION_OPEN: c_int = 0;
+    const GTK_FILE_CHOOSER_ACTION_SAVE: c_int = 1;
+    const GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER: c_int = 2;
+
+    const GSList = extern struct {
+        data: ?*anyopaque,
+        next: ?*GSList,
+    };
+
+    extern "c" fn suji_gtk_init_check() callconv(.c) c_int;
+    extern "c" fn suji_gtk_message_dialog_new(message_type: c_int, message: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn suji_gtk_message_dialog_set_detail(dialog: ?*anyopaque, detail: [*:0]const u8) callconv(.c) void;
+    extern "c" fn suji_gtk_file_chooser_dialog_new(action: c_int, title: ?[*:0]const u8, accept_label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn suji_gtk_dialog_auto_cancel(dialog: ?*anyopaque, delay_ms: u32) callconv(.c) void;
+
+    extern "c" fn gtk_window_set_title(window: ?*anyopaque, title: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_dialog_add_button(dialog: ?*anyopaque, button_text: [*:0]const u8, response_id: c_int) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_dialog_set_default_response(dialog: ?*anyopaque, response_id: c_int) callconv(.c) void;
+    extern "c" fn gtk_dialog_run(dialog: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn gtk_widget_destroy(widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_message_dialog_get_message_area(message_dialog: ?*anyopaque) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_check_button_new_with_label(label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_toggle_button_set_active(toggle_button: ?*anyopaque, is_active: c_int) callconv(.c) void;
+    extern "c" fn gtk_toggle_button_get_active(toggle_button: ?*anyopaque) callconv(.c) c_int;
+    extern "c" fn gtk_container_add(container: ?*anyopaque, widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_widget_show(widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_set_select_multiple(chooser: ?*anyopaque, select_multiple: c_int) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_set_show_hidden(chooser: ?*anyopaque, show_hidden: c_int) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_set_create_folders(chooser: ?*anyopaque, create_folders: c_int) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_set_do_overwrite_confirmation(chooser: ?*anyopaque, do_overwrite_confirmation: c_int) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_set_current_folder(chooser: ?*anyopaque, filename: [*:0]const u8) callconv(.c) c_int;
+    extern "c" fn gtk_file_chooser_set_current_name(chooser: ?*anyopaque, name: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_set_filename(chooser: ?*anyopaque, filename: [*:0]const u8) callconv(.c) c_int;
+    extern "c" fn gtk_file_chooser_get_filename(chooser: ?*anyopaque) callconv(.c) ?[*:0]u8;
+    extern "c" fn gtk_file_chooser_get_filenames(chooser: ?*anyopaque) callconv(.c) ?*GSList;
+    extern "c" fn gtk_file_filter_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_file_filter_set_name(filter: ?*anyopaque, name: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_file_filter_add_pattern(filter: ?*anyopaque, pattern: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_file_chooser_add_filter(chooser: ?*anyopaque, filter: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_free(mem: ?*anyopaque) callconv(.c) void;
+    extern "c" fn g_slist_free(list: ?*GSList) callconv(.c) void;
+
+    fn gtkAvailable() bool {
+        return suji_gtk_init_check() != 0;
+    }
+
+    fn boolInt(v: bool) c_int {
+        return if (v) 1 else 0;
+    }
+
+    fn responseForIndex(i: usize) c_int {
+        return GTK_DIALOG_RESPONSE_BASE + @as(c_int, @intCast(i));
+    }
+
+    fn indexForResponse(response: c_int, button_count: usize, cancel_id: ?usize) usize {
+        if (response >= GTK_DIALOG_RESPONSE_BASE) {
+            const idx: usize = @intCast(response - GTK_DIALOG_RESPONSE_BASE);
+            if (idx < button_count) return idx;
+        }
+        if (response == GTK_RESPONSE_CANCEL or response == GTK_RESPONSE_DELETE_EVENT) {
+            if (cancel_id) |idx| if (idx < button_count) return idx;
+        }
+        return 0;
+    }
+
+    fn maybeAutoCancel(dialog: ?*anyopaque) void {
+        const value = runtime.env("SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE") orelse return;
+        if (std.mem.eql(u8, value, "1") or std.ascii.eqlIgnoreCase(value, "true")) {
+            suji_gtk_dialog_auto_cancel(dialog, 50);
+        }
+    }
+
+    fn messageType(style: MessageBoxStyle) c_int {
+        return switch (style) {
+            .info => 0,
+            .warning => 1,
+            .question => 2,
+            .err => 3,
+            .none => 4,
+        };
+    }
+
+    fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
+        if (!gtkAvailable()) return .{};
+        var message_buf: [4096]u8 = undefined;
+        const message_z: [:0]const u8 = nullTerminateOrTruncate(opts.message, &message_buf) orelse "";
+        const dialog = suji_gtk_message_dialog_new(messageType(opts.style), message_z.ptr) orelse return .{};
+        defer gtk_widget_destroy(dialog);
+
+        if (opts.title.len > 0) {
+            var title_buf: [512]u8 = undefined;
+            if (nullTerminateOrTruncate(opts.title, &title_buf)) |title_z| gtk_window_set_title(dialog, title_z.ptr);
+        }
+        if (opts.detail.len > 0) {
+            var detail_buf: [4096]u8 = undefined;
+            if (nullTerminateOrTruncate(opts.detail, &detail_buf)) |detail_z| suji_gtk_message_dialog_set_detail(dialog, detail_z.ptr);
+        }
+
+        var button_storage: [MAX_DIALOG_BUTTONS][256]u8 = undefined;
+        const button_titles: []const []const u8 = if (opts.buttons.len > 0) opts.buttons else &.{"OK"};
+        const button_count = @min(button_titles.len, MAX_DIALOG_BUTTONS);
+        for (button_titles[0..button_count], 0..) |title, i| {
+            const button_z = nullTerminateOrTruncate(title, &button_storage[i]) orelse continue;
+            _ = gtk_dialog_add_button(dialog, button_z.ptr, responseForIndex(i));
+        }
+        const default_idx = opts.default_id orelse 0;
+        if (default_idx < button_count) gtk_dialog_set_default_response(dialog, responseForIndex(default_idx));
+
+        var checkbox: ?*anyopaque = null;
+        if (opts.checkbox_label.len > 0) {
+            var label_buf: [512]u8 = undefined;
+            if (nullTerminateOrTruncate(opts.checkbox_label, &label_buf)) |label_z| {
+                checkbox = gtk_check_button_new_with_label(label_z.ptr);
+                if (checkbox) |cb| {
+                    gtk_toggle_button_set_active(cb, boolInt(opts.checkbox_checked));
+                    if (gtk_message_dialog_get_message_area(dialog)) |area| {
+                        gtk_container_add(area, cb);
+                        gtk_widget_show(cb);
+                    }
+                }
+            }
+        }
+
+        maybeAutoCancel(dialog);
+        const response = gtk_dialog_run(dialog);
+        const checkbox_checked = if (checkbox) |cb| gtk_toggle_button_get_active(cb) != 0 else opts.checkbox_checked;
+        return .{
+            .response = indexForResponse(response, button_count, opts.cancel_id),
+            .checkbox_checked = checkbox_checked,
+        };
+    }
+
+    fn showErrorBox(title: []const u8, content: []const u8) void {
+        _ = @This().showMessageBox(.{
+            .style = .err,
+            .title = title,
+            .message = content,
+            .buttons = &.{"OK"},
+        });
+    }
+
+    fn applyDefaultPathOpen(dialog: ?*anyopaque, default_path: []const u8) void {
+        if (default_path.len == 0) return;
+        var path_buf: [4096]u8 = undefined;
+        const path_z = nullTerminateOrTruncate(default_path, &path_buf) orelse return;
+        if (default_path[default_path.len - 1] == '/') {
+            _ = gtk_file_chooser_set_current_folder(dialog, path_z.ptr);
+        } else {
+            _ = gtk_file_chooser_set_filename(dialog, path_z.ptr);
+        }
+    }
+
+    fn applyDefaultPathSave(dialog: ?*anyopaque, default_path: []const u8) void {
+        if (default_path.len == 0) return;
+        if (std.mem.lastIndexOfScalar(u8, default_path, '/')) |slash_idx| {
+            const dir = default_path[0..slash_idx];
+            const name = default_path[slash_idx + 1 ..];
+            if (dir.len > 0) {
+                var dir_buf: [4096]u8 = undefined;
+                if (nullTerminateOrTruncate(dir, &dir_buf)) |dir_z| _ = gtk_file_chooser_set_current_folder(dialog, dir_z.ptr);
+            }
+            if (name.len > 0) {
+                var name_buf: [512]u8 = undefined;
+                if (nullTerminateOrTruncate(name, &name_buf)) |name_z| gtk_file_chooser_set_current_name(dialog, name_z.ptr);
+            }
+        } else {
+            var name_buf: [512]u8 = undefined;
+            if (nullTerminateOrTruncate(default_path, &name_buf)) |name_z| gtk_file_chooser_set_current_name(dialog, name_z.ptr);
+        }
+    }
+
+    fn applyFilters(dialog: ?*anyopaque, filters: []const FileFilter) void {
+        for (filters) |filter| {
+            const gtk_filter = gtk_file_filter_new() orelse continue;
+            var name_buf: [256]u8 = undefined;
+            const name = if (filter.name.len > 0) filter.name else "Files";
+            if (nullTerminateOrTruncate(name, &name_buf)) |name_z| gtk_file_filter_set_name(gtk_filter, name_z.ptr);
+
+            var added = false;
+            for (filter.extensions) |ext_raw| {
+                if (ext_raw.len == 0) continue;
+                var pattern_buf: [256]u8 = undefined;
+                const pattern = if (std.mem.eql(u8, ext_raw, "*"))
+                    "*"
+                else if (std.mem.startsWith(u8, ext_raw, "*."))
+                    ext_raw
+                else if (std.mem.startsWith(u8, ext_raw, "."))
+                    std.fmt.bufPrint(&pattern_buf, "*{s}", .{ext_raw}) catch continue
+                else
+                    std.fmt.bufPrint(&pattern_buf, "*.{s}", .{ext_raw}) catch continue;
+                var pattern_z_buf: [256]u8 = undefined;
+                if (nullTerminateOrTruncate(pattern, &pattern_z_buf)) |pattern_z| {
+                    gtk_file_filter_add_pattern(gtk_filter, pattern_z.ptr);
+                    added = true;
+                }
+            }
+            if (added) gtk_file_chooser_add_filter(dialog, gtk_filter);
+        }
+    }
+
+    fn appendEscapedPath(w: *std.Io.Writer, first: *bool, path: []const u8) !void {
+        var esc_buf: [8192]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(path, &esc_buf) orelse return;
+        if (!first.*) try w.writeByte(',');
+        first.* = false;
+        try w.print("\"{s}\"", .{esc_buf[0..esc_n]});
+    }
+
+    fn writeOpenFilenameResponse(response_buf: []u8, filename: ?[*:0]u8) []const u8 {
+        const raw = filename orelse return writeCanceledResponse(response_buf, true);
+        defer g_free(@ptrCast(raw));
+        var w: std.Io.Writer = .fixed(response_buf);
+        w.writeAll("{\"canceled\":false,\"filePaths\":[") catch return writeCanceledResponse(response_buf, true);
+        var first = true;
+        appendEscapedPath(&w, &first, std.mem.span(raw)) catch return writeCanceledResponse(response_buf, true);
+        w.writeAll("]}") catch return writeCanceledResponse(response_buf, true);
+        return w.buffered();
+    }
+
+    fn writeOpenFilenamesResponse(response_buf: []u8, list: ?*GSList) []const u8 {
+        const head = list orelse return writeCanceledResponse(response_buf, true);
+        defer g_slist_free(head);
+        var w: std.Io.Writer = .fixed(response_buf);
+        w.writeAll("{\"canceled\":false,\"filePaths\":[") catch return writeCanceledResponse(response_buf, true);
+        var first = true;
+        var count: usize = 0;
+        var node: ?*GSList = head;
+        while (node) |n| : (node = n.next) {
+            defer if (n.data) |data| g_free(data);
+            if (count >= MAX_DIALOG_PATHS) break;
+            const cstr: [*:0]u8 = @ptrCast(n.data orelse continue);
+            appendEscapedPath(&w, &first, std.mem.span(cstr)) catch return writeCanceledResponse(response_buf, true);
+            count += 1;
+        }
+        w.writeAll("]}") catch return writeCanceledResponse(response_buf, true);
+        return w.buffered();
+    }
+
+    fn showOpen(opts: OpenDialogOpts, response_buf: []u8) []const u8 {
+        if (!gtkAvailable()) return writeCanceledResponse(response_buf, true);
+        const action: c_int = if (opts.can_choose_directories and !opts.can_choose_files)
+            GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER
+        else
+            GTK_FILE_CHOOSER_ACTION_OPEN;
+        var title_buf: [512]u8 = undefined;
+        const title_z: ?[:0]const u8 = if (opts.title.len > 0) nullTerminateOrTruncate(opts.title, &title_buf) else null;
+        var accept_buf: [128]u8 = undefined;
+        const accept_z: [:0]const u8 = if (opts.button_label.len > 0)
+            (nullTerminateOrTruncate(opts.button_label, &accept_buf) orelse "_Open")
+        else
+            "_Open";
+        const dialog = suji_gtk_file_chooser_dialog_new(action, if (title_z) |z| z.ptr else null, accept_z.ptr) orelse
+            return writeCanceledResponse(response_buf, true);
+        defer gtk_widget_destroy(dialog);
+
+        gtk_file_chooser_set_select_multiple(dialog, boolInt(opts.allows_multiple_selection));
+        gtk_file_chooser_set_show_hidden(dialog, boolInt(opts.shows_hidden_files));
+        gtk_file_chooser_set_create_folders(dialog, boolInt(opts.can_create_directories));
+        applyDefaultPathOpen(dialog, opts.default_path);
+        applyFilters(dialog, opts.filters);
+
+        maybeAutoCancel(dialog);
+        if (gtk_dialog_run(dialog) != GTK_RESPONSE_ACCEPT) return writeCanceledResponse(response_buf, true);
+        if (opts.allows_multiple_selection) return writeOpenFilenamesResponse(response_buf, gtk_file_chooser_get_filenames(dialog));
+        return writeOpenFilenameResponse(response_buf, gtk_file_chooser_get_filename(dialog));
+    }
+
+    fn showSave(opts: SaveDialogOpts, response_buf: []u8) []const u8 {
+        if (!gtkAvailable()) return writeSaveCanceledResponse(response_buf, true);
+        var title_buf: [512]u8 = undefined;
+        const title_z: ?[:0]const u8 = if (opts.title.len > 0) nullTerminateOrTruncate(opts.title, &title_buf) else null;
+        var accept_buf: [128]u8 = undefined;
+        const accept_z: [:0]const u8 = if (opts.button_label.len > 0)
+            (nullTerminateOrTruncate(opts.button_label, &accept_buf) orelse "_Save")
+        else
+            "_Save";
+        const dialog = suji_gtk_file_chooser_dialog_new(GTK_FILE_CHOOSER_ACTION_SAVE, if (title_z) |z| z.ptr else null, accept_z.ptr) orelse
+            return writeSaveCanceledResponse(response_buf, true);
+        defer gtk_widget_destroy(dialog);
+
+        gtk_file_chooser_set_show_hidden(dialog, boolInt(opts.shows_hidden_files));
+        gtk_file_chooser_set_create_folders(dialog, boolInt(opts.can_create_directories));
+        gtk_file_chooser_set_do_overwrite_confirmation(dialog, boolInt(opts.show_overwrite_confirmation));
+        applyDefaultPathSave(dialog, opts.default_path);
+        applyFilters(dialog, opts.filters);
+
+        maybeAutoCancel(dialog);
+        if (gtk_dialog_run(dialog) != GTK_RESPONSE_ACCEPT) return writeSaveCanceledResponse(response_buf, true);
+        const raw = gtk_file_chooser_get_filename(dialog) orelse return writeSaveCanceledResponse(response_buf, true);
+        defer g_free(@ptrCast(raw));
+        return writeSaveSuccessResponse(response_buf, std.mem.span(raw));
+    }
+} else struct {};
+
 /// NSAlert 메시지 박스. macOS HIG 기본: 첫 버튼 = default(Enter), 마지막 버튼 = Cancel(ESC).
 /// `default_id`/`cancel_id`로 명시적 변경.
 pub fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
     if (comptime builtin.os.tag == .windows) return win_window.messageBox(opts);
+    if (comptime is_linux) return linux_dlg.showMessageBox(opts);
     if (!comptime is_macos) return .{};
     const NSAlert = getClass("NSAlert") orelse return .{};
     const alloc = msgSend(NSAlert, "alloc") orelse return .{};
@@ -8022,6 +8322,10 @@ pub fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
 pub fn showErrorBox(title: []const u8, content: []const u8) void {
     if (comptime builtin.os.tag == .windows) {
         win_window.errorBox(title, content);
+        return;
+    }
+    if (comptime is_linux) {
+        linux_dlg.showErrorBox(title, content);
         return;
     }
     if (!comptime is_macos) return;
@@ -8421,6 +8725,7 @@ const win_dlg = if (builtin.os.tag == .windows) struct {
 
 pub fn showOpenDialog(opts: OpenDialogOpts, response_buf: []u8) []const u8 {
     if (comptime builtin.os.tag == .windows) return win_dlg.showOpen(opts, response_buf);
+    if (comptime is_linux) return linux_dlg.showOpen(opts, response_buf);
     if (!comptime is_macos) return writeCanceledResponse(response_buf, true);
     const NSOpenPanel = getClass("NSOpenPanel") orelse return writeCanceledResponse(response_buf, true);
     const panel = msgSend(NSOpenPanel, "openPanel") orelse return writeCanceledResponse(response_buf, true);
@@ -8459,6 +8764,7 @@ pub fn showOpenDialog(opts: OpenDialogOpts, response_buf: []u8) []const u8 {
 /// 형식: `{"canceled":bool,"filePath":"/path/file.ext"}`.
 pub fn showSaveDialog(opts: SaveDialogOpts, response_buf: []u8) []const u8 {
     if (comptime builtin.os.tag == .windows) return win_dlg.showSave(opts, response_buf);
+    if (comptime is_linux) return linux_dlg.showSave(opts, response_buf);
     if (!comptime is_macos) return writeSaveCanceledResponse(response_buf, true);
     const NSSavePanel = getClass("NSSavePanel") orelse return writeSaveCanceledResponse(response_buf, true);
     const panel = msgSend(NSSavePanel, "savePanel") orelse return writeSaveCanceledResponse(response_buf, true);

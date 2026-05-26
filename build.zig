@@ -227,6 +227,12 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("gtk-3", .{});
         root_module.linkSystemLibrary("gdk-3.0", .{});
         root_module.linkSystemLibrary("X11", .{});
+        // dialog_linux.c — GTK dialog constructors use varargs, so keep the
+        // tiny varargs boundary in C and the response/JSON logic in Zig.
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/dialog_linux.c"),
+            .flags = &[_][]const u8{},
+        });
         // XScreenSaver — powerMonitor idle time.
         root_module.linkSystemLibrary("Xss", .{});
         // power_monitor_linux.c — DBus power/session events via dlopen(libdbus-1.so.3).
