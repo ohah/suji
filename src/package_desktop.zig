@@ -448,6 +448,20 @@ pub fn packageLinuxDebAt(
 /// Windows: stage(bin/<name>.exe) + 선택적 signtool 서명 + zip.
 /// sign_tool_args 비어있으면 서명 생략(zero-native 와 동일 — 호스트 위임).
 /// 반환 아카이브 경로(caller free).
+/// Windows 패키지 — flat layout (모든 DLL + .pak/.dat 이 .exe 옆에 있어야 CEF
+/// 로더가 찾는다. macOS .app 같이 nested 구조 못 씀). exe_path 의 부모 디렉토리
+/// (보통 zig-out/bin) 가 이미 build.zig 의 copy step 으로 CEF/Node runtime
+/// 전부 stage 돼 있어서, 그 디렉토리를 통째로 복사.
+///
+/// 산출: <name>-<ver>-windows-<arch>/
+///   ├── <name>.exe (renamed from suji.exe)
+///   ├── libcef.dll, libnode.dll, etc. (~30 DLL)
+///   ├── locales/ (CEF i18n)
+///   ├── resources/frontend/ (dist 빌드)
+///   └── *.pak, *.dat, *.bin (CEF data)
+///
+/// Linux 와 달리 Windows 는 bash/cp/zip 의존 제거 — PowerShell Compress-Archive
+/// 가 OS native. signtool 도 정식 Windows 도구로 PATH 에 있어야.
 pub fn packageWindows(
     allocator: std.mem.Allocator,
     name: []const u8,
@@ -461,11 +475,42 @@ pub fn packageWindows(
     defer allocator.free(stage);
     const exe_name = try std.fmt.allocPrint(allocator, "{s}.exe", .{name});
     defer allocator.free(exe_name);
-    try stageCommon(allocator, stage, exe_name, exe_path, frontend_dist);
 
-    // 선택적 Authenticode 서명 (signtool, PFX cert + password). CI secret 주입.
+    // 1) 기존 stage 정리.
+    Dir.cwd().deleteTree(runtime.io, stage) catch {};
+    try Dir.cwd().createDirPath(runtime.io, stage);
+
+    // 2) exe_path 의 부모 디렉토리 = build artifacts dir (zig-out/bin). 그 안의
+    // 모든 파일을 stage 로 복사 — CEF DLL/Resources, Node DLL 전부 포함.
+    const exe_dir = std.fs.path.dirname(exe_path) orelse {
+        std.debug.print("[suji] cannot resolve exe directory\n", .{});
+        return error.InvalidExePath;
+    };
+    try copyDirContents(allocator, exe_dir, stage);
+
+    // 3) suji.exe → <name>.exe rename (config.app.name 사용).
+    if (!std.mem.eql(u8, exe_name, "suji.exe")) {
+        const suji_in_stage = try std.fmt.allocPrint(allocator, "{s}/suji.exe", .{stage});
+        defer allocator.free(suji_in_stage);
+        const renamed = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ stage, exe_name });
+        defer allocator.free(renamed);
+        Dir.cwd().rename(suji_in_stage, Dir.cwd(), renamed, runtime.io) catch |err| {
+            std.debug.print("[suji] rename suji.exe → {s} failed: {s}\n", .{ exe_name, @errorName(err) });
+        };
+    }
+
+    // 4) frontend dist → resources/frontend/.
+    const res_dir = try std.fmt.allocPrint(allocator, "{s}/resources/frontend", .{stage});
+    defer allocator.free(res_dir);
+    try Dir.cwd().createDirPath(runtime.io, res_dir);
+    copyDirContents(allocator, frontend_dist, res_dir) catch |err| {
+        // best-effort — frontend build 실패해도 진행 (사용자가 별도 fix).
+        std.debug.print("[suji] frontend dist copy failed: {s}\n", .{@errorName(err)});
+    };
+
+    // 5) 선택적 Authenticode 서명 (signtool.exe — Windows SDK).
     if (sign_cert) |cert| {
-        const exe_in_stage = try std.fmt.allocPrint(allocator, "{s}/bin/{s}", .{ stage, exe_name });
+        const exe_in_stage = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ stage, exe_name });
         defer allocator.free(exe_in_stage);
         std.debug.print("[suji] signing windows exe (signtool)...\n", .{});
         try runCmd(&.{
@@ -479,10 +524,56 @@ pub fn packageWindows(
         });
     }
 
+    // 6) PowerShell Compress-Archive 로 .zip 생성. zip(.exe) 의존 제거.
     const archive = try std.fmt.allocPrint(allocator, "{s}.zip", .{stage});
     errdefer allocator.free(archive);
     std.debug.print("[suji] packaging windows: {s}\n", .{archive});
-    try runCmd(&.{ "zip", "-r", archive, stage });
+    Dir.cwd().deleteFile(runtime.io, archive) catch {};
+    if (builtin.os.tag == .windows) {
+        const ps_cmd = try std.fmt.allocPrint(
+            allocator,
+            "Compress-Archive -Path '{s}' -DestinationPath '{s}' -Force",
+            .{ stage, archive },
+        );
+        defer allocator.free(ps_cmd);
+        try runCmd(&.{ "powershell", "-NoProfile", "-Command", ps_cmd });
+    } else {
+        // 비-Windows host 에서 cross-package (예: WSL/Linux CI 가 Windows 산출물 만듦).
+        runCmd(&.{ "zip", "-r", archive, stage }) catch {
+            std.debug.print("[suji] zip command not found; install zip or run on Windows host\n", .{});
+            return error.ZipFailed;
+        };
+    }
     std.debug.print("[suji] packaged: {s}\n", .{archive});
     return archive;
+}
+
+/// 디렉토리 contents 를 다른 디렉토리로 재귀 복사 (cross-platform, no shell).
+/// dst 는 호출 전 생성돼 있어야.
+fn copyDirContents(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !void {
+    const io = runtime.io;
+    var src_dir = Dir.cwd().openDir(io, src, .{ .iterate = true }) catch |err| {
+        std.debug.print("[suji] open dir '{s}' failed: {s}\n", .{ src, @errorName(err) });
+        return err;
+    };
+    defer src_dir.close(io);
+    var it = src_dir.iterate();
+    while (try it.next(io)) |entry| {
+        const src_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ src, entry.name });
+        defer allocator.free(src_path);
+        const dst_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dst, entry.name });
+        defer allocator.free(dst_path);
+        switch (entry.kind) {
+            .directory => {
+                try Dir.cwd().createDirPath(io, dst_path);
+                try copyDirContents(allocator, src_path, dst_path);
+            },
+            .file, .sym_link => {
+                Dir.cwd().copyFile(src_path, Dir.cwd(), dst_path, io, .{}) catch |err| {
+                    std.debug.print("[suji] copy '{s}' → '{s}' failed: {s}\n", .{ src_path, dst_path, @errorName(err) });
+                };
+            },
+            else => {},
+        }
+    }
 }
