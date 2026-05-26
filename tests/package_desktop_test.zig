@@ -124,7 +124,7 @@ test "packageLinuxDebAt creates a Debian ar archive with control and data member
     defer a.free(index);
     try writeFile(index, "<!doctype html><title>fake</title>\n");
 
-    const deb = try package_desktop.packageLinuxDebAt(a, root, "Deb E2E App", "1.2.3", exe, frontend);
+    const deb = try package_desktop.packageLinuxDebAt(a, root, "Deb E2E App", "1.2.3", exe, frontend, &.{}, &.{});
     defer a.free(deb);
     try std.testing.expect(std.mem.endsWith(u8, deb, ".deb"));
     try std.testing.expect(std.mem.indexOf(u8, deb, "deb-e2e-app_1.2.3_") != null);
