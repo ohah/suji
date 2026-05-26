@@ -431,7 +431,6 @@ pub fn defaultPrepareInstallStageDir(artifact_path: []const u8, out: []u8) Prepa
 }
 
 pub fn validatePrepareInstallOptions(io: std.Io, opts: PrepareInstallOptions) PrepareError!void {
-    if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
     if (!isValidInstallPath(opts.artifact_path) or !isValidInstallPath(opts.stage_dir)) {
         return error.InvalidPath;
     }
@@ -441,8 +440,14 @@ pub fn validatePrepareInstallOptions(io: std.Io, opts: PrepareInstallOptions) Pr
     if (!pathExists(io, opts.artifact_path)) return error.ArtifactNotFound;
 
     switch (opts.format) {
-        .app, .zip, .dmg => {
+        .app, .dmg => {
             if (builtin.os.tag != .macos) return error.UnsupportedPlatform;
+            if (opts.target_path.len == 0) return error.InvalidPath;
+        },
+        .zip => {
+            // .zip 은 macOS(stage 내 .app 추출 → target.app 교체) + Windows
+            // (stage 디렉토리 → install dir 통째 교체) 둘 다 지원.
+            if (builtin.os.tag != .macos and builtin.os.tag != .windows) return error.UnsupportedPlatform;
             if (opts.target_path.len == 0) return error.InvalidPath;
         },
         .appimage => {
@@ -535,11 +540,11 @@ fn findAppBundleInner(
 
 pub fn defaultQuitAndInstallHelperPath(source_path: []const u8, out: []u8) InstallError![]const u8 {
     if (!isValidInstallPath(source_path)) return error.InvalidPath;
-    return std.fmt.bufPrint(out, "{s}.quit-install.sh", .{source_path}) catch error.HelperPathTooLong;
+    const ext: []const u8 = if (builtin.os.tag == .windows) ".quit-install.ps1" else ".quit-install.sh";
+    return std.fmt.bufPrint(out, "{s}{s}", .{ source_path, ext }) catch error.HelperPathTooLong;
 }
 
 pub fn validateQuitAndInstallOptions(io: std.Io, opts: QuitAndInstallOptions) InstallError!void {
-    if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
     if (!isValidInstallPath(opts.source_path) or
         !isValidInstallPath(opts.target_path) or
         !isValidInstallPath(opts.helper_path))
@@ -560,7 +565,6 @@ pub fn renderQuitAndInstallScript(
     allocator: std.mem.Allocator,
     opts: QuitAndInstallOptions,
 ) InstallError![]u8 {
-    if (builtin.os.tag == .windows) return error.UnsupportedPlatform;
     if (!isValidInstallPath(opts.source_path) or
         !isValidInstallPath(opts.target_path) or
         !isValidInstallPath(opts.helper_path))
@@ -568,6 +572,8 @@ pub fn renderQuitAndInstallScript(
         return error.InvalidPath;
     }
     if (opts.wait_pid <= 0) return error.InvalidPid;
+
+    if (builtin.os.tag == .windows) return renderQuitAndInstallScriptWindows(allocator, opts);
 
     var out = std.ArrayList(u8).empty;
     errdefer out.deinit(allocator);
@@ -616,6 +622,93 @@ pub fn renderQuitAndInstallScript(
     );
 
     return out.toOwnedSlice(allocator);
+}
+
+/// Windows PowerShell `.ps1` helper. caller 가
+/// `powershell -NoProfile -ExecutionPolicy Bypass -File <helper>` 으로 실행.
+/// `.zip` 포맷 — source 는 압축 해제된 stage 디렉토리, target 은 install dir.
+/// Move-Item 으로 디렉토리 통째 교체, 실패 시 backup 복구.
+fn renderQuitAndInstallScriptWindows(
+    allocator: std.mem.Allocator,
+    opts: QuitAndInstallOptions,
+) InstallError![]u8 {
+    var out = std.ArrayList(u8).empty;
+    errdefer out.deinit(allocator);
+
+    // PowerShell single-quoted string: backtick-escape backtick + double single-quote.
+    try out.appendSlice(allocator, "$ErrorActionPreference = 'Stop'\n$src = '");
+    try appendPwshSingleQuoted(allocator, &out, opts.source_path);
+    try out.appendSlice(allocator, "'\n$dst = '");
+    try appendPwshSingleQuoted(allocator, &out, opts.target_path);
+    try out.appendSlice(allocator, "'\n$waitPid = ");
+    try out.print(allocator, "{d}", .{opts.wait_pid});
+    try out.appendSlice(allocator, "\n$relaunch = ");
+    try out.appendSlice(allocator, if (opts.relaunch) "1" else "0");
+    try out.appendSlice(allocator,
+        \\
+        \\try {
+        \\  # WaitForExit 는 process handle 기준 — `Get-Process` 만 쓰면 PID 재사용
+        \\  # race 가능 (Suji 종료 직후 OS 가 같은 PID 를 svchost 등에 재할당 →
+        \\  # 무한 대기 또는 잘못된 process 대기). handle 잡고 즉시 WaitForExit.
+        \\  $waitProc = Get-Process -Id $waitPid -ErrorAction SilentlyContinue
+        \\  if ($waitProc) {
+        \\    try { $waitProc.WaitForExit() } catch { }
+        \\  }
+        \\  if (-not (Test-Path -LiteralPath $src)) { exit 2 }
+        \\  $bk = "$dst.suji-update-backup-$([guid]::NewGuid().ToString('N'))"
+        \\  if (Test-Path -LiteralPath $dst) {
+        \\    try { Move-Item -LiteralPath $dst -Destination $bk -Force } catch { exit 4 }
+        \\  }
+        \\  try {
+        \\    Move-Item -LiteralPath $src -Destination $dst -Force
+        \\  } catch {
+        \\    if (Test-Path -LiteralPath $bk) {
+        \\      try { Move-Item -LiteralPath $bk -Destination $dst -Force } catch { }
+        \\    }
+        \\    exit 3
+        \\  }
+        \\  if (Test-Path -LiteralPath $bk) {
+        \\    Remove-Item -LiteralPath $bk -Recurse -Force -ErrorAction SilentlyContinue
+        \\  }
+        \\  # Move 후 source parent (extract_dir) 가 빈 디렉토리로 남아 누적 → 정리.
+        \\  $srcParent = Split-Path -Parent $src
+        \\  if ($srcParent -and (Test-Path -LiteralPath $srcParent)) {
+        \\    $remaining = @(Get-ChildItem -LiteralPath $srcParent -Force -ErrorAction SilentlyContinue)
+        \\    if ($remaining.Count -eq 0) {
+        \\      Remove-Item -LiteralPath $srcParent -Recurse -Force -ErrorAction SilentlyContinue
+        \\    }
+        \\  }
+        \\  if ($relaunch -eq 1) {
+        \\    # target 이 디렉토리(.zip 포맷) — `.exe` 단일 후보 선택. unins*는 Inno
+        \\    # Setup 의 uninstaller 라 제외. target 이 파일이면 직접 실행.
+        \\    if (Test-Path -LiteralPath $dst -PathType Container) {
+        \\      $exe = Get-ChildItem -LiteralPath $dst -Filter '*.exe' -File -ErrorAction SilentlyContinue |
+        \\        Where-Object { $_.Name -notlike 'unins*' } |
+        \\        Select-Object -First 1
+        \\      if ($exe) { Start-Process -FilePath $exe.FullName | Out-Null }
+        \\    } else {
+        \\      Start-Process -FilePath $dst | Out-Null
+        \\    }
+        \\  }
+        \\} finally {
+        \\  Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+        \\}
+        \\
+    );
+
+    return out.toOwnedSlice(allocator);
+}
+
+/// PowerShell single-quoted literal escape — backtick 와 single quote 만 처리
+/// (PowerShell 의 single-quoted 는 backslash interpolation 없음).
+fn appendPwshSingleQuoted(allocator: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8) !void {
+    for (s) |c| {
+        if (c == '\'') {
+            try out.appendSlice(allocator, "''");
+        } else {
+            try out.append(allocator, c);
+        }
+    }
 }
 
 pub fn writeQuitAndInstallScript(
@@ -998,6 +1091,51 @@ test "quitAndInstall helper script quotes paths and encodes relaunch policy" {
     try std.testing.expect(std.mem.indexOf(u8, script, "while kill -0 \"$WAIT_PID\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "mv \"$SOURCE\" \"$TARGET\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, script, "open -n \"$TARGET\"") != null);
+}
+
+test "Windows: quitAndInstall renders PowerShell helper with .ps1 path" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+
+    var helper_buf: [std.Io.Dir.max_path_bytes + 32]u8 = undefined;
+    const helper = try defaultQuitAndInstallHelperPath("C:\\Apps\\Suji.exe", &helper_buf);
+    try std.testing.expect(std.mem.endsWith(u8, helper, ".quit-install.ps1"));
+
+    const script = try renderQuitAndInstallScript(std.testing.allocator, .{
+        .source_path = "C:\\Apps\\stage\\extract\\Suji-1.0.0-windows-x64",
+        .target_path = "C:\\Apps\\Suji",
+        .helper_path = helper,
+        .wait_pid = 4321,
+        .relaunch = true,
+    });
+    defer std.testing.allocator.free(script);
+
+    try std.testing.expect(std.mem.indexOf(u8, script, "$ErrorActionPreference") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "$waitProc.WaitForExit()") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "$waitPid = 4321") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "$relaunch = 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "Move-Item -LiteralPath $src") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "Start-Process -FilePath") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "Remove-Item -LiteralPath $PSCommandPath") != null);
+    // source parent cleanup (extract_dir 누적 방지).
+    try std.testing.expect(std.mem.indexOf(u8, script, "Split-Path -Parent $src") != null);
+}
+
+test "Windows: quitAndInstall escapes single quotes in paths" {
+    if (@import("builtin").os.tag != .windows) return error.SkipZigTest;
+
+    const script = try renderQuitAndInstallScript(std.testing.allocator, .{
+        .source_path = "C:\\Apps\\Joe's\\stage",
+        .target_path = "C:\\Apps\\Joe's\\install",
+        .helper_path = "C:\\Apps\\helper.ps1",
+        .wait_pid = 1,
+        .relaunch = false,
+    });
+    defer std.testing.allocator.free(script);
+
+    // PowerShell single-quoted single quote escape = doubled.
+    try std.testing.expect(std.mem.indexOf(u8, script, "$src = 'C:\\Apps\\Joe''s\\stage'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "$dst = 'C:\\Apps\\Joe''s\\install'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, script, "$relaunch = 0") != null);
 }
 
 test "quitAndInstall validates source and writes helper script" {

@@ -3981,6 +3981,11 @@ fn prepareAutoUpdaterInstallArtifact(
         },
         .deb => return auto_updater.preparedSystemPackage(artifact, stage_dir),
         .zip => {
+            if (builtin.os.tag == .windows) {
+                const source = prepareWindowsZip(artifact, stage_dir) catch |err| return err;
+                owned_source.* = source;
+                return auto_updater.preparedQuitAndInstall(source, target, stage_dir, .zip);
+            }
             const source = prepareMacZipApp(artifact, stage_dir) catch |err| return err;
             owned_source.* = source;
             return auto_updater.preparedQuitAndInstall(source, target, stage_dir, .zip);
@@ -3991,6 +3996,57 @@ fn prepareAutoUpdaterInstallArtifact(
             return auto_updater.preparedQuitAndInstall(source, target, stage_dir, .dmg);
         },
     }
+}
+
+/// Windows `.zip` extraction → 압축 풀린 stage 디렉토리의 single child dir
+/// (Suji packaging 이 `<name>-<ver>-windows-x64/` 하나만 만듦) 반환.
+/// quitAndInstall 이 이 source dir 를 target install dir 로 통째 교체.
+fn prepareWindowsZip(artifact: []const u8, stage_dir: []const u8) auto_updater.PrepareError![]u8 {
+    if (builtin.os.tag != .windows) return error.UnsupportedPlatform;
+    std.Io.Dir.cwd().createDirPath(runtime.io, stage_dir) catch return error.CommandFailed;
+
+    const extract_dir = std.fmt.allocPrint(runtime.gpa, "{s}/extract", .{stage_dir}) catch
+        return error.OutOfMemory;
+    defer runtime.gpa.free(extract_dir);
+
+    std.Io.Dir.cwd().deleteTree(runtime.io, extract_dir) catch {};
+    std.Io.Dir.cwd().createDirPath(runtime.io, extract_dir) catch return error.CommandFailed;
+
+    // PowerShell Expand-Archive — .zip → extract_dir.
+    const ps_cmd = std.fmt.allocPrint(
+        runtime.gpa,
+        "Expand-Archive -LiteralPath '{s}' -DestinationPath '{s}' -Force",
+        .{ artifact, extract_dir },
+    ) catch return error.OutOfMemory;
+    defer runtime.gpa.free(ps_cmd);
+    runCmd(runtime.gpa, &.{ "powershell", "-NoProfile", "-Command", ps_cmd }) catch
+        return error.CommandFailed;
+
+    // 압축 풀린 디렉토리 안의 single child 디렉토리를 찾는다 (suji packaging
+    // 이 `<name>-<ver>-windows-x64/` 디렉토리 하나만 생성). 여러 entry 면
+    // extract_dir 자체를 source 로 사용 (사용자가 직접 만든 zip 호환).
+    var d = std.Io.Dir.cwd().openDir(runtime.io, extract_dir, .{ .iterate = true }) catch
+        return error.CommandFailed;
+    defer d.close(runtime.io);
+    var it = d.iterate();
+    var single: ?[]u8 = null;
+    var multiple = false;
+    while (it.next(runtime.io) catch return error.CommandFailed) |entry| {
+        if (entry.kind != .directory) continue;
+        if (single != null) {
+            multiple = true;
+            if (single) |p| runtime.gpa.free(p);
+            single = null;
+            break;
+        }
+        single = std.fmt.allocPrint(runtime.gpa, "{s}/{s}", .{ extract_dir, entry.name }) catch
+            return error.OutOfMemory;
+    }
+    if (multiple or single == null) {
+        if (single) |p| runtime.gpa.free(p);
+        return runtime.gpa.dupe(u8, extract_dir) catch error.OutOfMemory;
+    }
+    return single.?;
 }
 
 fn prepareMacZipApp(artifact: []const u8, stage_dir: []const u8) auto_updater.PrepareError![]u8 {
@@ -4060,6 +4116,19 @@ fn defaultAutoUpdaterInstallTarget(buf: []u8) ?[]const u8 {
 }
 
 fn launchQuitAndInstallHelper(helper_path: []const u8) !void {
+    if (builtin.os.tag == .windows) {
+        // PowerShell `.ps1` helper. `-ExecutionPolicy Bypass` 로 사용자 정책
+        // (RestrictedScript 등) 우회 — script 는 우리가 직접 쓴 파일이고
+        // 즉시 종료 후 self-delete 하므로 영구 정책 변경 아님.
+        const child = try std.process.spawn(runtime.io, .{
+            .argv = &.{ "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", helper_path },
+            .stdin = .ignore,
+            .stdout = .ignore,
+            .stderr = .ignore,
+        });
+        _ = child;
+        return;
+    }
     const child = try std.process.spawn(runtime.io, .{
         .argv = &.{ "/bin/sh", helper_path },
         .stdin = .ignore,
