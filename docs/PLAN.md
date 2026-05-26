@@ -914,6 +914,9 @@ func backend_handle_ipc(request *C.char) *C.char {
 - 공식 지원이 아닌 비공식 빌드 옵션
 - Electron도 libnode가 아닌 소스 레벨 통합 방식을 사용함
 - metacall/libnode 프로젝트 참고 가능
+- Windows CI/release는 공식 MSVC `libnode.lib` 대신 MSYS2
+  `mingw-w64-x86_64-nodejs`의 MinGW ABI `libnode.dll.a`를 사용한다. `bridge.cc`를
+  MinGW g++로 컴파일하므로 MSVC import lib는 의도적으로 Node enable 조건에서 제외한다.
 
 **대안 검토 (채택하지 않음)**:
 - NAPI: Node가 Zig를 로드하는 반대 구조. 구현 쉽지만 `node main.js`로 실행해야 하고 유저 PC에 Node 설치 필요. Zig가 프로세스 주인이 아니게 됨.

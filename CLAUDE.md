@@ -26,7 +26,9 @@ zig build lib -Dtarget=x86_64-windows          # Windows
 
 # Windows Node bridge 빌드: SUJI_MINGW_ROOT가 있으면 우선 사용하고, 없으면
 # C:\mingw-w64-16\mingw64 / C:\msys64\mingw64 / C:\msys64\ucrt64 순서로 탐색.
-# CI는 msys2/setup-msys2로 gcc + libnode runtime deps를 설치한다.
+# CI/release는 msys2/setup-msys2로 gcc + mingw-w64-x86_64-nodejs +
+# libnode runtime deps를 설치하고, MinGW ABI의 libnode.dll/libnode.dll.a/headers를
+# ~/.suji/node/<NODE_VERSION>/에 staging한다. MSVC libnode.lib는 사용하지 않는다.
 
 # 예제 실행
 cd examples/multi-backend && suji dev   # Zig + Rust + Go + Node.js

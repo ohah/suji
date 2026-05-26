@@ -321,8 +321,11 @@ test "Windows Node bridge accepts MSYS2 MinGW layout in CI" {
     inline for (.{
         "fn windowsMingwRoot",
         "SUJI_MINGW_ROOT",
+        "absolutePathExists",
         "C:\\\\msys64\\\\mingw64",
         "C:\\\\msys64\\\\ucrt64",
+        "MSVC `libnode.lib` is not ABI-compatible",
+        "libnode.dll.a",
         "SUJI_MINGW_GPP",
         "SUJI_MINGW_BIN",
         "install MSYS2/Winlibs MinGW",
@@ -333,6 +336,7 @@ test "Windows Node bridge accepts MSYS2 MinGW layout in CI" {
     inline for (.{
         ".github/workflows/ci.yml",
         ".github/workflows/e2e.yml",
+        ".github/workflows/release.yml",
     }) |path| {
         const workflow = try std.Io.Dir.cwd().readFileAlloc(
             std.testing.io,
@@ -347,6 +351,10 @@ test "Windows Node bridge accepts MSYS2 MinGW layout in CI" {
             "id: msys2",
             "steps.msys2.outputs['msys2-location']",
             "SUJI_MINGW_ROOT=$root",
+            "mingw-w64-x86_64-nodejs",
+            "Stage libnode from MSYS2 (Windows)",
+            "libnode.dll.a",
+            "include\\node",
             "mingw-w64-x86_64-gcc",
             "mingw-w64-x86_64-c-ares",
             "mingw-w64-x86_64-openssl",

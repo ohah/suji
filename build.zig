@@ -29,10 +29,15 @@ fn windowsMingwRoot(b: *std.Build) []const u8 {
 
 fn firstExistingAbsolute(b: *std.Build, candidates: []const []const u8) []const u8 {
     for (candidates) |path| {
-        std.Io.Dir.accessAbsolute(b.graph.io, path, .{}) catch continue;
+        if (!absolutePathExists(b, path)) continue;
         return path;
     }
     return candidates[0];
+}
+
+fn absolutePathExists(b: *std.Build, path: []const u8) bool {
+    std.Io.Dir.accessAbsolute(b.graph.io, path, .{}) catch return false;
+    return true;
 }
 
 pub fn build(b: *std.Build) void {
@@ -294,7 +299,13 @@ pub fn build(b: *std.Build) void {
     };
     const node_available = blk: {
         const lib_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ node_path, node_lib_name }) catch break :blk false;
-        std.Io.Dir.accessAbsolute(b.graph.io, lib_path, .{}) catch break :blk false;
+        if (!absolutePathExists(b, lib_path)) break :blk false;
+        if (os_tag == .windows) {
+            // MSVC `libnode.lib` is not ABI-compatible with the MinGW bridge.
+            // Enable embedded Node on Windows only when the MinGW import lib is present.
+            const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libnode.dll.a", .{node_path}) catch break :blk false;
+            if (!absolutePathExists(b, import_lib)) break :blk false;
+        }
         break :blk true;
     };
     // Node.js 지원 (libnode가 설치된 경우만)

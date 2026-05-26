@@ -72,6 +72,50 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+      - name: Install Windows MinGW runtime
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-c-ares
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-icu
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-nodejs
+      - name: Export Windows MinGW root
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msys2Location = "${{ steps.msys2.outputs['msys2-location'] }}"
+          $roots = @()
+          if ($msys2Location) {
+            $roots += Join-Path $msys2Location "mingw64"
+            $roots += Join-Path $msys2Location "ucrt64"
+          }
+          $roots += "$env:RUNNER_TEMP\msys64\mingw64"
+          $roots += "$env:RUNNER_TEMP\msys64\ucrt64"
+          $roots += "C:\msys64\mingw64"
+          $roots += "C:\msys64\ucrt64"
+
+          $root = $roots | Where-Object { $_ -and (Test-Path (Join-Path $_ "bin\g++.exe")) } | Select-Object -First 1
+          if (-not $root) {
+            $gpp = Get-Command g++.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($gpp) {
+              $candidate = Split-Path (Split-Path $gpp.Source -Parent) -Parent
+              if (Test-Path (Join-Path $candidate "bin\g++.exe")) {
+                $root = $candidate
+              }
+            }
+          }
+          if (-not $root) {
+            throw "MSYS2 MinGW g++ not found; checked: $($roots -join ', ')"
+          }
+          Write-Host "Using MinGW root: $root"
+          "SUJI_MINGW_ROOT=$root" >> $env:GITHUB_ENV
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |
@@ -114,18 +158,28 @@ jobs:
           curl -fSL "$URL" -o /tmp/libnode.tar.gz 2>/dev/null && \
             tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
             echo "libnode installed" || echo "libnode skipped"
-      - name: Download libnode (Windows)
+      - name: Stage libnode from MSYS2 (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          if (-not $env:SUJI_MINGW_ROOT) {
+            throw "SUJI_MINGW_ROOT is not set"
+          }
           $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
-          New-Item -ItemType Directory -Force -Path $nodeDir
-          $asset = "libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
-          $url = "https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$asset"
-          try {
-            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\libnode.tar.gz"
-            tar xzf "$env:TEMP\libnode.tar.gz" -C $nodeDir
-          } catch { Write-Host "libnode skipped" }
+          New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
+          New-Item -ItemType Directory -Force -Path "$nodeDir\include" | Out-Null
+          $runtimeDll = Join-Path $env:SUJI_MINGW_ROOT "bin\libnode.dll"
+          $importLib = Join-Path $env:SUJI_MINGW_ROOT "lib\libnode.dll.a"
+          $includeDir = Join-Path $env:SUJI_MINGW_ROOT "include\node"
+          foreach ($path in @($runtimeDll, $importLib, $includeDir)) {
+            if (-not (Test-Path $path)) {
+              throw "MSYS2 libnode artifact missing: $path"
+            }
+          }
+          Copy-Item -Force -LiteralPath $runtimeDll -Destination "$nodeDir\libnode.dll"
+          Copy-Item -Force -LiteralPath $importLib -Destination "$nodeDir\libnode.dll.a"
+          Copy-Item -Recurse -Force -Path "$includeDir\*" -Destination "$nodeDir\include\"
+          Write-Host "libnode staged from MSYS2: $nodeDir"
       - name: Build suji CLI
         shell: bash
         run: |

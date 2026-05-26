@@ -232,6 +232,7 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-icu
             mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-nodejs
 
       - name: Export Windows MinGW root
         if: runner.os == 'Windows'
@@ -324,21 +325,28 @@ jobs:
             echo "libnode installed: $NODE_DIR" || \
             echo "libnode not available for ${{ matrix.node_platform }}, continuing without Node backend"
 
-      - name: Download libnode (Windows)
+      - name: Stage libnode from MSYS2 (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
-          New-Item -ItemType Directory -Force -Path $nodeDir
-          $asset = "libnode-${{ env.NODE_VERSION }}-${{ matrix.node_platform }}.tar.gz"
-          $url = "https://github.com/ohah/suji/releases/download/libnode-v${{ env.NODE_VERSION }}/$asset"
-          try {
-            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\libnode.tar.gz"
-            tar xzf "$env:TEMP\libnode.tar.gz" -C $nodeDir
-            Write-Host "libnode installed: $nodeDir"
-          } catch {
-            Write-Host "libnode not available for ${{ matrix.node_platform }}, continuing without Node backend"
+          if (-not $env:SUJI_MINGW_ROOT) {
+            throw "SUJI_MINGW_ROOT is not set"
           }
+          $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
+          New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
+          New-Item -ItemType Directory -Force -Path "$nodeDir\include" | Out-Null
+          $runtimeDll = Join-Path $env:SUJI_MINGW_ROOT "bin\libnode.dll"
+          $importLib = Join-Path $env:SUJI_MINGW_ROOT "lib\libnode.dll.a"
+          $includeDir = Join-Path $env:SUJI_MINGW_ROOT "include\node"
+          foreach ($path in @($runtimeDll, $importLib, $includeDir)) {
+            if (-not (Test-Path $path)) {
+              throw "MSYS2 libnode artifact missing: $path"
+            }
+          }
+          Copy-Item -Force -LiteralPath $runtimeDll -Destination "$nodeDir\libnode.dll"
+          Copy-Item -Force -LiteralPath $importLib -Destination "$nodeDir\libnode.dll.a"
+          Copy-Item -Recurse -Force -Path "$includeDir\*" -Destination "$nodeDir\include\"
+          Write-Host "libnode staged from MSYS2: $nodeDir"
 
       - name: Build suji
         run: zig build
