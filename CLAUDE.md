@@ -51,6 +51,8 @@ bash tests/e2e/run-system-integration.sh # screen/desktopCapturer/crashReporter/
 bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
+bash tests/e2e/run-plugin-wrappers.sh   # 공식 플러그인 (state, sqlite) × {JS, Node} wrapper wire-contract 96 케이스 (mock bridge)
+bash tests/e2e/run-plugin-state-integration.sh # state plugin DLL 라운드트립(__suji__ → DLL → 응답)
 
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
 bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive)+Zig
@@ -727,6 +729,22 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
     래핑(`WinDynLib`). POSIX는 `std.DynLib` 그대로, 호출부 불변.
   - state 플러그인 + Rust/Go 래퍼 통합 테스트의 Windows skip 가드 제거 —
     Windows CI(`test-state`/`-rust`/`-go`)가 `.dll` dlopen 왕복까지 실증.
+- ~~Windows Go c-shared DLL 로드 실패 (ERROR_BAD_EXE_FORMAT 193)~~ **해결됨** (PR #35).
+  Go 1.26+ 의 `-buildmode=c-shared` 가 PE loader 호환되지 않는 DWARF/.debug_*
+  섹션을 emit. `suji dev` / build.zig 의 Windows 분기에 `-ldflags=-s -w` 추가로
+  fix. `test-state-go` 가 0→10/10 pass.
+- ~~Windows Rust SDK 빌드 실패 (specta unstable feature)~~ **해결됨** (PR #37).
+  `specta 2.0.0-rc.25` 가 unstable Rust feature `debug_closure_helpers`
+  ([rust-lang/rust#117729](https://github.com/rust-lang/rust/issues/117729)) 사용.
+  `crates/suji-rs` 의 typescript 생성 기능을 `typescript` cargo feature 로
+  격리 — default 빌드에선 specta 없이 stable Rust 빌드 통과. TypeScript
+  declaration 필요 시 `--features typescript` (nightly Rust 또는
+  RUSTC_BOOTSTRAP=1 + 패치 필요). `test-state-rust` 가 0→11/11 pass.
+- ~~Windows 네이티브 API 격차 (tray click/menu, globalShortcut trigger,
+  nativeTheme event, opacity/shadow non-Views, OS-initiated window state,
+  directory picker, custom dialog buttons, notification click)~~ **해결됨**
+  (PR #27~#34). `win_pump` 백그라운드 스레드 + hidden message-only window +
+  `src/suji.manifest` (Common-Controls v6 + PerMonitorV2) 로 macOS 동등 동작.
 - **Linux/Windows GPU 가속 미지원** (명시적 `--disable-gpu`): [#12](https://github.com/ohah/suji/issues/12)
   - macOS만 ANGLE Metal 경로로 GPU 활성. Linux/Windows는 SwiftShader CPU 폴백.
   - asset 배치 로직만 추가하면 됨. 우선순위 낮음.
