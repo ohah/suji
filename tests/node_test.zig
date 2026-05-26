@@ -344,6 +344,9 @@ test "Windows Node bridge accepts MSYS2 MinGW layout in CI" {
 
         inline for (.{
             "msys2/setup-msys2@v2",
+            "id: msys2",
+            "steps.msys2.outputs['msys2-location']",
+            "SUJI_MINGW_ROOT=$root",
             "mingw-w64-x86_64-gcc",
             "mingw-w64-x86_64-c-ares",
             "mingw-w64-x86_64-openssl",

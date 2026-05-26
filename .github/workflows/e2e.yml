@@ -221,6 +221,7 @@ jobs:
 
       - name: Install Windows MinGW runtime
         if: runner.os == 'Windows'
+        id: msys2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
@@ -231,6 +232,37 @@ jobs:
             mingw-w64-x86_64-openssl
             mingw-w64-x86_64-icu
             mingw-w64-x86_64-zlib
+
+      - name: Export Windows MinGW root
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $msys2Location = "${{ steps.msys2.outputs['msys2-location'] }}"
+          $roots = @()
+          if ($msys2Location) {
+            $roots += Join-Path $msys2Location "mingw64"
+            $roots += Join-Path $msys2Location "ucrt64"
+          }
+          $roots += "$env:RUNNER_TEMP\msys64\mingw64"
+          $roots += "$env:RUNNER_TEMP\msys64\ucrt64"
+          $roots += "C:\msys64\mingw64"
+          $roots += "C:\msys64\ucrt64"
+
+          $root = $roots | Where-Object { $_ -and (Test-Path (Join-Path $_ "bin\g++.exe")) } | Select-Object -First 1
+          if (-not $root) {
+            $gpp = Get-Command g++.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($gpp) {
+              $candidate = Split-Path (Split-Path $gpp.Source -Parent) -Parent
+              if (Test-Path (Join-Path $candidate "bin\g++.exe")) {
+                $root = $candidate
+              }
+            }
+          }
+          if (-not $root) {
+            throw "MSYS2 MinGW g++ not found; checked: $($roots -join ', ')"
+          }
+          Write-Host "Using MinGW root: $root"
+          "SUJI_MINGW_ROOT=$root" >> $env:GITHUB_ENV
 
       - name: Install Linux runtime dependencies
         if: runner.os == 'Linux'
