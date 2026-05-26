@@ -441,6 +441,80 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
             }
         },
         .windows => {
+            // Backend / plugin dylib + Node entry path 수집.
+            var backends_list = std.ArrayList(package_desktop.BackendArtifact).empty;
+            defer backends_list.deinit(allocator);
+
+            if (config.isMultiBackend()) {
+                if (config.backends) |bes| {
+                    for (bes) |be| {
+                        if (std.mem.eql(u8, be.lang, "node")) {
+                            try backends_list.append(allocator, .{
+                                .name = be.name,
+                                .lang = be.lang,
+                                .source_path = be.entry,
+                                .is_node = true,
+                            });
+                            continue;
+                        }
+                        const dylib = getDylibPath(allocator, be.lang, be.entry, true) catch continue;
+                        try backends_list.append(allocator, .{
+                            .name = be.name,
+                            .lang = be.lang,
+                            .source_path = dylib,
+                            .is_node = false,
+                        });
+                    }
+                }
+            } else if (config.backend) |be| {
+                if (std.mem.eql(u8, be.lang, "node")) {
+                    try backends_list.append(allocator, .{
+                        .name = be.lang,
+                        .lang = be.lang,
+                        .source_path = be.entry,
+                        .is_node = true,
+                    });
+                } else {
+                    if (getDylibPath(allocator, be.lang, be.entry, true)) |dylib| {
+                        try backends_list.append(allocator, .{
+                            .name = be.lang,
+                            .lang = be.lang,
+                            .source_path = dylib,
+                            .is_node = false,
+                        });
+                    } else |_| {}
+                }
+            }
+            defer for (backends_list.items) |a| {
+                if (!a.is_node) allocator.free(@constCast(a.source_path));
+            };
+
+            // Plugin dylib 도 같이 — config.plugins 는 이름 배열, 실 dylib 는
+            // getPluginDir + readPluginLang + getDylibPath 로 해결.
+            var plugins_list = std.ArrayList(package_desktop.BackendArtifact).empty;
+            defer plugins_list.deinit(allocator);
+            defer for (plugins_list.items) |a| allocator.free(@constCast(a.source_path));
+            if (config.plugins) |plugin_names| {
+                for (plugin_names) |pname| {
+                    const pdir = getPluginDir(allocator, pname) orelse continue;
+                    defer allocator.free(pdir);
+                    const plang = readPluginLang(allocator, pdir) orelse continue;
+                    defer allocator.free(plang);
+                    const pentry = std.fmt.allocPrint(allocator, "{s}/{s}", .{ pdir, plang }) catch continue;
+                    defer allocator.free(pentry);
+                    const dylib = getDylibPath(allocator, plang, pentry, true) catch continue;
+                    plugins_list.append(allocator, .{
+                        .name = pname,
+                        .lang = plang,
+                        .source_path = dylib,
+                        .is_node = false,
+                    }) catch {
+                        allocator.free(dylib);
+                        continue;
+                    };
+                }
+            }
+
             const archive = try package_desktop.packageWindows(
                 allocator,
                 config.app.name,
@@ -449,6 +523,8 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                 config.frontend.dist_dir,
                 runtime.env("SUJI_WIN_SIGN_CERT"),
                 runtime.env("SUJI_WIN_SIGN_PASSWORD"),
+                backends_list.items,
+                plugins_list.items,
             );
             allocator.free(archive);
         },
@@ -461,8 +537,96 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
 // 플러그인 빌드/로드
 // ============================================
 
+/// packaged binary 의 exe 디렉토리(<exe_dir>) 반환. caller free.
+/// packaging 이 backend/plugin dylib 들을 `<exe_dir>/backends/<name>/`
+/// `<exe_dir>/plugins/<name>/` 에 평탄 배치하므로 그 경로의 base 가 된다.
+fn packagedExeDir(allocator: std.mem.Allocator) ?[]const u8 {
+    var exe_buf: [1024]u8 = undefined;
+    const ep_len = std.process.executablePath(runtime.io, &exe_buf) catch return null;
+    const ep = exe_buf[0..ep_len];
+    const dir = std.fs.path.dirname(ep) orelse return null;
+    // packaged 마커: `<exe_dir>/resources/frontend/index.html` 존재 (macOS .app
+    // 의 ".app/Contents/MacOS/" 패턴과 동일 목적).
+    const probe = std.fmt.allocPrint(allocator, "{s}/resources/frontend/index.html", .{dir}) catch return null;
+    defer allocator.free(probe);
+    std.Io.Dir.cwd().access(runtime.io, probe, .{}) catch return null;
+    return allocator.dupe(u8, dir) catch null;
+}
+
+/// packaged 환경에서 backend dylib 의 alleged 경로 — packageWindows 가 배치한
+/// `<exe_dir>/backends/<be_name>/<dylib basename>`. dylib basename 은 lang 별
+/// known (Zig: backend.dll, Rust: rust_backend.dll, Go: backend.dll).
+/// Node 면 entry directory 경로 반환 (caller 가 main.js 로 join).
+fn packagedBackendDylibPath(
+    allocator: std.mem.Allocator,
+    exe_dir: []const u8,
+    be_name: []const u8,
+    lang: []const u8,
+) !?[]const u8 {
+    const basename: ?[]const u8 = if (std.mem.eql(u8, lang, "node"))
+        null // Node: 디렉토리만 반환
+    else if (std.mem.eql(u8, lang, "zig"))
+        switch (builtin.os.tag) {
+            .windows => "backend.dll",
+            .linux => "libbackend.so",
+            else => "libbackend.dylib",
+        }
+    else if (std.mem.eql(u8, lang, "rust"))
+        switch (builtin.os.tag) {
+            .windows => "rust_backend.dll",
+            .linux => "librust_backend.so",
+            else => "librust_backend.dylib",
+        }
+    else if (std.mem.eql(u8, lang, "go"))
+        switch (builtin.os.tag) {
+            .windows => "backend.dll",
+            .linux => "libbackend.so",
+            else => "libbackend.dylib",
+        }
+    else
+        return null;
+
+    if (basename) |b| {
+        return try std.fmt.allocPrint(allocator, "{s}/backends/{s}/{s}", .{ exe_dir, be_name, b });
+    }
+    return try std.fmt.allocPrint(allocator, "{s}/backends/{s}", .{ exe_dir, be_name });
+}
+
 fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, release: bool) !void {
     const plugins = config.plugins orelse return;
+
+    // packaged 면 build 스킵 + `<exe_dir>/plugins/<name>/<dylib>` 에서 직접 로드.
+    if (packagedExeDir(allocator)) |exe_dir| {
+        defer allocator.free(exe_dir);
+        for (plugins) |plugin_name| {
+            std.debug.print("[suji] loading plugin (packaged): {s}\n", .{plugin_name});
+            // packaged 의 plugin dir 는 같은 layout — plugins/<name>/<lang>/<entry>
+            // 가 없고 dylib 만 평탄. lang 을 모르므로 known 4종 시도.
+            for ([_][]const u8{ "zig", "rust", "go" }) |lang| {
+                const basename: []const u8 = if (std.mem.eql(u8, lang, "rust"))
+                    switch (builtin.os.tag) {
+                        .windows => "rust_backend.dll",
+                        .linux => "librust_backend.so",
+                        else => "librust_backend.dylib",
+                    }
+                else switch (builtin.os.tag) {
+                    .windows => "backend.dll",
+                    .linux => "libbackend.so",
+                    else => "libbackend.dylib",
+                };
+                const dylib = std.fmt.allocPrint(allocator, "{s}/plugins/{s}/{s}", .{ exe_dir, plugin_name, basename }) catch continue;
+                defer allocator.free(dylib);
+                std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch continue;
+                var path_z: [1024]u8 = undefined;
+                const path_zt = util.nullTerminate(dylib, &path_z);
+                registry.register(plugin_name, path_zt) catch |err| {
+                    std.debug.print("[suji] plugin '{s}' load failed: {}\n", .{ plugin_name, err });
+                };
+                break;
+            }
+        }
+        return;
+    }
 
     for (plugins) |plugin_name| {
         std.debug.print("[suji] loading plugin: {s}\n", .{plugin_name});
@@ -562,6 +726,50 @@ fn readPluginLang(allocator: std.mem.Allocator, plugin_dir: []const u8) ?[]const
 var g_node_runtime: ?*NodeRuntime = null;
 
 fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, release: bool) !void {
+    // packaged 환경: build 스킵 + packaged dylib 경로에서 직접 로드.
+    if (packagedExeDir(allocator)) |exe_dir| {
+        defer allocator.free(exe_dir);
+        if (config.isMultiBackend()) {
+            if (config.backends) |backends| {
+                for (backends) |be| {
+                    std.debug.print("[suji] loading {s} ({s}) packaged...\n", .{ be.name, be.lang });
+                    if (std.mem.eql(u8, be.lang, "node")) {
+                        const node_dir = std.fmt.allocPrintSentinel(allocator, "{s}/backends/{s}", .{ exe_dir, be.name }, 0) catch continue;
+                        defer allocator.free(node_dir);
+                        startNodeBackend(allocator, node_dir) catch |err| {
+                            std.debug.print("[suji] node start failed for {s}: {}\n", .{ be.name, err });
+                        };
+                        continue;
+                    }
+                    const dylib = (packagedBackendDylibPath(allocator, exe_dir, be.name, be.lang) catch continue) orelse continue;
+                    defer allocator.free(dylib);
+                    var path_z: [1024]u8 = undefined;
+                    const path_zt = util.nullTerminate(dylib, &path_z);
+                    registry.register(be.name, path_zt) catch |err| {
+                        std.debug.print("[suji] load failed for {s}: {}\n", .{ be.name, err });
+                    };
+                }
+            }
+        } else if (config.backend) |be| {
+            if (std.mem.eql(u8, be.lang, "node")) {
+                const node_dir = std.fmt.allocPrintSentinel(allocator, "{s}/backends/{s}", .{ exe_dir, be.lang }, 0) catch return;
+                defer allocator.free(node_dir);
+                startNodeBackend(allocator, node_dir) catch |err| {
+                    std.debug.print("[suji] node start failed: {}\n", .{err});
+                };
+                return;
+            }
+            const dylib = (try packagedBackendDylibPath(allocator, exe_dir, be.lang, be.lang)) orelse return;
+            defer allocator.free(dylib);
+            var path_z: [1024]u8 = undefined;
+            const path_zt = util.nullTerminate(dylib, &path_z);
+            registry.register(be.lang, path_zt) catch |err| {
+                std.debug.print("[suji] load failed: {}\n", .{err});
+            };
+        }
+        return;
+    }
+
     if (config.isMultiBackend()) {
         if (config.backends) |backends| {
             for (backends) |be| {
