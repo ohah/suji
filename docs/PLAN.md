@@ -424,8 +424,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 **목표**: Zig 전용 프레임워크로 완성도 올리기
 
 - [x] fs — 파일 시스템 (Phase 5-F: 코어 API + 5 SDK 노출 + sandbox + typed wrapper)
-- [x] dialog — 시스템 다이얼로그 (Phase 5-A: NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 5 SDK)
-- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
+- [x] dialog — 시스템 다이얼로그 (Phase 5-A: macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Windows TaskDialog/commdlg + 5 SDK)
+- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
 - [x] menu — 메뉴바 (Phase 5-D: macOS NSMenu + submenu/item/checkbox/separator + click + 5 SDK)
   > **옛 스펙 vs 실제 구현**: 옛 PLAN은 `plugins/{fs,dialog,tray,menu}/` 분리 dylib을
   > 의도했으나, 실제 구현은 **코어 API + 5 SDK wrapper** 형태. OS native API (Cocoa/
@@ -438,12 +438,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   > |---|---|---|---|
   > | clipboard | `clipboardReadText/WriteText/Clear` | — | `clipboard_read_text` 등 |
   > | shell | `shellOpenExternal/ShowItemInFolder/Beep` | — | `shell_*` |
-  > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (sheet modal) | `handleDialog*` |
-  > | tray | `createTray/setTrayMenu/destroyTray` | — (Cocoa 직접) | `tray_*` |
-  > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` | `notification_*` |
-  > | menu | `setApplicationMenu/resetApplicationMenu` | — (Cocoa 직접) | `handleMenu*` |
+  > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (macOS sheet modal; Windows Win32 path는 cef.zig) | `handleDialog*` |
+  > | tray | `createTray/setTrayMenu/destroyTray` | — (macOS Cocoa / Windows Win32 직접) | `tray_*` |
+  > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
+  > | menu | `setApplicationMenu/resetApplicationMenu/menu_popup` | — (macOS Cocoa 직접) | `handleMenu*` |
   > | fs | `fsSandboxCheck` etc | — | `handleFs*` (`src/main.zig`) |
-  > | globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (Carbon) | `handleGlobalShortcut*` |
+  > | globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
   > | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
   > | windows (멀티) | `createWindow/destroyWindow/setBounds/...` | — | `src/core/window_ipc.zig` |
   >
@@ -472,7 +472,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           최적이자 의도된 설계: 코어 자동 quit 없음, 사용자 코드가 Electron canonical
           `window:all-closed`+`suji.quit()` 직접 작성(Electron 동등). Chrome runtime
           전환 시에만 개선 가능 → 현 상태로 종결(won't-fix-by-design).
-    - [x] `set_title` / `set_bounds` 플랫폼별 구현 (macOS NSWindow 완료, Linux GTK / Windows Win32는 no-op 스텁)
+    - [x] `set_title` / `set_bounds` 플랫폼별 구현 (CEF Views 경로는 macOS/Linux/Windows 공통, macOS legacy fallback은 NSWindow)
     - [x] IPC `__window` 자동 태깅 — wire 레벨. `cef.zig:handleBrowserInvoke`에서 sender
           browser의 WM id를 `injectWindowField`로 request JSON에 merge. 이미 태그된 요청,
           비-객체/빈 객체/whitespace 엣지 케이스 모두 처리. `window_ipc.injectWindowField`
@@ -619,10 +619,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
               E2E 32 케이스 + Linux Xvfb/dbus openExternal x-scheme-handler + openPath MIME handler +
               showItemInFolder fake FileManager1 + beep 반복 호출 + trashItem round-trip E2E. 4개 SDK 노출.
         - [x] **Dialog** (`showMessageBox/showErrorBox/showOpenDialog/showSaveDialog` + Sync 변종 3개) —
-              NSAlert/NSOpenPanel/NSSavePanel + sheet modal. `src/platform/dialog.m` ObjC block
-              completion handler + nested NSApp event loop. windowId 첫 인자로 sheet vs
-              free-floating 분기 (Electron 두-인자 오버로드). showsTagField + filters + checkbox.
-              `documents/dialog.mdx`. 4개 SDK 노출.
+              macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Windows TaskDialogIndirect/
+              MessageBoxW/GetOpenFileNameW/IFileOpenDialog/GetSaveFileNameW. `src/platform/dialog.m`
+              ObjC block completion handler + nested NSApp event loop. windowId 첫 인자는 macOS에서
+              sheet, Windows에서는 free-floating native dialog. showsTagField + filters + checkbox.
+              Linux는 graceful stub. `documents/dialog.mdx`. 5개 SDK 노출.
         - **새로 깔린 인프라**: `.m` 파일 컴파일 룰 (build.zig + `-fobjc-arc`) — 향후 ObjC block
               필요 API (Notification completion, NSAnimation, vibrancy 등) 재사용 가능.
   - [x] **Phase 5: 라이프사이클 이벤트** — close/closed/all-closed/resized/moved/focus/blur는
@@ -636,16 +637,18 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
         will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
         미발화). frameless drag 라우팅은 macOS/Linux 완료 — Windows는 후속.
-  - [x] **Phase 5-B: Tray v1** — NSStatusItem + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
+  - [x] **Phase 5-B: Tray v1** — macOS NSStatusItem + Windows Shell_NotifyIconW + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
         (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
-        representedObject 라우팅. v1 한계: 아이콘 이미지 미지원(텍스트만), tray:click 미지원,
-        서브메뉴/checkbox 없음. 회귀 테스트 1건. `documents/tray.mdx`.
-  - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + Linux D-Bus notification daemon + 5 진입점.
+        representedObject 라우팅, Windows hidden message-only window + HMENU popup. Linux는 graceful stub.
+        v1 한계: custom icon 후속, macOS tray icon click 단독 hook 미지원, 서브메뉴/checkbox 없음.
+        회귀 테스트 1건. `documents/tray.mdx`.
+  - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + Linux D-Bus notification daemon + Windows Shell_NotifyIcon balloon + 5 진입점.
         `notification.{isSupported, requestPermission, show, close}` + `notification:click`
         이벤트 라우팅. `src/platform/notification.m` ObjC block completion handler 인프라
         재사용 + SujiNotificationDelegate. Linux는 `org.freedesktop.Notifications`
         `GetServerInformation`/`Notify`/`CloseNotification` 직접 호출 + fake daemon runtime E2E.
+        Windows는 notification 전용 tray icon + `NIF_INFO` balloon + `NIN_BALLOONUSERCLICK` 라우팅.
         Bundle ID 검사 — macOS `suji dev` loose binary는 stub 동작, `.app` 번들 후 실 알림 표시.
         v1 한계: actions/buttons, reply, custom icon 미지원. 회귀 + E2E + Zig SDK 단위.
         `documents/notification.mdx`.
@@ -654,9 +657,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         `menu.setApplicationMenu/resetApplicationMenu`, `submenu/item/checkbox/separator`,
         `menu:click {click}` 이벤트 라우팅. Frontend `@suji/api` + Zig/Rust/Go/Node SDK 노출.
         회귀 테스트 + SDK 단위 + `tests/e2e/menu.test.ts`. `documents/menu.mdx`.
-  - [x] **Phase 5-E: 글로벌 단축키** — macOS Carbon RegisterEventHotKey (NSEvent monitor가 아닌
-        Carbon path, 권한 불필요). 5 SDK 모두 노출(`globalShortcut.{register/unregister/
+  - [x] **Phase 5-E: 글로벌 단축키** — macOS Carbon RegisterEventHotKey + Windows RegisterHotKey
+        (macOS 일반 키는 NSEvent monitor가 아닌 Carbon path, 권한 불필요). 5 SDK 모두 노출(`globalShortcut.{register/unregister/
         unregisterAll/isRegistered}`) + accelerator 파싱 + `globalShortcut:trigger` 이벤트.
+        미디어키는 macOS NSEvent system-defined monitor 경로. Linux는 graceful stub.
         `src/platform/global_shortcut.m` + 5 SDK + e2e.
   - [x] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
         Frontend JS + Zig/Rust/Go/Node SDK wrapper, 단위/회귀/E2E 테스트, 문서 추가.
@@ -1372,11 +1376,11 @@ suji build → 결과물:
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
 | 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat(mtime ms)/mkdir/readdir/rm + 5 SDK 노출 |
-| 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. NSAlert/NSOpenPanel/NSSavePanel + sheet modal + 4 SDK 노출 |
-| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + 컨텍스트 메뉴 + click 이벤트 |
+| 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Windows TaskDialog/commdlg, Linux stub + 5 SDK 노출 |
+| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
-| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus |
-| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key (권한 불필요) + 5 SDK + accelerator 파싱 |
+| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Windows RegisterHotKey + 5 SDK + accelerator 파싱 |
 | 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | ✅ Phase 5. close/closed/all-closed/resized/moved/focus/blur (macOS NSWindowDelegate) |
 | 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ✅ `windows.create()` + Phase 3 외형 옵션 풀 셋 (frame/transparent/parent) |
 | 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ✅ (dylib 재로드 + Vite HMR) |
@@ -1420,9 +1424,9 @@ suji build → 결과물:
 | 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. macOS NSPasteboard + Linux GTK clipboard text/HTML + Windows CF_UNICODETEXT/CF_HTML. 4 SDK + macOS E2E 37 케이스 + Linux Xvfb + Windows text/HTML E2E |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
 | 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
-| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + 5 SDK |
-| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus |
-| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + scheme 사전 검사 + 4 SDK + Linux x-scheme-handler E2E |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Windows RegisterHotKey + 5 SDK |
+| 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
+| 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + Windows ShellExecuteW + scheme 사전 검사 + 5 SDK + Linux x-scheme-handler E2E |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
@@ -1551,11 +1555,11 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
       Linux libsecret/Secret Service, Windows Credential Manager, multi-service 격리)
     - `app.requestUserAttention`/`cancelUserAttentionRequest` (NSApp dock bounce)
     - `app.getPath` (7 표준 키: home/appData/userData/temp/desktop/documents/downloads)
-    - `shell.trashItem` (NSFileManager)
+    - `shell.trashItem` (macOS NSFileManager, Linux GIO, Windows SHFileOperation)
     - `powerMonitor` (macOS NSWorkspace, Linux logind/ScreenSaver DBus, Windows
       WM_POWERBROADCAST/WTS — 4 채널 callback→EventBus E2E + 플랫폼 bridge 회귀)
 
-    Linux/Windows 후속: 남은 macOS-only 구현의 cross-platform 동등 구현 필요.
+    Linux/Windows 후속: 남은 macOS-only 구현(대표적으로 메뉴바/context menu, 일부 창 외형 옵션)의 cross-platform 동등 구현 필요.
 17. ✅ **`windows.createView` (Electron WebContentsView 동등) — Phase 17-B CEF Views 전환**.
     macOS/Linux/Windows 기본 경로는 CEF-managed `CefWindow + CefBrowserView` 기반. id 풀 공유 +
     모든 webContents API view 호환. 8 SDK 메서드 + view-created/view-destroyed 이벤트 +

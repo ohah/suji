@@ -128,9 +128,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.windows.openDevTools(id) / toggleDevTools(id)  — DevTools (Phase 4-C)
 // suji.windows.copy(id) / paste(id) / findInPage(id, "x", .{})  — 편집/검색 (Phase 4-E)
 // suji.windows.setAudioMuted(id, true) / isAudioMuted(id)  — webContents audio mute
-// suji.windows.setOpacity(id, 0.5) / getOpacity(id)            — NSWindow alphaValue
+// suji.windows.setOpacity(id, 0.5) / getOpacity(id)            — NSWindow alphaValue / Win32 layered window
 // suji.windows.setBackgroundColor(id, "#ff8800")               — NSWindow.setBackgroundColor (#RRGGBB[AA])
-// suji.windows.setHasShadow(id, false) / hasShadow(id)          — NSWindow.hasShadow round-trip
+// suji.windows.setHasShadow(id, false) / hasShadow(id)          — NSWindow.hasShadow / Win32 shadow helper
 // suji.windows.printToPDF(id, "/tmp/x.pdf")  — PDF 인쇄 (Phase 4-D, 결과는 window:pdf-print-finished)
 // suji.windows.capturePage(id, "/tmp/s.png", rect?)  — 스크린샷 PNG (CDP,
 //   결과는 window:page-captured; rect{x,y,width,height} 지정 시 부분 영역만)
@@ -146,9 +146,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.powerMonitor.getSystemIdleState(60)  — "active"|"idle"|"locked"
 //   (잠금 시 "locked" 우선, 아니면 idle_seconds ≥ threshold)
 // suji.shell.openExternal("https://...") / showItemInFolder("/path") / beep() / trashItem(path)
-//   (openExternal/openPath: macOS NSWorkspace / Linux GIO default handler,
-//    showItemInFolder: macOS NSWorkspace reveal / Linux FileManager1 D-Bus,
-//    beep: macOS NSBeep / Linux GDK display beep,
+//   (openExternal/openPath: macOS NSWorkspace / Linux GIO default handler / Windows ShellExecuteW,
+//    showItemInFolder: macOS NSWorkspace reveal / Linux FileManager1 D-Bus / Windows explorer.exe,
+//    beep: macOS NSBeep / Linux GDK display beep / Windows MessageBeep,
 //    trashItem: macOS NSFileManager / Linux GIO / Windows SHFileOperation)
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")
@@ -160,15 +160,15 @@ fn onAllClosed(_: suji.Event) void {
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
 // suji.dialog.showErrorBox("Title", "content")
 // suji.tray.create("🚀 App", "tooltip") / setMenuRaw(id, "...items...") / destroy(id)
-//                                                                       (macOS NSStatusItem)
+//                                                                       (macOS NSStatusItem / Windows Shell_NotifyIconW)
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
-//                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus)
+//                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus / Windows Shell_NotifyIcon balloon)
 // suji.menu.setApplicationMenuRaw("\"items\":[...]") / resetApplicationMenu()
 //   / popup(items, {x?,y?})  — 임의 위치 컨텍스트 메뉴(NSMenu
 //   popUpMenuPositioningItem, x/y 미지정=커서; 동기 모달)
 //                                       (macOS NSMenu, menu:click 이벤트)
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
-//   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key, globalShortcut:trigger 이벤트)
+//   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key / Windows RegisterHotKey, globalShortcut:trigger 이벤트)
 //   미디어키: register("MediaPlayPause"|"MediaNextTrack"|"MediaPreviousTrack"|
 //   "MediaStop", click) — Electron 토큰 패리티. Carbon 불가분 NSEvent
 //   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
@@ -359,24 +359,24 @@ suji.platform                                                // "macos" | "linux
 // await windows.setViewBounds(viewId, {...}) / setViewVisible(viewId, bool) / getChildViews(host)
 //   viewId는 windowId와 같은 풀 — windows.loadURL(viewId,...) / executeJavaScript / openDevTools
 //   등 모든 webContents API가 view에도 동작.
-//   ⚠️ destroyView는 known limitation (render subprocess race) — host 창 close 시 자동 정리 권장,
-//   동적 hide/show는 setViewVisible 사용. 17-B에서 안정화.
+//   destroyView는 17-B CEF Views 경로에서 안정화 — target child cleanup/host 생존/
+//   remaining view/recreate를 E2E로 검증. 단순 동적 hide/show는 setViewVisible 사용.
 
 // import { clipboard, shell, dialog } from '@suji/api';
 // await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard / Linux GTK text / Windows CF_UNICODETEXT)
 // await clipboard.readHTML() / writeHTML(html)                            (macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML)
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
-//   (macOS NSWorkspace + NSFileManager, Linux GIO/FileManager1 shell APIs)
-// await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert)
-// await dialog.showMessageBox(windowId, options)  — sheet (부모 창 attach, dialog.m)
-// await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel)
-// await dialog.showOpenDialog(windowId, options) — sheet
-// await dialog.showSaveDialog({ defaultPath:'~/x.txt', nameFieldLabel })  (NSSavePanel)
-// await dialog.showSaveDialog(windowId, options) — sheet
+//   (macOS NSWorkspace + NSFileManager, Linux GIO/FileManager1, Windows ShellExecute/explorer/MessageBeep/SHFileOperation)
+// await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert / Windows TaskDialog)
+// await dialog.showMessageBox(windowId, options)  — macOS sheet, Windows free-floating
+// await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel / Win32 file dialog)
+// await dialog.showOpenDialog(windowId, options) — macOS sheet, Windows free-floating
+// await dialog.showSaveDialog({ defaultPath:'~/x.txt', nameFieldLabel })  (NSSavePanel / Win32 file dialog)
+// await dialog.showSaveDialog(windowId, options) — macOS sheet, Windows free-floating
 // await dialog.showErrorBox(title, content)                               (간이 에러 popup)
 
 // import { globalShortcut } from '@suji/api';
-// await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key)
+// await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key / Windows RegisterHotKey)
 // await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 
@@ -460,14 +460,15 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await clipboard.readText() / writeText("hi")
 // await clipboard.readHTML() / writeHTML("<b>x</b>")  // macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
-//   (Linux: openExternal/openPath/trashItem = GIO, showItemInFolder = FileManager1, beep = GDK)
+//   (Linux: openExternal/openPath/trashItem = GIO, showItemInFolder = FileManager1, beep = GDK;
+//    Windows: ShellExecute/explorer/MessageBeep/SHFileOperation)
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
 // await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
 // await dialog.showErrorBox(title, content)
 // const { trayId } = await tray.create({ title:"🚀", tooltip:"..." })
 // await tray.setMenu(trayId, [{label:"Quit",click:"quit"},{type:"separator"}])
 // await tray.destroy(trayId) — suji.on('tray:menu-click', ({trayId,click}) => ...)
-// const sup = await notification.isSupported() (macOS Bundle ID 필수 / Linux D-Bus daemon)
+// const sup = await notification.isSupported() (macOS Bundle ID 필수 / Linux D-Bus daemon / Windows Shell_NotifyIcon balloon)
 // await notification.requestPermission() / show({title,body,silent}) / close(notificationId)
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])

@@ -5,30 +5,30 @@ description: 시스템 트레이 아이콘 + 컨텍스트 메뉴 (Electron Tray)
 
 # Tray
 
-Electron `Tray` 호환 — macOS 메뉴바, Linux/Windows 시스템 트레이 (현재 macOS만).
-Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
+Electron `Tray` 호환 — macOS 메뉴바 `NSStatusItem`, Windows system tray
+`Shell_NotifyIconW`. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
 
 ## 플랫폼 지원
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `tray.create` | ✅ NSStatusItem | stub (trayId:0) | stub |
-| `tray.setTitle/setTooltip` | ✅ | stub (false) | stub |
-| `tray.setMenu` | ✅ NSMenu | stub | stub |
-| `tray.destroy` | ✅ | stub | stub |
-| Click event | ✅ `tray:menu-click` | — | — |
+| `tray.create` | ✅ NSStatusItem | stub (`trayId:0`) | ✅ Shell_NotifyIconW |
+| `tray.setTitle/setTooltip` | ✅ title + tooltip | stub (`false`) | ✅ tooltip update (`setTitle`도 tooltip으로 매핑) |
+| `tray.setMenu` | ✅ NSMenu | stub (`false`) | ✅ HMENU popup |
+| `tray.destroy` | ✅ | stub (`false`) | ✅ `NIM_DELETE` |
+| Click event | ✅ `tray:menu-click` for menu items | — | ✅ left click + menu item click |
 
-Linux/Windows는 향후 GTK `AppIndicator` / Win32 `Shell_NotifyIcon` plug-in. 현재 호출은
-`{trayId: 0}` 또는 `{success: false}` 즉시 반환.
+Linux는 향후 AppIndicator/StatusNotifierItem 계열 구현 전까지 graceful stub이다.
+Windows는 hidden message-only window가 tray callback과 popup menu command를 받는다.
 
 ## v1 한계
 
 | 미지원 | 설명 |
 |---|---|
-| **아이콘 이미지** | `iconPath` / NSImage / template 미지원. v1은 `title` 텍스트만 — 이모지 가능 (예: `"🚀 Suji"`). v2에서 NSImage 로딩. |
-| **아이콘 자체 클릭 (`tray:click`)** | NSStatusItem은 메뉴 설정 시 클릭 → 자동 메뉴 표시. 메뉴 없는 클릭 hook은 별도 작업. |
+| **커스텀 아이콘 이미지** | macOS v1은 `title` 텍스트만 — 이모지 가능 (예: `"🚀 Suji"`). Windows는 기본 app icon(`IDI_APPLICATION`) 사용. `iconPath`/template 로딩은 후속. |
+| **macOS 아이콘 자체 클릭 (`tray:click`)** | NSStatusItem은 메뉴 설정 시 클릭 → 자동 메뉴 표시. 메뉴 없는 클릭 hook은 별도 작업. Windows left click은 `tray:menu-click`에 빈 `click` 값으로 emit. |
 | **서브메뉴 / checkbox / radio** | NSMenu는 지원하나 v1은 평면 메뉴 + separator만. |
-| **오른쪽 클릭 구분** | NSStatusItem.button.action은 left/right 통합. |
+| **오른쪽 클릭 구분** | macOS NSStatusItem.button.action은 left/right 통합. Windows right click은 popup menu를 표시한다. |
 
 ## API
 
@@ -133,15 +133,25 @@ await tray.setMenu(trayId, [
   `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
 - NSApp UI thread에서만 호출 — BackendRegistry/EventBus 글로벌 안전.
 
+### Windows 경로
+- `win_pump` hidden message-only window가 `WM_TRAY` / `WM_COMMAND`를 수신한다.
+- `create`는 `Shell_NotifyIconW(NIM_ADD)`로 기본 app icon과 tooltip을 등록한다.
+- `setMenu`는 `CreatePopupMenu` + `AppendMenuW`로 평면 HMENU를 구성하고, right click에서
+  `TrackPopupMenu`를 호출한다.
+- left click / double click은 `tray:menu-click {"trayId":N,"click":""}`를 emit한다.
+- menu item click은 command id를 `(trayId, click)`으로 매핑해 같은 이벤트 채널로 emit한다.
+
 ### JSON wire 안전성
 - `title/tooltip/click/label` 모두 `escapeJsonStrFull` (newline/tab 보존, control char `\u00XX`).
 - 한글/이모지/ZWJ 시퀀스 안전 통과.
 
 ## E2E 한계
 
-OS 메뉴바 NSStatusItem은 puppeteer로 직접 클릭 불가. 자동화는:
+OS 메뉴바 `NSStatusItem`과 Windows system tray popup은 puppeteer로 직접 클릭하기 어렵다.
+자동화는:
 1. **회귀 가드** (`tests/window_manager_test.zig`) — 정적 ObjC selector / cmd / SDK 노출 검증.
 2. **응답 형식 검증** — IPC가 `{trayId: N}`, `{success: bool}` 응답하는지.
-3. **수동 검증 권장** — `tray.create` + `tray.setMenu` 후 메뉴바 직접 클릭.
+3. **Windows build/source 가드** — `Shell_NotifyIconW`/`WM_TRAY`/`WM_COMMAND` wiring을 빌드와 회귀 grep으로 고정.
+4. **수동 검증 권장** — `tray.create` + `tray.setMenu` 후 macOS 메뉴바 또는 Windows system tray를 직접 클릭.
 
 `tray:menu-click` 이벤트 검증은 `osascript` System Events API로 메뉴 항목 호출 가능하지만 Accessibility 권한 의존이라 RUN_DESTRUCTIVE 게이트 권장.

@@ -24,16 +24,16 @@ suji dev
 | Zig 백엔드 SDK | [`backend-zig.mdx`](./backend-zig.mdx) |
 | Rust / Go / Node SDK | [`backend-rust.mdx`](./backend-rust.mdx), [`backend-go.mdx`](./backend-go.mdx), [`backend-node.mdx`](./backend-node.mdx) |
 | 멀티윈도우 + webContents (Phase 4-A 네비/JS, 4-B 줌, 4-C DevTools, 4-E 편집/검색) | [`multi-window.mdx`](./multi-window.mdx) |
-| Native dialogs (Phase 5-A — showMessageBox/Open/Save/ErrorBox + sheet modal) | [`dialog.mdx`](./dialog.mdx) |
-| Clipboard / Shell (Phase 5-A — readText/writeText, openExternal/showItemInFolder/beep/trashItem) | [`clipboard-shell.mdx`](./clipboard-shell.mdx) |
-| Tray (Phase 5-B — NSStatusItem + 컨텍스트 메뉴 + click 이벤트) | [`tray.mdx`](./tray.mdx) |
-| Notification (Phase 5-C — UNUserNotificationCenter + click 이벤트) | [`notification.mdx`](./notification.mdx) |
-| Menu (Phase 5-D — 애플리케이션 메뉴바 커스터마이즈 + click 이벤트) | [`menu.mdx`](./menu.mdx) |
+| Native dialogs (Phase 5-A — macOS sheet + Windows Win32 dialogs) | [`dialog.mdx`](./dialog.mdx) |
+| Clipboard / Shell (Phase 5-A — clipboard + openExternal/showItemInFolder/beep/trashItem) | [`clipboard-shell.mdx`](./clipboard-shell.mdx) |
+| Tray (Phase 5-B — macOS NSStatusItem + Windows Shell_NotifyIconW + click 이벤트) | [`tray.mdx`](./tray.mdx) |
+| Notification (Phase 5-C — macOS UNUserNotificationCenter + Linux D-Bus + Windows balloon) | [`notification.mdx`](./notification.mdx) |
+| Menu (Phase 5-D — 애플리케이션 메뉴바 + menu.popup + click 이벤트) | [`menu.mdx`](./menu.mdx) |
 | File system (Phase 5-F — readFile/writeFile/stat/mkdir/readdir/rm + sandbox) | [`fs.mdx`](./fs.mdx) |
 | 앱 데이터 / 캐시 위치 (Electron `userData` 동등 — 3 OS 표준) | [`cache.mdx`](./cache.mdx) |
 | 보안 모델 (fs sandbox · V8 binding · IPC 검증 · Electron 비교) | [`security.mdx`](./security.mdx) |
 | macOS App Sandbox 자동화 (Mac App Store 대비 entitlements) | [`sandbox.mdx`](./sandbox.mdx) |
-| Global shortcut (Phase 5-E — Carbon Hot Key + accelerator) | [`global-shortcut.mdx`](./global-shortcut.mdx) |
+| Global shortcut (Phase 5-E — macOS Carbon Hot Key + Windows RegisterHotKey + accelerator) | [`global-shortcut.mdx`](./global-shortcut.mdx) |
 | crashReporter (CEF Crashpad/Breakpad 1차) | [`crash-reporter.mdx`](./crash-reporter.mdx) |
 | autoUpdater (manifest check + artifact download + SHA-256 verify + prepareInstall + quit-and-install) | [`auto-updater.mdx`](./auto-updater.mdx) |
 | Window lifecycle events (Phase 5 — resize/focus/blur/move via native/CEF Views delegates) | [`window-lifecycle.mdx`](./window-lifecycle.mdx) |

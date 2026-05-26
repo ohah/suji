@@ -12,19 +12,20 @@ API와 호환되는 응답 형식.
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `showMessageBox` | ✓ NSAlert | stub (response:0) | stub |
-| `showErrorBox` | ✓ NSAlert (critical) | stub | stub |
-| `showOpenDialog` | ✓ NSOpenPanel | stub (canceled:true) | stub |
-| `showSaveDialog` | ✓ NSSavePanel | stub | stub |
+| `showMessageBox` | ✓ NSAlert | stub (response:0) | ✓ TaskDialogIndirect, MessageBoxW fallback |
+| `showErrorBox` | ✓ NSAlert (critical) | no-op | ✓ MessageBoxW |
+| `showOpenDialog` | ✓ NSOpenPanel | stub (canceled:true) | ✓ GetOpenFileNameW / IFileOpenDialog(folder) |
+| `showSaveDialog` | ✓ NSSavePanel | stub (canceled:true) | ✓ GetSaveFileNameW |
 
-Linux/Windows는 향후 GTK/Win32 plug-in 작업. 현재는 호출 가능하지만 dialog 안 뜨고
-"canceled/default" 응답 즉시 반환 — `<input type=file>` HTML 등으로 폴백 권장.
+Linux는 향후 GTK file chooser/message dialog 작업 전까지 graceful stub이다.
+Windows는 Win32 native dialog를 사용한다. 단, parent window에 attach되는 sheet modal은
+macOS 전용이며 Windows dialog는 free-floating modal로 뜬다.
 
 ## 모달 동작 — Sheet vs Free-floating
 
 두 가지 modal 모드 지원 (Electron 매칭):
 
-### Sheet (부모 창 attach)
+### Sheet (부모 창 attach, macOS)
 
 첫 인자에 `windowId` 전달하면 부모 창 타이틀바에서 슬라이드 다운하는 sheet:
 
@@ -39,6 +40,7 @@ const r = await dialog.showMessageBox(windowId, {
 ```
 
 **다른 창 입력은 가능** — sheet은 attach된 부모 창만 차단. macOS HIG 표준 UX.
+Linux/Windows에서는 `windowId` 인자를 받아도 native sheet로 attach하지 않고 일반 dialog 경로를 사용한다.
 
 내부 구현: `src/platform/dialog.m`의 ObjC `^block` completion handler + nested
 NSApp event loop로 동기 대기. CEF 메시지 루프와 호환.
@@ -55,23 +57,24 @@ const r = await dialog.showMessageBox({ message: "..." });
 
 ## API
 
-모든 함수는 Electron 두-인자 오버로드 — 첫 인자 `windowId: number`면 sheet, 옵션
-객체면 free-floating.
+모든 함수는 Electron 두-인자 오버로드 — 첫 인자 `windowId: number`면 macOS에서는
+sheet, Windows/Linux에서는 native 기본/free-floating 경로를 사용한다. 옵션 객체만 넘기면
+free-floating.
 
 ```ts
 import { dialog } from '@suji/api';
 
 // Async (권장)
 dialog.showMessageBox(options): Promise<{ response, checkboxChecked }>;
-dialog.showMessageBox(windowId, options): Promise<...>;            // sheet
+dialog.showMessageBox(windowId, options): Promise<...>;            // macOS sheet, Windows free-floating
 
 dialog.showErrorBox(title: string, content: string): Promise<void>;
 
 dialog.showOpenDialog(options?): Promise<{ canceled, filePaths }>;
-dialog.showOpenDialog(windowId, options?): Promise<...>;           // sheet
+dialog.showOpenDialog(windowId, options?): Promise<...>;           // macOS sheet, Windows free-floating
 
 dialog.showSaveDialog(options?): Promise<{ canceled, filePath }>;
-dialog.showSaveDialog(windowId, options?): Promise<...>;           // sheet
+dialog.showSaveDialog(windowId, options?): Promise<...>;           // macOS sheet, Windows free-floating
 
 // Sync 변종 — 응답 shape만 다름 (raw 값 반환). 두-인자 오버로드 동일 지원.
 dialog.showMessageBoxSync(options): Promise<number>;
@@ -113,6 +116,13 @@ if (response === 0) {
 | `'error'` | NSAlertStyleCritical | ❗ |
 | `'question'` | NSAlertStyleWarning | ⚠️ (Electron과 동일 — macOS는 question 별도 스타일 없음) |
 | `'none'` (기본) | NSAlertStyleWarning | ⚠️ |
+
+### Windows 메시지 박스
+
+Windows는 가능한 경우 `TaskDialogIndirect`를 런타임 해상도(`LoadLibraryW` +
+`GetProcAddress`)로 호출한다. SxS manifest나 OS 상태 때문에 사용할 수 없으면
+`MessageBoxW`로 fallback한다. TaskDialog path는 커스텀 버튼 라벨을 보존하지만,
+fallback path는 Win32 표준 버튼 조합(`OK`, `OK/Cancel`, `Yes/No`, `Yes/No/Cancel`)으로 축약된다.
 
 ## showErrorBox
 
@@ -164,9 +174,10 @@ if (!canceled) {
 
 ### filters
 
-`{ name, extensions }` 배열. 현재 macOS UI는 필터 그룹 dropdown을 더 이상 노출하지
+`{ name, extensions }` 배열. macOS UI는 필터 그룹 dropdown을 더 이상 노출하지
 않아 (Big Sur부터) **모든 그룹의 extensions가 통합되어 허용** — `name` 필드는
-호환성용이며 화면에 표시되지 않음. 확장자는 점 없이.
+호환성용이며 화면에 표시되지 않음. Windows는 `OPENFILENAMEW.lpstrFilter` 형식으로
+필터 그룹을 전달한다. 확장자는 점 없이.
 
 `extensions: ['*']`이거나 빈 배열이면 모든 파일 허용.
 
@@ -209,6 +220,7 @@ if (!canceled) {
 
 NSSavePanel은 기본적으로 overwrite confirmation을 사용자가 끄지 못하게 함 — Electron의
 `'showOverwriteConfirmation'` 옵션은 macOS에서 항상 ON 상태로 무시됨.
+Windows는 `showOverwriteConfirmation`이 true일 때 `OFN_OVERWRITEPROMPT`를 사용한다.
 
 ### showsTagField
 
@@ -301,7 +313,7 @@ await dialog.showErrorBox("Error", "Something failed");
 
 ## Electron 대비 누락 항목 (현재 v1)
 
-향후 plug-in 작업으로 채울 항목들. 현재는 호출하면 무시되거나 stub 응답.
+Electron 대비 아직 노출하지 않거나 플랫폼별 native backend에서 무시되는 옵션들.
 
 | 누락 항목 | Electron API | 현재 동작 | 비고 |
 |---|---|---|---|
@@ -313,15 +325,18 @@ await dialog.showErrorBox("Error", "Something failed");
 | **`type: 'none'` 정확 매칭** | macOS는 아이콘 없음 | NSAlertStyleWarning(경고 아이콘) | NSAlert는 항상 app icon overlay — 완전 제거 까다로움 |
 | **`type: 'question'` 정확 매칭** | macOS는 question 아이콘 | NSAlertStyleWarning | macOS NSAlert에 question 스타일 없음 (Electron도 동일 매핑) |
 | **`showCertificateTrustDialog`** | 인증서 신뢰 dialog | 미구현 | 매우 niche |
-| **Windows 전용 옵션** (`promptToCreate` / `dontAddToRecent` / `noLink` / `normalizeAccessKeys`) | Windows 한정 | n/a | macOS에서 의미 없음 |
+| **Windows 전용 옵션** (`promptToCreate` / `dontAddToRecent` / `noLink` / `normalizeAccessKeys`) | Windows 한정 | 일부 미반영 | Windows option 매핑은 후속 |
 
 ## 알려진 한계 (구현 제약)
 
-- **macOS만 동작**: Linux/Windows는 stub (canceled/default 응답 즉시).
-- **`buttons` 16개 제한**: NSAlert UI 제약 + stack alloc 안전성.
+- **Linux는 stub**: showOpen/Save는 canceled 응답, messageBox는 default 응답, errorBox는 no-op.
+- **Sheet modal은 macOS 전용**: Windows는 parent window attach 없이 free-floating dialog를 사용한다.
+- **`buttons` 제한**: macOS NSAlert path는 16개, Windows TaskDialog path는 8개까지 커스텀 버튼을 보존한다.
 - **Dialog 텍스트 4KB 제한**: `nsStringFromSlice` 한도 — 그 이상 긴 메시지는 잘림.
 - **filters `name` UI 미표시**: macOS Big Sur+에서 NSOpenPanel은 필터 그룹 dropdown
   미노출 — 모든 extensions가 통합 허용.
+- **Windows 파일 dialog 옵션 일부 제한**: `buttonLabel`, `message`, `showsTagField`,
+  `treatPackageAsDirectory`, alias 처리 같은 macOS 전용 옵션은 Win32 dialog에서 무시된다.
 
 ## E2E 자동화 한계
 

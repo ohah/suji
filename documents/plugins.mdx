@@ -101,12 +101,12 @@ export fn plugin_destroy() callconv(.c) void { ... }
 |---|---|---|---|
 | clipboard | `clipboardReadText` 등 | — | `clipboard_*` |
 | shell | `shellOpenExternal` 등 | — | `shell_*` |
-| dialog | `showMessageBox` 등 | `src/platform/dialog.m` | `handleDialog*` |
-| tray | `createTray` 등 | — (Cocoa 직접) | `tray_*` |
-| notification | `notificationShow` 등 | `src/platform/notification.m` | `notification_*` |
-| menu | `setApplicationMenu` 등 | — (Cocoa 직접) | `handleMenu*` |
+| dialog | `showMessageBox` 등 | `src/platform/dialog.m` (macOS sheet; Windows Win32 path는 cef.zig) | `handleDialog*` |
+| tray | `createTray` 등 | — (macOS Cocoa / Windows Win32 직접) | `tray_*` |
+| notification | `notificationShow` 등 | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
+| menu | `setApplicationMenu/menu_popup` 등 | — (macOS Cocoa 직접) | `handleMenu*` |
 | fs | `fsSandboxCheck` 등 | — | `handleFs*` |
-| globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (Carbon) | `handleGlobalShortcut*` |
+| globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
 | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
 | windows | `createWindow` 등 | — | `src/core/window_ipc.zig` |
 

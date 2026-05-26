@@ -83,7 +83,8 @@ await windows.setBounds(2, { x: 100, y: 100, width: 1200, height: 800 });
 ```
 
 - macOS: Cocoa 좌표 자동 변환 (화면 좌상단 기준 Y 입력)
-- Linux / Windows: no-op (스텁) — 추후 GTK/Win32 구현 예정
+- CEF Views 경로: macOS / Linux / Windows 모두 `CefWindow.set_bounds`로 적용
+- macOS legacy fallback: Cocoa 좌표 변환 후 NSWindow bounds 적용
 
 ## webContents — 네비게이션 / JS 실행 (Phase 4-A)
 
@@ -158,7 +159,9 @@ await windows.executeJavaScript(2, "console.log('hi')");
 
 응답은 모두 `{from:"zig-core", cmd, windowId, ok}` 형태 (get_url/is_loading은 추가 필드). caller가 JSON 파싱.
 
-**Cross-platform**: 모두 macOS만 동작 (Linux/Windows는 CEF 자체 창 핸들이라 추후 구현). 미지원 플랫폼에선 silent no-op.
+**Cross-platform**: CEF Views 경로에서는 macOS/Linux/Windows 모두 같은 `windowId` 기반
+webContents API를 사용한다. 일부 외형 옵션은 플랫폼별 native window 지원 범위가 다르며,
+세부 사항은 아래 Phase 3 표를 따른다.
 
 ## 줌 (Phase 4-B)
 

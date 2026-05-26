@@ -1,26 +1,27 @@
 ---
 title: Notification (Phase 5-C)
-description: 시스템 알림 (Electron Notification) — macOS UNUserNotificationCenter + Linux D-Bus, 5 진입점 노출
+description: 시스템 알림 (Electron Notification) — macOS UNUserNotificationCenter + Linux D-Bus + Windows Shell_NotifyIcon balloon, 5 진입점 노출
 ---
 
 # Notification
 
 Electron `Notification` 호환 — macOS UNUserNotificationCenter (NSUserNotification은
-deprecated 후 macOS 26 제거) + Linux freedesktop notification D-Bus. Frontend JS +
-Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
+deprecated 후 macOS 26 제거), Linux freedesktop notification D-Bus, Windows
+`Shell_NotifyIconW` balloon notification. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
 
 ## 플랫폼 지원
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `notification.isSupported` | ✅ Bundle ID 있을 때만 true | ✅ notification daemon probe | stub |
-| `notification.requestPermission` | ✅ OS 다이얼로그 | ✅ daemon reachable (no prompt) | stub |
-| `notification.show` | ✅ UNUserNotificationCenter | ✅ D-Bus `Notify` | stub |
-| `notification.close` | ✅ pending + delivered | ✅ D-Bus `CloseNotification` | stub |
-| Click event | ✅ `notification:click` | — | — |
+| `notification.isSupported` | ✅ Bundle ID 있을 때만 true | ✅ notification daemon probe | ✅ true (Shell_NotifyIcon balloon) |
+| `notification.requestPermission` | ✅ OS 다이얼로그 | ✅ daemon reachable (no prompt) | ✅ true (권한 프롬프트 없음) |
+| `notification.show` | ✅ UNUserNotificationCenter | ✅ D-Bus `Notify` | ✅ `NIF_INFO` balloon |
+| `notification.close` | ✅ pending + delivered | ✅ D-Bus `CloseNotification` | ✅ backing tray icon 제거 |
+| Click event | ✅ `notification:click` | — | ✅ balloon click |
 
-Windows는 향후 Win32 `XML toast` plug-in. 현재 호출은 graceful 응답.
 Linux는 `org.freedesktop.Notifications` 서비스가 없으면 graceful false.
+Windows는 WinRT XML toast가 아니라 Shell notification balloon 경로다. Windows 10+에서는
+OS가 balloon을 toast UI처럼 렌더링하지만 action button/reply/custom image는 지원하지 않는다.
 
 ## ⚠️ macOS Bundle ID 필수 (dev 모드 한계)
 
@@ -40,10 +41,10 @@ Linux는 `org.freedesktop.Notifications` 서비스가 없으면 graceful false.
 
 | 미지원 | 비고 |
 |---|---|
-| **Actions / 버튼** | UNNotificationCategory 작업 — v2 |
-| **Reply input** | macOS only, hasReply: true — v2 |
-| **커스텀 icon** | 앱 아이콘만 자동 (NSImage attachment v2) |
-| **커스텀 sound** | macOS default/silent. Linux `silent`는 `suppress-sound` hint를 보내지만 최종 정책은 notification daemon 의존 |
+| **Actions / 버튼** | UNNotificationCategory / WinRT toast activator 작업 — v2 |
+| **Reply input** | macOS/Windows native reply는 v2 |
+| **커스텀 icon** | macOS는 앱 아이콘만 자동, Windows는 backing tray icon 기본값. attachment/iconPath는 v2 |
+| **커스텀 sound** | macOS default/silent. Linux `silent`는 `suppress-sound` hint, Windows는 `NIIF_NOSOUND` |
 
 ## API
 
@@ -151,6 +152,17 @@ await notification.close(notificationId);
 - `close()`는 Suji `notificationId`로 저장된 D-Bus id를 찾아 `CloseNotification(uint32)` 호출.
 - Linux click/action signal 라우팅, custom icon, reply, action button은 v1 범위 밖.
 
+### Windows Shell_NotifyIcon backend
+
+- `isSupported()` / `requestPermission()`은 true를 반환한다. 별도 권한 프롬프트가 없다.
+- `show()`는 notification 전용 tray icon을 만들고 `Shell_NotifyIconW(NIM_MODIFY)` +
+  `NIF_INFO`로 title/body balloon을 표시한다. `silent:true`면 `NIIF_NOSOUND`를 사용한다.
+- Suji `notificationId` ↔ backing tray id를 매핑한다. `close()`는 해당 tray icon을
+  `NIM_DELETE`로 제거한다.
+- 사용자가 balloon을 클릭하면 Windows pump thread가 `NIN_BALLOONUSERCLICK`을 받고
+  `notification:click {notificationId}`를 emit한다.
+- WinRT toast XML, AppUserModelID activator, action button, reply input은 아직 v1 범위 밖이다.
+
 ## E2E 한계
 
 macOS OS 알림 표시 자체는 puppeteer로 검증 불가 (UNUserNotificationCenter는 process 외부).
@@ -159,4 +171,6 @@ macOS OS 알림 표시 자체는 puppeteer로 검증 불가 (UNUserNotificationC
 2. **응답 형식 검증** (`tests/e2e/notification.test.ts`) — IPC 응답 shape (notificationId, success, granted, supported).
 3. **Linux D-Bus runtime E2E** (`tests/e2e/notification-linux-runtime.test.ts`) —
    fake `org.freedesktop.Notifications` daemon으로 `Notify`/`CloseNotification` 왕복 검증.
-4. **macOS 수동 검증 필수** — `.app` 번들 후 권한 grant 후 알림 시각/사운드 확인.
+4. **Windows runtime 경로** — Win32 Shell_NotifyIcon source/command wiring과 Windows 빌드로
+   regression을 고정한다. 실제 toast/balloon 표시와 클릭은 runner UI 한계로 수동 검증 영역이다.
+5. **macOS 수동 검증 필수** — `.app` 번들 후 권한 grant 후 알림 시각/사운드 확인.
