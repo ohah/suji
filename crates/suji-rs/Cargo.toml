@@ -9,8 +9,17 @@ description = "Suji desktop framework - Rust SDK"
 suji-macros = { path = "../suji-rs-macros", version = "0.1.0" }
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
-specta = { version = "2.0.0-rc.25", features = ["derive"] }
-specta-serde = "0.0.12"
-specta-typescript = "0.0.12"
+# specta 2.0.0-rc.25 가 unstable Rust feature `debug_closure_helpers` 를 사용 →
+# stable Rust 빌드 불가. `typescript` feature 로 격리해 SDK 핵심(handle/invoke/send)
+# 은 stable 에서 빌드, TypeScript 생성 기능은 opt-in (nightly 또는 RUSTC_BOOTSTRAP=1
+# + #![feature(debug_closure_helpers)] 패치 필요 — specta-rs 가 stable 호환 안정화
+# 머지하면 default 로 복귀).
+specta = { version = "2.0.0-rc.25", features = ["derive"], optional = true }
+specta-serde = { version = "0.0.12", optional = true }
+specta-typescript = { version = "0.0.12", optional = true }
+
+[features]
+default = []
+typescript = ["dep:specta", "dep:specta-serde", "dep:specta-typescript"]
 
 [dev-dependencies]

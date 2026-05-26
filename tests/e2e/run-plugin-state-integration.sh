@@ -8,7 +8,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/tests/e2e/_common.sh"
 
-# state plugin DLL pre-build (zig 빌드는 이미 메인 build 의 일부지만 안전 가드).
-( cd "$ROOT/plugins/state/zig" && zig build >/dev/null 2>&1 ) || true
+# state plugin DLL pre-build — 빌드 실패 시 e2e 가 더 정확한 진단 못 내므로
+# 여기서 명시적으로 fail. (이전엔 `|| true` 가 swallow 했음.)
+( cd "$ROOT/plugins/state/zig" && zig build )
 
 e2e_run_test tests/e2e/plugin-state-integration.test.ts
