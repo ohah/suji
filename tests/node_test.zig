@@ -308,3 +308,49 @@ test "build.zig: Linux Node bridge uses g++ and libstdc++ ABI" {
         try std.testing.expect(std.mem.indexOf(u8, branch, needle) != null);
     }
 }
+
+test "Windows Node bridge accepts MSYS2 MinGW layout in CI" {
+    const build_source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(build_source);
+
+    inline for (.{
+        "fn windowsMingwRoot",
+        "SUJI_MINGW_ROOT",
+        "C:\\\\msys64\\\\mingw64",
+        "C:\\\\msys64\\\\ucrt64",
+        "SUJI_MINGW_GPP",
+        "SUJI_MINGW_BIN",
+        "install MSYS2/Winlibs MinGW",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, build_source, needle) != null);
+    }
+
+    inline for (.{
+        ".github/workflows/ci.yml",
+        ".github/workflows/e2e.yml",
+    }) |path| {
+        const workflow = try std.Io.Dir.cwd().readFileAlloc(
+            std.testing.io,
+            path,
+            std.testing.allocator,
+            .limited(1024 * 1024),
+        );
+        defer std.testing.allocator.free(workflow);
+
+        inline for (.{
+            "msys2/setup-msys2@v2",
+            "mingw-w64-x86_64-gcc",
+            "mingw-w64-x86_64-c-ares",
+            "mingw-w64-x86_64-openssl",
+            "mingw-w64-x86_64-icu",
+            "mingw-w64-x86_64-zlib",
+        }) |needle| {
+            try std.testing.expect(std.mem.indexOf(u8, workflow, needle) != null);
+        }
+    }
+}

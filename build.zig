@@ -1,5 +1,40 @@
 const std = @import("std");
 
+fn trimTrailingPathSeparators(path: []const u8) []const u8 {
+    var end = path.len;
+    while (end > 0 and (path[end - 1] == '\\' or path[end - 1] == '/')) {
+        end -= 1;
+    }
+    return path[0..end];
+}
+
+fn windowsMingwRoot(b: *std.Build) []const u8 {
+    const env = &b.graph.environ_map;
+    if (env.get("SUJI_MINGW_ROOT")) |root| {
+        return trimTrailingPathSeparators(root);
+    }
+
+    const candidates = [_][]const u8{
+        "C:\\mingw-w64-16\\mingw64",
+        "C:\\msys64\\mingw64",
+        "C:\\msys64\\ucrt64",
+    };
+    for (candidates) |root| {
+        const gpp = std.fmt.allocPrint(b.allocator, "{s}\\bin\\g++.exe", .{root}) catch @panic("OOM");
+        std.Io.Dir.accessAbsolute(b.graph.io, gpp, .{}) catch continue;
+        return root;
+    }
+    return candidates[0];
+}
+
+fn firstExistingAbsolute(b: *std.Build, candidates: []const []const u8) []const u8 {
+    for (candidates) |path| {
+        std.Io.Dir.accessAbsolute(b.graph.io, path, .{}) catch continue;
+        return path;
+    }
+    return candidates[0];
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -277,16 +312,19 @@ pub fn build(b: *std.Build) void {
         if (os_tag == .windows) {
             // Windows: bridge.cc 를 외부 mingw g++ 로 컴파일. zig 의 clang/libcxx
             // (`std::__1::vector`) 와 mingw libnode 의 libstdc++ (`std::vector`)
-            // mangling/STL layout 불일치 회피. g++ 16.1+ 필요 (`C:\mingw-w64-16\
-            // mingw64\bin\g++.exe` — winlibs build).
+            // mangling/STL layout 불일치 회피. SUJI_MINGW_ROOT 또는 Winlibs/MSYS2
+            // mingw64 layout 을 사용한다.
+            const mingw_root = windowsMingwRoot(b);
+            const mingw_bin = std.fmt.allocPrint(b.allocator, "{s}\\bin", .{mingw_root}) catch @panic("OOM");
+            const mingw_gpp = std.fmt.allocPrint(b.allocator, "{s}\\g++.exe", .{mingw_bin}) catch @panic("OOM");
             const bridge_obj = b.cache_root.join(b.allocator, &.{ "bridge-mingw", "bridge.o" }) catch @panic("OOM");
             const obj_dir = std.fs.path.dirname(bridge_obj) orelse @panic("path");
             const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
             const ps_script = std.fmt.allocPrint(
                 b.allocator,
                 \\$ErrorActionPreference = 'Stop'
-                \\$gpp = 'C:\mingw-w64-16\mingw64\bin\g++.exe'
-                \\if (-not (Test-Path $gpp)) {{ throw "mingw g++ 16+ missing at $gpp. winlibs gcc 16.1.0 MSVCRT zip 풀어두기." }}
+                \\$gpp = $env:SUJI_MINGW_GPP
+                \\if (-not (Test-Path $gpp)) {{ throw "mingw g++ missing at $gpp. Set SUJI_MINGW_ROOT or install MSYS2/Winlibs MinGW." }}
                 \\New-Item -ItemType Directory -Force -Path '{s}' | Out-Null
                 \\& $gpp -c -std=c++20 -I $env:SUJI_NODE_INC -I $env:SUJI_BRIDGE_INC $env:SUJI_BRIDGE_SRC -o '{s}'
                 \\if ($LASTEXITCODE -ne 0) {{ throw "g++ failed: exit $LASTEXITCODE" }}
@@ -299,6 +337,7 @@ pub fn build(b: *std.Build) void {
             gpp_step.setEnvironmentVariable("SUJI_NODE_INC", node_include);
             gpp_step.setEnvironmentVariable("SUJI_BRIDGE_INC", b.path("src/platform/node").getPath(b));
             gpp_step.setEnvironmentVariable("SUJI_BRIDGE_SRC", b.path("src/platform/node/bridge.cc").getPath(b));
+            gpp_step.setEnvironmentVariable("SUJI_MINGW_GPP", mingw_gpp);
             gpp_bridge_step = &gpp_step.step;
 
             root_module.addObjectFile(.{ .cwd_relative = bridge_obj });
@@ -308,18 +347,27 @@ pub fn build(b: *std.Build) void {
             // mingw libstdc++ / libgcc / winpthread import lib 직접 명시.
             // (linkSystemLibrary 는 mingw 의 `libNAME.dll.a` 패턴 자동 매칭 안 함).
             // winpthread 는 `x86_64-w64-mingw32/lib/` subdir 에 있어 path 별도.
-            const mingw_lib = "C:\\mingw-w64-16\\mingw64\\lib";
-            const mingw_target_lib = "C:\\mingw-w64-16\\mingw64\\x86_64-w64-mingw32\\lib";
-            const libs_main = [_][]const u8{ "libstdc++.dll.a", "libgcc_s.a" };
-            for (libs_main) |lib_name| {
-                const lib_path = std.fmt.allocPrint(b.allocator, "{s}\\{s}", .{ mingw_lib, lib_name }) catch @panic("OOM");
-                root_module.addObjectFile(.{ .cwd_relative = lib_path });
-            }
-            const libs_target = [_][]const u8{"libwinpthread.dll.a"};
-            for (libs_target) |lib_name| {
-                const lib_path = std.fmt.allocPrint(b.allocator, "{s}\\{s}", .{ mingw_target_lib, lib_name }) catch @panic("OOM");
-                root_module.addObjectFile(.{ .cwd_relative = lib_path });
-            }
+            const mingw_lib = std.fmt.allocPrint(b.allocator, "{s}\\lib", .{mingw_root}) catch @panic("OOM");
+            const mingw_target_lib = std.fmt.allocPrint(b.allocator, "{s}\\x86_64-w64-mingw32\\lib", .{mingw_root}) catch @panic("OOM");
+            const libstdcxx_candidates = [_][]const u8{
+                std.fmt.allocPrint(b.allocator, "{s}\\libstdc++.dll.a", .{mingw_lib}) catch @panic("OOM"),
+                std.fmt.allocPrint(b.allocator, "{s}\\libstdc++.a", .{mingw_lib}) catch @panic("OOM"),
+            };
+            root_module.addObjectFile(.{ .cwd_relative = firstExistingAbsolute(b, &libstdcxx_candidates) });
+
+            const libgcc_candidates = [_][]const u8{
+                std.fmt.allocPrint(b.allocator, "{s}\\libgcc_s.a", .{mingw_lib}) catch @panic("OOM"),
+                std.fmt.allocPrint(b.allocator, "{s}\\libgcc_s.dll.a", .{mingw_lib}) catch @panic("OOM"),
+                std.fmt.allocPrint(b.allocator, "{s}\\libgcc_s.a", .{mingw_target_lib}) catch @panic("OOM"),
+                std.fmt.allocPrint(b.allocator, "{s}\\libgcc_s.dll.a", .{mingw_target_lib}) catch @panic("OOM"),
+            };
+            root_module.addObjectFile(.{ .cwd_relative = firstExistingAbsolute(b, &libgcc_candidates) });
+
+            const winpthread_candidates = [_][]const u8{
+                std.fmt.allocPrint(b.allocator, "{s}\\libwinpthread.dll.a", .{mingw_target_lib}) catch @panic("OOM"),
+                std.fmt.allocPrint(b.allocator, "{s}\\libwinpthread.dll.a", .{mingw_lib}) catch @panic("OOM"),
+            };
+            root_module.addObjectFile(.{ .cwd_relative = firstExistingAbsolute(b, &winpthread_candidates) });
         } else if (os_tag == .linux) {
             // Linux official libnode is built with libstdc++. Compiling bridge.cc
             // with Zig clang/libc++ emits std::__1 symbols and fails to link.
@@ -467,11 +515,11 @@ pub fn build(b: *std.Build) void {
                 \\$ErrorActionPreference = 'Stop'
                 \\New-Item -ItemType Directory -Force -Path $env:SUJI_BIN_DIR | Out-Null
                 \\Copy-Item -Force -LiteralPath $env:SUJI_NODE_SRC -Destination $env:SUJI_BIN_DIR
-                \\$mingw_bin = 'C:\mingw-w64-16\mingw64\bin'
+                \\$mingw_bin = $env:SUJI_MINGW_BIN
                 \\foreach ($d in @('libstdc++-6.dll', 'libgcc_s_seh-1.dll', 'libwinpthread-1.dll')) {
                 \\  $src = Join-Path $mingw_bin $d
                 \\  if (Test-Path $src) { Copy-Item -Force -LiteralPath $src -Destination $env:SUJI_BIN_DIR }
-                \\  else { throw "missing mingw runtime DLL: $src (install winlibs gcc 16.1.0 MSVCRT zip to C:\mingw-w64-16\)" }
+                \\  else { throw "missing mingw runtime DLL: $src (set SUJI_MINGW_ROOT or install MSYS2/Winlibs MinGW)" }
                 \\}
                 \\# libnode 가 dynamic load 하는 mingw 패키지 deps
                 \\$deps_bin = $env:LOCALAPPDATA + '\Temp\msys2-deps\mingw64\bin'
@@ -479,8 +527,9 @@ pub fn build(b: *std.Build) void {
                 \\                  'libicudt78.dll', 'libicuin78.dll', 'libicuuc78.dll',
                 \\                  'zlib1.dll')) {
                 \\  $src = Join-Path $deps_bin $d
+                \\  if (-not (Test-Path $src)) { $src = Join-Path $mingw_bin $d }
                 \\  if (Test-Path $src) { Copy-Item -Force -LiteralPath $src -Destination $env:SUJI_BIN_DIR }
-                \\  else { throw "missing libnode dep DLL: $src (MSYS2 mingw-w64-x86_64-{c-ares,openssl,icu,zlib} 패키지 압축 풀어두기)" }
+                \\  else { throw "missing libnode dep DLL: $d (install MSYS2 mingw-w64-x86_64-{c-ares,openssl,icu,zlib})" }
                 \\}
                 ,
             });
@@ -492,6 +541,7 @@ pub fn build(b: *std.Build) void {
             const node_src = src_mixed;
             copy_dlls.setEnvironmentVariable("SUJI_NODE_SRC", node_src);
             copy_dlls.setEnvironmentVariable("SUJI_BIN_DIR", bin_dir_w);
+            copy_dlls.setEnvironmentVariable("SUJI_MINGW_BIN", std.fmt.allocPrint(b.allocator, "{s}\\bin", .{windowsMingwRoot(b)}) catch @panic("OOM"));
             copy_dlls.step.dependOn(&install_artifact.step);
             b.getInstallStep().dependOn(&copy_dlls.step);
         }

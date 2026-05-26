@@ -29,7 +29,7 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-suji = { path = ${tomlPath(path.join(ROOT, "crates", "suji-rs"))} }
+suji = { path = ${tomlPath(path.join(ROOT, "crates", "suji-rs"))}, features = ["typescript"] }
 serde = { version = "1", features = ["derive"] }
 `);
 
