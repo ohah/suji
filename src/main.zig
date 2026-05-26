@@ -76,16 +76,42 @@ pub fn main(init: std.process.Init) !void {
 
     log.info("suji starting pid={d} log_level={s}", .{ getCurrentPid(), @tagName(log_level) });
 
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const raw_args = try init.minimal.args.toSlice(init.arena.allocator());
 
-    // 번들에서 실행 시 자동으로 run (macOS .app / Linux AppImage)
+    // `--do-not-de-elevate` 는 maybeRelaunchWithNoDeElevate 가 자기 자신 spawn
+    // 시 child cmdline 에 추가하는 internal flag — 사용자 명령으로 해석되면 안 됨.
+    // 사전 필터링 후 나머지를 command-line args 로 사용.
+    var filtered_buf: [64][:0]const u8 = undefined;
+    var filtered_len: usize = 0;
+    for (raw_args) |a| {
+        if (std.mem.eql(u8, a, "--do-not-de-elevate")) continue;
+        if (filtered_len >= filtered_buf.len) break;
+        filtered_buf[filtered_len] = a;
+        filtered_len += 1;
+    }
+    const args = filtered_buf[0..filtered_len];
+
+    // 번들에서 실행 시 자동으로 run (macOS .app / Linux AppImage / Windows packaged exe).
+    // Windows packaging 은 `<name>.exe` 옆에 `resources/frontend/index.html` 을 둔다 —
+    // 그게 있으면 packaged app 으로 판단해 runProd.
     if (args.len < 2) {
         var exe_buf: [1024]u8 = undefined;
         if (std.process.executablePath(init.io, &exe_buf)) |n| {
             const ep = exe_buf[0..n];
             const is_bundle = switch (comptime @import("builtin").os.tag) {
                 .macos => std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null,
-                else => false, // Linux/Windows: 향후 AppImage 등 감지 추가
+                .windows => blk: {
+                    // 같은 디렉토리에 resources/frontend/index.html 존재 = packaged.
+                    const exe_dir = std.fs.path.dirname(ep) orelse break :blk false;
+                    const probe = std.fmt.allocPrint(
+                        init.arena.allocator(),
+                        "{s}/resources/frontend/index.html",
+                        .{exe_dir},
+                    ) catch break :blk false;
+                    std.Io.Dir.cwd().access(runtime.io, probe, .{}) catch break :blk false;
+                    break :blk true;
+                },
+                else => false, // Linux: 향후 AppImage 등 감지 추가
             };
             if (is_bundle) {
                 try runProd(allocator);
@@ -4709,8 +4735,17 @@ fn cefEmitHandler(target: ?u32, event: []const u8, data: []const u8) void {
 
 /// dist 디렉토리 절대 경로 탐색 (로컬 → .app/AppImage 번들)
 fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 {
+    // realPathFileAlloc 가 sentinel 포함 [:0]u8 (alloc N+1) 을 반환 — caller 가
+    // []const u8 로 받아 free 하면 size mismatch panic. dupe 로 length-exact 재할당.
+    const dupe = struct {
+        fn run(a: std.mem.Allocator, sentinel: [:0]u8) ?[]const u8 {
+            defer a.free(sentinel);
+            return a.dupe(u8, sentinel) catch null;
+        }
+    }.run;
+
     // 1. CWD 기준 (로컬 개발)
-    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, dist_dir, allocator)) |p| return p else |_| {}
+    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, dist_dir, allocator)) |p| return dupe(allocator, p) else |_| {}
 
     // 2. .app 번들: exe/../Resources/frontend/dist
     var exe_buf: [1024]u8 = undefined;
@@ -4721,12 +4756,24 @@ fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 
 
     const bundle_dist = std.fmt.allocPrint(allocator, "{s}/Resources/frontend/dist", .{contents_dir}) catch return null;
     defer allocator.free(bundle_dist);
-    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_dist, allocator)) |p| return p else |_| {}
+    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_dist, allocator)) |p| return dupe(allocator, p) else |_| {}
 
     // 3. .app 번들: Resources/frontend (dist 없이)
     const bundle_frontend = std.fmt.allocPrint(allocator, "{s}/Resources/frontend", .{contents_dir}) catch return null;
     defer allocator.free(bundle_frontend);
-    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_frontend, allocator)) |p| return p else |_| {}
+    if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, bundle_frontend, allocator)) |p| return dupe(allocator, p) else |_| {}
+
+    // 3.5. Windows packaged: <exe_dir>/resources/frontend (소문자 r). packageWindows
+    // 가 만드는 layout — macOS 의 macos_dir/contents_dir 계층 대신 단순 flat.
+    if (builtin.os.tag == .windows) {
+        const exe_dir_win = std.fs.path.dirname(exe_path) orelse return null;
+        const win_pkg_dist = std.fmt.allocPrint(allocator, "{s}/resources/frontend/dist", .{exe_dir_win}) catch return null;
+        defer allocator.free(win_pkg_dist);
+        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, win_pkg_dist, allocator)) |p| return dupe(allocator, p) else |_| {}
+        const win_pkg_frontend = std.fmt.allocPrint(allocator, "{s}/resources/frontend", .{exe_dir_win}) catch return null;
+        defer allocator.free(win_pkg_frontend);
+        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, win_pkg_frontend, allocator)) |p| return dupe(allocator, p) else |_| {}
+    }
 
     // 4. Linux AppImage/AppDir: AppDir/usr/bin/<exe> + AppDir/usr/resources/frontend.
     if (builtin.os.tag == .linux) {
@@ -4734,11 +4781,11 @@ fn findDistPath(allocator: std.mem.Allocator, dist_dir: []const u8) ?[]const u8 
         const usr_dir = std.fs.path.dirname(bin_dir) orelse return null;
         const appdir_resources_dist = std.fmt.allocPrint(allocator, "{s}/resources/frontend/dist", .{usr_dir}) catch return null;
         defer allocator.free(appdir_resources_dist);
-        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, appdir_resources_dist, allocator)) |p| return p else |_| {}
+        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, appdir_resources_dist, allocator)) |p| return dupe(allocator, p) else |_| {}
 
         const appdir_resources_frontend = std.fmt.allocPrint(allocator, "{s}/resources/frontend", .{usr_dir}) catch return null;
         defer allocator.free(appdir_resources_frontend);
-        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, appdir_resources_frontend, allocator)) |p| return p else |_| {}
+        if (std.Io.Dir.cwd().realPathFileAlloc(runtime.io, appdir_resources_frontend, allocator)) |p| return dupe(allocator, p) else |_| {}
     }
 
     return null;
