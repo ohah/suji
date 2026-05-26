@@ -25,7 +25,13 @@ pub use suji_macros::command as handle;
 /// ts 시그니처 emit. SujiHandlers declaration manual 작성 (`@suji/api` interface
 /// augmentation)에 그대로 사용.
 ///
-/// ```
+/// `typescript` cargo feature 가 켜져 있어야 함 — specta 2.0.0-rc.25 가 unstable
+/// Rust feature `debug_closure_helpers` 를 쓰므로 stable Rust 빌드에선 default
+/// off. TypeScript 생성이 필요한 사용자만 `--features typescript` 로 opt-in (이때
+/// nightly Rust 또는 RUSTC_BOOTSTRAP=1 + #![feature(...)] 패치 필요 — specta-rs
+/// 안정화 머지까지 임시).
+///
+/// ```ignore
 /// use suji::{specta, Type};
 ///
 /// #[derive(Type, serde::Serialize, serde::Deserialize)]
@@ -33,6 +39,7 @@ pub use suji_macros::command as handle;
 /// #[derive(Type, serde::Serialize, serde::Deserialize)]
 /// pub struct GreetRes { pub greeting: String }
 /// ```
+#[cfg(feature = "typescript")]
 pub use specta::{self, Type};
 
 /// TypeScript declaration helpers for Rust backends.
@@ -41,7 +48,9 @@ pub use specta::{self, Type};
 /// this module turns explicit `#[derive(suji::Type)]` request/response types into the same
 /// `SujiHandlers` module augmentation used by the frontend and Node SDKs.
 ///
-/// ```rust
+/// `typescript` cargo feature 가 켜져 있어야 컴파일 — 위 `specta` re-export 참조.
+///
+/// ```ignore
 /// use serde::{Deserialize, Serialize};
 /// use suji::{specta, Type, typescript::SujiHandlers};
 ///
@@ -62,6 +71,7 @@ pub use specta::{self, Type};
 ///
 /// assert!(dts.contains("declare module '@suji/api'"));
 /// ```
+#[cfg(feature = "typescript")]
 pub mod typescript {
     use std::{any::TypeId, borrow::Cow};
 
@@ -2821,6 +2831,7 @@ mod tests {
         assert_eq!(v["count"], 7);
     }
 
+    #[cfg(feature = "typescript")]
     #[test]
     fn specta_type_derive_compiles() {
         use crate::Type;
@@ -2842,6 +2853,7 @@ mod tests {
         let _ = std::any::type_name::<GreetRes>();
     }
 
+    #[cfg(feature = "typescript")]
     #[test]
     fn typescript_suji_handlers_export_module_augmentation() {
         use crate::{typescript::SujiHandlers, Type};
@@ -2921,9 +2933,12 @@ pub mod prelude {
     pub use crate::quit;
     pub use crate::send;
     pub use crate::send_to;
+    #[cfg(feature = "typescript")]
     pub use crate::specta;
+    #[cfg(feature = "typescript")]
     pub use crate::typescript::SujiHandlers;
     pub use crate::InvokeEvent;
+    #[cfg(feature = "typescript")]
     pub use crate::Type;
     pub use crate::Window;
     pub use crate::PLATFORM_LINUX;
