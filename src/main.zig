@@ -353,6 +353,11 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     // App Sandbox(MAS) vs non-sandbox(Developer ID, 기본). 기본 false 라
     // 기존 Developer ID/notarize 배포 무회귀.
     const want_sandbox = release_opts.hasFlag(args, "--sandbox") or runtime.env("SUJI_SANDBOX") != null;
+    // Strict mode: 1 개 이상 backend/plugin dylib 가 packaging 에서 누락되면
+    // process exit code 를 non-zero 로 만든다. 기본은 lenient + WARN (기존 동작
+    // 무회귀). CI 가 silent miss 를 검출 못 하던 문제(`/code-review max PR#41`
+    // finding #2) 해소용 opt-in.
+    const want_strict = release_opts.hasFlag(args, "--strict") or runtime.env("SUJI_STRICT_PACKAGING") != null;
 
     // 백엔드 릴리스 빌드
     try buildBackendsFromConfig(allocator, &config, true);
@@ -442,6 +447,8 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
             // Backend / plugin dylib + Node entry path 수집.
             var backends_list = std.ArrayList(package_desktop.BackendArtifact).empty;
             defer backends_list.deinit(allocator);
+            // Missing dylib 카운터 — strict 모드에서 1+ 면 process 비정상 종료.
+            var missing_count: usize = 0;
 
             if (config.isMultiBackend()) {
                 if (config.backends) |bes| {
@@ -455,12 +462,17 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                             });
                             continue;
                         }
-                        const dylib = getDylibPath(allocator, be.lang, be.entry, true) catch continue;
+                        const dylib = getDylibPath(allocator, be.lang, be.entry, true) catch {
+                            std.debug.print("[suji] WARN: backend '{s}' lang={s} unsupported — backend will be absent from package\n", .{ be.name, be.lang });
+                            missing_count += 1;
+                            continue;
+                        };
                         // dylib 실존 검증 — 빌드가 사전에 실패했으면 packaging
                         // 단계에서 silent miss 가 아닌 명시적 경고.
                         std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch {
                             std.debug.print("[suji] WARN: backend '{s}' dylib missing at {s} — backend will be absent from package\n", .{ be.name, dylib });
                             allocator.free(dylib);
+                            missing_count += 1;
                             continue;
                         };
                         try backends_list.append(allocator, .{
@@ -481,13 +493,21 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     });
                 } else {
                     if (getDylibPath(allocator, be.lang, be.entry, true)) |dylib| {
+                        std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch {
+                            std.debug.print("[suji] WARN: backend '{s}' dylib missing at {s} — backend will be absent from package\n", .{ be.lang, dylib });
+                            allocator.free(dylib);
+                            missing_count += 1;
+                        };
                         try backends_list.append(allocator, .{
                             .name = be.lang,
                             .lang = be.lang,
                             .source_path = dylib,
                             .is_node = false,
                         });
-                    } else |_| {}
+                    } else |_| {
+                        std.debug.print("[suji] WARN: backend lang={s} unsupported — backend will be absent from package\n", .{be.lang});
+                        missing_count += 1;
+                    }
                 }
             }
             defer for (backends_list.items) |a| {
@@ -501,16 +521,29 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
             defer for (plugins_list.items) |a| allocator.free(@constCast(a.source_path));
             if (config.plugins) |plugin_names| {
                 for (plugin_names) |pname| {
-                    const pdir = getPluginDir(allocator, pname) orelse continue;
+                    const pdir = getPluginDir(allocator, pname) orelse {
+                        std.debug.print("[suji] WARN: plugin '{s}' not found — plugin will be absent from package\n", .{pname});
+                        missing_count += 1;
+                        continue;
+                    };
                     defer allocator.free(pdir);
-                    const plang = readPluginLang(allocator, pdir) orelse continue;
+                    const plang = readPluginLang(allocator, pdir) orelse {
+                        std.debug.print("[suji] WARN: plugin '{s}' suji-plugin.json invalid — plugin will be absent from package\n", .{pname});
+                        missing_count += 1;
+                        continue;
+                    };
                     defer allocator.free(plang);
                     const pentry = std.fmt.allocPrint(allocator, "{s}/{s}", .{ pdir, plang }) catch continue;
                     defer allocator.free(pentry);
-                    const dylib = getDylibPath(allocator, plang, pentry, true) catch continue;
+                    const dylib = getDylibPath(allocator, plang, pentry, true) catch {
+                        std.debug.print("[suji] WARN: plugin '{s}' lang={s} unsupported — plugin will be absent from package\n", .{ pname, plang });
+                        missing_count += 1;
+                        continue;
+                    };
                     std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch {
                         std.debug.print("[suji] WARN: plugin '{s}' dylib missing at {s} — plugin will be absent from package\n", .{ pname, dylib });
                         allocator.free(dylib);
+                        missing_count += 1;
                         continue;
                     };
                     plugins_list.append(allocator, .{
@@ -520,8 +553,18 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                         .is_node = false,
                     }) catch {
                         allocator.free(dylib);
+                        missing_count += 1;
                         continue;
                     };
+                }
+            }
+
+            // Summary: 1+ 누락이면 stderr 명시. strict 모드면 비정상 종료.
+            if (missing_count > 0) {
+                std.debug.print("[suji] WARN: packaging incomplete — {d} backend(s)/plugin(s) missing from package\n", .{missing_count});
+                if (want_strict) {
+                    std.debug.print("[suji] strict mode: aborting (set SUJI_STRICT_PACKAGING=0 or omit --strict to package anyway)\n", .{});
+                    return error.PackagingIncomplete;
                 }
             }
 
@@ -540,7 +583,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         },
         else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
-    _ = .{ signing, identity, want_notarize, want_dmg, want_deb, want_appimage, want_sandbox }; // 비-macOS arm 미사용 해소
+    _ = .{ signing, identity, want_notarize, want_dmg, want_deb, want_appimage, want_sandbox, want_strict }; // 비-Windows/macOS arm 미사용 해소
 }
 
 // ============================================
