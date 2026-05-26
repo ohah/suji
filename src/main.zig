@@ -92,8 +92,7 @@ pub fn main(init: std.process.Init) !void {
     const args = filtered_buf[0..filtered_len];
 
     // 번들에서 실행 시 자동으로 run (macOS .app / Linux AppImage / Windows packaged exe).
-    // Windows packaging 은 `<name>.exe` 옆에 `resources/frontend/index.html` 을 둔다 —
-    // 그게 있으면 packaged app 으로 판단해 runProd.
+    // Windows packaging 은 `<name>.exe` 옆에 `.suji-packaged` sentinel 을 둔다.
     if (args.len < 2) {
         var exe_buf: [1024]u8 = undefined;
         if (std.process.executablePath(init.io, &exe_buf)) |n| {
@@ -101,11 +100,10 @@ pub fn main(init: std.process.Init) !void {
             const is_bundle = switch (comptime @import("builtin").os.tag) {
                 .macos => std.mem.indexOf(u8, ep, ".app/Contents/MacOS/") != null,
                 .windows => blk: {
-                    // 같은 디렉토리에 resources/frontend/index.html 존재 = packaged.
                     const exe_dir = std.fs.path.dirname(ep) orelse break :blk false;
                     const probe = std.fmt.allocPrint(
                         init.arena.allocator(),
-                        "{s}/resources/frontend/index.html",
+                        "{s}/.suji-packaged",
                         .{exe_dir},
                     ) catch break :blk false;
                     std.Io.Dir.cwd().access(runtime.io, probe, .{}) catch break :blk false;
@@ -458,6 +456,13 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                             continue;
                         }
                         const dylib = getDylibPath(allocator, be.lang, be.entry, true) catch continue;
+                        // dylib 실존 검증 — 빌드가 사전에 실패했으면 packaging
+                        // 단계에서 silent miss 가 아닌 명시적 경고.
+                        std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch {
+                            std.debug.print("[suji] WARN: backend '{s}' dylib missing at {s} — backend will be absent from package\n", .{ be.name, dylib });
+                            allocator.free(dylib);
+                            continue;
+                        };
                         try backends_list.append(allocator, .{
                             .name = be.name,
                             .lang = be.lang,
@@ -503,6 +508,11 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     const pentry = std.fmt.allocPrint(allocator, "{s}/{s}", .{ pdir, plang }) catch continue;
                     defer allocator.free(pentry);
                     const dylib = getDylibPath(allocator, plang, pentry, true) catch continue;
+                    std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch {
+                        std.debug.print("[suji] WARN: plugin '{s}' dylib missing at {s} — plugin will be absent from package\n", .{ pname, dylib });
+                        allocator.free(dylib);
+                        continue;
+                    };
                     plugins_list.append(allocator, .{
                         .name = pname,
                         .lang = plang,
@@ -540,14 +550,17 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
 /// packaged binary 의 exe 디렉토리(<exe_dir>) 반환. caller free.
 /// packaging 이 backend/plugin dylib 들을 `<exe_dir>/backends/<name>/`
 /// `<exe_dir>/plugins/<name>/` 에 평탄 배치하므로 그 경로의 base 가 된다.
+///
+/// 마커: `<exe_dir>/.suji-packaged` 빈 파일. packageWindows 가 stage 에 생성.
+/// 이전엔 `resources/frontend/index.html` 만 probe 했는데, 개발자가 zig-out/bin
+/// 에 stale 파일 남기면 `suji dev` 가 packaged 로 false-positive → 백엔드 로드
+/// 전체 실패. 전용 sentinel 파일은 packaging 만 생성하므로 false-positive 봉쇄.
 fn packagedExeDir(allocator: std.mem.Allocator) ?[]const u8 {
     var exe_buf: [1024]u8 = undefined;
     const ep_len = std.process.executablePath(runtime.io, &exe_buf) catch return null;
     const ep = exe_buf[0..ep_len];
     const dir = std.fs.path.dirname(ep) orelse return null;
-    // packaged 마커: `<exe_dir>/resources/frontend/index.html` 존재 (macOS .app
-    // 의 ".app/Contents/MacOS/" 패턴과 동일 목적).
-    const probe = std.fmt.allocPrint(allocator, "{s}/resources/frontend/index.html", .{dir}) catch return null;
+    const probe = std.fmt.allocPrint(allocator, "{s}/.suji-packaged", .{dir}) catch return null;
     defer allocator.free(probe);
     std.Io.Dir.cwd().access(runtime.io, probe, .{}) catch return null;
     return allocator.dupe(u8, dir) catch null;
