@@ -451,7 +451,7 @@ _BrowserWindow_id = new WeakMap();
 // ============================================
 // clipboard — 시스템 클립보드 (Electron `clipboard.readText/writeText`)
 // ============================================
-// 현재 macOS만 지원 (NSPasteboard). Linux/Windows는 graceful no-op (read는 빈 문자열).
+// macOS NSPasteboard, Linux GTK clipboard, Windows CF_UNICODETEXT/CF_HTML.
 export const powerMonitor = {
     /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋.
      *  Electron `powerMonitor.getSystemIdleTime()` 동등. */
@@ -549,7 +549,7 @@ export const clipboard = {
     },
 };
 export const notification = {
-    /** 플랫폼 지원 여부 — 현재 macOS만 true. */
+    /** 플랫폼 지원 여부 — macOS bundle/권한, Linux daemon, Windows tray balloon 상태를 반영. */
     async isSupported() {
         const r = await coreCall({ cmd: "notification_is_supported" });
         return r.supported === true;
@@ -622,7 +622,7 @@ export const menu = {
 // globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
 // ============================================
 // Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4". Trigger fires on
-// `globalShortcut:trigger {accelerator, click}` via `suji.on`. Linux/Windows are stubs.
+// `globalShortcut:trigger {accelerator, click}` via `suji.on`. macOS/Windows supported.
 export const globalShortcut = {
     async register(accelerator, click) {
         const r = await coreCall({ cmd: "global_shortcut_register", accelerator, click });
@@ -644,7 +644,7 @@ export const globalShortcut = {
 // ============================================
 // shell — 외부 핸들러 호출 (Electron `shell.*`)
 // ============================================
-// 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.
+// macOS NSWorkspace/NSFileManager, Linux GIO/FileManager1/GDK, Windows ShellExecute/SHFileOperation.
 export const shell = {
     /** URL을 시스템 기본 핸들러로 열기 (http(s) → 브라우저, mailto: → 메일 앱 등).
      *  잘못된 URL syntax면 false. */

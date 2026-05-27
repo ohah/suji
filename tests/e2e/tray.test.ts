@@ -1,13 +1,13 @@
 /**
  * Tray E2E — `suji.tray.{create,setTitle,setTooltip,setMenu,destroy}` 검증.
  *
- * NSStatusItem은 OS 메뉴바에 떠 puppeteer로 직접 클릭 불가. 자동화 범위:
+ * NSStatusItem / GTK StatusIcon / Windows tray popup은 puppeteer로 직접 클릭하기 어렵다. 자동화 범위:
  *   - IPC wiring + 응답 shape (trayId / success boolean)
  *   - 다중 tray (여러 개 동시 생성 → 다른 trayId)
  *   - destroy → 같은 id 재호출 false (graceful)
  *   - setMenu 잘못된 trayId → false
  *   - menu items separator + 일반 항목 혼합
- *   - RUN_DESTRUCTIVE: osascript로 메뉴 항목 클릭 트리거 → `tray:menu-click` 이벤트 수신
+ *   - RUN_DESTRUCTIVE(macOS): osascript로 메뉴 항목 클릭 트리거 → `tray:menu-click` 이벤트 수신
  *
  * 실행:
  *   ./tests/e2e/run-tray.sh
@@ -66,7 +66,7 @@ describe("tray.create — wiring + 응답", () => {
     createdTrayIds.push(r.trayId);
   });
 
-  test("빈 옵션 → trayId 여전히 > 0 (NSStatusItem 자체는 생성)", async () => {
+  test("빈 옵션 → trayId 여전히 > 0 (native tray object 자체는 생성)", async () => {
     const r = await core<{ trayId: number }>({ cmd: "tray_create" });
     expect(r.trayId).toBeGreaterThan(0);
     createdTrayIds.push(r.trayId);

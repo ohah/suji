@@ -1,5 +1,6 @@
 // Package shell provides Suji shell API (Electron `shell.*`).
-// macOS: NSWorkspace + NSBeep. Linux/Windows stub. Routes through suji.Invoke.
+// macOS: NSWorkspace + NSFileManager + NSBeep. Linux: GIO/FileManager1/GDK.
+// Windows: ShellExecute/SHFileOperation/MessageBeep. Routes through suji.Invoke.
 package shell
 
 import (

@@ -433,7 +433,7 @@ export interface NotificationOptions {
     silent?: boolean;
 }
 export declare const notification: {
-    /** 플랫폼 지원 여부 — 현재 macOS만 true. */
+    /** 플랫폼 지원 여부 — macOS bundle/권한, Linux daemon, Windows tray balloon 상태를 반영. */
     isSupported(): Promise<boolean>;
     /** 알림 권한 요청 — 첫 호출 시 OS 다이얼로그. 이후 캐시. */
     requestPermission(): Promise<boolean>;
@@ -598,7 +598,7 @@ export interface MessageBoxOptions {
     checkboxChecked?: boolean;
 }
 export interface FileFilter {
-    /** 필터 그룹 표시명 (현재 macOS UI에는 미반영 — 모든 extensions가 통합 허용). */
+    /** 필터 그룹 표시명. 플랫폼별 native file filter에 매핑된다. */
     name: string;
     /** 허용 확장자 (점 없이): `["jpg", "png"]`. `"*"`은 모든 파일. */
     extensions: string[];

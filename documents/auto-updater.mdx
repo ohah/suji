@@ -100,7 +100,7 @@ _ = suji.autoUpdater.quitAndInstall("/tmp/my-app.app", "", "", true);
 | `auto_updater_check_update` | `currentVersion`, `latestVersion` 또는 `version`, `url`, optional `sha256`, `notes`, `pubDate` | `{success:true, updateAvailable, currentVersion, version, url, sha256, notes, pubDate}` |
 | `auto_updater_verify_file` | `path`, `sha256` | `{success:boolean, actualSha256}`. 읽기 실패/invalid hash는 `{success:false,error}` |
 | `auto_updater_download_artifact` | `url`, `path` 또는 `destination`, optional `sha256` | `{success:boolean, path, sha256, size}`. checksum mismatch면 최종 경로로 승격하지 않고 `success:false` |
-| `auto_updater_prepare_install` | `path` 또는 `artifact`, optional `format`, `target`, `stageDir`, `sha256` | `{success:true,path,source,target,stageDir,format,action,requiresQuitAndInstall}`. macOS `.zip/.dmg`는 `.app`을 stageDir로 풀고, Linux `.AppImage`는 실행 권한을 보정한다. `.deb`는 system package handoff로 분기 |
+| `auto_updater_prepare_install` | `path` 또는 `artifact`, optional `format`, `target`, `stageDir`, `sha256` | `{success:true,path,source,target,stageDir,format,action,requiresQuitAndInstall}`. macOS `.zip/.dmg`는 `.app`을 stageDir로 풀고, Windows `.zip`은 PowerShell `Expand-Archive`로 stageDir에 풀며, Linux `.AppImage`는 실행 권한을 보정한다. `.deb`는 system package handoff로 분기 |
 | `auto_updater_quit_and_install` | `path` 또는 `source`, optional `target`, `sha256`, `relaunch`, `helperPath` | `{success:true,path,target,helperPath,relaunch}`. helper script를 띄우고 응답 전송 직후 앱 종료 요청 |
 
 버전 비교는 semver 계열 숫자 segment를 비교하고, `v` prefix와 build metadata
@@ -114,13 +114,17 @@ _ = suji.autoUpdater.quitAndInstall("/tmp/my-app.app", "", "", true);
 - macOS `.zip`은 `ditto -x -k`로 stageDir 아래에 풀고 단일 `.app` bundle을 찾아
   `quitAndInstall` 입력으로 반환한다. `.dmg`는 `hdiutil attach -nobrowse -readonly`
   후 `.app`을 stageDir로 복사하고 detach한다.
+- Windows `.zip`은 PowerShell `Expand-Archive`로 stageDir 아래에 풀고, 압축 안의 단일
+  앱 디렉토리를 `quitAndInstall` 입력으로 반환한다. helper는 `.quit-install.ps1`로
+  생성되며 현재 프로세스 종료를 기다린 뒤 기존 target을 교체하고 선택적으로 재실행한다.
 - Linux `.AppImage`는 staged artifact에 `chmod +x`를 적용하고 현재 AppImage 또는
   실행 파일 target 교체 입력으로 반환한다. `raw`는 이미 준비된 파일/디렉토리를 그대로
   교체 입력으로 반환한다.
 - Linux `.deb`는 앱 내부에서 권한 상승 설치를 수행하지 않는다. `prepareInstall`은
   `{action:"systemPackage", requiresQuitAndInstall:false}`를 반환하며, 앱/배포 파이프라인이
   OS 패키지 매니저(`apt`, `dpkg`, GUI installer 등)로 handoff해야 한다.
-- `quitAndInstall`은 macOS/Linux만 지원한다. helper script가 현재 프로세스 종료를
+- `quitAndInstall`은 macOS/Linux shell script와 Windows PowerShell helper를 지원한다.
+  helper script가 현재 프로세스 종료를
   기다린 뒤 기존 target을 백업명으로 옮기고 source를 target으로 이동한다. 이동 실패 시
   backup을 원복한다. `relaunch:false`면 교체만 하고 재실행하지 않는다.
 - `checkForUpdates(url)`의 manifest fetch는 JS/Node 런타임의 `fetch`를 사용한다.

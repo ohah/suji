@@ -425,13 +425,13 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 
 - [x] fs — 파일 시스템 (Phase 5-F: 코어 API + 5 SDK 노출 + sandbox + typed wrapper)
 - [x] dialog — 시스템 다이얼로그 (Phase 5-A: macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3, Windows TaskDialog/commdlg + 5 SDK)
-- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
+- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
 - [x] menu — 메뉴바 (Phase 5-D: macOS NSMenu + submenu/item/checkbox/separator + click + 5 SDK)
   > **옛 스펙 vs 실제 구현**: 옛 PLAN은 `plugins/{fs,dialog,tray,menu}/` 분리 dylib을
   > 의도했으나, 실제 구현은 **코어 API + 5 SDK wrapper** 형태. OS native API (Cocoa/
   > CoreFoundation 등) 의존이라 dylib 분리는 Mac App Sandbox + CEF Helper와 충돌.
-  > Electron/Tauri도 동일하게 코어 API로 제공. `plugins/` 디렉토리는 `state` 같은
-  > cross-cutting 사용자 코드 (DB, 상태 동기화 등) 전용.
+  > Electron/Tauri도 동일하게 코어 API로 제공. `plugins/` 디렉토리는 `state`,
+  > `sqlite`, `log`, `store`, `http`, `notification-rich` 같은 cross-cutting 사용자 코드 전용.
   >
   > **각 기능 코드 위치** (현재 — 모두 `src/platform/cef.zig` 내부):
   > | 기능 | cef.zig section | ObjC .m 파일 | main.zig handler |
@@ -439,7 +439,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   > | clipboard | `clipboardReadText/WriteText/Clear` | — | `clipboard_read_text` 등 |
   > | shell | `shellOpenExternal/ShowItemInFolder/Beep` | — | `shell_*` |
   > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (macOS sheet modal), `src/platform/dialog_linux.c` (GTK varargs wrapper; Linux/Windows main path는 cef.zig) | `handleDialog*` |
-  > | tray | `createTray/setTrayMenu/destroyTray` | — (macOS Cocoa / Windows Win32 직접) | `tray_*` |
+  > | tray | `createTray/setTrayMenu/destroyTray` | — (macOS Cocoa / Linux GTK StatusIcon / Windows Win32 직접) | `tray_*` |
   > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
   > | menu | `setApplicationMenu/resetApplicationMenu/menu_popup` | — (macOS Cocoa 직접) | `handleMenu*` |
   > | fs | `fsSandboxCheck` etc | — | `handleFs*` (`src/main.zig`) |
@@ -638,10 +638,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
         will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
         미발화). frameless drag 라우팅은 macOS/Linux 완료 — Windows는 후속.
-  - [x] **Phase 5-B: Tray v1** — macOS NSStatusItem + Windows Shell_NotifyIconW + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
+  - [x] **Phase 5-B: Tray v1** — macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
         (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
-        representedObject 라우팅, Windows hidden message-only window + HMENU popup. Linux는 graceful stub.
+        representedObject 라우팅, Linux `GtkStatusIcon` + `GtkMenu`, Windows hidden message-only window + HMENU popup.
         v1 한계: custom icon 후속, macOS tray icon click 단독 hook 미지원, 서브메뉴/checkbox 없음.
         회귀 테스트 1건. `documents/tray.mdx`.
   - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + Linux D-Bus notification daemon + Windows Shell_NotifyIcon balloon + 5 진입점.
@@ -1378,7 +1378,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat(mtime ms)/mkdir/readdir/rm + 5 SDK 노출 |
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3, Windows TaskDialog/commdlg + 5 SDK 노출 |
-| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 |
+| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Windows RegisterHotKey + 5 SDK + accelerator 파싱 |
@@ -1411,7 +1411,7 @@ suji build → 결과물:
 | Windows .msi/.exe | electron-builder | `tauri build` | ❌ |
 | Linux .deb/.AppImage | electron-builder | `tauri build` | ✅ `.deb` 구현(`suji build --deb`/`SUJI_DEB`, `/opt/<package>` + `.desktop`, Debian control/data ar archive) + AppImage 구현(`suji build --appimage`/`SUJI_APPIMAGE`, `SUJI_APPIMAGETOOL` 지원, AppDir/usr/bin + resources/frontend). 유닛 + Linux Actions E2E로 `.deb` control/data와 `.AppImage` 생성/추출 검증 |
 | 코드 서명 & 공증 | electron-notarize | 빌트인 | ✅ codesign(none/adhoc/identity)+`notarytool`+stapler+DMG 구현(`bundle_macos.zig`), Win signtool(`package_desktop.zig`). `suji build --sign/--identity/--notarize/--dmg`. **adhoc 로컬 실증**(codesign --verify --deep --strict exit=0·Designated Req 만족·helper entitlements 부착·spctl 은 adhoc 이라 reject=정직 경계). identity/notarize/signtool 은 자격증명·Win 환경 필요로 미검증(CI secret 시) |
-| 자동 업데이트 | autoUpdater | `updater` 플러그인 | 🟡 1차 — manifest 기반 update check + semver 비교 + native artifact download + SHA-256 검증 + 포맷별 install 준비(`auto_updater_prepare_install`: macOS `.zip/.dmg`→`.app` stage, Linux `.AppImage`/raw 교체 입력, `.deb` system package handoff) + macOS/Linux quit-and-install 교체 helper 구현. Frontend/Node/Zig SDK + 유닛 + system-integration E2E + 실제 prepare→quit-and-install E2E(macOS `.zip`, Linux `.AppImage`, helper cleanup 포함). 남은 것: Windows 적용 |
+| 자동 업데이트 | autoUpdater | `updater` 플러그인 | 🟡 1차 — manifest 기반 update check + semver 비교 + native artifact download + SHA-256 검증 + 포맷별 install 준비(`auto_updater_prepare_install`: macOS `.zip/.dmg`→`.app` stage, Windows `.zip`→PowerShell `Expand-Archive` stage, Linux `.AppImage`/raw 교체 입력, `.deb` system package handoff) + macOS/Linux shell helper와 Windows PowerShell quit-and-install helper 구현. Frontend/Node/Zig SDK + 유닛 + system-integration E2E + 실제 prepare→quit-and-install E2E(macOS `.zip`, Linux `.AppImage`, helper cleanup 포함). Windows 실제 교체 E2E는 프로세스 종료/파일 잠금 경계로 후속 |
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ✅ `.github/workflows/release.yml` — `v*.*.*` 태그 정식 릴리스 + `workflow_dispatch dry_run=true` 검증 모드. macOS/Linux/Windows CLI 패키지 + checksums + embed core libs 크로스빌드 아티팩트, 태그↔`build.zig.zon` 버전 일치 검증, release publish gate. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 workflow 계약 고정 |
 | Homebrew tap | 사용자 직접 | -- | ✅ `release.yml` `homebrew` job — 릴리스 아티팩트 checksum으로 `Formula/suji.rb` 생성 + `ruby -c` 검증 + `homebrew-formula` artifact 업로드. 정식 릴리스 시 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 있으면 외부 tap repo push, 없으면 경고 후 skip. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 Formula 계약 고정 |
 | curl installer | 직접 다운로드 | -- | ✅ `scripts/install.sh` — 최신/특정 버전 GitHub Release asset 다운로드 + `.sha256` 검증 + 기본 `~/.suji/bin` 설치. release job이 `dist/install.sh`에 포함. macOS arm64/Linux x64 tar.gz + Windows x64 zip 매핑. 유닛(`release_workflow_test.zig`) + E2E(fake release archive 설치/체크섬 mismatch)로 계약 고정 |
@@ -1429,7 +1429,7 @@ suji build → 결과물:
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + Windows ShellExecuteW + scheme 사전 검사 + 5 SDK + Linux x-scheme-handler E2E |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
-| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | 🟡 백엔드 only — `suji.http.fetch(allocator, io, url, payload?)` (std.http.Client.fetch wrap). Frontend 미노출 |
+| HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ✅ `@suji/plugin-http` — renderer-safe fetch with URL allowlist(deny-by-default), Zig backend + JS/Node wrapper + 단위 테스트. 백엔드 전용 `suji.http.fetch(allocator, io, url, payload?)`도 유지 |
 | 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 62/62(실 sqlite3 CRUD 모바일 경로) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | ✅ `suji.json app.deepLinkSchemes:["myapp"]` → bundle_macos 가 `.app` Info.plist `CFBundleURLTypes` 자동 주입(scheme 당 dict, identifier-prefixed URLName). isValidUrlScheme(RFC 3986 — ALPHA 시작 [A-Za-z0-9+.-])로 무효 skip(XML 주입 차단). writeInfoPlist→buildInfoPlist 순수 분리. 검증: 실 `suji build` adhoc → `plutil -lint` OK + CFBundleURLTypes 에 유효 2/무효 1 skip 실증 + 단위 회귀. ⚠️ OS 레벨 *라우팅 실동작*(Launch Services)은 설치+등록 필요 = 헤드리스 미검증, plist 선언만 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
@@ -1471,7 +1471,7 @@ suji build → 결과물:
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
 | TypeScript 타입 자동 생성 | - | specta 연동 | ✅ 옵션 A+B 1차 완료 — `@suji/api` invoke<K> + `@suji/node` invoke/invokeSync/call/callSync 모두 SujiHandlers conditional generic으로 cmd/req/res 추론. Zig SDK는 comptime `typeToTs` + `App.schema` chain + `suji types` CLI(stdout/`--out`). Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`) + `suji::typescript::SujiHandlers` helper로 수동 등록한 req/res를 `.d.ts` module augmentation으로 emit. Go SDK는 `suji.NewTSHandlers()` + struct/json tag reflection helper로 동일 emit. 검증: app_test 골든 + 실 CLI 통합 + JS/Node type tests + Rust/Go SDK unit + Rust/Go/Node 외부 consumer E2E. Node 자동 생성은 런타임 타입메타 부재로 범위 밖 |
 | 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). **번들 Vite 템플릿**(Tauri식, create-vite 미위임 — `src/templates/frontend/<fw>/` 트리 comptime `@embedFile`; 누락 시 컴파일 실패=회귀 가드). 각 템플릿은 스캐폴딩 백엔드의 `ping`/`greet` 를 호출하는 동작 데모. `--backend` 대칭, `FrontendTemplate=std.meta.stringToEnum`. ⚠️ **정직 한계**: `@suji/api` npm 미발행 → 템플릿은 발행 불요 로컬 래퍼 `src/suji.ts`(런타임 `window.__suji__` 감쌈, @suji/api 와 표면 동형 — 발행 시 import 경로만 교체)로 동작. suji-cli(npx)는 `cpSync` 로 동일 트리 복사(lockstep). 검증=전 6 fw `bun install`+`bun run build`=0+dist 실증, 실 `suji init` E2E(zig+svelte 스캐폴딩→빌드), `tests/init_test.zig`(enum 구동 계약 + **suji-cli 미러 byte-동형 drift 가드** + 루트 템플릿 미러). 미검증=CEF 런타임 invoke 왕복(globalShortcut 동급 e2e 경계) |
-| 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 (state 1개) |
+| 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 공식 6개(`state`, `sqlite`, `log`, `store`, `http`, `notification-rich`) + JS/Node wrapper 계약 테스트 |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | ✅ `suji init` / `@suji/cli`가 `.github/workflows/suji.yml` 생성. 템플릿은 frontend `bun run build`, Zig backend fmt check, Rust/Go backend build를 포함하고, init.zig와 npm CLI 미러 byte-동형 단위 테스트 + init CLI E2E로 고정 |
 
 ### 바이너리 데이터 / 고급 기능
@@ -1537,8 +1537,8 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 11. **Windows frameless drag region + Linux 잔여 창 옵션 후속** — macOS/Linux `frame:false`
     drag/no-drag는 E2E 완료. Windows와 Linux `transparent`/`parent` parity는 후속.
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
-13. 🟡 **자동 업데이트** — manifest check + artifact download + SHA-256 verify + macOS/Linux prepareInstall/quit-and-install 1차 완료. macOS `.zip/.dmg` stage, Linux `.AppImage`/raw 교체 입력, `.deb` package-manager handoff 정책까지 문서화/검증(macOS `.zip` + Linux `.AppImage` E2E). 남은 것: Windows 적용
-14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 HTTP(`suji.http.fetch`)는 backend Zig SDK 완료 (frontend 미노출 — 보안). SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.
+13. 🟡 **자동 업데이트** — manifest check + artifact download + SHA-256 verify + macOS/Linux/Windows prepareInstall/quit-and-install 1차 완료. macOS `.zip/.dmg` stage, Windows `.zip` PowerShell stage/helper, Linux `.AppImage`/raw 교체 입력, `.deb` package-manager handoff 정책까지 문서화/검증(macOS `.zip` + Linux `.AppImage` E2E). 남은 것: Windows 실제 교체 E2E/인스톨러 연계
+14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 backend 전용 HTTP(`suji.http.fetch`) 완료. renderer-safe HTTP는 `@suji/plugin-http` 공식 플러그인으로 완료. SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.
 15. ✅ **`safeStorage` (OS secure store) — macOS + Linux + Windows 완료**.
     `safe_storage_set/get/delete` IPC 3개. macOS는 Keychain Services
     (SecItemAdd/CopyMatching/Delete), Linux는 libsecret Secret Service simple API

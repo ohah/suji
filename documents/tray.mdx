@@ -5,28 +5,28 @@ description: 시스템 트레이 아이콘 + 컨텍스트 메뉴 (Electron Tray)
 
 # Tray
 
-Electron `Tray` 호환 — macOS 메뉴바 `NSStatusItem`, Windows system tray
-`Shell_NotifyIconW`. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
+Electron `Tray` 호환 — macOS 메뉴바 `NSStatusItem`, Linux GTK `StatusIcon`,
+Windows system tray `Shell_NotifyIconW`. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
 
 ## 플랫폼 지원
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `tray.create` | ✅ NSStatusItem | stub (`trayId:0`) | ✅ Shell_NotifyIconW |
-| `tray.setTitle/setTooltip` | ✅ title + tooltip | stub (`false`) | ✅ tooltip update (`setTitle`도 tooltip으로 매핑) |
-| `tray.setMenu` | ✅ NSMenu | stub (`false`) | ✅ HMENU popup |
-| `tray.destroy` | ✅ | stub (`false`) | ✅ `NIM_DELETE` |
-| Click event | ✅ `tray:menu-click` for menu items | — | ✅ left click + menu item click |
+| `tray.create` | ✅ NSStatusItem | ✅ GTK StatusIcon | ✅ Shell_NotifyIconW |
+| `tray.setTitle/setTooltip` | ✅ title + tooltip | ✅ title + tooltip | ✅ tooltip update (`setTitle`도 tooltip으로 매핑) |
+| `tray.setMenu` | ✅ NSMenu | ✅ GtkMenu popup | ✅ HMENU popup |
+| `tray.destroy` | ✅ | ✅ hide + unref | ✅ `NIM_DELETE` |
+| Click event | ✅ `tray:menu-click` for menu items | ✅ activate + menu item click | ✅ left click + menu item click |
 
-Linux는 향후 AppIndicator/StatusNotifierItem 계열 구현 전까지 graceful stub이다.
+Linux v1은 추가 AppIndicator 의존성을 늘리지 않고 GTK3 `GtkStatusIcon` 경로를 쓴다.
 Windows는 hidden message-only window가 tray callback과 popup menu command를 받는다.
 
 ## v1 한계
 
 | 미지원 | 설명 |
 |---|---|
-| **커스텀 아이콘 이미지** | macOS v1은 `title` 텍스트만 — 이모지 가능 (예: `"🚀 Suji"`). Windows는 기본 app icon(`IDI_APPLICATION`) 사용. `iconPath`/template 로딩은 후속. |
-| **macOS 아이콘 자체 클릭 (`tray:click`)** | NSStatusItem은 메뉴 설정 시 클릭 → 자동 메뉴 표시. 메뉴 없는 클릭 hook은 별도 작업. Windows left click은 `tray:menu-click`에 빈 `click` 값으로 emit. |
+| **커스텀 아이콘 이미지** | macOS v1은 `title` 텍스트만 — 이모지 가능 (예: `"🚀 Suji"`). Linux는 테마 기본 아이콘(`application-x-executable`), Windows는 기본 app icon(`IDI_APPLICATION`) 사용. `iconPath`/template 로딩은 후속. |
+| **별도 `tray:click` 이벤트** | v1은 클릭을 `tray:menu-click` 채널로 통일한다. Windows/Linux icon activate는 빈 `click` 값으로 emit한다. macOS 메뉴 설정 시 클릭 → 자동 메뉴 표시라 메뉴 없는 click hook은 별도 작업. |
 | **서브메뉴 / checkbox / radio** | NSMenu는 지원하나 v1은 평면 메뉴 + separator만. |
 | **오른쪽 클릭 구분** | macOS NSStatusItem.button.action은 left/right 통합. Windows right click은 popup menu를 표시한다. |
 
@@ -133,6 +133,14 @@ await tray.setMenu(trayId, [
   `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
 - NSApp UI thread에서만 호출 — BackendRegistry/EventBus 글로벌 안전.
 
+### Linux 경로
+
+- `gtk_status_icon_new` + `gtk_status_icon_set_from_icon_name("application-x-executable")`로 tray icon을 만든다.
+- `setTitle`/`setTooltip`은 `gtk_status_icon_set_title`/`gtk_status_icon_set_tooltip_text`로 반영한다.
+- `setMenu`는 `GtkMenu` + `GtkMenuItem`/`GtkSeparatorMenuItem`을 재빌드하고, item `activate` signal에서 `tray:menu-click`을 emit한다.
+- icon activate는 Windows left click과 동일하게 `tray:menu-click {"trayId":N,"click":""}`를 emit한다.
+- GTK3 StatusIcon은 upstream deprecated API라, 향후 AppIndicator/StatusNotifierItem 구현으로 교체할 수 있다.
+
 ### Windows 경로
 - `win_pump` hidden message-only window가 `WM_TRAY` / `WM_COMMAND`를 수신한다.
 - `create`는 `Shell_NotifyIconW(NIM_ADD)`로 기본 app icon과 tooltip을 등록한다.
@@ -147,11 +155,11 @@ await tray.setMenu(trayId, [
 
 ## E2E 한계
 
-OS 메뉴바 `NSStatusItem`과 Windows system tray popup은 puppeteer로 직접 클릭하기 어렵다.
+OS 메뉴바 `NSStatusItem`, Linux desktop tray host, Windows system tray popup은 puppeteer로 직접 클릭하기 어렵다.
 자동화는:
 1. **회귀 가드** (`tests/window_manager_test.zig`) — 정적 ObjC selector / cmd / SDK 노출 검증.
 2. **응답 형식 검증** — IPC가 `{trayId: N}`, `{success: bool}` 응답하는지.
-3. **Windows build/source 가드** — `Shell_NotifyIconW`/`WM_TRAY`/`WM_COMMAND` wiring을 빌드와 회귀 grep으로 고정.
-4. **수동 검증 권장** — `tray.create` + `tray.setMenu` 후 macOS 메뉴바 또는 Windows system tray를 직접 클릭.
+3. **Linux/Windows build/source 가드** — `GtkStatusIcon`/`GtkMenu`와 `Shell_NotifyIconW`/`WM_TRAY`/`WM_COMMAND` wiring을 빌드와 회귀 grep으로 고정.
+4. **수동 검증 권장** — `tray.create` + `tray.setMenu` 후 macOS 메뉴바, Linux desktop tray, Windows system tray를 직접 클릭.
 
 `tray:menu-click` 이벤트 검증은 `osascript` System Events API로 메뉴 항목 호출 가능하지만 Accessibility 권한 의존이라 RUN_DESTRUCTIVE 게이트 권장.

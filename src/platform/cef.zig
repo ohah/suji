@@ -6189,13 +6189,11 @@ fn setMenuItemTag(item: *anyopaque, tag: i64) void {
 }
 
 // ============================================
-// Tray API — NSStatusItem (Electron `Tray`)
+// Tray API — NSStatusItem / GTK StatusIcon / Shell_NotifyIconW (Electron `Tray`)
 // ============================================
 // NSStatusBar.systemStatusBar에 statusItem 추가. 메뉴 클릭 시 SujiTrayTarget.trayMenuClick:이
 // 호출되고, NSMenuItem.tag(trayId) + representedObject(NSString click name)로 라우팅해
 // `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
-//
-// 비-macOS는 모두 stub.
 
 pub const TrayMenuItem = union(enum) {
     item: struct { label: []const u8, click: []const u8 },
@@ -6442,7 +6440,234 @@ const win_tray = if (builtin.os.tag == .windows) struct {
     }
 } else struct {};
 
-/// 새 tray 생성. title/tooltip은 빈 문자열이면 미설정 (icon 미지원 v1).
+// ============================================
+// Linux GTK StatusIcon — tray icon + popup menu.
+// GTK StatusIcon is deprecated upstream, but it keeps Suji's v1 tray backend
+// dependency-free because gtk-3 is already required for CEF/Linux native APIs.
+// ============================================
+const linux_tray = if (is_linux) struct {
+    const MAX_TRAYS: usize = 16;
+    const MAX_MENU_ITEMS: usize = 64;
+    const MAX_CLICK_BYTES: usize = 256;
+
+    const MenuCallback = struct {
+        used: bool = false,
+        tray_id: u32 = 0,
+        click: [MAX_CLICK_BYTES]u8 = undefined,
+        click_len: usize = 0,
+    };
+
+    const Entry = struct {
+        used: bool = false,
+        id: u32 = 0,
+        status_icon: ?*anyopaque = null,
+        menu: ?*anyopaque = null,
+        callbacks: [MAX_MENU_ITEMS]MenuCallback = [_]MenuCallback{.{}} ** MAX_MENU_ITEMS,
+    };
+
+    var entries: [MAX_TRAYS]Entry = [_]Entry{.{}} ** MAX_TRAYS;
+    var next_id: u32 = 1;
+
+    extern "c" fn suji_gtk_init_check() callconv(.c) c_int;
+    extern "c" fn gtk_status_icon_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_status_icon_set_from_icon_name(status_icon: ?*anyopaque, icon_name: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_status_icon_set_title(status_icon: ?*anyopaque, title: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_status_icon_set_tooltip_text(status_icon: ?*anyopaque, text: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_status_icon_set_visible(status_icon: ?*anyopaque, visible: c_int) callconv(.c) void;
+    extern "c" fn gtk_status_icon_position_menu(menu: ?*anyopaque, x: ?*c_int, y: ?*c_int, push_in: ?*c_int, user_data: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_menu_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_menu_item_new_with_label(label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_separator_menu_item_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_menu_shell_append(menu_shell: ?*anyopaque, child: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_widget_show_all(widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_widget_destroy(widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_menu_popup(
+        menu: ?*anyopaque,
+        parent_menu_shell: ?*anyopaque,
+        parent_menu_item: ?*anyopaque,
+        func: ?*const anyopaque,
+        data: ?*anyopaque,
+        button: u32,
+        activate_time: u32,
+    ) callconv(.c) void;
+    extern "c" fn g_signal_connect_data(
+        instance: ?*anyopaque,
+        detailed_signal: [*:0]const u8,
+        c_handler: ?*const anyopaque,
+        data: ?*anyopaque,
+        destroy_data: ?*const fn (?*anyopaque, ?*anyopaque) callconv(.c) void,
+        connect_flags: c_int,
+    ) callconv(.c) usize;
+    extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
+
+    fn gtkAvailable() bool {
+        return suji_gtk_init_check() != 0;
+    }
+
+    fn findEntry(tray_id: u32) ?*Entry {
+        for (&entries) |*entry| {
+            if (entry.used and entry.id == tray_id) return entry;
+        }
+        return null;
+    }
+
+    fn freeSlot() ?*Entry {
+        for (&entries) |*entry| {
+            if (!entry.used) return entry;
+        }
+        return null;
+    }
+
+    fn reserveId() u32 {
+        const id = next_id;
+        next_id +%= 1;
+        if (next_id == 0) next_id = 1;
+        return id;
+    }
+
+    fn dataForTrayId(tray_id: u32) ?*anyopaque {
+        return @ptrFromInt(@as(usize, tray_id));
+    }
+
+    fn trayIdFromData(data: ?*anyopaque) u32 {
+        const ptr = data orelse return 0;
+        return @intCast(@intFromPtr(ptr));
+    }
+
+    fn clearCallbacks(entry: *Entry) void {
+        for (&entry.callbacks) |*cb| cb.* = .{};
+    }
+
+    fn firstFreeCallback(entry: *Entry) ?*MenuCallback {
+        for (&entry.callbacks) |*cb| {
+            if (!cb.used) return cb;
+        }
+        return null;
+    }
+
+    fn setCallback(cb: *MenuCallback, tray_id: u32, click: []const u8) bool {
+        if (click.len > cb.click.len) return false;
+        cb.used = true;
+        cb.tray_id = tray_id;
+        cb.click_len = click.len;
+        @memcpy(cb.click[0..click.len], click);
+        return true;
+    }
+
+    fn emit(tray_id: u32, click: []const u8) void {
+        if (tray_id == 0) return;
+        if (g_tray_emit_handler) |handler| handler(tray_id, click);
+    }
+
+    fn menuItemActivateC(_: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
+        const cb: *MenuCallback = @ptrCast(@alignCast(data orelse return));
+        if (!cb.used) return;
+        emit(cb.tray_id, cb.click[0..cb.click_len]);
+    }
+
+    fn statusIconActivateC(_: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
+        emit(trayIdFromData(data), "");
+    }
+
+    fn statusIconPopupC(status_icon: ?*anyopaque, button: u32, activate_time: u32, data: ?*anyopaque) callconv(.c) void {
+        const entry = findEntry(trayIdFromData(data)) orelse return;
+        const menu = entry.menu orelse return;
+        gtk_menu_popup(
+            menu,
+            null,
+            null,
+            @ptrCast(&gtk_status_icon_position_menu),
+            status_icon,
+            button,
+            activate_time,
+        );
+    }
+
+    fn setTitle(tray_id: u32, title: []const u8) bool {
+        const entry = findEntry(tray_id) orelse return false;
+        var title_buf: [256]u8 = undefined;
+        const title_z = nullTerminateOrTruncate(title, &title_buf) orelse return false;
+        gtk_status_icon_set_title(entry.status_icon, title_z.ptr);
+        return true;
+    }
+
+    fn setTooltip(tray_id: u32, tooltip: []const u8) bool {
+        const entry = findEntry(tray_id) orelse return false;
+        var tooltip_buf: [512]u8 = undefined;
+        const tooltip_z = nullTerminateOrTruncate(tooltip, &tooltip_buf) orelse return false;
+        gtk_status_icon_set_tooltip_text(entry.status_icon, tooltip_z.ptr);
+        return true;
+    }
+
+    fn create(title: []const u8, tooltip: []const u8) u32 {
+        if (!gtkAvailable()) return 0;
+        const slot = freeSlot() orelse return 0;
+        const icon = gtk_status_icon_new() orelse return 0;
+
+        gtk_status_icon_set_from_icon_name(icon, "application-x-executable");
+        gtk_status_icon_set_visible(icon, 1);
+
+        const id = reserveId();
+        slot.* = .{
+            .used = true,
+            .id = id,
+            .status_icon = icon,
+        };
+
+        _ = g_signal_connect_data(icon, "activate", @ptrCast(&statusIconActivateC), dataForTrayId(id), null, 0);
+        _ = g_signal_connect_data(icon, "popup-menu", @ptrCast(&statusIconPopupC), dataForTrayId(id), null, 0);
+
+        if (title.len > 0) _ = setTitle(id, title);
+        if (tooltip.len > 0) {
+            _ = setTooltip(id, tooltip);
+        } else if (title.len > 0) {
+            _ = setTooltip(id, title);
+        }
+        return id;
+    }
+
+    fn setMenu(tray_id: u32, items: []const TrayMenuItem) bool {
+        const entry = findEntry(tray_id) orelse return false;
+        if (!gtkAvailable()) return false;
+
+        if (entry.menu) |old_menu| gtk_widget_destroy(old_menu);
+        entry.menu = null;
+        clearCallbacks(entry);
+
+        const menu = gtk_menu_new() orelse return false;
+        for (items) |item| switch (item) {
+            .separator => {
+                const sep = gtk_separator_menu_item_new() orelse continue;
+                gtk_menu_shell_append(menu, sep);
+            },
+            .item => |it| {
+                var label_buf: [256]u8 = undefined;
+                const label_z = nullTerminateOrTruncate(it.label, &label_buf) orelse continue;
+                const cb = firstFreeCallback(entry) orelse continue;
+                if (!setCallback(cb, tray_id, it.click)) continue;
+                const menu_item = gtk_menu_item_new_with_label(label_z.ptr) orelse continue;
+                _ = g_signal_connect_data(menu_item, "activate", @ptrCast(&menuItemActivateC), cb, null, 0);
+                gtk_menu_shell_append(menu, menu_item);
+            },
+        };
+        gtk_widget_show_all(menu);
+        entry.menu = menu;
+        return true;
+    }
+
+    fn destroy(tray_id: u32) bool {
+        const entry = findEntry(tray_id) orelse return false;
+        if (entry.menu) |menu| gtk_widget_destroy(menu);
+        if (entry.status_icon) |icon| {
+            gtk_status_icon_set_visible(icon, 0);
+            g_object_unref(icon);
+        }
+        entry.* = .{};
+        return true;
+    }
+} else struct {};
+
+/// 새 tray 생성. title/tooltip은 빈 문자열이면 미설정 (custom icon 미지원 v1).
 /// 반환: trayId (failure 시 0).
 pub fn createTray(title: []const u8, tooltip: []const u8) u32 {
     if (comptime builtin.os.tag == .windows) {
@@ -6451,6 +6676,7 @@ pub fn createTray(title: []const u8, tooltip: []const u8) u32 {
         const tip = if (tooltip.len > 0) tooltip else title;
         return win_tray.createIcon(tip);
     }
+    if (comptime is_linux) return linux_tray.create(title, tooltip);
     if (!comptime is_macos) return 0;
     ensureTraysMap();
     if (!g_trays_initialized) return 0;
@@ -6496,6 +6722,7 @@ pub fn setTrayTitle(tray_id: u32, title: []const u8) bool {
     // Windows system tray 는 icon-only — title 은 tooltip 으로 대체 (Electron 패리티
     // 한계: Windows 는 NSStatusItem 의 button title 같은 개념 없음).
     if (comptime builtin.os.tag == .windows) return win_tray.setTooltip(tray_id, title);
+    if (comptime is_linux) return linux_tray.setTitle(tray_id, title);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry = g_trays.get(tray_id) orelse return false;
@@ -6505,6 +6732,7 @@ pub fn setTrayTitle(tray_id: u32, title: []const u8) bool {
 
 pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
     if (comptime builtin.os.tag == .windows) return win_tray.setTooltip(tray_id, tooltip);
+    if (comptime is_linux) return linux_tray.setTooltip(tray_id, tooltip);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry = g_trays.get(tray_id) orelse return false;
@@ -6516,6 +6744,7 @@ pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
 /// (NSString) 자동 release (NSMenu deinit 연쇄).
 pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
     if (comptime builtin.os.tag == .windows) return win_tray.setMenu(tray_id, items);
+    if (comptime is_linux) return linux_tray.setMenu(tray_id, items);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry_ptr = g_trays.getPtr(tray_id) orelse return false;
@@ -6550,6 +6779,7 @@ pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
 /// tray 제거. NSStatusBar에서 빼고 retain count 해제.
 pub fn destroyTray(tray_id: u32) bool {
     if (comptime builtin.os.tag == .windows) return win_tray.destroyIcon(tray_id);
+    if (comptime is_linux) return linux_tray.destroy(tray_id);
     if (!comptime is_macos) return false;
     if (!g_trays_initialized) return false;
     const entry = g_trays.get(tray_id) orelse return false;
@@ -7006,12 +7236,13 @@ pub fn notificationClose(id: []const u8) bool {
 }
 
 // ============================================
-// Global shortcut API — Carbon RegisterEventHotKey (Electron `globalShortcut.*`)
+// Global shortcut API — Carbon RegisterEventHotKey / Win32 RegisterHotKey
+// (Electron `globalShortcut.*`)
 // ============================================
 // macOS: Carbon Hot Key API (system-wide, 권한 불필요). global_shortcut.m이 wrap —
 // accelerator 문자열 → modifier mask + virtual key code → RegisterEventHotKey.
 // 트리거 시 `globalShortcut:trigger {accelerator, click}` EventBus emit.
-// 비-macOS는 모두 stub.
+// Windows는 RegisterHotKey + hidden pump window 경로. Linux는 graceful stub.
 
 pub const GlobalShortcutEmitHandler = *const fn (accelerator: []const u8, click: []const u8) void;
 pub var g_global_shortcut_emit_handler: ?GlobalShortcutEmitHandler = null;
@@ -7759,7 +7990,7 @@ fn detachWindowLifecycle(ns_window: ?*anyopaque) void {
 //   2. **Free-floating** — `parent_window` null이면 runModal로 화면 중앙 독립 창.
 //      앱 전체 입력 차단. Electron의 두-인자 호출 없이 부른 케이스.
 //
-// 비-macOS는 모두 stub (canceled:true / response:0). 향후 GTK/Win32 plug-in.
+// Linux는 GTK3, Windows는 TaskDialog/commdlg/IFileOpenDialog 경로.
 
 // dialog.m C 함수 (sheet path). nested run loop로 동기화.
 extern "c" fn suji_run_sheet_alert(parent_window: ?*anyopaque, alert: ?*anyopaque) i64;

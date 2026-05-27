@@ -2858,7 +2858,7 @@ test "회귀: Notification API (Phase 5-C) — UNUserNotificationCenter + .m 파
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "NotificationOptions") != null);
 }
 
-test "회귀: Tray API (Phase 5-B) — NSStatusItem + 메뉴 + click 라우팅 + 5 진입점" {
+test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click 라우팅 + 5 진입점" {
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/platform/cef.zig",
@@ -2877,6 +2877,11 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem + 메뉴 + click 라우팅 +
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSStatusBar") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "statusItemWithLength:") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "removeStatusItem:") != null);
+    // Linux GTK StatusIcon + GtkMenu backend.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "const linux_tray") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_status_icon_new") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_menu_new") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_menu_popup") != null);
     // SujiTrayTarget ObjC subclass + trayMenuClick: selector.
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"SujiTrayTarget\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "trayMenuClick:") != null);

@@ -1,5 +1,6 @@
 // Package notification provides Suji system notification API (Electron `Notification`).
-// macOS: UNUserNotificationCenter. Linux/Windows stub.
+// macOS: UNUserNotificationCenter. Linux: freedesktop Notifications D-Bus.
+// Windows: Shell_NotifyIcon balloon.
 //
 // 클릭은 EventBus의 `notification:click {notificationId}` 이벤트로 수신.
 package notification

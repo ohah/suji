@@ -1,8 +1,8 @@
-// Package globalshortcut provides macOS system-wide hot keys (Electron `globalShortcut.*`).
+// Package globalshortcut provides system-wide hot keys (Electron `globalShortcut.*`).
 //
 // Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4", etc.
 // Triggers fire on EventBus channel `globalShortcut:trigger {accelerator, click}`.
-// Linux/Windows are stubs.
+// macOS uses Carbon Hot Key/media monitor, Windows uses RegisterHotKey. Linux is stub.
 package globalshortcut
 
 import (

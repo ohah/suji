@@ -102,7 +102,7 @@ export fn plugin_destroy() callconv(.c) void { ... }
 | clipboard | `clipboardReadText` 등 | — | `clipboard_*` |
 | shell | `shellOpenExternal` 등 | — | `shell_*` |
 | dialog | `showMessageBox` 등 | `src/platform/dialog.m` (macOS sheet), `src/platform/dialog_linux.c` (GTK wrapper; Linux/Windows main path는 cef.zig) | `handleDialog*` |
-| tray | `createTray` 등 | — (macOS Cocoa / Windows Win32 직접) | `tray_*` |
+| tray | `createTray` 등 | — (macOS Cocoa / Linux GTK StatusIcon / Windows Win32 직접) | `tray_*` |
 | notification | `notificationShow` 등 | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
 | menu | `setApplicationMenu/menu_popup` 등 | — (macOS Cocoa 직접) | `handleMenu*` |
 | fs | `fsSandboxCheck` 등 | — | `handleFs*` |

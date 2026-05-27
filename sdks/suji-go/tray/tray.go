@@ -1,5 +1,5 @@
 // Package tray provides Suji system tray (menu bar) icon API (Electron `Tray`).
-// macOS: NSStatusItem. Linux/Windows stub (Create는 trayId:0 응답).
+// macOS: NSStatusItem. Linux: GTK StatusIcon. Windows: Shell_NotifyIconW.
 //
 // 메뉴 항목 클릭은 EventBus의 `tray:menu-click {trayId, click}` 이벤트로 수신.
 package tray

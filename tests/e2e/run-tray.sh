@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tray E2E — fresh suji dev에서 단독 실행.
-# RUN_DESTRUCTIVE=1: osascript로 메뉴 항목 클릭 트리거 (Accessibility 권한 필요).
+# macOS NSStatusItem / Linux GTK StatusIcon / Windows Shell_NotifyIconW 응답 shape 검증.
+# RUN_DESTRUCTIVE=1: macOS osascript로 메뉴 항목 클릭 트리거 (Accessibility 권한 필요).
 #
 # 사용:
 #   ./tests/e2e/run-tray.sh

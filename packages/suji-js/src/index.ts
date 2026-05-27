@@ -709,7 +709,7 @@ export class BrowserWindow {
 // ============================================
 // clipboard — 시스템 클립보드 (Electron `clipboard.readText/writeText`)
 // ============================================
-// 현재 macOS만 지원 (NSPasteboard). Linux/Windows는 graceful no-op (read는 빈 문자열).
+// macOS NSPasteboard, Linux GTK clipboard, Windows CF_UNICODETEXT/CF_HTML.
 
 export const powerMonitor = {
   /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋.
@@ -827,7 +827,8 @@ export const clipboard = {
 // ============================================
 // notification — 시스템 알림 (Electron `Notification`)
 // ============================================
-// macOS: UNUserNotificationCenter. Linux/Windows stub. valid Bundle ID + Info.plist 필요
+// macOS UNUserNotificationCenter, Linux freedesktop Notifications D-Bus,
+// Windows Shell_NotifyIcon balloon. macOS는 valid Bundle ID + Info.plist 필요.
 // (suji dev 모드에선 알림 안 뜰 수 있음 — `.app` 번들 이후 정상). 첫 호출 시 OS 권한 요청.
 //
 // 클릭은 `notification:click {notificationId}` 이벤트로 수신 (suji.on 사용).
@@ -840,7 +841,7 @@ export interface NotificationOptions {
 }
 
 export const notification = {
-  /** 플랫폼 지원 여부 — 현재 macOS만 true. */
+  /** 플랫폼 지원 여부 — macOS bundle/권한, Linux daemon, Windows tray balloon 상태를 반영. */
   async isSupported(): Promise<boolean> {
     const r = await coreCall<{ supported: boolean }>({ cmd: "notification_is_supported" });
     return r.supported === true;
@@ -869,8 +870,8 @@ export const notification = {
 // ============================================
 // tray — 시스템 트레이 아이콘 (Electron `Tray`)
 // ============================================
-// 현재 macOS만 지원 (NSStatusItem). Linux/Windows는 stub — create는 trayId:0 반환.
-// v1: title/tooltip + 메뉴 only. icon path는 v2.
+// macOS NSStatusItem, Linux GTK StatusIcon, Windows Shell_NotifyIconW.
+// v1: title/tooltip + 메뉴 only. custom icon path는 v2.
 
 export interface TrayMenuSeparator {
   type: "separator";
@@ -985,7 +986,7 @@ export const menu = {
 // globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
 // ============================================
 // Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4". Trigger fires on
-// `globalShortcut:trigger {accelerator, click}` via `suji.on`. Linux/Windows are stubs.
+// `globalShortcut:trigger {accelerator, click}` via `suji.on`. macOS/Windows supported.
 
 export const globalShortcut = {
   async register(accelerator: string, click: string): Promise<boolean> {
@@ -1012,7 +1013,7 @@ export const globalShortcut = {
 // ============================================
 // shell — 외부 핸들러 호출 (Electron `shell.*`)
 // ============================================
-// 현재 macOS만 지원 (NSWorkspace + NSBeep). Linux/Windows는 항상 false.
+// macOS NSWorkspace/NSFileManager, Linux GIO/FileManager1/GDK, Windows ShellExecute/SHFileOperation.
 
 export const shell = {
   /** URL을 시스템 기본 핸들러로 열기 (http(s) → 브라우저, mailto: → 메일 앱 등).
@@ -1164,8 +1165,7 @@ export const fs = {
 // ============================================
 // dialog — Native modal dialogs (Electron `dialog.*`)
 // ============================================
-// macOS만 지원 (NSOpenPanel/NSSavePanel/NSAlert). Linux/Windows에선 stub —
-// canceled:true / response:0 반환.
+// macOS NSOpenPanel/NSSavePanel/NSAlert, Linux GTK, Windows native dialogs.
 //
 // 모든 dialog는 Promise. 내부적으로 `runModal` 동기 호출이라 modal 동안 부모 창 입력 차단.
 
@@ -1193,7 +1193,7 @@ export interface MessageBoxOptions {
 }
 
 export interface FileFilter {
-  /** 필터 그룹 표시명 (현재 macOS UI에는 미반영 — 모든 extensions가 통합 허용). */
+  /** 필터 그룹 표시명. 플랫폼별 native file filter에 매핑된다. */
   name: string;
   /** 허용 확장자 (점 없이): `["jpg", "png"]`. `"*"`은 모든 파일. */
   extensions: string[];

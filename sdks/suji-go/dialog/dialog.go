@@ -1,5 +1,5 @@
 // Package dialog provides Suji native dialog API (Electron `dialog.*`).
-// macOS: NSAlert/NSOpenPanel/NSSavePanel. Linux/Windows stub.
+// macOS: NSAlert/NSOpenPanel/NSSavePanel. Linux: GTK. Windows: native dialogs.
 //
 // 응답은 raw JSON string — caller가 encoding/json으로 파싱.
 package dialog
@@ -89,4 +89,3 @@ func ShowSaveDialog(fieldsJSON string) string {
 	}
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"dialog_show_save_dialog",%s}`, fieldsJSON))
 }
-

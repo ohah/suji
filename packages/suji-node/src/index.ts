@@ -1131,7 +1131,9 @@ export const fs = {
 };
 
 // ============================================
-// notification — 시스템 알림 (Electron `Notification`). macOS only (UNUserNotificationCenter).
+// notification — 시스템 알림 (Electron `Notification`).
+// macOS UNUserNotificationCenter, Linux freedesktop Notifications D-Bus,
+// Windows Shell_NotifyIcon balloon.
 // 클릭은 `notification:click {notificationId}` 이벤트로 수신.
 // ============================================
 
@@ -1245,7 +1247,7 @@ export const menu = {
 };
 
 // ============================================
-// globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
+// globalShortcut — system-wide hot keys (Electron `globalShortcut.*`)
 // ============================================
 
 export const globalShortcut = {
