@@ -44,10 +44,12 @@ pub fn switches(platform: Platform, ci_env_value: ?[]const u8) SwitchSet {
     set.add(.{ .name = "disable-background-mode" });
     set.add(.{ .name = "remote-allow-origins", .value = "*" });
 
-    if (platform != .macos) {
-        set.add(.{ .name = "disable-gpu" });
-        set.add(.{ .name = "disable-gpu-compositing" });
-    }
+    // GPU 하드웨어 가속 — 3-OS 활성 (#12). 이전엔 Linux/Windows 에서
+    // disable-gpu/disable-gpu-compositing 명시. CEF 런타임 자산
+    // (libEGL/libGLESv2/vk_swiftshader/vk_swiftshader_icd.json) 이
+    // addInstallCefRuntimeStep 으로 zig-out/bin 옆에 배치되므로 ANGLE/SwiftShader
+    // 가 정상 로딩 → WebGL/CSS 합성/비디오 가속 활성. CI(headless)는 GPU 없어
+    // SwiftShader CPU fallback 으로 자동 전환 — 정상 동작.
 
     if (platform == .linux) {
         set.add(.{ .name = "no-sandbox" });
@@ -84,14 +86,19 @@ test "CEF command switches do not override network service mode in CI" {
     try std.testing.expect(!containsSwitch(macos, "disable-background-networking"));
 }
 
-test "CEF command switches disable GPU on non-macOS platforms" {
+test "CEF command switches enable GPU on all platforms (#12)" {
+    // GPU 가속 활성화 — CEF runtime asset 배치 완료(addInstallCefRuntimeStep).
+    // CI(GPU 없음) 는 SwiftShader CPU fallback 자동.
     const linux = switches(.linux, null).slice();
     const windows = switches(.windows, null).slice();
+    const macos = switches(.macos, null).slice();
 
-    try std.testing.expect(containsSwitch(linux, "disable-gpu"));
-    try std.testing.expect(containsSwitch(linux, "disable-gpu-compositing"));
-    try std.testing.expect(containsSwitch(windows, "disable-gpu"));
-    try std.testing.expect(containsSwitch(windows, "disable-gpu-compositing"));
+    try std.testing.expect(!containsSwitch(linux, "disable-gpu"));
+    try std.testing.expect(!containsSwitch(linux, "disable-gpu-compositing"));
+    try std.testing.expect(!containsSwitch(windows, "disable-gpu"));
+    try std.testing.expect(!containsSwitch(windows, "disable-gpu-compositing"));
+    try std.testing.expect(!containsSwitch(macos, "disable-gpu"));
+    try std.testing.expect(!containsSwitch(macos, "disable-gpu-compositing"));
 }
 
 test "CEF command switches add Linux CI headless guards only when requested" {
