@@ -983,6 +983,29 @@ pub fn build(b: *std.Build) void {
     const http_test_step = b.step("test-http", "Run http plugin tests (requires built dylib)");
     http_test_step.dependOn(&http_test_run.step);
 
+    // notification-rich plugin tests (Windows WinRT toast; non-Windows = unsupported_platform 검증)
+    const nrich_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/notification_rich_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const nrich_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    nrich_loader.addImport("events", events_module);
+    nrich_loader.addImport("runtime", runtime_module);
+    nrich_loader.addImport("util", util_module);
+    nrich_test_mod.addImport("loader", nrich_loader);
+    nrich_test_mod.addImport("events", events_module);
+    const nrich_test = b.addTest(.{ .root_module = nrich_test_mod });
+    const nrich_test_run = b.addRunArtifact(nrich_test);
+    nrich_test_run.setCwd(b.path("."));
+    const nrich_test_step = b.step("test-notification-rich", "Run notification-rich plugin tests (requires built dylib)");
+    nrich_test_step.dependOn(&nrich_test_run.step);
+
     // State plugin Rust 래퍼 통합 테스트
     // Rust bridge dylib를 cargo로 빌드한 뒤 Zig 테스트에서 로드.
     const rust_wrapper_mod = b.createModule(.{

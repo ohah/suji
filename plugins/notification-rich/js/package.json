@@ -1,0 +1,12 @@
+{
+  "name": "@suji/plugin-notification-rich",
+  "version": "0.1.0",
+  "description": "Rich toast notifications for Suji (Windows WinRT action buttons + Action Center persistence).",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test src"
+  },
+  "files": ["dist", "README.md"]
+}
