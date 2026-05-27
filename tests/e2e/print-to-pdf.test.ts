@@ -83,12 +83,12 @@ describe("print_to_pdf", () => {
       }), pdfPath) as Promise<{ path?: string; success?: boolean }>;
 
     try {
-      const ack = await core<{ from: string; cmd: string; windowId: number; ok: boolean }>({
+      const ack = await core<{ from: string; cmd: string; ok: boolean; path?: string; success?: boolean }>({
         cmd: "print_to_pdf",
         windowId: created.windowId,
         path: pdfPath,
       });
-      expect(ack).toEqual({ from: "zig-core", cmd: "print_to_pdf", windowId: created.windowId, ok: true });
+      expect(ack).toEqual({ from: "zig-core", cmd: "print_to_pdf", ok: true, path: pdfPath, success: true });
 
       const result = await Promise.race([
         finished,
