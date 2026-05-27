@@ -61,4 +61,19 @@ describe("richNotification Node — channel routing", () => {
     const r = await richNotification.show({ title: "T", body: "B" });
     expect(r.id).toBe(0);
   });
+
+  it("show passes image", async () => {
+    mockBridge.invoke.mockResolvedValueOnce('{"result":{"id":1}}');
+    await richNotification.show({ title: "T", body: "B", image: "C:/x.png" });
+    expect(lastPayload()).toEqual({ cmd: "notification:rich_show", title: "T", body: "B", image: "C:/x.png" });
+  });
+
+  it("setImageRoots / getImageRoots round-trip", async () => {
+    mockBridge.invoke.mockResolvedValueOnce('{"result":{"ok":true}}');
+    await richNotification.setImageRoots(["C:/icons"]);
+    expect(lastPayload()).toEqual({ cmd: "notification:set_image_roots", roots: ["C:/icons"] });
+
+    mockBridge.invoke.mockResolvedValueOnce('{"result":{"roots":["C:/icons"]}}');
+    expect(await richNotification.getImageRoots()).toEqual(["C:/icons"]);
+  });
 });

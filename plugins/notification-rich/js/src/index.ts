@@ -40,6 +40,9 @@ export interface ShowOpts {
   title: string;
   body: string;
   actions?: ToastAction[];
+  /** 이미지 파일 절대 경로. setImageRoots 로 등록된 root 안에 있어야 표시되고
+   * 아니면 silently 무시(toast 는 image 없이 표시). */
+  image?: string;
   scenario?: "alarm" | "reminder" | "incomingCall" | "urgent";
   silent?: boolean;
 }
@@ -56,6 +59,7 @@ export const richNotification = {
       title: opts.title,
       body: opts.body,
       ...(opts.actions ? { actions: opts.actions } : {}),
+      ...(opts.image ? { image: opts.image } : {}),
       ...(opts.scenario ? { scenario: opts.scenario } : {}),
       ...(opts.silent !== undefined ? { silent: opts.silent } : {}),
     });
@@ -64,5 +68,16 @@ export const richNotification = {
 
   async hide(id: number): Promise<void> {
     await call("notification:rich_hide", { id });
+  },
+
+  /** image 경로 allowlist 설정 — fs sandbox 와 동형(deny-by-default, ".." 차단,
+   * prefix + separator boundary, `["*"]` = escape hatch). */
+  async setImageRoots(roots: string[]): Promise<void> {
+    await call("notification:set_image_roots", { roots });
+  },
+
+  async getImageRoots(): Promise<string[]> {
+    const r = await call("notification:get_image_roots", {});
+    return (r?.roots ?? []) as string[];
   },
 };

@@ -26,7 +26,9 @@ const suji = @import("suji");
 pub const app = suji.app()
     .named("notification-rich")
     .handle("notification:rich_show", richShow)
-    .handle("notification:rich_hide", richHide);
+    .handle("notification:rich_hide", richHide)
+    .handle("notification:set_image_roots", setImageRoots)
+    .handle("notification:get_image_roots", getImageRoots);
 
 var gpa: std.heap.DebugAllocator(.{}) = .init;
 const alloc = gpa.allocator();
@@ -36,6 +38,9 @@ const MAX_BODY: usize = 1024;
 const MAX_ACTIONS: usize = 5;
 const MAX_LABEL: usize = 64;
 const MAX_ID: usize = 64;
+const MAX_IMAGE_PATH: usize = 4096;
+const MAX_IMAGE_ROOTS: usize = 32;
+const MAX_ROOT_LEN: usize = 4096;
 
 var next_id: u64 = 1;
 var id_mutex: std.Io.Mutex = .init;
@@ -48,9 +53,85 @@ fn nextId() u64 {
 }
 
 // ============================================
+// Image path allowlist — fs sandbox 와 동형:
+//   * "..": 어떤 모드든 차단 (path traversal)
+//   * roots 비어 있음 → 모든 image 차단 (deny-by-default)
+//   * 매칭은 prefix + separator boundary (/foo/bar 허용 시 /foo/barX 통과 X)
+//   * ["*"] = escape hatch (".." 만 차단)
+// ============================================
+
+var image_roots: std.ArrayList([]const u8) = .empty;
+var image_roots_mutex: std.Io.Mutex = .init;
+
+fn clearImageRoots() void {
+    for (image_roots.items) |r| alloc.free(r);
+    image_roots.clearRetainingCapacity();
+}
+
+fn hasParentTraversal(path: []const u8) bool {
+    // ".." path component 검출 — / 와 \ 둘 다 separator 로 취급.
+    var i: usize = 0;
+    while (i < path.len) {
+        // 다음 component 의 시작
+        const start = i;
+        while (i < path.len and path[i] != '/' and path[i] != '\\') : (i += 1) {}
+        if (std.mem.eql(u8, path[start..i], "..")) return true;
+        if (i < path.len) i += 1; // separator 건너뛰기
+    }
+    return false;
+}
+
+fn pathPrefixMatchesRoot(path: []const u8, root: []const u8) bool {
+    if (root.len == 0) return false;
+    if (path.len < root.len) return false;
+    // 대소문자 구분 (Windows 도 OS 호출은 case-insensitive 지만 우리는 strict).
+    if (!std.mem.startsWith(u8, path, root)) return false;
+    if (path.len == root.len) return true;
+    // separator boundary — root 끝이 / 거나 \ 면 OK, 아니면 다음 char 가 separator 여야.
+    const last = root[root.len - 1];
+    if (last == '/' or last == '\\') return true;
+    const next = path[root.len];
+    return next == '/' or next == '\\';
+}
+
+fn isImageAllowed(path: []const u8) bool {
+    if (path.len == 0 or path.len > MAX_IMAGE_PATH) return false;
+    if (hasParentTraversal(path)) return false;
+    image_roots_mutex.lockUncancelable(suji.io());
+    defer image_roots_mutex.unlock(suji.io());
+    if (image_roots.items.len == 0) return false;
+    for (image_roots.items) |root| {
+        if (std.mem.eql(u8, root, "*")) return true; // escape hatch
+        if (pathPrefixMatchesRoot(path, root)) return true;
+    }
+    return false;
+}
+
+// ============================================
 // JSON helpers
 // ============================================
 
+/// JSON output 용 진짜 JSON 이스케이프 — `"\` 와 제어문자 처리.
+fn realJsonEscapeAppend(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !void {
+    for (s) |c| {
+        switch (c) {
+            '"' => try buf.appendSlice(a, "\\\""),
+            '\\' => try buf.appendSlice(a, "\\\\"),
+            '\n' => try buf.appendSlice(a, "\\n"),
+            '\r' => try buf.appendSlice(a, "\\r"),
+            '\t' => try buf.appendSlice(a, "\\t"),
+            0...8, 11, 12, 14...31 => {
+                var tmp: [6]u8 = undefined;
+                const out = std.fmt.bufPrint(&tmp, "\\u{x:0>4}", .{c}) catch continue;
+                try buf.appendSlice(a, out);
+            },
+            else => try buf.append(a, c),
+        }
+    }
+}
+
+/// XML 콘텐츠/속성 이스케이프 (이름은 jsonEscapeAppend 지만 실제로는 XML/HTML
+/// 엔티티). toast XML body 에서만 사용. ⚠️ JSON output 에는 realJsonEscapeAppend 사용.
 fn jsonEscapeAppend(buf: *std.ArrayList(u8), a: std.mem.Allocator, s: []const u8) !void {
     for (s) |c| {
         switch (c) {
@@ -516,11 +597,14 @@ fn richShow(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     if (body.len > MAX_BODY) return req.err("body too long");
 
     const actions_raw = suji.extractJsonValue(req.raw, "actions");
-    // image: v1 정직 경계 — renderer-supplied 파일 경로를 file:// 로 toast 에
-    // 임베드하면 임의 로컬 파일 접근 가능(allowedRoots fs gate 우회).
-    // 플러그인은 코어의 rendererPathFsGate 에 접근 불가 → v1 image 비활성.
-    // 후속에서 plugin-side allowlist API (`notification:set_image_roots`) 검토.
-    const image_path: ?[]const u8 = null;
+    // image: 플러그인-자체 allowlist (set_image_roots) 통과 시 활성.
+    // deny-by-default — roots 빈 상태 = image 무시(toast 는 표시되지만 image 없음).
+    // 명시적 거부가 아니라 무시 — 호출자 친화(잘못된 image 가 전체 toast 실패시키지 않음).
+    const image_path_raw = req.string("image");
+    const image_path: ?[]const u8 = if (image_path_raw) |p|
+        (if (isImageAllowed(p)) p else null)
+    else
+        null;
     const scenario = req.string("scenario");
     const silent_str = suji.extractJsonValue(req.raw, "silent");
     const silent = if (silent_str) |s| std.mem.eql(u8, std.mem.trim(u8, s, " \t\n\r"), "true") else false;
@@ -565,6 +649,58 @@ fn richHide(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const ok = if (comptime builtin.os.tag == .windows) winrt.forgetAndHide(@intCast(id_i)) else unreachable;
     if (!ok) return req.err("not_found");
     return req.okRaw("{\"ok\":true}");
+}
+
+fn setImageRoots(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    const raw_array = suji.extractJsonValue(req.raw, "roots") orelse return req.err("missing roots");
+
+    const parsed = std.json.parseFromSlice(std.json.Value, alloc, raw_array, .{}) catch return req.err("invalid roots");
+    defer parsed.deinit();
+    if (parsed.value != .array) return req.err("roots must be array");
+    if (parsed.value.array.items.len > MAX_IMAGE_ROOTS) return req.err("too many roots");
+
+    var new_list: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (new_list.items) |p| alloc.free(p);
+        new_list.deinit(alloc);
+    }
+    for (parsed.value.array.items) |val| {
+        if (val != .string) return req.err("root not string");
+        if (val.string.len == 0 or val.string.len > MAX_ROOT_LEN) return req.err("invalid root");
+        // 보안: root 자체에 ".." 가 들어가면 의도된 sandbox 가 아니므로 거부.
+        // ("*" 는 단일 char escape hatch, ".." 검사 통과)
+        if (!std.mem.eql(u8, val.string, "*") and hasParentTraversal(val.string)) return req.err("root has parent traversal");
+        const owned = alloc.dupe(u8, val.string) catch return req.err("alloc");
+        new_list.append(alloc, owned) catch {
+            alloc.free(owned);
+            return req.err("alloc");
+        };
+    }
+
+    image_roots_mutex.lockUncancelable(suji.io());
+    defer image_roots_mutex.unlock(suji.io());
+    clearImageRoots();
+    image_roots.deinit(alloc);
+    image_roots = new_list;
+    return req.okRaw("{\"ok\":true}");
+}
+
+fn getImageRoots(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    image_roots_mutex.lockUncancelable(suji.io());
+    defer image_roots_mutex.unlock(suji.io());
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(req.arena);
+    out.appendSlice(req.arena, "{\"roots\":[") catch return req.err("alloc");
+    for (image_roots.items, 0..) |root, i| {
+        if (i > 0) out.append(req.arena, ',') catch return req.err("alloc");
+        out.append(req.arena, '"') catch return req.err("alloc");
+        realJsonEscapeAppend(&out, req.arena, root) catch return req.err("alloc");
+        out.append(req.arena, '"') catch return req.err("alloc");
+    }
+    out.appendSlice(req.arena, "]}") catch return req.err("alloc");
+    const final = out.toOwnedSlice(req.arena) catch return req.err("alloc");
+    return req.okRaw(final);
 }
 
 comptime {
