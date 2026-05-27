@@ -1695,8 +1695,10 @@ pub const CefNative = struct {
                 if (resolveParentNSWindow(self, pid)) |parent_ns| {
                     if (ns_window) |child_ns| attachMacChildWindow(parent_ns, child_ns);
                 }
-            } else if (comptime is_linux and parent_views_window == null) {
-                log.warn("createWindow: parent_id={d} 해석 실패 — CEF Views parent attach 스킵", .{pid});
+            } else if (comptime is_linux) {
+                if (parent_views_window == null) {
+                    log.warn("createWindow: parent_id={d} 해석 실패 — CEF Views parent attach 스킵", .{pid});
+                }
             }
         }
         forceInitialLoadUrl(br, url_z);
