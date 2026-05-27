@@ -759,6 +759,18 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
 - **Linux/Windows GPU 가속 미지원** (명시적 `--disable-gpu`): [#12](https://github.com/ohah/suji/issues/12)
   - macOS만 ANGLE Metal 경로로 GPU 활성. Linux/Windows는 SwiftShader CPU 폴백.
   - asset 배치 로직만 추가하면 됨. 우선순위 낮음.
+- **`@suji/plugin-notification-rich` macOS/Linux 액션 버튼 미구현**: 현재
+  Windows WinRT toast 만 정식 구현. macOS/Linux 는 `unsupported_platform` 반환.
+  - macOS: `UNUserNotificationCenter` + `UNNotificationCategory`/
+    `UNNotificationAction` 패턴 (기존 `src/platform/notification.m` 의 click
+    delegate 재사용). .app 번들 + Info.plist 필요.
+  - Linux: `libnotify` `notify_notification_add_action` + GLib main loop
+    signal callback (CEF 가 GLib 루프 통합 운영 — plugin 호출 가능).
+  - 두 플랫폼 모두 액션 클릭 콜백은 코어 `notification:click` 채널과 동형으로
+    라우팅하면 SDK 면 일관됨. 후속 PR. 우선순위 중.
+- **`@suji/plugin-notification-rich` Windows 액션 클릭 콜백 미구현**:
+  WinRT toast 액션 버튼 클릭은 `NotificationActivator` COM 클래스 등록 필요
+  (별도 인스톨러 + HKCU 레지스트리). 현재는 표시/Action Center 영속까지만.
 
 ## 구현 노트
 
