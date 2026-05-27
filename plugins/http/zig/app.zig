@@ -152,8 +152,14 @@ fn httpFetch(req: suji.Request, _: suji.InvokeEvent) suji.Response {
 
     var client: std.http.Client = .{ .allocator = alloc, .io = pluginIo() };
     defer client.deinit();
-    var aw = std.Io.Writer.Allocating.init(alloc);
-    defer aw.deinit();
+
+    // streaming response bound — 16MB 고정 버퍼에 직접 쓰고 초과 시 fetch 가
+    // error.WriteFailed 반환. 이전 Allocating writer 는 전체 body 를 할당한 뒤
+    // 사후 검사라 10GB 응답 = 10GB 할당. 이제 ceiling 보장 + OOM 방지.
+    // Trade-off: 응답이 작아도 16MB 항상 사전 할당(per-fetch 일회성).
+    const resp_buf = alloc.alloc(u8, MAX_RESPONSE_BYTES) catch return req.err("alloc");
+    defer alloc.free(resp_buf);
+    var resp_writer: std.Io.Writer = .fixed(resp_buf);
 
     const fetch_payload: ?[]const u8 = if (is_post) (body orelse "") else null;
 
@@ -163,17 +169,14 @@ fn httpFetch(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const r = client.fetch(.{
         .location = .{ .url = url },
         .payload = fetch_payload,
-        .response_writer = &aw.writer,
+        .response_writer = &resp_writer,
         .redirect_behavior = .not_allowed,
-    }) catch return req.err("fetch failed");
+    }) catch |e| {
+        if (e == error.WriteFailed) return req.err("response too large");
+        return req.err("fetch failed");
+    };
 
-    // 응답 본문 크기 1차 가드 — toOwnedSlice 전에 written buffer 길이 검사.
-    // v1 정직 한계: std.http.Client 가 이미 전체 body 를 메모리에 allocate 한 뒤
-    // 검사하는 post-allocation 가드. 진정한 streaming bound 는 후속(Request 저수준
-    // API + bounded reader).
-    if (aw.writer.end > MAX_RESPONSE_BYTES) return req.err("response too large");
-    const body_slice = aw.toOwnedSlice() catch return req.err("alloc");
-    defer alloc.free(body_slice);
+    const body_slice = resp_buf[0..resp_writer.end];
 
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(req.arena);
