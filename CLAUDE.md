@@ -760,9 +760,11 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
   directory picker, custom dialog buttons, notification click)~~ **해결됨**
   (PR #27~#34). `win_pump` 백그라운드 스레드 + hidden message-only window +
   `src/suji.manifest` (Common-Controls v6 + PerMonitorV2) 로 macOS 동등 동작.
-- **Linux/Windows GPU 가속 미지원** (명시적 `--disable-gpu`): [#12](https://github.com/ohah/suji/issues/12)
-  - macOS만 ANGLE Metal 경로로 GPU 활성. Linux/Windows는 SwiftShader CPU 폴백.
-  - asset 배치 로직만 추가하면 됨. 우선순위 낮음.
+- ~~Linux/Windows GPU 가속 미지원 (`--disable-gpu`)~~ **해결됨** ([#12](https://github.com/ohah/suji/issues/12)).
+  CEF runtime asset (libEGL/libGLESv2/vk_swiftshader/vk_swiftshader_icd.json) 가
+  `addInstallCefRuntimeStep` 으로 zig-out/bin 옆에 자동 배치되어 ANGLE/SwiftShader
+  로딩 가능 → WebGL/CSS 합성/비디오 가속 활성. CI headless 환경은 GPU 없어
+  SwiftShader CPU fallback 자동(정상 동작).
 - **`@suji/plugin-notification-rich` macOS/Linux 액션 버튼 미구현**: 현재
   Windows WinRT toast 만 정식 구현. macOS/Linux 는 `unsupported_platform` 반환.
   - macOS: `UNUserNotificationCenter` + `UNNotificationCategory`/
