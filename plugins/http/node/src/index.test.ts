@@ -58,4 +58,19 @@ describe("http.fetch Node — channel + payload shape", () => {
     expect(r.status).toBe(0);
     expect(r.body).toBe("");
   });
+
+  it("fetch passes headers map", async () => {
+    mockBridge.invoke.mockResolvedValueOnce('{"result":{"status":200,"body":""}}');
+    await http.fetch("https://x/", { headers: { "X-Foo": "bar" } });
+    expect(lastPayload()).toEqual({ cmd: "http:fetch", url: "https://x/", headers: { "X-Foo": "bar" } });
+  });
+
+  it("setAllowedHeaders + getAllowedHeaders", async () => {
+    mockBridge.invoke.mockResolvedValueOnce('{"result":{"ok":true}}');
+    await http.setAllowedHeaders(["X-A"]);
+    expect(lastPayload()).toEqual({ cmd: "http:set_allowed_headers", headers: ["X-A"] });
+
+    mockBridge.invoke.mockResolvedValueOnce('{"result":{"headers":["X-A"]}}');
+    expect(await http.getAllowedHeaders()).toEqual(["X-A"]);
+  });
 });

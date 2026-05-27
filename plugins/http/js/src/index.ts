@@ -24,6 +24,8 @@ function getBridge(): SujiBridge {
 export interface FetchOpts {
   method?: "GET" | "POST";
   body?: string;
+  /** 헤더 맵. 이름이 setAllowedHeaders 로 등록된 것만 허용. 미허용 시 fetch 거부. */
+  headers?: Record<string, string>;
 }
 
 export interface FetchResponse {
@@ -43,6 +45,7 @@ export const http = {
       url,
       ...(opts.method ? { method: opts.method } : {}),
       ...(opts.body !== undefined ? { body: opts.body } : {}),
+      ...(opts.headers ? { headers: opts.headers } : {}),
     });
     return {
       status: Number(r?.status ?? 0),
@@ -57,5 +60,17 @@ export const http = {
   async getAllowedUrls(): Promise<string[]> {
     const r = await call("http:get_allowed_urls", {});
     return (r?.urls ?? []) as string[];
+  },
+
+  /** 요청 헤더 이름 화이트리스트 (case-insensitive). 정책: deny-by-default —
+   * 등록 안 된 이름은 fetch 거부. Cookie/Authorization 등 누출 위험 헤더는
+   * 명시적 opt-in 만 허용. */
+  async setAllowedHeaders(headers: string[]): Promise<void> {
+    await call("http:set_allowed_headers", { headers });
+  },
+
+  async getAllowedHeaders(): Promise<string[]> {
+    const r = await call("http:get_allowed_headers", {});
+    return (r?.headers ?? []) as string[];
   },
 };

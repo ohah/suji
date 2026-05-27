@@ -244,6 +244,94 @@ test "http plugin: oversized pattern rejected" {
     try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"invalid pattern\"") != null);
 }
 
+test "http plugin: allowed_headers round-trip + replace" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadHttp(&reg);
+
+    const s = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X-Test\",\"Authorization\"]}");
+    defer freeResp(&reg, s);
+    try std.testing.expect(std.mem.indexOf(u8, s.?, "\"ok\":true") != null);
+
+    const g = invokePlugin(&reg, "{\"cmd\":\"http:get_allowed_headers\"}");
+    defer freeResp(&reg, g);
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "\"X-Test\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "\"Authorization\"") != null);
+
+    // 두 번째 set 은 replace
+    const s2 = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"Accept\"]}");
+    defer freeResp(&reg, s2);
+    const g2 = invokePlugin(&reg, "{\"cmd\":\"http:get_allowed_headers\"}");
+    defer freeResp(&reg, g2);
+    try std.testing.expect(std.mem.indexOf(u8, g2.?, "\"X-Test\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, g2.?, "\"Accept\"") != null);
+}
+
+test "http plugin: header name validation rejects bad tokens" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadHttp(&reg);
+
+    const cases = [_][]const u8{
+        "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X:bad\"]}", // colon
+        "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"With Space\"]}", // space
+        "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X\\r\\n\"]}", // CRLF
+        "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"\"]}", // empty
+        "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[42]}", // non-string
+        "{\"cmd\":\"http:set_allowed_headers\",\"headers\":\"not-array\"}", // wrong type
+    };
+    for (cases) |c| {
+        const r = invokePlugin(&reg, c);
+        defer freeResp(&reg, r);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\"") != null);
+    }
+}
+
+test "http plugin: fetch headers gated by allowlist" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadHttp(&reg);
+
+    const s_url = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_urls\",\"urls\":[\"https://api.allowed/*\"]}");
+    defer freeResp(&reg, s_url);
+    const s_clear = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[]}");
+    defer freeResp(&reg, s_clear);
+
+    // empty allowlist → 미허용 header 거부
+    const r1 = invokePlugin(&reg, "{\"cmd\":\"http:fetch\",\"url\":\"https://api.allowed/v1\",\"headers\":{\"X-Custom\":\"v\"}}");
+    defer freeResp(&reg, r1);
+    try std.testing.expect(std.mem.indexOf(u8, r1.?, "\"error\":\"header not allowed\"") != null);
+
+    // 허용 후 동일 호출 → 다른 에러(네트워크 등)는 가능하지만 header 자체는 통과해야 함
+    const s_set = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X-Custom\"]}");
+    defer freeResp(&reg, s_set);
+    const r2 = invokePlugin(&reg, "{\"cmd\":\"http:fetch\",\"url\":\"https://api.allowed/v1\",\"headers\":{\"X-Custom\":\"v\"}}");
+    defer freeResp(&reg, r2);
+    try std.testing.expect(std.mem.indexOf(u8, r2.?, "\"error\":\"header not allowed\"") == null);
+}
+
+test "http plugin: header value CRLF injection blocked" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadHttp(&reg);
+
+    const s_url = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_urls\",\"urls\":[\"*\"]}");
+    defer freeResp(&reg, s_url);
+    const s_h = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X\"]}");
+    defer freeResp(&reg, s_h);
+
+    // JSON 이스케이프 시퀀스 \r\n → 디코드 후 실제 CR/LF 바이트가 헤더 값에 들어감.
+    // 우리 isValidHeaderValue 가 byte-level 로 거부.
+    const req_bytes = "{\"cmd\":\"http:fetch\",\"url\":\"https://x.com/\",\"headers\":{\"X\":\"a\\r\\nHost: evil\"}}";
+    const r = invokePlugin(&reg, req_bytes);
+    defer freeResp(&reg, r);
+    try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"invalid header value\"") != null);
+}
+
 test "http plugin: oversized URL rejected" {
     var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();

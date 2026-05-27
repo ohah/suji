@@ -38,6 +38,7 @@ async function call(cmd: string, payload: Record<string, unknown>): Promise<any>
 export interface FetchOpts {
   method?: "GET" | "POST";
   body?: string;
+  headers?: Record<string, string>;
 }
 
 export interface FetchResponse {
@@ -51,6 +52,7 @@ export const http = {
       url,
       ...(opts.method ? { method: opts.method } : {}),
       ...(opts.body !== undefined ? { body: opts.body } : {}),
+      ...(opts.headers ? { headers: opts.headers } : {}),
     });
     return {
       status: Number(r?.status ?? 0),
@@ -65,5 +67,14 @@ export const http = {
   async getAllowedUrls(): Promise<string[]> {
     const r = await call("http:get_allowed_urls", {});
     return (r?.urls ?? []) as string[];
+  },
+
+  async setAllowedHeaders(headers: string[]): Promise<void> {
+    await call("http:set_allowed_headers", { headers });
+  },
+
+  async getAllowedHeaders(): Promise<string[]> {
+    const r = await call("http:get_allowed_headers", {});
+    return (r?.headers ?? []) as string[];
   },
 };

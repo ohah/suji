@@ -23,7 +23,9 @@ pub const app = suji.app()
     .named("http")
     .handle("http:fetch", httpFetch)
     .handle("http:set_allowed_urls", httpSetAllowedUrls)
-    .handle("http:get_allowed_urls", httpGetAllowedUrls);
+    .handle("http:get_allowed_urls", httpGetAllowedUrls)
+    .handle("http:set_allowed_headers", httpSetAllowedHeaders)
+    .handle("http:get_allowed_headers", httpGetAllowedHeaders);
 
 var gpa: std.heap.DebugAllocator(.{}) = .init;
 const alloc = gpa.allocator();
@@ -37,6 +39,10 @@ const MAX_URL_LEN: usize = 4096;
 const MAX_PATTERN_LEN: usize = 1024;
 const MAX_PATTERNS: usize = 256;
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+const MAX_HEADERS_PER_REQUEST: usize = 16;
+const MAX_HEADER_NAME_LEN: usize = 128;
+const MAX_HEADER_VALUE_LEN: usize = 4096;
+const MAX_ALLOWED_HEADERS: usize = 32;
 
 // ============================================
 // Allowlist
@@ -44,6 +50,9 @@ const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 var allowed_urls: std.ArrayList([]const u8) = .empty;
 var allowed_mutex: std.Io.Mutex = .init;
+
+var allowed_headers: std.ArrayList([]const u8) = .empty;
+var allowed_headers_mutex: std.Io.Mutex = .init;
 
 fn matchGlob(pattern: []const u8, text: []const u8) bool {
     // src/core/util.zig matchGlob 미러 — 플러그인은 util import 안 함, 동형 구현.
@@ -86,6 +95,44 @@ fn isAllowed(url: []const u8) bool {
 fn clearAllowed() void {
     for (allowed_urls.items) |p| alloc.free(p);
     allowed_urls.clearRetainingCapacity();
+}
+
+fn clearAllowedHeaders() void {
+    for (allowed_headers.items) |h| alloc.free(h);
+    allowed_headers.clearRetainingCapacity();
+}
+
+/// RFC 7230 token char: alpha/digit + !#$%&'*+-.^_`|~
+fn isHeaderTokenChar(c: u8) bool {
+    if (std.ascii.isAlphanumeric(c)) return true;
+    return switch (c) {
+        '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~' => true,
+        else => false,
+    };
+}
+
+fn isValidHeaderName(name: []const u8) bool {
+    if (name.len == 0 or name.len > MAX_HEADER_NAME_LEN) return false;
+    for (name) |c| if (!isHeaderTokenChar(c)) return false;
+    return true;
+}
+
+/// CRLF/NUL 차단 — std.http.Client 도 assert 하지만 정직 경계로 사전 차단.
+fn isValidHeaderValue(value: []const u8) bool {
+    if (value.len > MAX_HEADER_VALUE_LEN) return false;
+    for (value) |c| {
+        if (c == '\r' or c == '\n' or c == 0) return false;
+    }
+    return true;
+}
+
+fn isHeaderAllowed(name: []const u8) bool {
+    allowed_headers_mutex.lockUncancelable(pluginIo());
+    defer allowed_headers_mutex.unlock(pluginIo());
+    for (allowed_headers.items) |allowed| {
+        if (std.ascii.eqlIgnoreCase(allowed, name)) return true;
+    }
+    return false;
 }
 
 // ============================================
@@ -150,6 +197,30 @@ fn httpFetch(req: suji.Request, _: suji.InvokeEvent) suji.Response {
         is_post = body != null;
     }
 
+    // headers 처리 — set_allowed_headers 로 등록한 이름만 허용. 응답에 잘못된
+    // 이름/값이 있으면 fetch 안 시도 하고 즉시 error 반환.
+    var extra_headers: std.ArrayList(std.http.Header) = .empty;
+    defer extra_headers.deinit(req.arena);
+    if (suji.extractJsonValue(req.raw, "headers")) |headers_raw| {
+        const parsed = std.json.parseFromSlice(std.json.Value, alloc, headers_raw, .{}) catch return req.err("invalid headers");
+        defer parsed.deinit();
+        if (parsed.value != .object) return req.err("headers must be object");
+        if (parsed.value.object.count() > MAX_HEADERS_PER_REQUEST) return req.err("too many headers");
+        var iter = parsed.value.object.iterator();
+        while (iter.next()) |entry| {
+            const name = entry.key_ptr.*;
+            if (entry.value_ptr.* != .string) return req.err("header value not string");
+            const value = entry.value_ptr.*.string;
+            if (!isValidHeaderName(name)) return req.err("invalid header name");
+            if (!isValidHeaderValue(value)) return req.err("invalid header value");
+            if (!isHeaderAllowed(name)) return req.err("header not allowed");
+            // arena 에 복제 — parsed 의 lifetime 은 이 블록만, fetch 호출시까지 살아야 함.
+            const name_dup = req.arena.dupe(u8, name) catch return req.err("alloc");
+            const value_dup = req.arena.dupe(u8, value) catch return req.err("alloc");
+            extra_headers.append(req.arena, .{ .name = name_dup, .value = value_dup }) catch return req.err("alloc");
+        }
+    }
+
     var client: std.http.Client = .{ .allocator = alloc, .io = pluginIo() };
     defer client.deinit();
 
@@ -169,6 +240,7 @@ fn httpFetch(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const r = client.fetch(.{
         .location = .{ .url = url },
         .payload = fetch_payload,
+        .extra_headers = extra_headers.items,
         .response_writer = &resp_writer,
         .redirect_behavior = .not_allowed,
     }) catch |e| {
@@ -220,6 +292,55 @@ fn httpSetAllowedUrls(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     allowed_urls.deinit(alloc);
     allowed_urls = new_list;
     return req.okRaw("{\"ok\":true}");
+}
+
+fn httpSetAllowedHeaders(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    const raw_array = suji.extractJsonValue(req.raw, "headers") orelse return req.err("missing headers");
+
+    const parsed = std.json.parseFromSlice(std.json.Value, alloc, raw_array, .{}) catch return req.err("invalid headers");
+    defer parsed.deinit();
+    if (parsed.value != .array) return req.err("headers must be array");
+    if (parsed.value.array.items.len > MAX_ALLOWED_HEADERS) return req.err("too many headers");
+
+    var new_list: std.ArrayList([]const u8) = .empty;
+    errdefer {
+        for (new_list.items) |h| alloc.free(h);
+        new_list.deinit(alloc);
+    }
+    for (parsed.value.array.items) |val| {
+        if (val != .string) return req.err("header name not string");
+        if (!isValidHeaderName(val.string)) return req.err("invalid header name");
+        const owned = alloc.dupe(u8, val.string) catch return req.err("alloc");
+        new_list.append(alloc, owned) catch {
+            alloc.free(owned);
+            return req.err("alloc");
+        };
+    }
+
+    allowed_headers_mutex.lockUncancelable(pluginIo());
+    defer allowed_headers_mutex.unlock(pluginIo());
+    clearAllowedHeaders();
+    allowed_headers.deinit(alloc);
+    allowed_headers = new_list;
+    return req.okRaw("{\"ok\":true}");
+}
+
+fn httpGetAllowedHeaders(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    allowed_headers_mutex.lockUncancelable(pluginIo());
+    defer allowed_headers_mutex.unlock(pluginIo());
+
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(req.arena);
+    out.appendSlice(req.arena, "{\"headers\":[") catch return req.err("alloc");
+    for (allowed_headers.items, 0..) |name, i| {
+        if (i > 0) out.append(req.arena, ',') catch return req.err("alloc");
+        out.append(req.arena, '"') catch return req.err("alloc");
+        appendJsonEscaped(&out, req.arena, name) catch return req.err("alloc");
+        out.append(req.arena, '"') catch return req.err("alloc");
+    }
+    out.appendSlice(req.arena, "]}") catch return req.err("alloc");
+    const final = out.toOwnedSlice(req.arena) catch return req.err("alloc");
+    return req.okRaw(final);
 }
 
 fn httpGetAllowedUrls(req: suji.Request, _: suji.InvokeEvent) suji.Response {
