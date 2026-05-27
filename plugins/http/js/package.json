@@ -1,0 +1,12 @@
+{
+  "name": "@suji/plugin-http",
+  "version": "0.1.0",
+  "description": "Renderer-safe HTTP fetch for Suji with URL allowlist.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test src"
+  },
+  "files": ["dist", "README.md"]
+}

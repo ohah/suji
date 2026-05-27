@@ -1,0 +1,5 @@
+{
+  "name": "http",
+  "lang": "zig",
+  "description": "Renderer-safe HTTP client with URL allowlist (CORS-free backend fetch). Zig std.http 위에 allowlist 게이트."
+}
