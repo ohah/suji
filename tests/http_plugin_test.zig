@@ -289,6 +289,59 @@ test "http plugin: header name validation rejects bad tokens" {
     }
 }
 
+test "http plugin: header name matching is case-insensitive" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadHttp(&reg);
+
+    const s_url = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_urls\",\"urls\":[\"*\"]}");
+    defer freeResp(&reg, s_url);
+    const s_h = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X-Custom\"]}");
+    defer freeResp(&reg, s_h);
+
+    // registered as "X-Custom", passed as "x-custom" / "X-CUSTOM" — 둘 다 통과해야.
+    const variants = [_][]const u8{
+        "{\"cmd\":\"http:fetch\",\"url\":\"https://x/\",\"headers\":{\"x-custom\":\"v\"}}",
+        "{\"cmd\":\"http:fetch\",\"url\":\"https://x/\",\"headers\":{\"X-CUSTOM\":\"v\"}}",
+    };
+    for (variants) |req| {
+        const r = invokePlugin(&reg, req);
+        defer freeResp(&reg, r);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"header not allowed\"") == null);
+    }
+}
+
+test "http plugin: header value MAX boundary" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadHttp(&reg);
+
+    const s_url = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_urls\",\"urls\":[\"*\"]}");
+    defer freeResp(&reg, s_url);
+    const s_h = invokePlugin(&reg, "{\"cmd\":\"http:set_allowed_headers\",\"headers\":[\"X\"]}");
+    defer freeResp(&reg, s_h);
+
+    // 정확히 MAX (4096) 통과, MAX+1 거부.
+    const a = std.heap.page_allocator;
+    inline for (.{ .{ .len = 4096, .expect_ok = true }, .{ .len = 4097, .expect_ok = false } }) |case| {
+        var payload: std.ArrayList(u8) = .empty;
+        defer payload.deinit(a);
+        try payload.appendSlice(a, "{\"cmd\":\"http:fetch\",\"url\":\"https://x/\",\"headers\":{\"X\":\"");
+        var i: usize = 0;
+        while (i < case.len) : (i += 1) try payload.append(a, 'a');
+        try payload.appendSlice(a, "\"}}");
+        const r = invokePlugin(&reg, payload.items);
+        defer freeResp(&reg, r);
+        if (case.expect_ok) {
+            try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"invalid header value\"") == null);
+        } else {
+            try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"invalid header value\"") != null);
+        }
+    }
+}
+
 test "http plugin: fetch headers gated by allowlist" {
     var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
