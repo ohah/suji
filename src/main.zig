@@ -3344,7 +3344,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return result;
     }
 
-    // Application Menu API — NSMenu customization.
+    // Application Menu API — native app menu / popup customization.
     if (std.mem.eql(u8, cmd, "menu_set_application_menu")) {
         return handleMenuSetApplicationMenu(req_clean, response_buf);
     }

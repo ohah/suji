@@ -168,9 +168,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus / Windows Shell_NotifyIcon balloon)
 // suji.menu.setApplicationMenuRaw("\"items\":[...]") / resetApplicationMenu()
-//   / popup(items, {x?,y?})  — 임의 위치 컨텍스트 메뉴(NSMenu
-//   popUpMenuPositioningItem, x/y 미지정=커서; 동기 모달)
-//                                       (macOS NSMenu, menu:click 이벤트)
+//   / popup(items, {x?,y?})  — 임의 위치 컨텍스트 메뉴(macOS NSMenu
+//   popUpMenuPositioningItem, Linux GTK popup; x/y 미지정=커서/포인터)
+//                                       (macOS NSMenu / Linux GTK, menu:click 이벤트)
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key / Linux X11 XGrabKey / Windows RegisterHotKey, globalShortcut:trigger 이벤트)
 //   미디어키: register("MediaPlayPause"|"MediaNextTrack"|"MediaPreviousTrack"|
@@ -476,7 +476,8 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await notification.requestPermission() / show({title,body,silent}) / close(notificationId)
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
-// await menu.resetApplicationMenu() — suji.on('menu:click', ({click}) => ...)
+// await menu.resetApplicationMenu()
+// await menu.popup([{label:"Run",click:"run"}], {x:10,y:10}) — suji.on('menu:click', ({click}) => ...)
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, session, crashReporter, autoUpdater } from '@suji/node'
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen / Linux X11 screen)
 // await crashReporter.start({uploadToServer:false})

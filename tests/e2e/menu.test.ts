@@ -1,11 +1,12 @@
 /**
- * Menu E2E — `suji.menu.{setApplicationMenu,resetApplicationMenu}` 검증.
+ * Menu E2E — `suji.menu.{setApplicationMenu,resetApplicationMenu,popup}` 검증.
  *
  * 자동화 범위:
  *   - IPC wiring + success 응답
  *   - submenu/item/checkbox/separator 조합
  *   - resetApplicationMenu 기본 메뉴 복원
  *   - 잘못된 items 타입 parse error
+ *   - Linux: GTK context menu popup 정상 응답
  *   - RUN_DESTRUCTIVE: osascript로 메뉴 항목 클릭 → `menu:click` 이벤트 수신
  *
  * 실행:
@@ -26,6 +27,8 @@ const core = <T = any>(request: Record<string, unknown>): Promise<T> =>
   ) as Promise<T>;
 
 const runDestructive = process.env.RUN_DESTRUCTIVE === "1";
+const isDarwin = process.platform === "darwin";
+const isLinux = process.platform === "linux";
 
 beforeAll(async () => {
   browser = await puppeteer.connect({
@@ -45,7 +48,7 @@ afterAll(async () => {
 });
 
 describe("menu_set_application_menu — wiring + 응답", () => {
-  test("submenu/item/checkbox/separator 조합", async () => {
+  test.skipIf(!isDarwin)("submenu/item/checkbox/separator 조합", async () => {
     const r = await core<{ success: boolean }>({
       cmd: "menu_set_application_menu",
       items: [
@@ -68,7 +71,7 @@ describe("menu_set_application_menu — wiring + 응답", () => {
     expect(r.success).toBe(true);
   });
 
-  test("Unicode 라벨 + click", async () => {
+  test.skipIf(!isDarwin)("Unicode 라벨 + click", async () => {
     const r = await core<{ success: boolean }>({
       cmd: "menu_set_application_menu",
       items: [
@@ -84,13 +87,24 @@ describe("menu_set_application_menu — wiring + 응답", () => {
     expect(r.success).toBe(true);
   });
 
-  test("resetApplicationMenu 정상", async () => {
+  test.skipIf(!isDarwin)("resetApplicationMenu 정상", async () => {
     const r = await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
     expect(r.success).toBe(true);
   });
+
+  test.skipIf(isDarwin)("application menu stub graceful false", async () => {
+    const set = await core<{ success: boolean }>({
+      cmd: "menu_set_application_menu",
+      items: [{ label: "Tools", submenu: [{ label: "Run", click: "run" }] }],
+    });
+    expect(set.success).toBe(false);
+
+    const reset = await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
+    expect(reset.success).toBe(false);
+  });
 });
 
-describe("error 분기", () => {
+describe("error / platform 분기", () => {
   test("items non-array → parse error", async () => {
     const r = await core<{ success: boolean; error?: string }>({
       cmd: "menu_set_application_menu",
@@ -119,6 +133,21 @@ describe("error 분기", () => {
     });
     expect(r.success).toBe(false);
     expect(r.error).toBe("parse");
+  });
+
+  test.skipIf(!isLinux)("menu_popup 정상 응답 (Linux GTK)", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "menu_popup",
+      x: 16,
+      y: 16,
+      items: [
+        { label: "Linux Popup Item", click: "linux-popup-item" },
+        { type: "checkbox", label: "Linux Popup Check", click: "linux-popup-check", checked: true },
+        { type: "separator" },
+        { type: "submenu", label: "Nested", submenu: [{ label: "Child", click: "linux-popup-child" }] },
+      ],
+    });
+    expect(r.success).toBe(true);
   });
 });
 

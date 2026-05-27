@@ -6092,10 +6092,11 @@ pub fn appHide() bool {
 }
 
 // ============================================
-// Application Menu API — NSMenu customization
+// Application Menu API — native app menu / popup customization
 // ============================================
 // macOS 메뉴바 커스터마이즈. App 메뉴(Quit/Hide 등)는 macOS 관례와 종료 라우팅을 위해
 // 프레임워크가 유지하고, caller가 전달한 top-level 메뉴를 그 뒤에 붙인다.
+// Linux는 앱 메뉴바 대신 programmatic context menu(`menu.popup`)만 GTK로 제공한다.
 //
 // 클릭 시 SujiAppMenuTarget.appMenuClick:이 representedObject(NSString click name)를 읽어
 // `menu:click {"click":"..."}` 이벤트를 발화한다. checkbox는 클릭 시 state를 토글한다.
@@ -6204,6 +6205,7 @@ pub fn resetApplicationMenu() bool {
 /// (`createMenuFromItems`). x/y 미지정 시 현재 커서(화면 좌표).
 /// ⚠️ popUp 은 동기 모달 — 항목 선택/dismiss 까지 블록(macOS 표준 동작).
 pub fn popupContextMenu(items: []const ApplicationMenuItem, x: ?f64, y: ?f64) bool {
+    if (comptime is_linux) return linux_context_menu.popup(items, x, y);
     if (!comptime is_macos) return false;
     const menu = createMenuFromItems("", items) orelse return false;
     // x·y 둘 다 지정해야 그 좌표 사용 — 한쪽만이면 커서로 폴백(부분 지정 무의미).
@@ -6253,6 +6255,181 @@ fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, e
     setMenuItemEnabled(m, enabled);
     msgSendVoid1(menu, "addItem:", m);
 }
+
+const linux_context_menu = if (is_linux) struct {
+    const MAX_MENU_ITEMS: usize = 64;
+    const MAX_CLICK_BYTES: usize = 256;
+
+    const MenuCallback = struct {
+        used: bool = false,
+        click: [MAX_CLICK_BYTES]u8 = undefined,
+        click_len: usize = 0,
+    };
+
+    var current_menu: ?*anyopaque = null;
+    var callbacks: [MAX_MENU_ITEMS]MenuCallback = [_]MenuCallback{.{}} ** MAX_MENU_ITEMS;
+    var popup_x: c_int = 0;
+    var popup_y: c_int = 0;
+
+    extern "c" fn suji_gtk_init_check() callconv(.c) c_int;
+    extern "c" fn gtk_menu_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_menu_item_new_with_label(label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_check_menu_item_new_with_label(label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_check_menu_item_set_active(check_menu_item: ?*anyopaque, is_active: c_int) callconv(.c) void;
+    extern "c" fn gtk_separator_menu_item_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_menu_item_set_submenu(menu_item: ?*anyopaque, submenu: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_menu_shell_append(menu_shell: ?*anyopaque, child: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_widget_set_sensitive(widget: ?*anyopaque, sensitive: c_int) callconv(.c) void;
+    extern "c" fn gtk_widget_show_all(widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_widget_destroy(widget: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_get_current_event_time() callconv(.c) u32;
+    extern "c" fn gtk_menu_popup(
+        menu: ?*anyopaque,
+        parent_menu_shell: ?*anyopaque,
+        parent_menu_item: ?*anyopaque,
+        func: ?*const anyopaque,
+        data: ?*anyopaque,
+        button: u32,
+        activate_time: u32,
+    ) callconv(.c) void;
+    extern "c" fn g_signal_connect_data(
+        instance: ?*anyopaque,
+        detailed_signal: [*:0]const u8,
+        c_handler: ?*const anyopaque,
+        data: ?*anyopaque,
+        destroy_data: ?*const fn (?*anyopaque, ?*anyopaque) callconv(.c) void,
+        connect_flags: c_int,
+    ) callconv(.c) usize;
+
+    fn gtkAvailable() bool {
+        return suji_gtk_init_check() != 0;
+    }
+
+    fn clearCallbacks() void {
+        for (&callbacks) |*cb| cb.* = .{};
+    }
+
+    fn closeCurrentMenu() void {
+        const menu = current_menu orelse {
+            clearCallbacks();
+            return;
+        };
+        current_menu = null;
+        gtk_widget_destroy(menu);
+        clearCallbacks();
+    }
+
+    fn firstFreeCallback() ?*MenuCallback {
+        for (&callbacks) |*cb| {
+            if (!cb.used) return cb;
+        }
+        return null;
+    }
+
+    fn setCallback(cb: *MenuCallback, click: []const u8) bool {
+        if (click.len > cb.click.len) return false;
+        cb.used = true;
+        cb.click_len = click.len;
+        @memcpy(cb.click[0..click.len], click);
+        return true;
+    }
+
+    fn menuItemActivateC(_: ?*anyopaque, data: ?*anyopaque) callconv(.c) void {
+        const cb: *MenuCallback = @ptrCast(@alignCast(data orelse return));
+        if (!cb.used) return;
+        if (g_menu_emit_handler) |emit| emit(cb.click[0..cb.click_len]);
+    }
+
+    fn menuDeactivateC(widget: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+        const menu = widget orelse return;
+        if (current_menu == null or current_menu.? != menu) return;
+        current_menu = null;
+        gtk_widget_destroy(menu);
+        clearCallbacks();
+    }
+
+    fn popupPositionC(_: ?*anyopaque, x: ?*c_int, y: ?*c_int, push_in: ?*c_int, _: ?*anyopaque) callconv(.c) void {
+        if (x) |px| px.* = popup_x;
+        if (y) |py| py.* = popup_y;
+        if (push_in) |p| p.* = 0;
+    }
+
+    fn coordToCInt(v: f64) c_int {
+        if (std.math.isNan(v)) return 0;
+        const min = @as(f64, @floatFromInt(std.math.minInt(c_int)));
+        const max = @as(f64, @floatFromInt(std.math.maxInt(c_int)));
+        return @intFromFloat(std.math.clamp(v, min, max));
+    }
+
+    fn createGtkMenuFromItems(items: []const ApplicationMenuItem) ?*anyopaque {
+        const menu = gtk_menu_new() orelse return null;
+        for (items) |item| addGtkMenuItem(menu, item);
+        return menu;
+    }
+
+    fn addGtkMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
+        switch (item) {
+            .separator => {
+                const sep = gtk_separator_menu_item_new() orelse return;
+                gtk_menu_shell_append(menu, sep);
+            },
+            .item => |it| addClickable(menu, it.label, it.click, it.enabled, null),
+            .checkbox => |it| addClickable(menu, it.label, it.click, it.enabled, it.checked),
+            .submenu => |sub| {
+                var label_buf: [256]u8 = undefined;
+                const label_z = nullTerminateOrTruncate(sub.label, &label_buf) orelse return;
+                const item_widget = gtk_menu_item_new_with_label(label_z.ptr) orelse return;
+                const submenu = createGtkMenuFromItems(sub.items) orelse return;
+                gtk_menu_item_set_submenu(item_widget, submenu);
+                gtk_widget_set_sensitive(item_widget, if (sub.enabled) 1 else 0);
+                gtk_menu_shell_append(menu, item_widget);
+            },
+        }
+    }
+
+    fn addClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool) void {
+        var label_buf: [256]u8 = undefined;
+        const label_z = nullTerminateOrTruncate(label, &label_buf) orelse return;
+        const cb = firstFreeCallback() orelse return;
+        if (!setCallback(cb, click)) return;
+        const item_widget = if (checked) |state| blk: {
+            const check = gtk_check_menu_item_new_with_label(label_z.ptr) orelse return;
+            gtk_check_menu_item_set_active(check, if (state) 1 else 0);
+            break :blk check;
+        } else gtk_menu_item_new_with_label(label_z.ptr) orelse return;
+
+        gtk_widget_set_sensitive(item_widget, if (enabled) 1 else 0);
+        _ = g_signal_connect_data(item_widget, "activate", @ptrCast(&menuItemActivateC), cb, null, 0);
+        gtk_menu_shell_append(menu, item_widget);
+    }
+
+    fn popup(items: []const ApplicationMenuItem, x: ?f64, y: ?f64) bool {
+        if (!gtkAvailable()) return false;
+        closeCurrentMenu();
+
+        const menu = createGtkMenuFromItems(items) orelse return false;
+        current_menu = menu;
+        _ = g_signal_connect_data(menu, "deactivate", @ptrCast(&menuDeactivateC), null, null, 0);
+        gtk_widget_show_all(menu);
+
+        const use_position = x != null and y != null;
+        if (use_position) {
+            popup_x = coordToCInt(x.?);
+            popup_y = coordToCInt(y.?);
+        }
+        const position_func: ?*const anyopaque = if (use_position) @ptrCast(&popupPositionC) else null;
+        gtk_menu_popup(
+            menu,
+            null,
+            null,
+            position_func,
+            null,
+            0,
+            gtk_get_current_event_time(),
+        );
+        return true;
+    }
+} else struct {};
 
 fn setMenuItemEnabled(item: *anyopaque, enabled: bool) void {
     const f: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);

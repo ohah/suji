@@ -952,7 +952,7 @@ test "Linux CEF Views window lifecycle events are documented and run in Actions"
     inline for (.{
         "Linux CEF Views runtime E2E",
         "run-window-lifecycle-events-cef-views.sh",
-        "macOS CI + Linux CEF runtime subset",
+        "macOS/Linux/Windows CI + CEF runtime subset",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, plan, needle) != null);
     }
