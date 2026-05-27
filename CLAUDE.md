@@ -794,7 +794,7 @@ BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runti
 
 ## 배포 / 설치
 
-### Suji CLI 배포 (예정)
+### Suji CLI 배포
 
 | 채널 | 명령어 | 상태 |
 |------|--------|------|

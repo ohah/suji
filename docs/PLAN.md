@@ -715,8 +715,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - **안전성**: id monotonic (재사용 X), create 전체 write lock, closed 창 emit은 silent no-op, orphan은 destroyAll, 부모-자식은 시각 관계만 (재귀 close X)
     - **TDD 인프라**: Light 투자 (MockBrowser/MockWebView 각 10~20줄만). 필요 시점에 확장. WindowManager 단위는 CEF 없이 풀-TDD
     - **구현 순서**: Phase 2 (기본) + Phase 2.5 (데이터 인프라) **분리 유지**. 2.5 없이 Phase 2만 완료되면 플러그인이 멀티 윈도우 인지 불가
-    - **E2E 실행**: macOS CI + Linux CEF runtime subset. Windows는 현재 보류/빌드 안정화 후 재개.
-- [ ] CLI 도구
+    - **E2E 실행**: macOS/Linux/Windows CI + CEF runtime subset.
+- [x] CLI 도구
   - [x] `suji init` — 프로젝트 스캐폴딩 (backend zig/rust/go/multi + frontend react/vue/svelte/solid/preact/vanilla)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
@@ -1535,7 +1535,7 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
     환경 한계로 단위 테스트가 cover (`docs/WINDOW_API.md` 매핑 표).
 8. ✅ **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
 9. ✅ **보안 모델** (Phase 7: fs sandbox + cache 격리 + IPC 검증 + CSP + contextIsolation audit) — Phase 7 핵심 완료
-10. **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — 진입 장벽 즉각 해소
+10. ✅ **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — `@suji/cli` 스캐폴더, Homebrew Formula 생성/검증, curl installer 완료. npm publish/tap push는 토큰 보유 환경에서 수행
 11. **Windows frameless drag region 후속** — macOS/Linux `frame:false`
     drag/no-drag는 E2E 완료. Linux 잔여 창 옵션(`transparent`/`parent` 등)은 CEF Views
     native path로 완료. Windows frameless parity는 후속.
