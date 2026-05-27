@@ -59,6 +59,7 @@ bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
 bash tests/e2e/run-system-integration.sh # screen/desktopCapturer/crashReporter/app 등 통합
 bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
+bash tests/e2e/run-gpu-accel.sh         # GPU 가속 회귀 가드 (#12) — WebGL ANGLE/D3D11/SwiftShader fallback
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
 bash tests/e2e/run-plugin-wrappers.sh   # 공식 플러그인 (state/sqlite/log/store/http/notification-rich) × {JS, Node} wrapper wire-contract (mock bridge)
