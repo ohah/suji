@@ -174,7 +174,9 @@ func StopFindInPage(windowID uint32, clearSelection bool) string {
 	))
 }
 
-// PrintToPDF는 콜백 async — 결과는 `window:pdf-print-finished` 이벤트.
+// PrintToPDF — 코어가 CDP 완료까지 응답 보류 → 응답 JSON 에 `success` 직접 포함
+// (예: `{"from":"zig-core","cmd":"print_to_pdf","path":"...","success":true}`).
+// EventBus emit `window:pdf-print-finished` 도 동시 발화(다른 구독자 호환).
 func PrintToPDF(windowID uint32, path string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"print_to_pdf","windowId":%d,"path":"%s"}`,
@@ -183,8 +185,8 @@ func PrintToPDF(windowID uint32, path string) string {
 }
 
 // CapturePage — 페이지 스크린샷 PNG 저장 (Electron webContents.capturePage,
-// CDP Page.captureScreenshot). 즉시 ack + 완료는 window:page-captured
-// 이벤트({path,success}) — caller 가 on 으로 path 매칭(PrintToPDF 동형).
+// CDP Page.captureScreenshot). 코어 deferred response — 응답 JSON 에 `success`
+// 직접 포함. EventBus emit `window:page-captured` 도 동시 발화.
 func CapturePage(windowID uint32, path string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
 		`{"cmd":"capture_page","windowId":%d,"path":"%s"}`,

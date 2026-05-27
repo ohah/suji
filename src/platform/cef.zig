@@ -2437,6 +2437,79 @@ pub const CefNative = struct {
     }
 };
 
+// ============================================
+// Deferred IPC response — Promise-style 직접 응답 (issue #16)
+//
+// 기본 IPC: handleBrowserInvoke → 핸들러 동기 응답 → sendInvokeResponse 즉시.
+// 일부 핸들러(print_to_pdf/capture_page)는 CDP 콜백을 기다려야 결과를 안다.
+// 이전 디자인: ack 즉시 + 별도 EventBus 이벤트(`window:pdf-print-finished` 등) →
+//   SDK 가 path 매칭 listener 로 await. 콜백 미발화 경로(#16)에서 listener leak.
+// 새 디자인: 핸들러가 `cefDeferResponse(path)` 호출 → 호출 컨텍스트(seq_id,
+//   browser, frame) 를 path 키로 보관 + handleBrowserInvoke 는 sendInvokeResponse
+//   skip. CDP 콜백에서 `cefCompletePending(path, result)` → 보관된 컨텍스트로
+//   응답 송신. EventBus emit 은 그대로(다른 구독자 호환).
+// ============================================
+
+/// invoke 핸들러 실행 동안 set — 호출 컨텍스트(응답 송신용).
+/// CEF IPC 가 UI 스레드 단일이라 thread_local 불필요(같은 스레드에서 직렬화).
+const CallCtx = struct {
+    browser: ?*c._cef_browser_t,
+    frame: ?*c._cef_frame_t,
+    seq_id: i32,
+    deferred: bool,
+};
+var g_current_call_ctx: ?CallCtx = null;
+
+const PendingResp = struct {
+    in_use: bool = false,
+    browser: ?*c._cef_browser_t = null,
+    frame: ?*c._cef_frame_t = null,
+    seq_id: i32 = 0,
+    path_buf: [PDF_PATH_STACK_BUF]u8 = undefined,
+    path_len: usize = 0,
+};
+/// CapturePending 과 동등한 16 슬롯 — 동시 deferred 16 까지. 초과 시 fallback
+/// (즉시 ok:false 응답). 헤드리스 e2e 도 동시 8 미만이라 여유.
+var g_pending_responses = [_]PendingResp{.{}} ** 16;
+
+/// 핸들러가 호출: 응답을 보류하고 path 키로 컨텍스트 보관. 슬롯 풀 OR 컨텍스트
+/// 미설정이면 false — 호출자가 즉시 ok:false 응답 fallback.
+pub fn cefDeferResponse(path: []const u8) bool {
+    if (path.len == 0 or path.len > PDF_PATH_STACK_BUF) return false;
+    var ctx = g_current_call_ctx orelse return false;
+    for (&g_pending_responses) |*slot| {
+        if (!slot.in_use) {
+            slot.in_use = true;
+            slot.browser = ctx.browser;
+            slot.frame = ctx.frame;
+            slot.seq_id = ctx.seq_id;
+            @memcpy(slot.path_buf[0..path.len], path);
+            slot.path_len = path.len;
+            ctx.deferred = true;
+            g_current_call_ctx = ctx;
+            return true;
+        }
+    }
+    return false;
+}
+
+/// CDP 콜백 등에서 호출: path 매칭 pending 에 응답 송신.
+/// `result_json` 은 `cefHandleSuji` 가 반환했을 본문 (e.g. `{"cmd":"print_to_pdf",
+/// "windowId":N,"ok":true}`). EventBus emit 은 호출자가 별도로 진행 — 이 함수는
+/// **deferred Promise resolve 만** 담당.
+pub fn cefCompletePending(path: []const u8, result_json: []const u8) bool {
+    for (&g_pending_responses) |*slot| {
+        if (!slot.in_use) continue;
+        const stored = slot.path_buf[0..slot.path_len];
+        if (!std.mem.eql(u8, stored, path)) continue;
+        sendInvokeResponse(slot.browser, slot.frame, slot.seq_id, true, result_json);
+        slot.in_use = false;
+        slot.path_len = 0;
+        return true;
+    }
+    return false;
+}
+
 /// 글로벌 cef_pdf_print_callback_t — 매 print 마다 alloc하면 ref-counted 수명 추적
 /// 부담. 콜백 자체는 stateless (path/success를 인자로 받음) → 글로벌 단일로 안전.
 /// 동시 print 여러 개 호출 시 EventBus emit이 각자 독립으로 발화 (path가 인자에 포함).
@@ -2450,22 +2523,30 @@ fn ensurePdfCallback() void {
     g_pdf_callback_initialized = true;
 }
 
-/// CEF print_to_pdf 완료 콜백 — `window:pdf-print-finished` 이벤트로 emit.
-/// payload: `{"path": "<utf8>", "success": true|false}`. main이 inject한
-/// g_emit_callback 활용 (cef.zig는 backends/loader에 dep 하지 않도록).
+/// CEF print_to_pdf 완료 콜백 — deferred Promise resolve + `window:pdf-print-finished` emit.
 fn onPdfPrintFinished(_: [*c]c.cef_pdf_print_callback_t, path: [*c]const c.cef_string_t, ok: c_int) callconv(.c) void {
-    const emit = g_emit_callback orelse return;
-
     var path_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
     const path_str: []const u8 = if (path) |p| cefStringToUtf8(p, &path_buf) else "";
 
     var escaped_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
     const escaped_n = window_mod.escapeJsonChars(path_str, &escaped_buf);
 
+    // 1) deferred Promise resolve — print_to_pdf 호출자가 await invoke 로 받는 응답.
+    // `ok:true` 는 IPC dispatch 성공(여기 도달한 자체), `success` 는 실 PDF 작성 결과.
+    // 기존 ack 응답 (`{cmd,windowId,ok}`) 의 `ok` 필드 유지 — 호환.
+    var resp_buf: [PDF_PATH_STACK_BUF + 160]u8 = undefined;
+    var rw = std.Io.Writer.fixed(&resp_buf);
+    rw.print(
+        "{{\"from\":\"zig-core\",\"cmd\":\"print_to_pdf\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
+        .{ escaped_buf[0..escaped_n], ok != 0 },
+    ) catch return;
+    _ = cefCompletePending(path_str, rw.buffered());
+
+    // 2) EventBus emit — 다른 SDK/백엔드 구독자 호환 보존.
+    const emit = g_emit_callback orelse return;
     var payload_buf: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
     var w = std.Io.Writer.fixed(&payload_buf);
     w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ escaped_buf[0..escaped_n], ok != 0 }) catch return;
-
     emit(null, EVENT_PDF_PRINT_FINISHED, w.buffered());
 }
 
@@ -2488,11 +2569,22 @@ pub const EVENT_PDF_PRINT_FINISHED: []const u8 = "window:pdf-print-finished";
 // base64 는 IPC payload 한도(64KB) 초과 가능 → 파일 경로 방식(printToPDF 동일).
 pub const EVENT_PAGE_CAPTURED: []const u8 = "window:page-captured";
 
-/// `window:page-captured`{path,success} 발화 (결과 도착·요청 드롭 공용).
+/// `window:page-captured`{path,success} 발화 + deferred Promise resolve.
 fn emitPageCaptured(path: []const u8, ok: bool) void {
-    const emit = g_emit_callback orelse return;
     var esc: [PDF_PATH_STACK_BUF]u8 = undefined;
     const en = window_mod.escapeJsonChars(path, &esc);
+
+    // 1) deferred Promise resolve. `ok:true` = IPC 성공, `success` = 캡처 결과.
+    var resp_buf: [PDF_PATH_STACK_BUF + 160]u8 = undefined;
+    var rw = std.Io.Writer.fixed(&resp_buf);
+    rw.print(
+        "{{\"from\":\"zig-core\",\"cmd\":\"capture_page\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
+        .{ esc[0..en], ok },
+    ) catch return;
+    _ = cefCompletePending(path, rw.buffered());
+
+    // 2) EventBus emit.
+    const emit = g_emit_callback orelse return;
     var payload: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
     var w = std.Io.Writer.fixed(&payload);
     w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ esc[0..en], ok }) catch return;
@@ -10915,6 +11007,10 @@ fn handleBrowserInvoke(
         }, &injected_buf) orelse data;
     };
 
+    // 핸들러가 deferred 응답을 등록할 수 있도록 컨텍스트 노출(`cefDeferResponse`).
+    g_current_call_ctx = .{ .browser = browser, .frame = frame, .seq_id = seq_id, .deferred = false };
+    defer g_current_call_ctx = null;
+
     // 백엔드 호출
     var response_buf: [16384]u8 = undefined;
     var success: bool = false;
@@ -10929,12 +11025,16 @@ fn handleBrowserInvoke(
         }
     }
 
+    // 핸들러가 deferred 응답 등록했다면 sendInvokeResponse skip — pending 컨텍스트
+    // 에 보관됐고, CDP 콜백 등에서 cefCompletePending 으로 송신될 것.
+    const deferred = if (g_current_call_ctx) |ctx| ctx.deferred else false;
     if (traceIpcEnabled()) {
-        std.debug.print("[suji:ipc] resp seq={d} success={} result_len={d}\n", .{ seq_id, success, result.len });
+        std.debug.print("[suji:ipc] resp seq={d} success={} result_len={d} deferred={}\n", .{ seq_id, success, result.len, deferred });
     }
 
-    // 응답 CefProcessMessage 생성
-    sendInvokeResponse(browser, frame, seq_id, success, result);
+    if (!deferred) {
+        sendInvokeResponse(browser, frame, seq_id, success, result);
+    }
     if (g_quit_after_next_response) {
         g_quit_after_next_response = false;
         quit();

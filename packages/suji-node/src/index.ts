@@ -679,43 +679,24 @@ export const windows = {
     return invoke<WindowOpResponse>('__core__', { cmd: 'stop_find_in_page', windowId, clearSelection });
   },
 
-  /** PDF 인쇄. CEF는 콜백 async라 두 단계 신호:
-   *  1. 코어 IPC 응답 — 요청 접수만 (CEF에 큐잉, 파일 아직 X).
-   *  2. `window:pdf-print-finished` 이벤트({path, success}) — 실 PDF 작성 완료.
-   *  이 SDK는 listener를 path로 매칭해 Promise<{success}>로 단일화. */
-  printToPDF(windowId: number, path: string): Promise<{ success: boolean }> {
-    return new Promise((resolve) => {
-      const off = on("window:pdf-print-finished", (data) => {
-        const d = data as { path?: string; success?: boolean };
-        if (d.path === path) {
-          off();
-          resolve({ success: d.success === true });
-        }
-      });
-      invoke<WindowOpResponse>('__core__', { cmd: 'print_to_pdf', windowId, path });
-    });
+  /** PDF 인쇄. 코어가 CDP 완료까지 응답 보류 → 단일 await 로 `{success}` 받음.
+   *  EventBus `window:pdf-print-finished` emit 은 다른 구독자 호환 유지. */
+  async printToPDF(windowId: number, path: string): Promise<{ success: boolean }> {
+    const r = await invoke<{ success?: boolean }>('__core__', { cmd: 'print_to_pdf', windowId, path });
+    return { success: r?.success === true };
   },
 
-  /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage`, CDP
-   *  Page.captureScreenshot). printToPDF 동형 2단(ack + window:page-captured). */
-  capturePage(
+  /** 페이지 스크린샷 PNG 저장. 코어 deferred response 로 단일 await. */
+  async capturePage(
     windowId: number,
     path: string,
     rect?: { x: number; y: number; width: number; height: number },
   ): Promise<{ success: boolean }> {
-    return new Promise((resolve) => {
-      const off = on("window:page-captured", (data) => {
-        const d = data as { path?: string; success?: boolean };
-        if (d.path === path) {
-          off();
-          resolve({ success: d.success === true });
-        }
-      });
-      invoke<WindowOpResponse>('__core__', {
-        cmd: 'capture_page', windowId, path,
-        ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
-      });
+    const r = await invoke<{ success?: boolean }>('__core__', {
+      cmd: 'capture_page', windowId, path,
+      ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
     });
+    return { success: r?.success === true };
   },
 };
 
