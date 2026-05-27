@@ -1211,7 +1211,7 @@ pub const menu = struct {
     }
 };
 
-/// macOS Carbon Hot Key 기반 (Electron `globalShortcut.*`). accelerator 파싱:
+/// 시스템 전역 단축키 (Electron `globalShortcut.*`). accelerator 파싱:
 /// `"Cmd+Shift+K"`, `"CommandOrControl+P"`, `"Alt+F4"` 등. 트리거 시 EventBus의
 /// `globalShortcut:trigger {accelerator, click}`로 수신.
 pub const globalShortcut = struct {

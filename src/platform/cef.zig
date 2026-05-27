@@ -7236,13 +7236,14 @@ pub fn notificationClose(id: []const u8) bool {
 }
 
 // ============================================
-// Global shortcut API — Carbon RegisterEventHotKey / Win32 RegisterHotKey
+// Global shortcut API — Carbon RegisterEventHotKey / X11 XGrabKey / Win32 RegisterHotKey
 // (Electron `globalShortcut.*`)
 // ============================================
 // macOS: Carbon Hot Key API (system-wide, 권한 불필요). global_shortcut.m이 wrap —
 // accelerator 문자열 → modifier mask + virtual key code → RegisterEventHotKey.
 // 트리거 시 `globalShortcut:trigger {accelerator, click}` EventBus emit.
-// Windows는 RegisterHotKey + hidden pump window 경로. Linux는 graceful stub.
+// Linux는 X11 XGrabKey + dedicated event thread 경로. Windows는 RegisterHotKey +
+// hidden pump window 경로.
 
 pub const GlobalShortcutEmitHandler = *const fn (accelerator: []const u8, click: []const u8) void;
 pub var g_global_shortcut_emit_handler: ?GlobalShortcutEmitHandler = null;
@@ -7257,6 +7258,7 @@ pub fn setGlobalShortcutEmitHandler(handler: GlobalShortcutEmitHandler) void {
     g_global_shortcut_emit_handler = handler;
     if (comptime is_macos) suji_global_shortcut_set_callback(&globalShortcutTriggerC);
     if (comptime builtin.os.tag == .windows) win_pump.ensureRunning();
+    if (comptime builtin.os.tag == .linux) linux_gs.prepare();
 }
 
 /// Zig slice → null-terminated C string in caller-supplied buffer.
@@ -7817,8 +7819,365 @@ const win_gs = if (builtin.os.tag == .windows) struct {
     }
 } else struct {};
 
+// ============================================
+// Linux globalShortcut FFI — X11 XGrabKey + event thread.
+// ============================================
+// Wayland compositor-global shortcuts have no stable compositor-independent API.
+// DISPLAY가 있는 X11/XWayland 세션에서만 활성화하고, DISPLAY 부재/키 매핑 실패는
+// os_reject/parse_failed로 graceful degrade.
+const linux_gs = if (builtin.os.tag == .linux) struct {
+    const Display = anyopaque;
+    const Window = c_ulong;
+    const KeySym = c_ulong;
+
+    const KeyPress: c_int = 2;
+    const GrabModeAsync: c_int = 1;
+    const ShiftMask: c_uint = 1 << 0;
+    const LockMask: c_uint = 1 << 1;
+    const ControlMask: c_uint = 1 << 2;
+    const Mod1Mask: c_uint = 1 << 3; // Alt
+    const Mod2Mask: c_uint = 1 << 4; // usually NumLock
+    const Mod4Mask: c_uint = 1 << 6; // Super/Meta
+    const IgnoredModifierMasks = [_]c_uint{ 0, LockMask, Mod2Mask, LockMask | Mod2Mask };
+
+    const XK_BackSpace: KeySym = 0xff08;
+    const XK_Tab: KeySym = 0xff09;
+    const XK_Return: KeySym = 0xff0d;
+    const XK_Escape: KeySym = 0xff1b;
+    const XK_Delete: KeySym = 0xffff;
+    const XK_Insert: KeySym = 0xff63;
+    const XK_Home: KeySym = 0xff50;
+    const XK_End: KeySym = 0xff57;
+    const XK_PageUp: KeySym = 0xff55;
+    const XK_PageDown: KeySym = 0xff56;
+    const XK_Left: KeySym = 0xff51;
+    const XK_Up: KeySym = 0xff52;
+    const XK_Right: KeySym = 0xff53;
+    const XK_Down: KeySym = 0xff54;
+    const XK_F1: KeySym = 0xffbe;
+
+    const XKeyEvent = extern struct {
+        type_: c_int,
+        serial: c_ulong,
+        send_event: c_int,
+        display: ?*Display,
+        window: Window,
+        root: Window,
+        subwindow: Window,
+        time: c_ulong,
+        x: c_int,
+        y: c_int,
+        x_root: c_int,
+        y_root: c_int,
+        state: c_uint,
+        keycode: c_uint,
+        same_screen: c_int,
+    };
+    const XEvent = extern union {
+        type_: c_int,
+        xkey: XKeyEvent,
+        pad: [24]c_long,
+    };
+    const XErrorEvent = extern struct {
+        type_: c_int,
+        display: ?*Display,
+        resourceid: c_ulong,
+        serial: c_ulong,
+        error_code: u8,
+        request_code: u8,
+        minor_code: u8,
+    };
+    const XErrorHandler = ?*const fn (display: ?*Display, event: *XErrorEvent) callconv(.c) c_int;
+
+    extern "X11" fn XInitThreads() callconv(.c) c_int;
+    extern "X11" fn XOpenDisplay(display_name: ?[*:0]const u8) callconv(.c) ?*Display;
+    extern "X11" fn XCloseDisplay(display: ?*Display) callconv(.c) c_int;
+    extern "X11" fn XDefaultRootWindow(display: ?*Display) callconv(.c) Window;
+    extern "X11" fn XStringToKeysym(string: [*:0]const u8) callconv(.c) KeySym;
+    extern "X11" fn XKeysymToKeycode(display: ?*Display, keysym: KeySym) callconv(.c) u8;
+    extern "X11" fn XGrabKey(display: ?*Display, keycode: c_int, modifiers: c_uint, grab_window: Window, owner_events: c_int, pointer_mode: c_int, keyboard_mode: c_int) callconv(.c) c_int;
+    extern "X11" fn XUngrabKey(display: ?*Display, keycode: c_int, modifiers: c_uint, grab_window: Window) callconv(.c) c_int;
+    extern "X11" fn XNextEvent(display: ?*Display, event_return: *XEvent) callconv(.c) c_int;
+    extern "X11" fn XSync(display: ?*Display, discard: c_int) callconv(.c) c_int;
+    extern "X11" fn XSetErrorHandler(handler: XErrorHandler) callconv(.c) XErrorHandler;
+
+    const Parsed = struct {
+        mods: c_uint,
+        keycode: u8,
+    };
+    const Slot = struct {
+        used: bool = false,
+        keycode: u8 = 0,
+        mods: c_uint = 0,
+        accel: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined,
+        accel_len: usize = 0,
+        click: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined,
+        click_len: usize = 0,
+    };
+
+    const CAPACITY: usize = 64;
+    var slots: [CAPACITY]Slot = [_]Slot{.{}} ** CAPACITY;
+    var display: ?*Display = null;
+    var root_window: Window = 0;
+    var started: std.atomic.Value(bool) = .init(false);
+    var init_lock: std.atomic.Value(bool) = .init(false);
+    var xlib_threads_ready: std.atomic.Value(bool) = .init(false);
+    var xlib_threads_lock: std.atomic.Value(bool) = .init(false);
+    var slots_lock: std.atomic.Value(bool) = .init(false);
+    var x_error_seen: std.atomic.Value(bool) = .init(false);
+
+    fn spinLock(flag: *std.atomic.Value(bool)) void {
+        while (flag.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    fn spinUnlock(flag: *std.atomic.Value(bool)) void {
+        flag.store(false, .release);
+    }
+
+    fn xErrorHandler(_: ?*Display, _: *XErrorEvent) callconv(.c) c_int {
+        x_error_seen.store(true, .release);
+        return 0;
+    }
+
+    pub fn prepare() void {
+        _ = ensureXlibThreads();
+    }
+
+    fn ensureXlibThreads() bool {
+        if (xlib_threads_ready.load(.acquire)) return true;
+        spinLock(&xlib_threads_lock);
+        defer spinUnlock(&xlib_threads_lock);
+        if (xlib_threads_ready.load(.acquire)) return true;
+        if (XInitThreads() == 0) return false;
+        xlib_threads_ready.store(true, .release);
+        return true;
+    }
+
+    fn ensureRunning() bool {
+        if (started.load(.acquire) and display != null) return true;
+        if (!ensureXlibThreads()) return false;
+        spinLock(&init_lock);
+        defer spinUnlock(&init_lock);
+        if (started.load(.acquire) and display != null) return true;
+
+        const dpy = XOpenDisplay(null) orelse return false;
+        display = dpy;
+        root_window = XDefaultRootWindow(dpy);
+
+        const thread = std.Thread.spawn(.{}, eventLoop, .{}) catch {
+            _ = XCloseDisplay(dpy);
+            display = null;
+            root_window = 0;
+            return false;
+        };
+        thread.detach();
+        started.store(true, .release);
+        return true;
+    }
+
+    fn eventLoop() void {
+        const dpy = display orelse return;
+        var ev: XEvent = undefined;
+        while (true) {
+            if (XNextEvent(dpy, &ev) != 0) continue;
+            if (ev.type_ == KeyPress) handleKeyPress(ev.xkey.keycode, ev.xkey.state);
+        }
+    }
+
+    fn normalizeMods(state: c_uint) c_uint {
+        return state & ~(LockMask | Mod2Mask);
+    }
+
+    fn handleKeyPress(keycode: c_uint, state: c_uint) void {
+        const mods = normalizeMods(state);
+        var accel_copy: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
+        var click_copy: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
+        var accel_len: usize = 0;
+        var click_len: usize = 0;
+
+        spinLock(&slots_lock);
+        for (&slots) |*s| {
+            if (!s.used) continue;
+            if (@as(c_uint, s.keycode) == keycode and s.mods == mods) {
+                @memcpy(accel_copy[0..s.accel_len], s.accel[0..s.accel_len]);
+                @memcpy(click_copy[0..s.click_len], s.click[0..s.click_len]);
+                accel_len = s.accel_len;
+                click_len = s.click_len;
+                break;
+            }
+        }
+        spinUnlock(&slots_lock);
+
+        if (accel_len > 0) {
+            if (g_global_shortcut_emit_handler) |emit| emit(accel_copy[0..accel_len], click_copy[0..click_len]);
+        }
+    }
+
+    fn parse(accel: []const u8) ?Parsed {
+        const dpy = display orelse return null;
+        var mods: c_uint = 0;
+        var keycode: u8 = 0;
+        var has_key = false;
+        var it = std.mem.tokenizeScalar(u8, accel, '+');
+        while (it.next()) |raw| {
+            var lower_buf: [32]u8 = undefined;
+            if (raw.len + 1 > lower_buf.len) return null;
+            for (raw, 0..) |ch, i| lower_buf[i] = std.ascii.toLower(ch);
+            const part = lower_buf[0..raw.len];
+            if (std.mem.eql(u8, part, "ctrl") or std.mem.eql(u8, part, "control") or
+                std.mem.eql(u8, part, "cmdorctrl") or std.mem.eql(u8, part, "commandorcontrol"))
+            {
+                mods |= ControlMask;
+            } else if (std.mem.eql(u8, part, "cmd") or std.mem.eql(u8, part, "command") or
+                std.mem.eql(u8, part, "meta") or std.mem.eql(u8, part, "super"))
+            {
+                mods |= Mod4Mask;
+            } else if (std.mem.eql(u8, part, "shift")) {
+                mods |= ShiftMask;
+            } else if (std.mem.eql(u8, part, "alt") or std.mem.eql(u8, part, "option")) {
+                mods |= Mod1Mask;
+            } else {
+                if (has_key) return null;
+                const keysym = keysymFromName(part) orelse return null;
+                const kc = XKeysymToKeycode(dpy, keysym);
+                if (kc == 0) return null;
+                keycode = kc;
+                has_key = true;
+            }
+        }
+        if (!has_key) return null;
+        return .{ .mods = mods, .keycode = keycode };
+    }
+
+    fn keysymFromName(name: []const u8) ?KeySym {
+        if (name.len == 1) {
+            const ch = name[0];
+            if (ch >= 'a' and ch <= 'z') return @as(KeySym, ch - 'a' + 'A');
+            if (ch >= '0' and ch <= '9') return @as(KeySym, ch);
+        }
+        if (name.len >= 2 and name[0] == 'f') {
+            const num = std.fmt.parseInt(u32, name[1..], 10) catch return null;
+            if (num >= 1 and num <= 24) return XK_F1 + @as(KeySym, num - 1);
+        }
+        if (std.mem.eql(u8, name, "space")) return 0x20;
+        if (std.mem.eql(u8, name, "enter") or std.mem.eql(u8, name, "return")) return XK_Return;
+        if (std.mem.eql(u8, name, "escape") or std.mem.eql(u8, name, "esc")) return XK_Escape;
+        if (std.mem.eql(u8, name, "tab")) return XK_Tab;
+        if (std.mem.eql(u8, name, "backspace")) return XK_BackSpace;
+        if (std.mem.eql(u8, name, "delete") or std.mem.eql(u8, name, "forwarddelete")) return XK_Delete;
+        if (std.mem.eql(u8, name, "insert")) return XK_Insert;
+        if (std.mem.eql(u8, name, "home")) return XK_Home;
+        if (std.mem.eql(u8, name, "end")) return XK_End;
+        if (std.mem.eql(u8, name, "pageup")) return XK_PageUp;
+        if (std.mem.eql(u8, name, "pagedown")) return XK_PageDown;
+        if (std.mem.eql(u8, name, "up")) return XK_Up;
+        if (std.mem.eql(u8, name, "down")) return XK_Down;
+        if (std.mem.eql(u8, name, "left")) return XK_Left;
+        if (std.mem.eql(u8, name, "right")) return XK_Right;
+
+        var key_name: [32]u8 = undefined;
+        if (name.len + 1 > key_name.len) return null;
+        @memcpy(key_name[0..name.len], name);
+        key_name[name.len] = 0;
+        const sym = XStringToKeysym(@ptrCast(key_name[0..name.len :0].ptr));
+        if (sym == 0) return null;
+        return sym;
+    }
+
+    fn findSlot(accel: []const u8) ?usize {
+        for (&slots, 0..) |*s, i| {
+            if (s.used and std.mem.eql(u8, s.accel[0..s.accel_len], accel)) return i;
+        }
+        return null;
+    }
+
+    fn freeSlot() ?usize {
+        for (&slots, 0..) |*s, i| if (!s.used) return i;
+        return null;
+    }
+
+    fn grab(dpy: ?*Display, keycode: u8, mods: c_uint) bool {
+        x_error_seen.store(false, .release);
+        const prev_handler = XSetErrorHandler(&xErrorHandler);
+        for (IgnoredModifierMasks) |ignored| {
+            _ = XGrabKey(dpy, @intCast(keycode), mods | ignored, root_window, 1, GrabModeAsync, GrabModeAsync);
+        }
+        _ = XSync(dpy, 0);
+        _ = XSetErrorHandler(prev_handler);
+        return !x_error_seen.load(.acquire);
+    }
+
+    fn ungrab(dpy: ?*Display, keycode: u8, mods: c_uint) void {
+        for (IgnoredModifierMasks) |ignored| {
+            _ = XUngrabKey(dpy, @intCast(keycode), mods | ignored, root_window);
+        }
+        _ = XSync(dpy, 0);
+    }
+
+    fn register(accel: []const u8, click: []const u8) GlobalShortcutStatus {
+        if (accel.len > GLOBAL_SHORTCUT_STR_MAX or click.len > GLOBAL_SHORTCUT_STR_MAX) return .too_long;
+        if (!ensureRunning()) return .os_reject;
+        const parsed = parse(accel) orelse return .parse;
+        const dpy = display orelse return .os_reject;
+
+        spinLock(&slots_lock);
+        defer spinUnlock(&slots_lock);
+        if (findSlot(accel) != null) return .duplicate;
+        const idx = freeSlot() orelse return .capacity;
+
+        if (!grab(dpy, parsed.keycode, parsed.mods)) {
+            ungrab(dpy, parsed.keycode, parsed.mods);
+            return .os_reject;
+        }
+        var s = &slots[idx];
+        s.used = true;
+        s.keycode = parsed.keycode;
+        s.mods = parsed.mods;
+        @memcpy(s.accel[0..accel.len], accel);
+        s.accel_len = accel.len;
+        @memcpy(s.click[0..click.len], click);
+        s.click_len = click.len;
+        return .ok;
+    }
+
+    fn unregister(accel: []const u8) bool {
+        const dpy = display orelse return false;
+        spinLock(&slots_lock);
+        defer spinUnlock(&slots_lock);
+        const idx = findSlot(accel) orelse return false;
+        var s = &slots[idx];
+        ungrab(dpy, s.keycode, s.mods);
+        s.used = false;
+        s.accel_len = 0;
+        s.click_len = 0;
+        return true;
+    }
+
+    fn unregisterAll() void {
+        const dpy = display orelse return;
+        spinLock(&slots_lock);
+        defer spinUnlock(&slots_lock);
+        for (&slots) |*s| {
+            if (!s.used) continue;
+            ungrab(dpy, s.keycode, s.mods);
+            s.used = false;
+            s.accel_len = 0;
+            s.click_len = 0;
+        }
+    }
+
+    fn isRegistered(accel: []const u8) bool {
+        spinLock(&slots_lock);
+        defer spinUnlock(&slots_lock);
+        return findSlot(accel) != null;
+    }
+} else struct {};
+
 pub fn globalShortcutRegister(accelerator: []const u8, click: []const u8) GlobalShortcutStatus {
     if (comptime builtin.os.tag == .windows) return win_gs.register(accelerator, click);
+    if (comptime builtin.os.tag == .linux) return linux_gs.register(accelerator, click);
     if (!comptime is_macos) return .os_reject;
     var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
     var click_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
@@ -7837,6 +8196,7 @@ pub fn globalShortcutRegister(accelerator: []const u8, click: []const u8) Global
 
 pub fn globalShortcutUnregister(accelerator: []const u8) bool {
     if (comptime builtin.os.tag == .windows) return win_gs.unregister(accelerator);
+    if (comptime builtin.os.tag == .linux) return linux_gs.unregister(accelerator);
     if (!comptime is_macos) return false;
     var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
     const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return false;
@@ -7848,12 +8208,17 @@ pub fn globalShortcutUnregisterAll() void {
         win_gs.unregisterAll();
         return;
     }
+    if (comptime builtin.os.tag == .linux) {
+        linux_gs.unregisterAll();
+        return;
+    }
     if (!comptime is_macos) return;
     suji_global_shortcut_unregister_all();
 }
 
 pub fn globalShortcutIsRegistered(accelerator: []const u8) bool {
     if (comptime builtin.os.tag == .windows) return win_gs.isRegistered(accelerator);
+    if (comptime builtin.os.tag == .linux) return linux_gs.isRegistered(accelerator);
     if (!comptime is_macos) return false;
     var accel_buf: [GLOBAL_SHORTCUT_STR_MAX]u8 = undefined;
     const accel_cstr = writeCStr(accelerator, &accel_buf) orelse return false;

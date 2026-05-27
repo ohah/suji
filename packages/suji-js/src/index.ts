@@ -983,10 +983,10 @@ export const menu = {
 };
 
 // ============================================
-// globalShortcut — macOS Carbon Hot Key (Electron `globalShortcut.*`)
+// globalShortcut — system-wide hot keys (Electron `globalShortcut.*`)
 // ============================================
 // Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4". Trigger fires on
-// `globalShortcut:trigger {accelerator, click}` via `suji.on`. macOS/Windows supported.
+// `globalShortcut:trigger {accelerator, click}` via `suji.on`. macOS/Linux(X11)/Windows supported.
 
 export const globalShortcut = {
   async register(accelerator: string, click: string): Promise<boolean> {

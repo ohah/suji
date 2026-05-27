@@ -3485,7 +3485,7 @@ test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "APPDATA") != null);
 }
 
-test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {
+test "회귀: Global Shortcut API (Phase 5-E) — Carbon/X11/RegisterHotKey + 5 SDK" {
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/main.zig",
@@ -3509,6 +3509,10 @@ test "회귀: Global Shortcut API (Phase 5-E) — Carbon Hot Key + 5 SDK" {
     defer std.testing.allocator.free(cef_src);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "globalShortcutRegister") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_global_shortcut_register") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "XGrabKey") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "XSetErrorHandler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "XNextEvent") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "RegisterHotKey") != null);
 
     const m_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

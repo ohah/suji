@@ -443,7 +443,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
   > | menu | `setApplicationMenu/resetApplicationMenu/menu_popup` | — (macOS Cocoa 직접) | `handleMenu*` |
   > | fs | `fsSandboxCheck` etc | — | `handleFs*` (`src/main.zig`) |
-  > | globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
+  > | globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Linux X11/Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
   > | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
   > | windows (멀티) | `createWindow/destroyWindow/setBounds/...` | — | `src/core/window_ipc.zig` |
   >
@@ -658,10 +658,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         `menu.setApplicationMenu/resetApplicationMenu`, `submenu/item/checkbox/separator`,
         `menu:click {click}` 이벤트 라우팅. Frontend `@suji/api` + Zig/Rust/Go/Node SDK 노출.
         회귀 테스트 + SDK 단위 + `tests/e2e/menu.test.ts`. `documents/menu.mdx`.
-  - [x] **Phase 5-E: 글로벌 단축키** — macOS Carbon RegisterEventHotKey + Windows RegisterHotKey
+  - [x] **Phase 5-E: 글로벌 단축키** — macOS Carbon RegisterEventHotKey + Linux X11 XGrabKey + Windows RegisterHotKey
         (macOS 일반 키는 NSEvent monitor가 아닌 Carbon path, 권한 불필요). 5 SDK 모두 노출(`globalShortcut.{register/unregister/
         unregisterAll/isRegistered}`) + accelerator 파싱 + `globalShortcut:trigger` 이벤트.
-        미디어키는 macOS NSEvent system-defined monitor 경로. Linux는 graceful stub.
+        미디어키는 macOS NSEvent system-defined monitor 경로. Linux는 X11/XWayland 전용이며 순수 Wayland는 graceful reject.
         `src/platform/global_shortcut.m` + 5 SDK + e2e.
   - [x] **Phase 5-F: 파일 시스템 API** — Zig `std.fs` 노출. readFile/writeFile/stat/mkdir/readdir.
         Frontend JS + Zig/Rust/Go/Node SDK wrapper, 단위/회귀/E2E 테스트, 문서 추가.
@@ -1381,7 +1381,7 @@ suji build → 결과물:
 | 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + submenu/item/checkbox/separator + click 이벤트 |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
-| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Windows RegisterHotKey + 5 SDK + accelerator 파싱 |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Linux X11 XGrabKey + Windows RegisterHotKey + 5 SDK + accelerator 파싱 |
 | 창 이벤트 (resize/close/focus/blur) | `BrowserWindow` 이벤트 | `Window` 이벤트 | ✅ Phase 5. close/closed/all-closed/resized/moved/focus/blur (macOS NSWindowDelegate) |
 | 멀티 윈도우 | `new BrowserWindow()` | `WebviewWindow` | ✅ `windows.create()` + Phase 3 외형 옵션 풀 셋 (frame/transparent/parent) |
 | 핫 리로드 | webpack HMR | Vite HMR + 백엔드 감시 | ✅ (dylib 재로드 + Vite HMR) |
@@ -1425,7 +1425,7 @@ suji build → 결과물:
 | 클립보드 | `clipboard` | `clipboard-manager` | ✅ Phase 5-A. macOS NSPasteboard + Linux GTK clipboard text/HTML + Windows CF_UNICODETEXT/CF_HTML. 4 SDK + macOS E2E 37 케이스 + Linux Xvfb + Windows text/HTML E2E |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. NSMenu + 5 SDK + E2E |
 | 파일 시스템 | `fs` | `fs` 플러그인 | ✅ Phase 5-F. Zig std.fs 기반 텍스트 read/write + metadata/list/rm |
-| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Windows RegisterHotKey + 5 SDK |
+| 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Linux X11 XGrabKey + Windows RegisterHotKey + 5 SDK |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + Windows ShellExecuteW + scheme 사전 검사 + 5 SDK + Linux x-scheme-handler E2E |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |

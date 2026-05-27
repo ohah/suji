@@ -1,13 +1,13 @@
 ---
 title: Global Shortcut (Phase 5-E)
-description: 시스템 전역 단축키 — macOS Carbon Hot Key + Windows RegisterHotKey, accelerator 문자열 → trigger 이벤트
+description: 시스템 전역 단축키 — macOS Carbon Hot Key + Linux X11 XGrabKey + Windows RegisterHotKey, accelerator 문자열 → trigger 이벤트
 ---
 
 # Global Shortcut
 
 Electron `globalShortcut.*`에 대응하는 시스템 전역 단축키 API. macOS는 Carbon
-`RegisterEventHotKey`, Windows는 Win32 `RegisterHotKey` + hidden message pump를 사용한다.
-Linux는 아직 stub이다.
+`RegisterEventHotKey`, Linux는 X11 `XGrabKey`, Windows는 Win32 `RegisterHotKey` +
+hidden message pump를 사용한다.
 
 macOS에서 일반 accelerator는 Carbon path라 Accessibility 권한 없이 동작한다.
 미디어키(`MediaPlayPause` 등)는 Carbon이 지원하지 않아 NSEvent system-defined monitor를
@@ -23,11 +23,11 @@ macOS에서 일반 accelerator는 Carbon path라 Accessibility 권한 없이 동
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `globalShortcut.register` | ✅ Carbon Hot Key / media NSEvent | stub (`false`) | ✅ RegisterHotKey |
-| `globalShortcut.unregister` | ✅ | stub (`false`) | ✅ UnregisterHotKey |
-| `globalShortcut.unregisterAll` | ✅ | no-op | ✅ all registered slots |
-| `globalShortcut.isRegistered` | ✅ | stub (`false`) | ✅ local registry |
-| Trigger event | ✅ `globalShortcut:trigger` | — | ✅ `WM_HOTKEY` → `globalShortcut:trigger` |
+| `globalShortcut.register` | ✅ Carbon Hot Key / media NSEvent | ✅ X11 `XGrabKey` | ✅ RegisterHotKey |
+| `globalShortcut.unregister` | ✅ | ✅ `XUngrabKey` | ✅ UnregisterHotKey |
+| `globalShortcut.unregisterAll` | ✅ | ✅ all registered slots | ✅ all registered slots |
+| `globalShortcut.isRegistered` | ✅ | ✅ local registry | ✅ local registry |
+| Trigger event | ✅ `globalShortcut:trigger` | ✅ `KeyPress` → `globalShortcut:trigger` | ✅ `WM_HOTKEY` → `globalShortcut:trigger` |
 
 ## Accelerator 문법
 
@@ -40,13 +40,14 @@ macOS에서 일반 accelerator는 Carbon path라 Accessibility 권한 없이 동
 | Alt | `Option` |
 | Ctrl | `Control` |
 
-macOS에서 Cmd 계열은 Command modifier다. Windows에서 Cmd/CmdOrCtrl/Command/Meta/Super는
-Control modifier로 매핑한다.
+macOS에서 Cmd 계열은 Command modifier다. Linux에서 `CmdOrCtrl`/`CommandOrControl`은
+Control, `Cmd`/`Command`/`Meta`/`Super`는 X11 `Mod4`로 매핑한다. Windows에서
+Cmd/CmdOrCtrl/Command/Meta/Super는 Control modifier로 매핑한다.
 
 | Key | 예시 |
 |---|---|
 | 알파벳/숫자 | `A`-`Z`, `0`-`9` |
-| Function | `F1`-`F20` |
+| Function | `F1`-`F24` |
 | Whitespace/Edit | `Space`, `Tab`, `Return` (or `Enter`), `Esc` (or `Escape`), `Delete` (or `Backspace`), `ForwardDelete` |
 | Navigation | `Up`, `Down`, `Left`, `Right`, `PageUp`, `PageDown`, `Home`, `End` |
 | Punctuation | `Plus`, `Minus`, `Comma`, `Period`, `Slash`, `Backslash` |
@@ -127,10 +128,17 @@ suji.On("globalShortcut:trigger", func(data string) { ... })
 - 등록 슬롯은 64개이며, 같은 accelerator는 중복 등록하지 않는다.
 - `WM_HOTKEY` 수신 시 등록 당시의 `{accelerator, click}`을 `globalShortcut:trigger`로 emit한다.
 
+## Linux 동작 정밀
+
+- X11 세션(`DISPLAY`)에서 별도 Xlib connection을 열고 root window에 `XGrabKey`를 등록한다.
+- CapsLock/NumLock 상태와 무관하게 동작하도록 기본 modifier, Lock, Mod2, Lock+Mod2 조합을 함께 grab한다.
+- 전용 event thread가 `KeyPress`를 받고 등록 당시의 `{accelerator, click}`을 `globalShortcut:trigger`로 emit한다.
+- Wayland 순수 세션처럼 `DISPLAY`가 없거나 X11 키 매핑이 실패하면 register는 `os_reject` 또는 `parse_failed`로 실패한다.
+
 ## 한계
 
-- Linux는 아직 stub (register/unregister/isRegistered는 false, unregisterAll은 no-op).
+- Linux는 X11/XWayland 경로만 지원한다. compositor별 Wayland global shortcut portal은 후속 범위다.
 - 동시 등록 한도 64개 (`SUJI_HOTKEY_MAX`).
 - accelerator/click 문자열 한도 각 128 byte.
-- 동일 accelerator는 한 번만 등록 가능 — 두 번째 register는 `error:"register"`.
-- 미디어키는 현재 macOS 전용 토큰이다. Windows RegisterHotKey parser는 일반 키/F1-F24/navigation/edit 키를 지원한다.
+- 동일 accelerator는 한 번만 등록 가능 — 두 번째 register는 `error:"already_registered"`.
+- 미디어키는 현재 macOS 전용 토큰이다. Linux/Windows parser는 일반 키/F1-F24/navigation/edit 키를 지원한다.

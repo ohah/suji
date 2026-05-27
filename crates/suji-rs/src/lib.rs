@@ -1780,7 +1780,7 @@ pub mod menu {
 
 /// macOS Carbon Hot Key wrapper. Accelerator syntax: `"Cmd+Shift+K"`,
 /// `"CommandOrControl+P"`, `"Alt+F4"`, etc. Triggers fire on the EventBus channel
-/// `globalShortcut:trigger {accelerator, click}`. macOS/Windows are supported; Linux is stub.
+/// `globalShortcut:trigger {accelerator, click}`. macOS/Linux(X11)/Windows are supported.
 pub mod global_shortcut {
     use crate::{invoke, serde_json};
 

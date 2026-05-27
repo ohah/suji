@@ -2,7 +2,7 @@
 //
 // Accelerator syntax: "Cmd+Shift+K", "CommandOrControl+P", "Alt+F4", etc.
 // Triggers fire on EventBus channel `globalShortcut:trigger {accelerator, click}`.
-// macOS uses Carbon Hot Key/media monitor, Windows uses RegisterHotKey. Linux is stub.
+// macOS uses Carbon Hot Key/media monitor, Linux uses X11 XGrabKey, Windows uses RegisterHotKey.
 package globalshortcut
 
 import (

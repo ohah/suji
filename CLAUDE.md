@@ -172,7 +172,7 @@ fn onAllClosed(_: suji.Event) void {
 //   popUpMenuPositioningItem, x/y 미지정=커서; 동기 모달)
 //                                       (macOS NSMenu, menu:click 이벤트)
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
-//   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key / Windows RegisterHotKey, globalShortcut:trigger 이벤트)
+//   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key / Linux X11 XGrabKey / Windows RegisterHotKey, globalShortcut:trigger 이벤트)
 //   미디어키: register("MediaPlayPause"|"MediaNextTrack"|"MediaPreviousTrack"|
 //   "MediaStop", click) — Electron 토큰 패리티. Carbon 불가분 NSEvent
 //   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
@@ -380,7 +380,7 @@ suji.platform                                                // "macos" | "linux
 // await dialog.showErrorBox(title, content)                               (간이 에러 popup)
 
 // import { globalShortcut } from '@suji/api';
-// await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key / Windows RegisterHotKey)
+// await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key / Linux X11 XGrabKey / Windows RegisterHotKey)
 // await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 

@@ -106,7 +106,7 @@ export fn plugin_destroy() callconv(.c) void { ... }
 | notification | `notificationShow` 등 | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
 | menu | `setApplicationMenu/menu_popup` 등 | — (macOS Cocoa 직접) | `handleMenu*` |
 | fs | `fsSandboxCheck` 등 | — | `handleFs*` |
-| globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
+| globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Linux X11/Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
 | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
 | windows | `createWindow` 등 | — | `src/core/window_ipc.zig` |
 

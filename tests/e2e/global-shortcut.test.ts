@@ -38,9 +38,8 @@ afterAll(async () => {
   await browser?.disconnect();
 });
 
-// macOS: Carbon Hot Key. Windows: RegisterHotKey (PoC — register/parse 만,
-// WM_HOTKEY message pump 는 후속). Linux: X11 XGrabKey 미배선 → fail.
-describe.skipIf(process.platform === "linux")("global shortcut core commands", () => {
+// macOS: Carbon Hot Key/media monitor. Linux: X11 XGrabKey. Windows: RegisterHotKey.
+describe("global shortcut core commands", () => {
   test("register / isRegistered / unregister round-trip", async () => {
     const accel = "Cmd+Shift+F8";
 
@@ -165,8 +164,8 @@ describe.skipIf(process.platform === "linux")("global shortcut core commands", (
     await core({ cmd: "global_shortcut_unregister_all" });
   });
 
-  test("modifier aliases (CmdOrCtrl, CommandOrControl, Meta, Super) all map to Cmd", async () => {
-    // 각 alias로 등록 + 같은 Cmd 키조합으로 isRegistered 확인은 어렵지만 (각 string은 다르게 키로 저장됨),
+  test("modifier aliases register successfully", async () => {
+    // 각 alias로 등록 + 같은 OS 키조합으로 isRegistered 확인은 어렵지만 (각 string은 다르게 키로 저장됨),
     // 모두 등록 자체가 성공하는지만 검증.
     const aliases = ["CmdOrCtrl+Shift+F5", "CommandOrControl+Shift+F6", "Meta+Shift+F7"];
     for (const a of aliases) {
