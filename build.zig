@@ -960,6 +960,29 @@ pub fn build(b: *std.Build) void {
     const store_test_step = b.step("test-store", "Run store plugin tests (requires built dylib)");
     store_test_step.dependOn(&store_test_run.step);
 
+    // HTTP plugin tests (log/state/sqlite/store 와 동형)
+    const http_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/http_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const http_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    http_loader.addImport("events", events_module);
+    http_loader.addImport("runtime", runtime_module);
+    http_loader.addImport("util", util_module);
+    http_test_mod.addImport("loader", http_loader);
+    http_test_mod.addImport("events", events_module);
+    const http_test = b.addTest(.{ .root_module = http_test_mod });
+    const http_test_run = b.addRunArtifact(http_test);
+    http_test_run.setCwd(b.path("."));
+    const http_test_step = b.step("test-http", "Run http plugin tests (requires built dylib)");
+    http_test_step.dependOn(&http_test_run.step);
+
     // State plugin Rust 래퍼 통합 테스트
     // Rust bridge dylib를 cargo로 빌드한 뒤 Zig 테스트에서 로드.
     const rust_wrapper_mod = b.createModule(.{
