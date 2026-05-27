@@ -65,3 +65,32 @@ describe("error propagation", () => {
     await expect(http.fetch("https://blocked/")).rejects.toThrow("http: forbidden");
   });
 });
+
+describe("http headers + allowlist", () => {
+  it("fetch passes headers map", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { status: 200, body: "" } });
+    await http.fetch("https://x/", { headers: { "X-Foo": "bar", Accept: "application/json" } });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("http:fetch", {
+      url: "https://x/",
+      headers: { "X-Foo": "bar", Accept: "application/json" },
+    });
+  });
+
+  it("setAllowedHeaders routes array", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { ok: true } });
+    await http.setAllowedHeaders(["X-Custom", "Authorization"]);
+    expect(mockBridge.invoke).toHaveBeenCalledWith("http:set_allowed_headers", {
+      headers: ["X-Custom", "Authorization"],
+    });
+  });
+
+  it("getAllowedHeaders returns array", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { headers: ["X-Custom"] } });
+    expect(await http.getAllowedHeaders()).toEqual(["X-Custom"]);
+  });
+
+  it("getAllowedHeaders returns empty when missing", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: {} });
+    expect(await http.getAllowedHeaders()).toEqual([]);
+  });
+});
