@@ -1,0 +1,21 @@
+{
+  "name": "@suji/plugin-store-node",
+  "version": "0.1.0",
+  "description": "Suji Store Plugin - persistent file-backed config for Node.js backends",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT"
+}
