@@ -425,7 +425,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 
 - [x] fs — 파일 시스템 (Phase 5-F: 코어 API + 5 SDK 노출 + sandbox + typed wrapper)
 - [x] dialog — 시스템 다이얼로그 (Phase 5-A: macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3, Windows TaskDialog/commdlg + 5 SDK)
-- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 + 5 SDK)
+- [x] tray — 트레이 아이콘 (Phase 5-B: macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 + macOS/Linux iconPath/submenu/checkbox + 5 SDK)
 - [x] menu — 메뉴바/context menu (Phase 5-D: macOS NSMenu + Linux GTK popup + submenu/item/checkbox/separator + click + 5 SDK)
   > **옛 스펙 vs 실제 구현**: 옛 PLAN은 `plugins/{fs,dialog,tray,menu}/` 분리 dylib을
   > 의도했으나, 실제 구현은 **코어 API + 5 SDK wrapper** 형태. OS native API (Cocoa/
@@ -640,12 +640,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
         will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
         미발화). frameless drag 라우팅은 macOS/Linux 완료 — Windows는 후속.
-  - [x] **Phase 5-B: Tray v1** — macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
+  - [x] **Phase 5-B: Tray** — macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
         (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
         representedObject 라우팅, Linux `GtkStatusIcon` + `GtkMenu`, Windows hidden message-only window + HMENU popup.
-        v1 한계: custom icon 후속, macOS tray icon click 단독 hook 미지원, 서브메뉴/checkbox 없음.
-        회귀 테스트 1건. `documents/tray.mdx`.
+        macOS/Linux `iconPath` + submenu/checkbox/enabled 지원. 남은 한계: Windows `iconPath`/nested submenu parity,
+        radio item, macOS tray icon click 단독 hook. 회귀/SDK/E2E 테스트. `documents/tray.mdx`.
   - [x] **Phase 5-C: Notification v1** — UNUserNotificationCenter + Linux D-Bus notification daemon + Windows Shell_NotifyIcon balloon + 5 진입점.
         `notification.{isSupported, requestPermission, show, close}` + `notification:click`
         이벤트 라우팅. `src/platform/notification.m` ObjC block completion handler 인프라
@@ -1381,7 +1381,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | 파일 시스템 API | `fs` 모듈 | `fs` 플러그인 | ✅ Phase 5-F. 텍스트 read/write + stat(mtime ms)/mkdir/readdir/rm + 5 SDK 노출 |
 | 시스템 다이얼로그 (open/save/messageBox/errorBox) | `dialog` | `dialog` 플러그인 | ✅ Phase 5-A. macOS NSAlert/NSOpenPanel/NSSavePanel + sheet modal, Linux GTK3, Windows TaskDialog/commdlg + 5 SDK 노출 |
-| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트 |
+| 트레이 아이콘 | `Tray` | `tray-icon` | ✅ Phase 5-B. macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 컨텍스트 메뉴 + click 이벤트. macOS/Linux `iconPath` + submenu/checkbox/enabled 지원 |
 | 메뉴바 | `Menu` | `menu` | ✅ Phase 5-D. macOS NSMenu + Linux GTK `Menu.popup` + submenu/item/checkbox/separator + click 이벤트 |
 | 알림 (Notification) | `Notification` | `notification` | ✅ Phase 5-C macOS UNUserNotificationCenter + Linux freedesktop D-Bus + Windows Shell_NotifyIcon balloon |
 | 글로벌 단축키 | `globalShortcut` | `global-shortcut` | ✅ Phase 5-E. macOS Carbon Hot Key + Linux X11 XGrabKey + Windows RegisterHotKey + 5 SDK + accelerator 파싱 |
@@ -1393,7 +1393,7 @@ suji build → 결과물:
 
 | 기능 | Electron | Tauri | Suji |
 |------|----------|-------|------|
-| **fs sandbox (frontend path 화이트리스트)** | `webPreferences.sandbox` + nodeIntegration:false | allowlist | ✅ `fs.allowedRoots` config + `..` traversal 가드 + boundary check + backend bypass. 렌더러-제어 경로 cmd(쓰기: print_to_pdf/capture_page/desktop_capturer_capture_thumbnail · 읽기: native_image_get_size/to_png|jpeg = 파일내용 base64 유출)도 `rendererPathFsGate`로 동일 경계 게이트(opt-in 비파괴 — allowedRoots 설정 시 fs 읽기/쓰기 우회 차단). 보안 점검 후속 보완 |
+| **fs sandbox (frontend path 화이트리스트)** | `webPreferences.sandbox` + nodeIntegration:false | allowlist | ✅ `fs.allowedRoots` config + `..` traversal 가드 + boundary check + backend bypass. 렌더러-제어 경로 cmd(쓰기: print_to_pdf/capture_page/desktop_capturer_capture_thumbnail · 읽기: native_image_get_size/to_png|jpeg = 파일내용 base64 유출 · tray_create.iconPath)도 `rendererPathFsGate`로 동일 경계 게이트(opt-in 비파괴 — allowedRoots 설정 시 fs 읽기/쓰기/이미지 로드 우회 차단). 보안 점검 후속 보완 |
 | **앱별 cache 격리** | `app.getPath('userData')` | 자동 | ✅ OS 표준 (macOS Application Support / Linux XDG / Windows APPDATA) — 앱 이름별 자동 격리 |
 | 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs(default-deny) + **shell/dialog allowlist**(opt-in — `shell.allowedPaths`/`allowedExternalUrls`(glob, util.matchGlob 재사용)/`dialog.allowedPaths`. 키 부재=레거시 무제한 비파괴, 존재=enforce(`[]`=deny-all/`["*"]`=allow/특정=제한). backend SDK 우회·`..`/boundary 가드 fs 동형. 단위 포괄(opt-in/deny-all/glob/boundary/traversal/backend-bypass)). network(webRequest setter)는 그 자체가 선언적 net-control이라 데이터 유출 sink 아님 → 범위 제외(정직). **모바일(Tauri 패리티) 완료**: Stage 1 = embed C ABI `suji_core_set_permissions`/`suji_core_permission_check`(게이트 로직 `util.*` CEF-free 단일 출처, Swift/Kotlin glob 재구현 0, uniform opt-in, null fail-closed). Stage 2 = iOS `_shared` Swift + Android `_shared` Kotlin/JNI 가 네이티브 shell/fs 액션 직전 C ABI 호출 + init 시 앱 컨테이너 정책 전달(보안 로직 0, JSON 직렬화로 escape 안전). dialog 는 모바일=OS 문서 피커(사용자 중재)라 미게이트(데드 config 회피). **검증: iOS 실 시뮬레이터 + Android 실 에뮬레이터 기능 e2e 양쪽 37/37(권한 5케이스 — allowed fs→success, denied fs read/write→forbidden, denied url→forbidden, allowed url→not forbidden — 정책이 네이티브 액션 전 실제 enforce 됨을 격리 검증)** + Zig-side embed_abi 종합 + iOS/Android 크로스빌드 + 모바일 하니스 62/62 무회귀 |
 | CSP (Content Security Policy) | 수동 설정 | 빌트인 | ✅ `suji://` 응답에 default CSP + X-Content-Type-Options + X-Frame-Options. `config.security.csp` override + `"disabled"` escape |

@@ -17,7 +17,7 @@ const mockBridge = {
 (globalThis as any).window = { __suji__: mockBridge };
 
 // 모듈 import (window.__suji__ 설정 후)
-const { invoke, on, once, send, off, fanout, chain, menu, fs: sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, BrowserWindow, windows } = await import("./index");
+const { invoke, on, once, send, off, fanout, chain, tray, menu, fs: sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, BrowserWindow, windows } = await import("./index");
 
 beforeEach(() => {
   mockBridge.invoke.mockClear();
@@ -154,6 +154,25 @@ describe("menu", () => {
     mockBridge.core.mockResolvedValueOnce({ success: true });
     await menu.resetApplicationMenu();
     expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"menu_reset_application_menu"}');
+  });
+});
+
+describe("tray", () => {
+  it("create forwards iconPath", async () => {
+    mockBridge.core.mockResolvedValueOnce({ trayId: 7 });
+    const result = await tray.create({ title: "App", tooltip: "tip", iconPath: "/tmp/tray.png" });
+    expect(result.trayId).toBe(7);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"tray_create","title":"App","tooltip":"tip","iconPath":"/tmp/tray.png"}');
+  });
+
+  it("setMenu forwards submenu, checkbox, and enabled flags", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    const ok = await tray.setMenu(7, [
+      { type: "checkbox", label: "Flag", click: "flag", checked: true, enabled: false },
+      { label: "More", submenu: [{ label: "Child", click: "child" }] },
+    ]);
+    expect(ok).toBe(true);
+    expect(mockBridge.core).toHaveBeenCalledWith('{"cmd":"tray_set_menu","trayId":7,"items":[{"type":"checkbox","label":"Flag","click":"flag","checked":true,"enabled":false},{"label":"More","submenu":[{"label":"Child","click":"child"}]}]}');
   });
 });
 

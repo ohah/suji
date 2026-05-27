@@ -181,6 +181,26 @@ interface InvokeEvent {
 | `menu` | `menu_set_application_menu` / `menu_reset_application_menu`; 이벤트 `menu:click {click}` |
 | `fs` | `fs_read_file` / `fs_write_file` / `fs_stat` / `fs_mkdir` / `fs_readdir` |
 
+Tray create wire shape:
+
+```json
+{ "cmd": "tray_create", "title": "App", "tooltip": "tip", "iconPath": "/tmp/tray.png" }
+```
+
+Tray menu item wire shape:
+
+```json
+[
+  { "type": "item", "label": "Run", "click": "run", "enabled": true },
+  { "type": "checkbox", "label": "Flag", "click": "flag", "checked": true, "enabled": true },
+  { "type": "submenu", "label": "More", "submenu": [{ "label": "Child", "click": "child" }] },
+  { "type": "separator" }
+]
+```
+
+macOS/Linux는 `iconPath`, submenu, checkbox, enabled를 지원한다. Windows는 현재 기본 icon과
+flat HMENU 중심으로 동작한다.
+
 Menu item wire shape:
 
 ```json

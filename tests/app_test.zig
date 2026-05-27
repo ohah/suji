@@ -1187,6 +1187,10 @@ test "tray.create: title + tooltip 필드 전송" {
             try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"cmd\":\"tray_create\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"title\":\"🚀 App\"") != null);
             try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"tooltip\":\"tooltip\"") != null);
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"iconPath\":\"\"") != null);
+
+            _ = app_mod.tray.createWithIcon("🚀 App", "tooltip", "/tmp/tray.png");
+            try std.testing.expect(std.mem.indexOf(u8, InvokeSpy.lastRequest(), "\"iconPath\":\"/tmp/tray.png\"") != null);
         }
     }.run);
 }

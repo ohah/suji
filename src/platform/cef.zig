@@ -6546,8 +6546,23 @@ fn setMenuItemTag(item: *anyopaque, tag: i64) void {
 // `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
 
 pub const TrayMenuItem = union(enum) {
-    item: struct { label: []const u8, click: []const u8 },
+    item: struct {
+        label: []const u8,
+        click: []const u8,
+        enabled: bool = true,
+    },
+    checkbox: struct {
+        label: []const u8,
+        click: []const u8,
+        checked: bool = false,
+        enabled: bool = true,
+    },
     separator,
+    submenu: struct {
+        label: []const u8,
+        enabled: bool = true,
+        items: []const TrayMenuItem,
+    },
 };
 
 const TrayEntry = struct {
@@ -6573,12 +6588,30 @@ fn ensureTrayTarget() ?*anyopaque {
     return ensureSimpleObjcTarget(&g_tray_target, "SujiTrayTarget", "trayMenuClick:", &trayMenuClickImpl);
 }
 
+const TRAY_MENU_CHECKBOX_TAG_BIT: i64 = 1;
+
+fn trayMenuItemTag(tray_id: u32, checkbox: bool) i64 {
+    return (@as(i64, @intCast(tray_id)) << 1) | if (checkbox) TRAY_MENU_CHECKBOX_TAG_BIT else 0;
+}
+
+fn trayIdFromMenuItemTag(tag: i64) ?u32 {
+    if (tag <= 0) return null;
+    const tray_id = tag >> 1;
+    if (tray_id <= 0) return null;
+    return @intCast(tray_id);
+}
+
+fn trayMenuTagIsCheckbox(tag: i64) bool {
+    return (tag & TRAY_MENU_CHECKBOX_TAG_BIT) != 0;
+}
+
 /// NSMenuItem clicked → 이벤트 emit. main.zig가 콜백 등록한 g_event_emit 호출.
 fn trayMenuClickImpl(_: ?*anyopaque, _: ?*anyopaque, sender: ?*anyopaque) callconv(.c) void {
     const item = sender orelse return;
-    const tray_id_signed = menuItemTag(item);
-    if (tray_id_signed <= 0) return;
-    const tray_id: u32 = @intCast(tray_id_signed);
+    const tag = menuItemTag(item);
+    if (tag <= 0) return;
+    if (trayMenuTagIsCheckbox(tag)) toggleMenuItemState(item);
+    const tray_id = trayIdFromMenuItemTag(tag) orelse return;
     const click_name = representedObjectUtf8(item) orelse return;
     if (g_tray_emit_handler) |emit| emit(tray_id, click_name);
 }
@@ -6637,7 +6670,8 @@ const win_tray = if (builtin.os.tag == .windows) struct {
     pub var entries: [16]Entry = [_]Entry{.{}} ** 16;
     var next_id: u32 = 1;
 
-    fn createIcon(tooltip: []const u8) u32 {
+    fn createIcon(tooltip: []const u8, icon_path: []const u8) u32 {
+        _ = icon_path; // Windows tray iconPath parity is intentionally deferred.
         const hwnd = win_pump.pumpHwnd() orelse return 0;
         var slot_idx: usize = 0;
         var found = false;
@@ -6751,12 +6785,9 @@ const win_tray = if (builtin.os.tag == .windows) struct {
             .separator => {
                 _ = win_pump.AppendMenuW(hmenu, win_pump.MF_SEPARATOR, 0, null);
             },
-            .item => |entry| {
-                const cmd_id = win_pump.assignMenuId(tray_id, entry.click) orelse continue;
-                var label_buf: [256]u16 = undefined;
-                const label_z = utf8ToZ16Local(&label_buf, entry.label) orelse continue;
-                _ = win_pump.AppendMenuW(hmenu, win_pump.MF_STRING, @as(usize, cmd_id), label_z);
-            },
+            .item => |entry| appendMenuClickable(hmenu, tray_id, entry.label, entry.click, entry.enabled, false),
+            .checkbox => |entry| appendMenuClickable(hmenu, tray_id, entry.label, entry.click, entry.enabled, entry.checked),
+            .submenu => {},
         };
         const rc = win_pump.submitSync(.{
             .kind = @intFromEnum(win_pump.ReqKind.tray_set_menu),
@@ -6788,11 +6819,21 @@ const win_tray = if (builtin.os.tag == .windows) struct {
         buf[written] = 0;
         return @ptrCast(buf[0..written :0].ptr);
     }
+
+    fn appendMenuClickable(hmenu: ?*anyopaque, tray_id: u32, label: []const u8, click: []const u8, enabled: bool, checked: bool) void {
+        const cmd_id = win_pump.assignMenuId(tray_id, click) orelse return;
+        var label_buf: [256]u16 = undefined;
+        const label_z = utf8ToZ16Local(&label_buf, label) orelse return;
+        var flags = win_pump.MF_STRING;
+        if (!enabled) flags |= win_pump.MF_GRAYED;
+        if (checked) flags |= win_pump.MF_CHECKED;
+        _ = win_pump.AppendMenuW(hmenu, flags, @as(usize, cmd_id), label_z);
+    }
 } else struct {};
 
 // ============================================
 // Linux GTK StatusIcon — tray icon + popup menu.
-// GTK StatusIcon is deprecated upstream, but it keeps Suji's v1 tray backend
+// GTK StatusIcon is deprecated upstream, but it keeps Suji's tray backend
 // dependency-free because gtk-3 is already required for CEF/Linux native APIs.
 // ============================================
 const linux_tray = if (is_linux) struct {
@@ -6821,14 +6862,19 @@ const linux_tray = if (is_linux) struct {
     extern "c" fn suji_gtk_init_check() callconv(.c) c_int;
     extern "c" fn gtk_status_icon_new() callconv(.c) ?*anyopaque;
     extern "c" fn gtk_status_icon_set_from_icon_name(status_icon: ?*anyopaque, icon_name: [*:0]const u8) callconv(.c) void;
+    extern "c" fn gtk_status_icon_set_from_file(status_icon: ?*anyopaque, filename: [*:0]const u8) callconv(.c) void;
     extern "c" fn gtk_status_icon_set_title(status_icon: ?*anyopaque, title: [*:0]const u8) callconv(.c) void;
     extern "c" fn gtk_status_icon_set_tooltip_text(status_icon: ?*anyopaque, text: [*:0]const u8) callconv(.c) void;
     extern "c" fn gtk_status_icon_set_visible(status_icon: ?*anyopaque, visible: c_int) callconv(.c) void;
     extern "c" fn gtk_status_icon_position_menu(menu: ?*anyopaque, x: ?*c_int, y: ?*c_int, push_in: ?*c_int, user_data: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_menu_new() callconv(.c) ?*anyopaque;
     extern "c" fn gtk_menu_item_new_with_label(label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_check_menu_item_new_with_label(label: [*:0]const u8) callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_check_menu_item_set_active(check_menu_item: ?*anyopaque, is_active: c_int) callconv(.c) void;
     extern "c" fn gtk_separator_menu_item_new() callconv(.c) ?*anyopaque;
+    extern "c" fn gtk_menu_item_set_submenu(menu_item: ?*anyopaque, submenu: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_menu_shell_append(menu_shell: ?*anyopaque, child: ?*anyopaque) callconv(.c) void;
+    extern "c" fn gtk_widget_set_sensitive(widget: ?*anyopaque, sensitive: c_int) callconv(.c) void;
     extern "c" fn gtk_widget_show_all(widget: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_widget_destroy(widget: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_menu_popup(
@@ -6949,12 +6995,18 @@ const linux_tray = if (is_linux) struct {
         return true;
     }
 
-    fn create(title: []const u8, tooltip: []const u8) u32 {
+    fn create(title: []const u8, tooltip: []const u8, icon_path: []const u8) u32 {
         if (!gtkAvailable()) return 0;
         const slot = freeSlot() orelse return 0;
         const icon = gtk_status_icon_new() orelse return 0;
 
-        gtk_status_icon_set_from_icon_name(icon, "application-x-executable");
+        if (icon_path.len > 0) {
+            var path_buf: [2048]u8 = undefined;
+            const path_z = nullTerminateOrTruncate(icon_path, &path_buf) orelse return 0;
+            gtk_status_icon_set_from_file(icon, path_z.ptr);
+        } else {
+            gtk_status_icon_set_from_icon_name(icon, "application-x-executable");
+        }
         gtk_status_icon_set_visible(icon, 1);
 
         const id = reserveId();
@@ -6984,25 +7036,51 @@ const linux_tray = if (is_linux) struct {
         entry.menu = null;
         clearCallbacks(entry);
 
-        const menu = gtk_menu_new() orelse return false;
-        for (items) |item| switch (item) {
-            .separator => {
-                const sep = gtk_separator_menu_item_new() orelse continue;
-                gtk_menu_shell_append(menu, sep);
-            },
-            .item => |it| {
-                var label_buf: [256]u8 = undefined;
-                const label_z = nullTerminateOrTruncate(it.label, &label_buf) orelse continue;
-                const cb = firstFreeCallback(entry) orelse continue;
-                if (!setCallback(cb, tray_id, it.click)) continue;
-                const menu_item = gtk_menu_item_new_with_label(label_z.ptr) orelse continue;
-                _ = g_signal_connect_data(menu_item, "activate", @ptrCast(&menuItemActivateC), cb, null, 0);
-                gtk_menu_shell_append(menu, menu_item);
-            },
-        };
+        const menu = createTrayGtkMenuFromItems(entry, tray_id, items) orelse return false;
         gtk_widget_show_all(menu);
         entry.menu = menu;
         return true;
+    }
+
+    fn createTrayGtkMenuFromItems(entry: *Entry, tray_id: u32, items: []const TrayMenuItem) ?*anyopaque {
+        const menu = gtk_menu_new() orelse return null;
+        for (items) |item| addTrayGtkMenuItem(entry, menu, tray_id, item);
+        return menu;
+    }
+
+    fn addTrayGtkMenuItem(entry: *Entry, menu: *anyopaque, item_tray_id: u32, item: TrayMenuItem) void {
+        switch (item) {
+            .separator => {
+                const sep = gtk_separator_menu_item_new() orelse return;
+                gtk_menu_shell_append(menu, sep);
+            },
+            .item => |it| addTrayGtkClickable(entry, menu, item_tray_id, it.label, it.click, it.enabled, null),
+            .checkbox => |it| addTrayGtkClickable(entry, menu, item_tray_id, it.label, it.click, it.enabled, it.checked),
+            .submenu => |sub| {
+                var label_buf: [256]u8 = undefined;
+                const label_z = nullTerminateOrTruncate(sub.label, &label_buf) orelse return;
+                const menu_item = gtk_menu_item_new_with_label(label_z.ptr) orelse return;
+                const submenu = createTrayGtkMenuFromItems(entry, item_tray_id, sub.items) orelse return;
+                gtk_menu_item_set_submenu(menu_item, submenu);
+                gtk_widget_set_sensitive(menu_item, if (sub.enabled) 1 else 0);
+                gtk_menu_shell_append(menu, menu_item);
+            },
+        }
+    }
+
+    fn addTrayGtkClickable(entry: *Entry, menu: *anyopaque, item_tray_id: u32, label: []const u8, click: []const u8, enabled: bool, checked: ?bool) void {
+        var label_buf: [256]u8 = undefined;
+        const label_z = nullTerminateOrTruncate(label, &label_buf) orelse return;
+        const cb = firstFreeCallback(entry) orelse return;
+        if (!setCallback(cb, item_tray_id, click)) return;
+        const menu_item = if (checked) |state| blk: {
+            const check = gtk_check_menu_item_new_with_label(label_z.ptr) orelse return;
+            gtk_check_menu_item_set_active(check, if (state) 1 else 0);
+            break :blk check;
+        } else gtk_menu_item_new_with_label(label_z.ptr) orelse return;
+        gtk_widget_set_sensitive(menu_item, if (enabled) 1 else 0);
+        _ = g_signal_connect_data(menu_item, "activate", @ptrCast(&menuItemActivateC), cb, null, 0);
+        gtk_menu_shell_append(menu, menu_item);
     }
 
     fn destroy(tray_id: u32) bool {
@@ -7017,16 +7095,16 @@ const linux_tray = if (is_linux) struct {
     }
 } else struct {};
 
-/// 새 tray 생성. title/tooltip은 빈 문자열이면 미설정 (custom icon 미지원 v1).
+/// 새 tray 생성. title/tooltip/iconPath는 빈 문자열이면 미설정.
 /// 반환: trayId (failure 시 0).
-pub fn createTray(title: []const u8, tooltip: []const u8) u32 {
+pub fn createTray(title: []const u8, tooltip: []const u8, icon_path: []const u8) u32 {
     if (comptime builtin.os.tag == .windows) {
         // Windows PoC: title 무시 (system tray 는 보통 icon-only). tooltip 만 적용.
         // 빈 tooltip 이면 title 을 fallback 으로 사용.
         const tip = if (tooltip.len > 0) tooltip else title;
-        return win_tray.createIcon(tip);
+        return win_tray.createIcon(tip, icon_path);
     }
-    if (comptime is_linux) return linux_tray.create(title, tooltip);
+    if (comptime is_linux) return linux_tray.create(title, tooltip, icon_path);
     if (!comptime is_macos) return 0;
     ensureTraysMap();
     if (!g_trays_initialized) return 0;
@@ -7042,6 +7120,7 @@ pub fn createTray(title: []const u8, tooltip: []const u8) u32 {
 
     if (title.len > 0) applyTrayTitle(item, title);
     if (tooltip.len > 0) applyTrayTooltip(item, tooltip);
+    if (icon_path.len > 0) applyTrayIcon(item, icon_path);
 
     const id = g_next_tray_id;
     g_next_tray_id += 1;
@@ -7066,6 +7145,18 @@ fn applyTrayTooltip(item: *anyopaque, tooltip: []const u8) void {
     const button = msgSend(item, "button") orelse return;
     const ns = nsStringFromSlice(tooltip) orelse return;
     msgSendVoid1(button, "setToolTip:", ns);
+}
+
+/// statusItem.button.image = NSImage(contentsOfFile: iconPath).
+fn applyTrayIcon(item: *anyopaque, icon_path: []const u8) void {
+    const button = msgSend(item, "button") orelse return;
+    const ns_path = nsStringFromSlice(icon_path) orelse return;
+    const NSImage = getClass("NSImage") orelse return;
+    const alloc = msgSend(NSImage, "alloc") orelse return;
+    const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const img = init_fn(alloc, @ptrCast(objc.sel_registerName("initWithContentsOfFile:")), ns_path) orelse return;
+    msgSendVoid1(button, "setImage:", img);
 }
 
 pub fn setTrayTitle(tray_id: u32, title: []const u8) bool {
@@ -7100,30 +7191,50 @@ pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
     const entry_ptr = g_trays.getPtr(tray_id) orelse return false;
     const target = ensureTrayTarget() orelse return false;
 
-    const NSMenu = getClass("NSMenu") orelse return false;
-    const NSMenuItem = getClass("NSMenuItem") orelse return false;
-    const menu_alloc = msgSend(NSMenu, "alloc") orelse return false;
-    const menu = msgSend(menu_alloc, "init") orelse return false;
-
-    for (items) |item| switch (item) {
-        .separator => {
-            const sep = msgSend(NSMenuItem, "separatorItem") orelse continue;
-            msgSendVoid1(menu, "addItem:", sep);
-        },
-        .item => |it| {
-            const ns_label = nsStringFromSlice(it.label) orelse continue;
-            const ns_click = nsStringFromSlice(it.click) orelse continue;
-            const m = allocNSMenuItem(ns_label, "trayMenuClick:", emptyNSString() orelse continue) orelse continue;
-            msgSendVoid1(m, "setTarget:", target);
-            msgSendVoid1(m, "setRepresentedObject:", ns_click);
-            setMenuItemTag(m, @intCast(tray_id));
-            msgSendVoid1(menu, "addItem:", m);
-        },
-    };
+    const menu = createTrayNSMenuFromItems("", tray_id, items, target) orelse return false;
 
     msgSendVoid1(entry_ptr.status_item, "setMenu:", menu);
     entry_ptr.menu = menu;
     return true;
+}
+
+fn createTrayNSMenuFromItems(title: []const u8, tray_id: u32, items: []const TrayMenuItem, target: *anyopaque) ?*anyopaque {
+    const menu = createMenu(title) orelse return null;
+    for (items) |item| addTrayNSMenuItem(menu, tray_id, item, target);
+    return menu;
+}
+
+fn addTrayNSMenuItem(menu: *anyopaque, tray_id: u32, item: TrayMenuItem, target: *anyopaque) void {
+    switch (item) {
+        .separator => {
+            const NSMenuItem = getClass("NSMenuItem") orelse return;
+            const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
+            msgSendVoid1(menu, "addItem:", sep);
+        },
+        .item => |it| addTrayNSMenuClickable(menu, tray_id, target, it.label, it.click, it.enabled, null),
+        .checkbox => |it| addTrayNSMenuClickable(menu, tray_id, target, it.label, it.click, it.enabled, it.checked),
+        .submenu => |sub| {
+            const submenu = createTrayNSMenuFromItems(sub.label, tray_id, sub.items, target) orelse return;
+            const m = addSubmenuItem(menu, sub.label, submenu) orelse return;
+            setMenuItemEnabled(m, sub.enabled);
+        },
+    }
+}
+
+fn addTrayNSMenuClickable(menu: *anyopaque, tray_id: u32, target: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool) void {
+    const ns_label = nsStringFromSlice(label) orelse return;
+    const ns_click = nsStringFromSlice(click) orelse return;
+    const m = allocNSMenuItem(ns_label, "trayMenuClick:", emptyNSString() orelse return) orelse return;
+    msgSendVoid1(m, "setTarget:", target);
+    msgSendVoid1(m, "setRepresentedObject:", ns_click);
+    if (checked) |state| {
+        setMenuItemTag(m, trayMenuItemTag(tray_id, true));
+        setMenuItemState(m, state);
+    } else {
+        setMenuItemTag(m, trayMenuItemTag(tray_id, false));
+    }
+    setMenuItemEnabled(m, enabled);
+    msgSendVoid1(menu, "addItem:", m);
 }
 
 /// tray 제거. NSStatusBar에서 빼고 retain count 해제.
@@ -7279,7 +7390,7 @@ const win_notify = if (builtin.os.tag == .windows) struct {
     fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
         // 빈 tooltip 으로 tray icon 생성 (notification 전용 — 사용자에게 visible 한 icon
         // 짧게 표시 후 destroy 됨, 실제로는 toast UI 가 주로 보임).
-        const tray_id = win_tray.createIcon("");
+        const tray_id = win_tray.createIcon("", "");
         if (tray_id == 0) return false;
         // tray entry 찾기
         var entry: ?*win_tray.Entry = null;
@@ -7686,6 +7797,8 @@ const win_pump = if (builtin.os.tag == .windows) struct {
     extern "user32" fn DestroyMenu(hMenu: ?*anyopaque) callconv(.winapi) i32;
 
     const MF_STRING: u32 = 0x0;
+    const MF_GRAYED: u32 = 0x1;
+    const MF_CHECKED: u32 = 0x8;
     const MF_SEPARATOR: u32 = 0x800;
 
     // HWND_MESSAGE = (HWND)-3

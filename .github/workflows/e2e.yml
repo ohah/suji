@@ -157,6 +157,11 @@ jobs:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-menu.log
         run: bash tests/e2e/run-menu.sh
 
+      - name: E2E — tray
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-tray.log
+        run: bash tests/e2e/run-tray.sh
+
       - name: E2E — window lifecycle events
         run: bash tests/e2e/run-window-lifecycle-events.sh
 

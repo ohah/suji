@@ -163,7 +163,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
 // suji.dialog.showErrorBox("Title", "content")
-// suji.tray.create("🚀 App", "tooltip") / setMenuRaw(id, "...items...") / destroy(id)
+// suji.tray.createWithIcon("App", "tooltip", "/tmp/tray.png")
+//   / setMenuRaw(id, "...items with submenu/checkbox...") / destroy(id)
 //                                                                       (macOS NSStatusItem / Linux GTK StatusIcon / Windows Shell_NotifyIconW)
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus / Windows Shell_NotifyIcon balloon)
@@ -253,7 +254,8 @@ suji::export_handlers!(ping);
 // suji::dialog::show_message_box(MessageBoxOpts { message: "Q", ... })
 // suji::dialog::show_open_dialog(r#""properties":["openFile"]"#)
 // suji::dialog::show_error_box("Title", "content")
-// suji::tray::create("🚀", "tip") / set_menu(id, &[MenuItem::Item{...}, MenuItem::Separator]) / destroy(id)
+// suji::tray::create_with_icon("App", "tip", "/tmp/tray.png")
+//   / set_menu(id, &[MenuItem::Item{...}, MenuItem::Checkbox{...}, MenuItem::Separator]) / destroy(id)
 // suji::notification::{is_supported, request_permission, show("T","B",false), close("id")}
 // suji::menu::set_application_menu(&[MenuItem::Submenu{...}]) / reset_application_menu()
 // suji::global_shortcut::{register("Cmd+Shift+K","openSettings"), unregister(a),
@@ -295,7 +297,8 @@ var _ = suji.Bind(&App{})
 // dialog.ShowMessageBox(dialog.MessageBoxOpts{Message:"Q", Buttons:[]string{"OK"}})
 // dialog.ShowOpenDialog(`"properties":["openFile"]`) / ShowErrorBox(t, c)
 // import "github.com/ohah/suji-go/tray"
-// tray.Create("🚀", "tip") / SetMenu(id, []tray.MenuItem{{Label:"Quit",Click:"quit"}}) / Destroy(id)
+// tray.CreateWithIcon("App", "tip", "/tmp/tray.png")
+//   / SetMenu(id, []tray.MenuItem{{Label:"Quit",Click:"quit"},{Checkbox:true,Label:"Sync",Click:"sync"}}) / Destroy(id)
 // import "github.com/ohah/suji-go/notification"
 // notification.Show("Title", "Body", false) / RequestPermission() / Close(id)
 // import "github.com/ohah/suji-go/menu"
@@ -469,8 +472,8 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await dialog.showMessageBox({ message:"...", buttons:["OK"], windowId? })
 // await dialog.showOpenDialog({ properties:["openFile"], filters }) / showSaveDialog(...)
 // await dialog.showErrorBox(title, content)
-// const { trayId } = await tray.create({ title:"🚀", tooltip:"..." })
-// await tray.setMenu(trayId, [{label:"Quit",click:"quit"},{type:"separator"}])
+// const { trayId } = await tray.create({ title:"App", tooltip:"...", iconPath:"/tmp/tray.png" })
+// await tray.setMenu(trayId, [{label:"Quit",click:"quit"},{type:"checkbox",label:"Sync",click:"sync",checked:true},{label:"More",submenu:[{label:"Reload",click:"reload"}]}])
 // await tray.destroy(trayId) — suji.on('tray:menu-click', ({trayId,click}) => ...)
 // const sup = await notification.isSupported() (macOS Bundle ID 필수 / Linux D-Bus daemon / Windows Shell_NotifyIcon balloon)
 // await notification.requestPermission() / show({title,body,silent}) / close(notificationId)
@@ -702,7 +705,7 @@ boundary 가드 — `/foo/bar` 허용 시 `/foo/barX` 통과 X. backend SDK 호�
 동일 `allowedRoots` 경계로 게이트(`rendererPathFsGate`) — 쓰기:
 `print_to_pdf`/`capture_page`/`desktop_capturer_capture_thumbnail`, 읽기:
 `native_image_get_size`/`native_image_to_png|jpeg`(임의 파일을 base64 로
-렌더러에 반환 = 파일내용 유출). 단 **opt-in**(이 API들은 그동안 무제한 출하
+렌더러에 반환 = 파일내용 유출), 이미지 로드 `tray_create.iconPath`. 단 **opt-in**(이 API들은 그동안 무제한 출하
 — `allowedRoots` 미설정/`[]`이면 레거시 무제한 비파괴, 설정 시 `fs.*` 와
 동일 경계 enforce → 설정한 fs 통제가 이 경로 읽기/쓰기도 포함). backend 우회 동일.
 

@@ -1630,20 +1630,45 @@ pub mod notification {
 pub mod tray {
     use crate::{escape_json_full, invoke, serde_json};
 
-    /// 메뉴 항목 — separator 또는 click 이벤트 발화하는 일반 item.
+    /// 메뉴 항목 — item/checkbox/separator/submenu.
     pub enum MenuItem<'a> {
-        Item { label: &'a str, click: &'a str },
+        Item {
+            label: &'a str,
+            click: &'a str,
+        },
+        ItemWithOptions {
+            label: &'a str,
+            click: &'a str,
+            enabled: bool,
+        },
+        Checkbox {
+            label: &'a str,
+            click: &'a str,
+            checked: bool,
+            enabled: bool,
+        },
         Separator,
+        Submenu {
+            label: &'a str,
+            enabled: bool,
+            submenu: Vec<MenuItem<'a>>,
+        },
     }
 
     /// 새 트레이 생성. 응답 JSON: `{"from","cmd","trayId":N}`. trayId=0이면 실패.
     pub fn create(title: &str, tooltip: &str) -> Option<String> {
+        create_with_icon(title, tooltip, "")
+    }
+
+    /// macOS/Linux에서는 icon_path를 tray icon 이미지로 사용한다. Windows는 현재 기본 icon.
+    pub fn create_with_icon(title: &str, tooltip: &str, icon_path: &str) -> Option<String> {
         invoke(
             "__core__",
             &format!(
-                r#"{{"cmd":"tray_create","title":"{}","tooltip":"{}"}}"#,
+                r#"{{"cmd":"tray_create","title":"{}","tooltip":"{}","iconPath":"{}"}}"#,
                 escape_json_full(title),
                 escape_json_full(tooltip),
+                escape_json_full(icon_path),
             ),
         )
     }
@@ -1673,22 +1698,59 @@ pub mod tray {
     /// 메뉴 설정 — items 배열을 serde_json으로 안전하게 직렬화.
     /// 클릭 시 `tray:menu-click {trayId, click}` 이벤트 발화.
     pub fn set_menu(tray_id: u32, items: &[MenuItem]) -> Option<String> {
-        let arr: Vec<serde_json::Value> = items
-            .iter()
-            .map(|it| match it {
-                MenuItem::Separator => serde_json::json!({"type": "separator"}),
-                MenuItem::Item { label, click } => {
-                    serde_json::json!({"label": label, "click": click})
-                }
-            })
-            .collect();
-        let req = serde_json::json!({
+        let req = set_menu_request(tray_id, items);
+        invoke("__core__", &req)
+    }
+
+    pub(crate) fn set_menu_request(tray_id: u32, items: &[MenuItem]) -> String {
+        serde_json::json!({
             "cmd": "tray_set_menu",
             "trayId": tray_id,
-            "items": arr,
+            "items": items.iter().map(item_to_json).collect::<Vec<_>>(),
         })
-        .to_string();
-        invoke("__core__", &req)
+        .to_string()
+    }
+
+    fn item_to_json(item: &MenuItem) -> serde_json::Value {
+        match item {
+            MenuItem::Item { label, click } => serde_json::json!({
+                "label": label,
+                "click": click,
+            }),
+            MenuItem::ItemWithOptions {
+                label,
+                click,
+                enabled,
+            } => serde_json::json!({
+                "type": "item",
+                "label": label,
+                "click": click,
+                "enabled": enabled,
+            }),
+            MenuItem::Checkbox {
+                label,
+                click,
+                checked,
+                enabled,
+            } => serde_json::json!({
+                "type": "checkbox",
+                "label": label,
+                "click": click,
+                "checked": checked,
+                "enabled": enabled,
+            }),
+            MenuItem::Separator => serde_json::json!({"type": "separator"}),
+            MenuItem::Submenu {
+                label,
+                enabled,
+                submenu,
+            } => serde_json::json!({
+                "type": "submenu",
+                "label": label,
+                "enabled": enabled,
+                "submenu": submenu.iter().map(item_to_json).collect::<Vec<_>>(),
+            }),
+        }
     }
 
     pub fn destroy(tray_id: u32) -> Option<String> {
@@ -2496,6 +2558,43 @@ mod tests {
         assert_eq!(v["items"][0]["label"], "도구 \"Tools\"");
         assert_eq!(v["items"][0]["submenu"][0]["label"], "Run \\ now");
         assert_eq!(v["items"][0]["submenu"][0]["click"], "run\nnow");
+    }
+
+    #[test]
+    fn tray_set_menu_request_builds_nested_items() {
+        let req = crate::tray::set_menu_request(
+            7,
+            &[
+                crate::tray::MenuItem::Item {
+                    label: "Run",
+                    click: "run",
+                },
+                crate::tray::MenuItem::Checkbox {
+                    label: "Flag",
+                    click: "flag",
+                    checked: true,
+                    enabled: false,
+                },
+                crate::tray::MenuItem::Submenu {
+                    label: "More",
+                    enabled: true,
+                    submenu: vec![crate::tray::MenuItem::ItemWithOptions {
+                        label: "Child",
+                        click: "child",
+                        enabled: true,
+                    }],
+                },
+            ],
+        );
+        let v: serde_json::Value = serde_json::from_str(&req).unwrap();
+        assert_eq!(v["cmd"], "tray_set_menu");
+        assert_eq!(v["trayId"], 7);
+        assert_eq!(v["items"][0]["click"], "run");
+        assert_eq!(v["items"][1]["type"], "checkbox");
+        assert_eq!(v["items"][1]["checked"], true);
+        assert_eq!(v["items"][1]["enabled"], false);
+        assert_eq!(v["items"][2]["type"], "submenu");
+        assert_eq!(v["items"][2]["submenu"][0]["click"], "child");
     }
 
     #[test]

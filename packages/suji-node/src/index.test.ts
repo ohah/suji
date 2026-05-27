@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, invoke, invokeSync, send, sendTo, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, type InvokeEvent } from './index';
+import { handle, invoke, invokeSync, send, sendTo, tray, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -122,6 +122,25 @@ describe('menu', () => {
     bridge.invoke.mockResolvedValueOnce('{"success":true}');
     await menu.resetApplicationMenu();
     expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"menu_reset_application_menu"}');
+  });
+});
+
+describe('tray', () => {
+  it('create invokes __core__ with iconPath', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"trayId":7}');
+    const result = await tray.create({ title: 'App', tooltip: 'tip', iconPath: '/tmp/tray.png' });
+    expect(result.trayId).toBe(7);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"tray_create","title":"App","tooltip":"tip","iconPath":"/tmp/tray.png"}');
+  });
+
+  it('setMenu invokes __core__ with submenu and checkbox items', async () => {
+    bridge.invoke.mockResolvedValueOnce('{"success":true}');
+    const ok = await tray.setMenu(7, [
+      { type: 'checkbox', label: 'Flag', click: 'flag', checked: true, enabled: false },
+      { label: 'More', submenu: [{ label: 'Child', click: 'child' }] },
+    ]);
+    expect(ok).toBe(true);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"tray_set_menu","trayId":7,"items":[{"type":"checkbox","label":"Flag","click":"flag","checked":true,"enabled":false},{"label":"More","submenu":[{"label":"Child","click":"child"}]}]}');
   });
 });
 

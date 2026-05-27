@@ -2880,8 +2880,11 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click �
     // Linux GTK StatusIcon + GtkMenu backend.
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "const linux_tray") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_status_icon_new") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_status_icon_set_from_file") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_menu_new") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_menu_popup") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_check_menu_item_new_with_label") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_menu_item_set_submenu") != null);
     // SujiTrayTarget ObjC subclass + trayMenuClick: selector.
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"SujiTrayTarget\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "trayMenuClick:") != null);
@@ -2908,9 +2911,12 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click �
     // emit 핸들러 등록 — dev/dist 양쪽.
     try std.testing.expect(std.mem.indexOf(u8, main_src, "cef.setTrayEmitHandler(&trayEmitHandler)") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "tray:menu-click") != null);
-    // setMenu items 파싱 (separator vs item).
-    try std.testing.expect(std.mem.indexOf(u8, main_src, "TraySetMenuJson") != null);
+    // setMenu items 파싱 (separator/item/checkbox/submenu).
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "parseTrayMenuItem") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"separator\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"checkbox\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"submenu\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"iconPath\"") != null);
 
     // 4 SDK 노출 확인.
     const app_src = try std.Io.Dir.cwd().readFileAlloc(
@@ -2931,6 +2937,7 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click �
     defer std.testing.allocator.free(rs_src);
     try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub mod tray {") != null);
     try std.testing.expect(std.mem.indexOf(u8, rs_src, "pub fn set_menu(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, rs_src, "create_with_icon") != null);
 
     const go_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -2940,6 +2947,7 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click �
     );
     defer std.testing.allocator.free(go_src);
     try std.testing.expect(std.mem.indexOf(u8, go_src, "func Create(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_src, "func CreateWithIcon(") != null);
     try std.testing.expect(std.mem.indexOf(u8, go_src, "type MenuItem struct") != null);
 
     const node_src = try std.Io.Dir.cwd().readFileAlloc(
@@ -2960,6 +2968,8 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click �
     defer std.testing.allocator.free(ts_src);
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "export const tray =") != null);
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "TrayMenuItem") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "TrayMenuCheckbox") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ts_src, "iconPath?: string") != null);
 }
 
 test "회귀: Menu API (Phase 5-D) — NSMenu 커스터마이즈 + click 라우팅 + 4 SDK" {

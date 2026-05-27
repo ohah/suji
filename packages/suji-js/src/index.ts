@@ -849,26 +849,45 @@ export const notification = {
 // tray — 시스템 트레이 아이콘 (Electron `Tray`)
 // ============================================
 // macOS NSStatusItem, Linux GTK StatusIcon, Windows Shell_NotifyIconW.
-// v1: title/tooltip + 메뉴 only. custom icon path는 v2.
+// macOS/Linux: iconPath + submenu/checkbox. Windows: flat HMENU + default icon.
 
 export interface TrayMenuSeparator {
   type: "separator";
 }
 
 export interface TrayMenuItemSpec {
+  type?: "item";
   /** 메뉴에 표시될 텍스트. */
   label: string;
   /** 클릭 시 emit될 이벤트 이름 — `tray:menu-click {trayId, click}` 페이로드의 click 필드. */
   click: string;
+  enabled?: boolean;
 }
 
-export type TrayMenuItem = TrayMenuItemSpec | TrayMenuSeparator;
+export interface TrayMenuCheckbox {
+  type: "checkbox";
+  label: string;
+  click: string;
+  checked?: boolean;
+  enabled?: boolean;
+}
+
+export interface TrayMenuSubmenu {
+  type?: "submenu";
+  label: string;
+  enabled?: boolean;
+  submenu: TrayMenuItem[];
+}
+
+export type TrayMenuItem = TrayMenuItemSpec | TrayMenuCheckbox | TrayMenuSeparator | TrayMenuSubmenu;
 
 export interface TrayCreateOptions {
-  /** 메뉴바에 표시될 텍스트 (icon 미지원 v1라 가시성 위해 권장). */
+  /** 메뉴바에 표시될 텍스트. */
   title?: string;
   /** 마우스 호버 시 표시될 툴팁. */
   tooltip?: string;
+  /** macOS/Linux tray icon 이미지 파일 경로. Windows는 현재 기본 아이콘을 사용. */
+  iconPath?: string;
 }
 
 export const tray = {
@@ -887,7 +906,7 @@ export const tray = {
     return r.success === true;
   },
 
-  /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. items는 분리선/일반 항목 혼합 가능.
+  /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. macOS/Linux는 submenu/checkbox도 지원.
    *  메뉴 항목 클릭은 `suji.on('tray:menu-click', ({trayId, click}) => ...)` 로 수신. */
   async setMenu(trayId: number, items: TrayMenuItem[]): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "tray_set_menu", trayId, items });

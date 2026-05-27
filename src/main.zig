@@ -3303,15 +3303,22 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         return handleDialogShowSaveDialog(req_clean, response_buf);
     }
 
-    // Tray API — NSStatusItem.
+    // Tray API — NSStatusItem / GTK StatusIcon / Shell_NotifyIconW.
     if (std.mem.eql(u8, cmd, "tray_create")) {
         const title = util.extractJsonString(req_clean, "title") orelse "";
         const tooltip = util.extractJsonString(req_clean, "tooltip") orelse "";
+        const icon_path_raw = util.extractJsonString(req_clean, "iconPath") orelse "";
         var t_buf: [256]u8 = undefined;
         var tt_buf: [512]u8 = undefined;
+        var icon_path_buf: [2048]u8 = undefined;
         const t_n = util.unescapeJsonStr(title, &t_buf) orelse 0;
         const tt_n = util.unescapeJsonStr(tooltip, &tt_buf) orelse 0;
-        const id = cef.createTray(t_buf[0..t_n], tt_buf[0..tt_n]);
+        const icon_path_n = util.unescapeJsonStr(icon_path_raw, &icon_path_buf) orelse 0;
+        const icon_path = icon_path_buf[0..icon_path_n];
+        if (icon_path.len > 0) {
+            if (rendererPathFsGate(response_buf, "tray_create", icon_path)) |e| return e;
+        }
+        const id = cef.createTray(t_buf[0..t_n], tt_buf[0..tt_n], icon_path);
         const result = std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"tray_create\",\"trayId\":{d}}}",
@@ -4171,9 +4178,10 @@ fn isPathAllowedForFrontend(path: []const u8) bool {
 ///  - 쓰기: print_to_pdf / capture_page / desktop_capturer_capture_thumbnail
 ///  - 읽기: native_image_get_size / native_image_to_png|jpeg (임의 파일을
 ///    base64 로 인코딩해 렌더러로 반환 = 파일내용 유출)
+///  - 파일 probe/read sink: tray_create.iconPath
 /// **opt-in**: fs.allowedRoots 미설정/빈이면 레거시 무제한(비파괴 — 이 API
 /// 들은 그동안 무제한 출하), 설정 시 `fs.*` 와 동일 경계로 enforce(설정한 fs
-/// 통제가 이 경로들도 포함 → 신뢰불가 렌더러의 임의 파일 읽기/쓰기 차단).
+/// 통제가 이 경로들도 포함 → 신뢰불가 렌더러의 임의 파일 읽기/쓰기/이미지 로드 차단).
 /// backend SDK 호출은 fs 와 동일 thread-local 마커로 우회.
 fn rendererPathFsGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
     if (g_in_backend_invoke) return null;
@@ -4295,6 +4303,9 @@ test "rendererPathFsGate: opt-in (fs.allowedRoots 미설정=레거시 허용, �
     try std.testing.expect(rendererPathFsGate(&resp, "native_image_get_size", "/Users/x/app/i.png") == null);
     try std.testing.expect(rendererPathFsGate(&resp, "native_image_to_png", "/etc/shadow") != null);
     try std.testing.expect(rendererPathFsGate(&resp, "native_image_to_jpeg", "/Users/x/app/../secret.jpg") != null);
+    // tray iconPath도 renderer-controlled file path이므로 동일 경계 적용.
+    try std.testing.expect(rendererPathFsGate(&resp, "tray_create", "/Users/x/app/tray.png") == null);
+    try std.testing.expect(rendererPathFsGate(&resp, "tray_create", "/etc/tray.png") != null);
 
     // backend SDK 호출 → 우회(설정돼 있어도 null).
     g_in_backend_invoke = true;
@@ -4594,44 +4605,66 @@ fn handleDialogShowOpenDialog(req_clean: []const u8, response_buf: []u8) ?[]cons
 }
 
 // ============================================
-// Tray handlers — std.json으로 menu items 파싱
+// Tray handlers — menu item 재귀 파싱
 // ============================================
 
-const TrayMenuItemJson = struct {
-    type: []const u8 = "", // "separator"면 separator, 아니면 일반 item
-    label: []const u8 = "",
-    click: []const u8 = "",
-};
-
-const TraySetMenuJson = struct {
-    trayId: u32 = 0,
-    items: []const TrayMenuItemJson = &.{},
-};
-
 fn handleTraySetMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
-    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var arena_buf: [DIALOG_PARSE_ARENA * 2]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
     const arena = fba.allocator();
 
-    const parsed = std.json.parseFromSlice(TraySetMenuJson, arena, req_clean, .{
-        .ignore_unknown_fields = true,
-    }) catch {
+    const parsed = std.json.parseFromSlice(std.json.Value, arena, req_clean, .{}) catch {
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_menu\",\"success\":false,\"error\":\"parse\"}}", .{}) catch null;
     };
-    defer parsed.deinit();
-    const opts = parsed.value;
+    if (parsed.value != .object) return coreError(response_buf, "tray_set_menu", "parse");
+    const obj = parsed.value.object;
+    const tray_id = util.nonNegU32(util.extractJsonInt(req_clean, "trayId") orelse return coreError(response_buf, "tray_set_menu", "parse"));
+    const items_val = obj.get("items") orelse return coreError(response_buf, "tray_set_menu", "parse");
+    if (items_val != .array) return coreError(response_buf, "tray_set_menu", "parse");
+    const items = parseTrayMenuItems(arena, items_val.array.items) catch return coreError(response_buf, "tray_set_menu", "parse");
 
-    var items = arena.alloc(cef.TrayMenuItem, opts.items.len) catch return null;
-    for (opts.items, 0..) |it, i| {
-        if (std.mem.eql(u8, it.type, "separator")) {
-            items[i] = .separator;
-        } else {
-            items[i] = .{ .item = .{ .label = it.label, .click = it.click } };
-        }
-    }
-
-    const ok = cef.setTrayMenu(opts.trayId, items);
+    const ok = cef.setTrayMenu(tray_id, items);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+fn parseTrayMenuItems(arena: std.mem.Allocator, values: []const std.json.Value) MenuParseError![]cef.TrayMenuItem {
+    var out = try arena.alloc(cef.TrayMenuItem, values.len);
+    for (values, 0..) |v, i| out[i] = try parseTrayMenuItem(arena, v);
+    return out;
+}
+
+fn parseTrayMenuItem(arena: std.mem.Allocator, value: std.json.Value) MenuParseError!cef.TrayMenuItem {
+    if (value != .object) return error.InvalidMenuItem;
+    const obj = value.object;
+    const typ = util.jsonObjectGetString(obj, "type") orelse "";
+    if (std.mem.eql(u8, typ, "separator")) return .separator;
+
+    const label = util.jsonObjectGetString(obj, "label") orelse "";
+    const click = util.jsonObjectGetString(obj, "click") orelse "";
+    const enabled = util.jsonObjectGetBool(obj, "enabled") orelse true;
+
+    if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
+        const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
+        if (sub_val != .array) return error.InvalidMenuItem;
+        return .{ .submenu = .{
+            .label = label,
+            .enabled = enabled,
+            .items = try parseTrayMenuItems(arena, sub_val.array.items),
+        } };
+    }
+    if (std.mem.eql(u8, typ, "checkbox")) {
+        return .{ .checkbox = .{
+            .label = label,
+            .click = click,
+            .checked = util.jsonObjectGetBool(obj, "checked") orelse false,
+            .enabled = enabled,
+        } };
+    }
+    return .{ .item = .{
+        .label = label,
+        .click = click,
+        .enabled = enabled,
+    } };
 }
 
 // ============================================

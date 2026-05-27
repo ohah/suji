@@ -1154,12 +1154,31 @@ export const notification = {
 // ============================================
 
 export interface TrayMenuSeparator { type: 'separator'; }
-export interface TrayMenuItemSpec { label: string; click: string; }
-export type TrayMenuItem = TrayMenuItemSpec | TrayMenuSeparator;
+export interface TrayMenuItemSpec {
+  type?: 'item';
+  label: string;
+  click: string;
+  enabled?: boolean;
+}
+export interface TrayMenuCheckbox {
+  type: 'checkbox';
+  label: string;
+  click: string;
+  checked?: boolean;
+  enabled?: boolean;
+}
+export interface TrayMenuSubmenu {
+  type?: 'submenu';
+  label: string;
+  enabled?: boolean;
+  submenu: TrayMenuItem[];
+}
+export type TrayMenuItem = TrayMenuItemSpec | TrayMenuCheckbox | TrayMenuSeparator | TrayMenuSubmenu;
 
 export interface TrayCreateOptions {
   title?: string;
   tooltip?: string;
+  iconPath?: string;
 }
 
 export const tray = {

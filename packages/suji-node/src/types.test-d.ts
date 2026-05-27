@@ -2,7 +2,7 @@
  * Type-only test — Node SDK invoke/invokeSync/call/callSync가 SujiHandlers augment를 추론.
  * tsc 컴파일 통과 = pass.
  */
-import { call, callSync, invoke, invokeSync, BrowserWindow } from "./index";
+import { call, callSync, invoke, invokeSync, BrowserWindow, tray, type TrayMenuItem } from "./index";
 
 declare module "./index" {
   interface SujiHandlers {
@@ -96,3 +96,15 @@ async function _bwChecks() {
   void _id; void _url; void _wid; void _vid; void _childIds;
 }
 void _bwChecks;
+
+async function _trayChecks() {
+  await tray.create({ title: "x", tooltip: "tip", iconPath: "/tmp/tray.png" });
+  const items: TrayMenuItem[] = [
+    { label: "Run", click: "run", enabled: true },
+    { type: "checkbox", label: "Flag", click: "flag", checked: true },
+    { label: "More", submenu: [{ label: "Child", click: "child" }] },
+    { type: "separator" },
+  ];
+  await tray.setMenu(1, items);
+}
+void _trayChecks;

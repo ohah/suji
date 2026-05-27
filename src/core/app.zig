@@ -1155,15 +1155,26 @@ pub const notification = struct {
 };
 
 pub const tray = struct {
-    /// 트레이 생성. 응답: `{"from","cmd","trayId":N}`. trayId=0이면 실패 (비-macOS 등).
+    /// 트레이 생성. 응답: `{"from","cmd","trayId":N}`. trayId=0이면 실패.
     /// title/tooltip은 빈 문자열이면 미설정.
     pub fn create(title: []const u8, tooltip: []const u8) ?[]const u8 {
+        return createWithIcon(title, tooltip, "");
+    }
+
+    /// icon_path는 macOS/Linux에서 네이티브 tray icon 이미지로 사용한다.
+    pub fn createWithIcon(title: []const u8, tooltip: []const u8, icon_path: []const u8) ?[]const u8 {
         var t_buf: [512]u8 = undefined;
         var tt_buf: [1024]u8 = undefined;
+        var icon_buf: [2048]u8 = undefined;
         const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
         const tt_n = util.escapeJsonStrFull(tooltip, &tt_buf) orelse return null;
-        var fields_buf: [2048]u8 = undefined;
-        const fields = std.fmt.bufPrint(&fields_buf, "\"title\":\"{s}\",\"tooltip\":\"{s}\"", .{ t_buf[0..t_n], tt_buf[0..tt_n] }) catch return null;
+        const icon_n = util.escapeJsonStrFull(icon_path, &icon_buf) orelse return null;
+        var fields_buf: [4096]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"title\":\"{s}\",\"tooltip\":\"{s}\",\"iconPath\":\"{s}\"",
+            .{ t_buf[0..t_n], tt_buf[0..tt_n], icon_buf[0..icon_n] },
+        ) catch return null;
         return coreCmd("tray_create", fields);
     }
 

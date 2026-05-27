@@ -7,6 +7,7 @@
  *   - destroy → 같은 id 재호출 false (graceful)
  *   - setMenu 잘못된 trayId → false
  *   - menu items separator + 일반 항목 혼합
+ *   - macOS/Linux iconPath + submenu/checkbox/enabled menu shape
  *   - RUN_DESTRUCTIVE(macOS): osascript로 메뉴 항목 클릭 트리거 → `tray:menu-click` 이벤트 수신
  *
  * 실행:
@@ -28,8 +29,17 @@ const core = <T = any>(request: Record<string, unknown>): Promise<T> =>
   ) as Promise<T>;
 
 const runDestructive = process.env.RUN_DESTRUCTIVE === "1";
+const isWindows = process.platform === "win32";
+const trayIconPath = "/tmp/suji-tray-e2e-icon.png";
 
 beforeAll(async () => {
+  await Bun.write(
+    trayIconPath,
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
   browser = await puppeteer.connect({
     browserURL: "http://localhost:9222",
     protocolTimeout: 30000,
@@ -68,6 +78,17 @@ describe("tray.create — wiring + 응답", () => {
 
   test("빈 옵션 → trayId 여전히 > 0 (native tray object 자체는 생성)", async () => {
     const r = await core<{ trayId: number }>({ cmd: "tray_create" });
+    expect(r.trayId).toBeGreaterThan(0);
+    createdTrayIds.push(r.trayId);
+  });
+
+  test.skipIf(isWindows)("iconPath 옵션 → macOS/Linux trayId > 0", async () => {
+    const r = await core<{ trayId: number }>({
+      cmd: "tray_create",
+      title: "Icon Tray",
+      tooltip: "icon tooltip",
+      iconPath: trayIconPath,
+    });
     expect(r.trayId).toBeGreaterThan(0);
     createdTrayIds.push(r.trayId);
   });
@@ -118,6 +139,24 @@ describe("setTitle / setTooltip / setMenu — 응답", () => {
         { label: "Reload", click: "reload" },
         { type: "separator" },
         { label: "Quit", click: "quit-app" },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
+  test.skipIf(isWindows)("setMenu submenu + checkbox + enabled flags", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "tray_set_menu", trayId,
+      items: [
+        { type: "checkbox", label: "Feature enabled", click: "feature-toggle", checked: true },
+        { label: "Disabled item", click: "disabled-click", enabled: false },
+        {
+          label: "More",
+          submenu: [
+            { label: "Child item", click: "child-click" },
+            { type: "checkbox", label: "Child flag", click: "child-flag", checked: false },
+          ],
+        },
       ],
     });
     expect(r.success).toBe(true);
@@ -191,6 +230,13 @@ describe("error 분기", () => {
   test("setMenu items 잘못된 type (non-array) → graceful (parse error)", async () => {
     const r = await core<{ success: boolean; error?: string }>({
       cmd: "tray_set_menu", trayId: 1, items: "not-array" as any,
+    });
+    expect(r.success).toBe(false);
+  });
+
+  test("setMenu submenu가 배열이 아니면 graceful parse error", async () => {
+    const r = await core<{ success: boolean; error?: string }>({
+      cmd: "tray_set_menu", trayId: 1, items: [{ label: "Bad", submenu: "not-array" as any }],
     });
     expect(r.success).toBe(false);
   });

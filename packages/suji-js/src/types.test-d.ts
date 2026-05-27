@@ -2,7 +2,7 @@
  * Type-only test — `invoke` generic overload가 SujiHandlers augment를 정확히 추론하는지
  * 검증. tsc 컴파일 통과 = pass. 런타임 실행은 없음 (이름이 .test-d.ts라 bun이 skip).
  */
-import { invoke, type InvokeOptions, BrowserWindow } from "./index";
+import { invoke, type InvokeOptions, BrowserWindow, tray, type TrayMenuItem } from "./index";
 
 declare module "./index" {
   interface SujiHandlers {
@@ -69,3 +69,15 @@ async function _bwChecks() {
   void _id; void _url; void _wid; void _id2;
 }
 void _bwChecks;
+
+async function _trayChecks() {
+  await tray.create({ title: "x", tooltip: "tip", iconPath: "/tmp/tray.png" });
+  const items: TrayMenuItem[] = [
+    { label: "Run", click: "run", enabled: true },
+    { type: "checkbox", label: "Flag", click: "flag", checked: true },
+    { label: "More", submenu: [{ label: "Child", click: "child" }] },
+    { type: "separator" },
+  ];
+  await tray.setMenu(1, items);
+}
+void _trayChecks;

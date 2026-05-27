@@ -5,29 +5,30 @@ description: 시스템 트레이 아이콘 + 컨텍스트 메뉴 (Electron Tray)
 
 # Tray
 
-Electron `Tray` 호환 — macOS 메뉴바 `NSStatusItem`, Linux GTK `StatusIcon`,
-Windows system tray `Shell_NotifyIconW`. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK 모두 노출.
+Electron `Tray` 호환 API. macOS는 메뉴바 `NSStatusItem`, Linux는 GTK `StatusIcon`,
+Windows는 system tray `Shell_NotifyIconW` 경로를 쓴다. Frontend JS + Zig/Rust/Go/Node
+백엔드 SDK 모두 같은 `__core__` wire shape를 보낸다.
 
 ## 플랫폼 지원
 
 | API | macOS | Linux | Windows |
 |---|---|---|---|
-| `tray.create` | ✅ NSStatusItem | ✅ GTK StatusIcon | ✅ Shell_NotifyIconW |
+| `tray.create` | ✅ title/tooltip/iconPath | ✅ title/tooltip/iconPath | ✅ tooltip, 기본 icon |
 | `tray.setTitle/setTooltip` | ✅ title + tooltip | ✅ title + tooltip | ✅ tooltip update (`setTitle`도 tooltip으로 매핑) |
-| `tray.setMenu` | ✅ NSMenu | ✅ GtkMenu popup | ✅ HMENU popup |
+| `tray.setMenu` | ✅ item/separator/checkbox/submenu/enabled | ✅ item/separator/checkbox/submenu/enabled | ✅ flat HMENU item/separator, checkbox 표시 best-effort |
 | `tray.destroy` | ✅ | ✅ hide + unref | ✅ `NIM_DELETE` |
 | Click event | ✅ `tray:menu-click` for menu items | ✅ activate + menu item click | ✅ left click + menu item click |
 
-Linux v1은 추가 AppIndicator 의존성을 늘리지 않고 GTK3 `GtkStatusIcon` 경로를 쓴다.
+Linux는 추가 AppIndicator 의존성을 늘리지 않고 GTK3 `GtkStatusIcon` 경로를 쓴다.
 Windows는 hidden message-only window가 tray callback과 popup menu command를 받는다.
 
-## v1 한계
+## 현재 한계
 
-| 미지원 | 설명 |
+| 한계 | 설명 |
 |---|---|
-| **커스텀 아이콘 이미지** | macOS v1은 `title` 텍스트만 — 이모지 가능 (예: `"🚀 Suji"`). Linux는 테마 기본 아이콘(`application-x-executable`), Windows는 기본 app icon(`IDI_APPLICATION`) 사용. `iconPath`/template 로딩은 후속. |
-| **별도 `tray:click` 이벤트** | v1은 클릭을 `tray:menu-click` 채널로 통일한다. Windows/Linux icon activate는 빈 `click` 값으로 emit한다. macOS 메뉴 설정 시 클릭 → 자동 메뉴 표시라 메뉴 없는 click hook은 별도 작업. |
-| **서브메뉴 / checkbox / radio** | NSMenu는 지원하나 v1은 평면 메뉴 + separator만. |
+| **Windows parity** | Windows는 아직 `iconPath`와 중첩 submenu를 완전 구현하지 않는다. 기본 app icon + flat HMENU 경로 유지. |
+| **별도 `tray:click` 이벤트** | 클릭을 `tray:menu-click` 채널로 통일한다. Windows/Linux icon activate는 빈 `click` 값으로 emit한다. macOS 메뉴 설정 시 클릭 → 자동 메뉴 표시라 메뉴 없는 click hook은 별도 작업. |
+| **radio item** | checkbox는 macOS/Linux에서 지원하지만 radio group semantics는 후속. |
 | **오른쪽 클릭 구분** | macOS NSStatusItem.button.action은 left/right 통합. Windows right click은 popup menu를 표시한다. |
 
 ## API
@@ -35,44 +36,65 @@ Windows는 hidden message-only window가 tray callback과 popup menu command를 
 ```ts
 import { tray } from '@suji/api';
 
-// 생성 — title은 메뉴바에 표시 (v1 아이콘 미지원이라 권장).
 const { trayId } = await tray.create({
-  title: '🚀 My App',
+  title: 'My App',
   tooltip: 'My App is running',
+  iconPath: '/absolute/path/to/tray.png', // macOS/Linux
 });
 
-// 메뉴 설정 — items 배열. 클릭 이벤트 이름은 자유.
 await tray.setMenu(trayId, [
-  { label: 'Show window',  click: 'show-main' },
-  { label: 'Reload',       click: 'reload-app' },
+  { label: 'Show window', click: 'show-main' },
+  { type: 'checkbox', label: 'Enable sync', click: 'toggle-sync', checked: true },
+  {
+    label: 'More',
+    submenu: [
+      { label: 'Reload', click: 'reload-app' },
+      { label: 'Disabled action', click: 'disabled-action', enabled: false },
+    ],
+  },
   { type: 'separator' },
-  { label: 'Quit',         click: 'quit-app' },
+  { label: 'Quit', click: 'quit-app' },
 ]);
 
-// 클릭 수신 — `tray:menu-click {trayId, click}`.
 suji.on('tray:menu-click', ({ trayId, click }) => {
   if (click === 'quit-app') suji.quit();
-  if (click === 'show-main') {/* ... */}
 });
 
-// 텍스트 변경
-await tray.setTitle(trayId, '🎉 Update available');
+await tray.setTitle(trayId, 'Update available');
 await tray.setTooltip(trayId, 'New version ready');
-
-// 정리
 await tray.destroy(trayId);
 ```
+
+Menu item wire shape:
+
+```json
+[
+  { "type": "item", "label": "Run", "click": "run", "enabled": true },
+  { "type": "checkbox", "label": "Flag", "click": "flag", "checked": true, "enabled": true },
+  {
+    "type": "submenu",
+    "label": "More",
+    "enabled": true,
+    "submenu": [{ "label": "Child", "click": "child" }]
+  },
+  { "type": "separator" }
+]
+```
+
+`iconPath`는 renderer-controlled file path라 `fs.allowedRoots`가 설정된 앱에서는 같은
+경계로 검사한다. backend SDK 호출은 기존 fs sandbox 정책과 동일하게 우회한다.
 
 ## Backend SDK
 
 ### Zig (`suji.tray.*`)
 
 ```zig
-const r = suji.tray.create("🚀 My App", "tooltip");
-// items_json은 caller가 빌드 (raw JSON):
+const r = suji.tray.createWithIcon("My App", "tooltip", "/tmp/tray.png");
 const items =
     \\"items":[
     \\  {"label":"Settings","click":"open-settings"},
+    \\  {"type":"checkbox","label":"Sync","click":"sync","checked":true},
+    \\  {"label":"More","submenu":[{"label":"Reload","click":"reload"}]},
     \\  {"type":"separator"},
     \\  {"label":"Quit","click":"quit"}
     \\]
@@ -85,11 +107,17 @@ _ = suji.tray.destroy(1);
 
 ```rust
 use suji::tray::{self, MenuItem};
-let r = tray::create("🚀 My App", "tooltip");
+
+let r = tray::create_with_icon("My App", "tooltip", "/tmp/tray.png");
 let _ = tray::set_menu(1, &[
     MenuItem::Item { label: "Settings", click: "open-settings" },
+    MenuItem::Checkbox { label: "Sync", click: "sync", checked: true, enabled: true },
+    MenuItem::Submenu {
+        label: "More",
+        enabled: true,
+        submenu: vec![MenuItem::Item { label: "Reload", click: "reload" }],
+    },
     MenuItem::Separator,
-    MenuItem::Item { label: "Quit", click: "quit" },
 ]);
 let _ = tray::destroy(1);
 ```
@@ -98,11 +126,13 @@ let _ = tray::destroy(1);
 
 ```go
 import "github.com/ohah/suji-go/tray"
-tray.Create("🚀 My App", "tooltip")
+
+tray.CreateWithIcon("My App", "tooltip", "/tmp/tray.png")
 tray.SetMenu(1, []tray.MenuItem{
     {Label: "Settings", Click: "open-settings"},
+    {Checkbox: true, Label: "Sync", Click: "sync", Checked: true},
+    {Type: "submenu", Label: "More", Submenu: []tray.MenuItem{{Label: "Reload", Click: "reload"}}},
     {Separator: true},
-    {Label: "Quit", Click: "quit"},
 })
 tray.Destroy(1)
 ```
@@ -111,55 +141,45 @@ tray.Destroy(1)
 
 ```ts
 import { tray } from '@suji/node';
-const { trayId } = await tray.create({ title: '🚀 My App' });
+
+const { trayId } = await tray.create({ title: 'My App', iconPath: '/tmp/tray.png' });
 await tray.setMenu(trayId, [
   { label: 'Settings', click: 'open-settings' },
-  { type: 'separator' },
-  { label: 'Quit', click: 'quit' },
+  { type: 'checkbox', label: 'Sync', click: 'sync', checked: true },
+  { label: 'More', submenu: [{ label: 'Reload', click: 'reload' }] },
 ]);
 ```
 
 ## 동작 정밀
 
-### 라이프사이클
-- `create` → `NSStatusBar.systemStatusBar.statusItemWithLength:NSVariableStatusItemLength` →
-  반환된 NSStatusItem을 `[item retain]` (autorelease pool 종료 후에도 유지).
-- `destroy` → `[NSStatusBar removeStatusItem:item]` + `[item release]`.
-- 앱 종료 시 자동 cleanup 안 함 (의도) — caller가 destroy 안 부르면 메뉴바에서 자동 제거되지만 메모리는 leak. 실제론 process 종료로 모두 회수.
+### macOS 경로
 
-### Click 라우팅
-- 각 NSMenuItem이 `tag = trayId` + `representedObject = NSString(click)` 보유.
-- `SujiTrayTarget.trayMenuClick:(NSMenuItem*)sender` selector가 두 값 추출 →
-  `tray:menu-click {"trayId":N,"click":"..."}` 이벤트 발화.
-- NSApp UI thread에서만 호출 — BackendRegistry/EventBus 글로벌 안전.
+- `create`는 `NSStatusBar.systemStatusBar.statusItemWithLength:`로 `NSStatusItem`을 만들고 retain한다.
+- `iconPath`가 있으면 `NSImage initWithContentsOfFile:`로 이미지를 로드해 `statusItem.button.image`에 설정한다.
+- `setMenu`는 `NSMenu`를 재귀 빌드한다. checkbox는 클릭 즉시 native checked state를 토글한 뒤 `tray:menu-click`을 emit한다.
+- 각 clickable `NSMenuItem`은 composite `tag`에 tray id와 checkbox 여부를 담고, `representedObject`에 click 이름을 보관한다.
 
 ### Linux 경로
 
-- `gtk_status_icon_new` + `gtk_status_icon_set_from_icon_name("application-x-executable")`로 tray icon을 만든다.
+- `gtk_status_icon_new` 후 `iconPath`가 있으면 `gtk_status_icon_set_from_file`, 없으면 `gtk_status_icon_set_from_icon_name("application-x-executable")`를 사용한다.
 - `setTitle`/`setTooltip`은 `gtk_status_icon_set_title`/`gtk_status_icon_set_tooltip_text`로 반영한다.
-- `setMenu`는 `GtkMenu` + `GtkMenuItem`/`GtkSeparatorMenuItem`을 재빌드하고, item `activate` signal에서 `tray:menu-click`을 emit한다.
+- `setMenu`는 `GtkMenu`를 재귀 빌드하고 `GtkMenuItem`/`GtkCheckMenuItem` activate signal에서 `tray:menu-click`을 emit한다.
 - icon activate는 Windows left click과 동일하게 `tray:menu-click {"trayId":N,"click":""}`를 emit한다.
 - GTK3 StatusIcon은 upstream deprecated API라, 향후 AppIndicator/StatusNotifierItem 구현으로 교체할 수 있다.
 
 ### Windows 경로
+
 - `win_pump` hidden message-only window가 `WM_TRAY` / `WM_COMMAND`를 수신한다.
 - `create`는 `Shell_NotifyIconW(NIM_ADD)`로 기본 app icon과 tooltip을 등록한다.
-- `setMenu`는 `CreatePopupMenu` + `AppendMenuW`로 평면 HMENU를 구성하고, right click에서
-  `TrackPopupMenu`를 호출한다.
+- `setMenu`는 `CreatePopupMenu` + `AppendMenuW`로 flat HMENU를 구성하고 right click에서 `TrackPopupMenu`를 호출한다.
 - left click / double click은 `tray:menu-click {"trayId":N,"click":""}`를 emit한다.
 - menu item click은 command id를 `(trayId, click)`으로 매핑해 같은 이벤트 채널로 emit한다.
 
-### JSON wire 안전성
-- `title/tooltip/click/label` 모두 `escapeJsonStrFull` (newline/tab 보존, control char `\u00XX`).
-- 한글/이모지/ZWJ 시퀀스 안전 통과.
-
 ## E2E 한계
 
-OS 메뉴바 `NSStatusItem`, Linux desktop tray host, Windows system tray popup은 puppeteer로 직접 클릭하기 어렵다.
-자동화는:
-1. **회귀 가드** (`tests/window_manager_test.zig`) — 정적 ObjC selector / cmd / SDK 노출 검증.
-2. **응답 형식 검증** — IPC가 `{trayId: N}`, `{success: bool}` 응답하는지.
-3. **Linux/Windows build/source 가드** — `GtkStatusIcon`/`GtkMenu`와 `Shell_NotifyIconW`/`WM_TRAY`/`WM_COMMAND` wiring을 빌드와 회귀 grep으로 고정.
-4. **수동 검증 권장** — `tray.create` + `tray.setMenu` 후 macOS 메뉴바, Linux desktop tray, Windows system tray를 직접 클릭.
+OS 메뉴바 `NSStatusItem`, Linux desktop tray host, Windows system tray popup은 Puppeteer로 직접
+클릭하기 어렵다. 자동화 범위는 IPC 응답 shape, 다중 tray, destroy graceful path,
+macOS/Linux `iconPath`/submenu/checkbox parse와 native set 성공까지다.
 
-`tray:menu-click` 이벤트 검증은 `osascript` System Events API로 메뉴 항목 호출 가능하지만 Accessibility 권한 의존이라 RUN_DESTRUCTIVE 게이트 권장.
+`tray:menu-click` 실제 클릭 검증은 `osascript` System Events API로 가능하지만
+Accessibility 권한 의존이라 `RUN_DESTRUCTIVE=1` 게이트로 둔다.

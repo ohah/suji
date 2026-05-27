@@ -275,22 +275,16 @@ export declare const windows: {
         findNext?: boolean;
     }): Promise<WindowOpResponse>;
     stopFindInPage(windowId: number, clearSelection?: boolean): Promise<WindowOpResponse>;
-    /** PDF로 인쇄. CEF는 콜백 기반 async라 두 단계 신호:
-     *  1. 코어 IPC 응답 — 요청 접수만 (CEF에 큐잉됨, 파일 아직 X).
-     *  2. `window:pdf-print-finished` 이벤트({path, success}) — 실 PDF 작성 완료.
-     *  이 SDK는 listener를 path로 매칭해 Promise<{success}>로 단일화 — 사용자는
-     *  await 한 번만. 반환된 success가 false면 PDF 작성 실패 (디스크 권한 등).
-     *
-     *  주의: 같은 path로 동시 인쇄 시 첫 번째 완료 이벤트가 둘 다 resolve. 보통
-     *  사용자 시나리오에서 동시 호출 드물어 OK. */
+    /** PDF로 인쇄 (Electron `webContents.printToPDF`). 코어가 CDP 완료까지 응답
+     *  보류 → 단일 await 로 결과(`{success}`) 받음. EventBus `window:pdf-print-
+     *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지. */
     printToPDF(windowId: number, path: string): Promise<{
         success: boolean;
     }>;
-    /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
-     *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
-     *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
+    /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage` — CDP
+     *  Page.captureScreenshot). 코어 deferred response 로 단일 await.
      *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
-     *  rect 지정 시 부분 영역만 (Electron `capturePage(rect)`); 미지정=전체. */
+     *  rect 지정 시 부분 영역만; 미지정=전체. */
     capturePage(windowId: number, path: string, rect?: {
         x: number;
         y: number;
@@ -448,17 +442,34 @@ export interface TrayMenuSeparator {
     type: "separator";
 }
 export interface TrayMenuItemSpec {
+    type?: "item";
     /** 메뉴에 표시될 텍스트. */
     label: string;
     /** 클릭 시 emit될 이벤트 이름 — `tray:menu-click {trayId, click}` 페이로드의 click 필드. */
     click: string;
+    enabled?: boolean;
 }
-export type TrayMenuItem = TrayMenuItemSpec | TrayMenuSeparator;
+export interface TrayMenuCheckbox {
+    type: "checkbox";
+    label: string;
+    click: string;
+    checked?: boolean;
+    enabled?: boolean;
+}
+export interface TrayMenuSubmenu {
+    type?: "submenu";
+    label: string;
+    enabled?: boolean;
+    submenu: TrayMenuItem[];
+}
+export type TrayMenuItem = TrayMenuItemSpec | TrayMenuCheckbox | TrayMenuSeparator | TrayMenuSubmenu;
 export interface TrayCreateOptions {
-    /** 메뉴바에 표시될 텍스트 (icon 미지원 v1라 가시성 위해 권장). */
+    /** 메뉴바에 표시될 텍스트. */
     title?: string;
     /** 마우스 호버 시 표시될 툴팁. */
     tooltip?: string;
+    /** macOS/Linux tray icon 이미지 파일 경로. Windows는 현재 기본 아이콘을 사용. */
+    iconPath?: string;
 }
 export declare const tray: {
     /** 새 시스템 트레이 아이콘 생성. 반환된 trayId로 이후 update/destroy. */
@@ -467,7 +478,7 @@ export declare const tray: {
     }>;
     setTitle(trayId: number, title: string): Promise<boolean>;
     setTooltip(trayId: number, tooltip: string): Promise<boolean>;
-    /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. items는 분리선/일반 항목 혼합 가능.
+    /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. macOS/Linux는 submenu/checkbox도 지원.
      *  메뉴 항목 클릭은 `suji.on('tray:menu-click', ({trayId, click}) => ...)` 로 수신. */
     setMenu(trayId: number, items: TrayMenuItem[]): Promise<boolean>;
     destroy(trayId: number): Promise<boolean>;

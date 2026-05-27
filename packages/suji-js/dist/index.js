@@ -226,45 +226,23 @@ export const windows = {
     stopFindInPage(windowId, clearSelection = false) {
         return coreCall({ cmd: "stop_find_in_page", windowId, clearSelection });
     },
-    /** PDF로 인쇄. CEF는 콜백 기반 async라 두 단계 신호:
-     *  1. 코어 IPC 응답 — 요청 접수만 (CEF에 큐잉됨, 파일 아직 X).
-     *  2. `window:pdf-print-finished` 이벤트({path, success}) — 실 PDF 작성 완료.
-     *  이 SDK는 listener를 path로 매칭해 Promise<{success}>로 단일화 — 사용자는
-     *  await 한 번만. 반환된 success가 false면 PDF 작성 실패 (디스크 권한 등).
-     *
-     *  주의: 같은 path로 동시 인쇄 시 첫 번째 완료 이벤트가 둘 다 resolve. 보통
-     *  사용자 시나리오에서 동시 호출 드물어 OK. */
-    printToPDF(windowId, path) {
-        return new Promise((resolve) => {
-            const off = on("window:pdf-print-finished", (data) => {
-                const d = data;
-                if (d.path === path) {
-                    off();
-                    resolve({ success: d.success === true });
-                }
-            });
-            coreCall({ cmd: "print_to_pdf", windowId, path });
-        });
+    /** PDF로 인쇄 (Electron `webContents.printToPDF`). 코어가 CDP 완료까지 응답
+     *  보류 → 단일 await 로 결과(`{success}`) 받음. EventBus `window:pdf-print-
+     *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지. */
+    async printToPDF(windowId, path) {
+        const r = await coreCall({ cmd: "print_to_pdf", windowId, path });
+        return { success: r?.success === true };
     },
-    /** 페이지 스크린샷을 PNG 파일로 저장 (Electron `webContents.capturePage`
-     *  대응 — CDP Page.captureScreenshot). printToPDF 와 동일 2단:
-     *  IPC ack 즉시 + `window:page-captured`({path,success}) 이벤트.
+    /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage` — CDP
+     *  Page.captureScreenshot). 코어 deferred response 로 단일 await.
      *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
-     *  rect 지정 시 부분 영역만 (Electron `capturePage(rect)`); 미지정=전체. */
-    capturePage(windowId, path, rect) {
-        return new Promise((resolve) => {
-            const off = on("window:page-captured", (data) => {
-                const d = data;
-                if (d.path === path) {
-                    off();
-                    resolve({ success: d.success === true });
-                }
-            });
-            coreCall({
-                cmd: "capture_page", windowId, path,
-                ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
-            });
+     *  rect 지정 시 부분 영역만; 미지정=전체. */
+    async capturePage(windowId, path, rect) {
+        const r = await coreCall({
+            cmd: "capture_page", windowId, path,
+            ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
         });
+        return { success: r?.success === true };
     },
     // ── Phase 17-A: WebContentsView ──
     // viewId는 windowId와 같은 풀이라 loadURL/executeJavaScript/openDevTools/setZoomFactor
@@ -584,7 +562,7 @@ export const tray = {
         const r = await coreCall({ cmd: "tray_set_tooltip", trayId, tooltip });
         return r.success === true;
     },
-    /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. items는 분리선/일반 항목 혼합 가능.
+    /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. macOS/Linux는 submenu/checkbox도 지원.
      *  메뉴 항목 클릭은 `suji.on('tray:menu-click', ({trayId, click}) => ...)` 로 수신. */
     async setMenu(trayId, items) {
         const r = await coreCall({ cmd: "tray_set_menu", trayId, items });

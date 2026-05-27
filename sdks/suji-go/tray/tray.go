@@ -12,18 +12,29 @@ import (
 	"github.com/ohah/suji-go/internal/jsonesc"
 )
 
-// MenuItem — Separator는 빈 항목, Label/Click 둘 다 비어있지 않으면 일반 항목.
+// MenuItem is a tray menu entry. Separator/Checkbox keep the old struct-style API
+// while Type accepts the wire values "item", "checkbox", "separator", "submenu".
 type MenuItem struct {
 	Separator bool
+	Checkbox  bool
+	Type      string
 	Label     string
 	Click     string
+	Enabled   *bool
+	Checked   bool
+	Submenu   []MenuItem
 }
 
 // Create new tray icon. Response: `{"from","cmd","trayId":N}`. trayId=0 means failure.
 func Create(title, tooltip string) string {
+	return CreateWithIcon(title, tooltip, "")
+}
+
+// CreateWithIcon uses iconPath as the native tray icon on macOS/Linux. Windows uses the default icon for now.
+func CreateWithIcon(title, tooltip, iconPath string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(
-		`{"cmd":"tray_create","title":"%s","tooltip":"%s"}`,
-		jsonesc.Full(title), jsonesc.Full(tooltip),
+		`{"cmd":"tray_create","title":"%s","tooltip":"%s","iconPath":"%s"}`,
+		jsonesc.Full(title), jsonesc.Full(tooltip), jsonesc.Full(iconPath),
 	))
 }
 
@@ -41,23 +52,62 @@ func SetTooltip(trayID uint32, tooltip string) string {
 	))
 }
 
-// SetMenu — items 배열로 메뉴 구성. Separator true면 분리선, 아니면 Label+Click 일반 항목.
+// SetMenu — items 배열로 메뉴 구성. macOS/Linux는 checkbox/submenu/enabled를 지원한다.
 func SetMenu(trayID uint32, items []MenuItem) string {
-	arr := make([]map[string]interface{}, len(items))
-	for i, it := range items {
-		if it.Separator {
-			arr[i] = map[string]interface{}{"type": "separator"}
-		} else {
-			arr[i] = map[string]interface{}{"label": it.Label, "click": it.Click}
-		}
-	}
+	return suji.Invoke("__core__", buildSetMenuRequest(trayID, items))
+}
+
+func buildSetMenuRequest(trayID uint32, items []MenuItem) string {
 	req := map[string]interface{}{
 		"cmd":    "tray_set_menu",
 		"trayId": trayID,
-		"items":  arr,
+		"items":  menuItemsToJSON(items),
 	}
 	b, _ := json.Marshal(req)
-	return suji.Invoke("__core__", string(b))
+	return string(b)
+}
+
+func menuItemsToJSON(items []MenuItem) []map[string]interface{} {
+	arr := make([]map[string]interface{}, len(items))
+	for i, it := range items {
+		arr[i] = menuItemToJSON(it)
+	}
+	return arr
+}
+
+func menuItemToJSON(it MenuItem) map[string]interface{} {
+	typ := it.Type
+	if typ == "" {
+		if it.Separator {
+			typ = "separator"
+		} else if it.Checkbox {
+			typ = "checkbox"
+		} else if it.Submenu != nil {
+			typ = "submenu"
+		}
+	}
+
+	if typ == "separator" {
+		return map[string]interface{}{"type": "separator"}
+	}
+
+	out := map[string]interface{}{
+		"label": it.Label,
+	}
+	if it.Enabled != nil {
+		out["enabled"] = *it.Enabled
+	}
+	if typ == "submenu" {
+		out["type"] = "submenu"
+		out["submenu"] = menuItemsToJSON(it.Submenu)
+		return out
+	}
+	out["click"] = it.Click
+	if typ == "checkbox" {
+		out["type"] = "checkbox"
+		out["checked"] = it.Checked
+	}
+	return out
 }
 
 func Destroy(trayID uint32) string {
