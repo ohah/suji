@@ -92,7 +92,8 @@ pub const events = struct {
 pub const Appearance = struct {
     /// false면 frameless — 타이틀바/리사이즈 핸들/시스템 보더 모두 제거 (Electron `frame: false`).
     frame: bool = true,
-    /// true면 투명 배경 — NSWindow.opaque=false + clear color + 그림자 X. HTML body도 transparent여야 의미.
+    /// true면 투명 배경 — native window/view + CEF browser background를 투명화.
+    /// HTML body도 transparent여야 의미.
     transparent: bool = false,
     /// 16진수 RGB(A) (`#FFFFFF` / `#FFFFFFFF`). transparent=true와 함께 쓰면 transparent 우선.
     background_color: ?[]const u8 = null,
@@ -104,7 +105,7 @@ pub const Appearance = struct {
 pub const Constraints = struct {
     /// false면 사용자 리사이즈 불가 (frame=true일 때만 의미; frameless는 이미 핸들 없음).
     resizable: bool = true,
-    /// true면 NSFloatingWindowLevel — 일반 창 위.
+    /// true면 일반 창 위.
     always_on_top: bool = false,
     /// 최소/최대 콘텐츠 크기 (0이면 제한 없음).
     min_width: u32 = 0,
@@ -144,7 +145,7 @@ pub const CreateOptions = struct {
     /// 초기 로드 URL. null이면 Native 구현이 default URL 사용.
     url: ?[]const u8 = null,
     bounds: Bounds = .{},
-    /// 부모 창 id. 비-null이면 시각 관계만 설정 (자식은 부모 위에 떠다니고 부모 이동 시 따라감).
+    /// 부모 창 id. 비-null이면 플랫폼별 native parent/child 시각 관계를 설정.
     /// 재귀 close X — 부모 close해도 자식은 유지 (PLAN 핵심결정사항: orphan은 destroyAll만).
     parent_id: ?u32 = null,
     /// name 중복 시: false면 기존 id 반환(싱글턴), true면 새 창 생성
@@ -209,7 +210,7 @@ pub const Window = struct {
     /// owned string. .view는 빈 문자열로 채워짐 (NSWindow가 없어 표시되지 않음).
     title: []const u8,
     bounds: Bounds,
-    /// 시각 부모 창 id. **.window 전용** — Cocoa child window 관계 (자식이 부모 위에 떠다님).
+    /// 시각 부모 창 id. **.window 전용** — Cocoa child window 또는 CEF Views parent window 관계.
     /// .view는 항상 null — view의 소속은 `host_window_id`가 표현.
     parent_id: ?u32,
     /// view가 합성된 host 창 id. **.view 전용** — .window는 항상 null.

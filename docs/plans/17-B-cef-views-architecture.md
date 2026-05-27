@@ -52,15 +52,15 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 | Suji 옵션 | 현재 (NSWindow direct) | CefWindow 매핑 | 위험도 |
 |---|---|---|---|
 | `frame: false` | `NSWindowStyleMaskBorderless` | `CefWindowDelegate::IsFrameless` | 낮음 (검증된 API) |
-| `backgroundColor` | `setBackgroundColor:` | `CefWindowDelegate::GetBackgroundColor` | 낮음 |
+| `backgroundColor` | `setBackgroundColor:` | `CefWindow/CefBrowserView::set_background_color` | 낮음 |
 | `resizable` | `NSWindowStyleMaskResizable` | `CefWindowDelegate::CanResize` | 낮음 |
-| `alwaysOnTop` | `NSFloatingWindowLevel` | `CefWindowDelegate::IsAlwaysOnTop` | 낮음 |
+| `alwaysOnTop` | `NSFloatingWindowLevel` | `CefWindow::SetAlwaysOnTop` | 낮음 |
 | `min/max width·height` | `setContentMin/MaxSize:` | `CefWindowDelegate::GetMinimumSize/GetMaximumSize` | 낮음 |
 | `fullscreen` | `toggleFullScreen:` | `CefWindow::SetFullscreen` | 낮음 |
-| `transparent` | `opaque=NO` + clearColor | `CefWindowDelegate::IsFrameless`+ `WithStandardWindowButtons=false` 조합 | **중간** — 노출 부족 가능 |
+| `transparent` | `opaque=NO` + clearColor | `CefWindowDelegate::IsFrameless` + CEF background_color=0 | **중간** — compositor 의존 |
 | `titleBarStyle: hidden/hiddenInset` | `NSWindowStyleMaskFullSizeContentView` | **CefWindow 직접 미지원 가능성** | **높음** — workaround 필요 |
 | Frameless `-webkit-app-region` 드래그 | `SujiKeyableWindow.sendEvent:` 직접 처리 | CefWindow 사용 시 우리 sendEvent override 적용 가능한지 미확인 | **높음** |
-| `attachMacChildWindow` (parent-child 시각 관계) | `NSWindow.addChildWindow:ordered:` | `CefWindow::SetParentWindow`? 미확인 | 중간 |
+| `attachMacChildWindow` (parent-child 시각 관계) | `NSWindow.addChildWindow:ordered:` | `CefWindowDelegate::GetParentWindow` | 중간 |
 | Native dialog sheet (`dialog.m` `windowId` 첫 인자) | NSWindow에 attach | CefWindow에서 NSWindow 핸들 추출 필요 | 중간 |
 
 → **macOS 옵션 풀이 light한 use case (frame/resizable/min·max)는 안전하게 CefWindow 마이그레이션 가능. titleBarStyle/transparent/frameless drag은 CefWindow API 노출 + workaround 검증이 핵심 위험.**
@@ -101,8 +101,9 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 #### 2026-05-24 추가 진행 상태
 
 - ✅ 17-B.2~17-B.4: CEF Views host 옵션 매핑 1차 완료.
-  - `frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor`는 CEF Views delegate/NSWindow handle 보정으로 매핑.
-  - `titleBarStyle/transparent`는 CEF Views가 만든 NSWindow handle 추출 후 기존 macOS 옵션 함수를 재사용.
+  - `frame/resizable/alwaysOnTop/min·max/fullscreen/backgroundColor`는 CEF Views delegate/API와 macOS NSWindow handle 보정으로 매핑.
+  - `titleBarStyle`은 CEF Views가 만든 NSWindow handle 추출 후 기존 macOS 옵션 함수를 재사용.
+  - `transparent`는 CEF browser/window/view background를 0으로 맞추고 macOS는 NSWindow 투명화 보정을 추가 적용.
   - frameless drag region은 `set_draggable_regions` 경로와 `no-drag` 버튼 클릭 E2E로 회귀 검증.
   - CEF Views 전용 E2E runner 3개를 CI에 추가:
     `run-window-lifecycle-cef-views.sh`, `run-window-lifecycle-events-cef-views.sh`,
@@ -164,7 +165,10 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 ### 17-B.7 — Linux/Windows (완료)
 - CefWindow는 cross-platform → Linux GTK/Win32에서도 CEF Views top-level path를 기본 사용
 - Linux/Windows child WebContentsView는 CEF overlay child view로 1차 배선
-- macOS-specific 옵션은 제외 (이미 그렇게 되어 있음)
+- Linux top-level 창 옵션은 `frame:false`, drag/no-drag, `transparent`, `parent`,
+  alwaysOnTop/resizable/min·max/fullscreen/backgroundColor까지 CEF Views native path로 배선.
+  `parent`는 `CefWindowDelegate::GetParentWindow` + non-modal dialog로 부모 컨트롤을 비활성화하지 않음.
+  Windows frameless parity는 별도 후속.
 - 17-A에서 빠진 native 백엔드 SDK (Rust/Go/Node) view API 노출 완료
 - CEF-free 단위 테스트로 platform default와 child path 선택을 고정
   - macOS 기본: attached child `CefWindow`

@@ -206,6 +206,34 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
     expect(r.windowId).toBeGreaterThan(0);
   });
 
+  test("parent name으로 실제 부모 창 attach 옵션 수락", async () => {
+    const parentName = `parent-${Date.now()}`;
+    const parent = await coreCall({
+      cmd: "create_window",
+      name: parentName,
+      title: "parent-native-options",
+      url: "about:blank",
+      width: 360,
+      height: 240,
+    });
+    const child = await coreCall({
+      cmd: "create_window",
+      title: "child-native-options",
+      url: "about:blank",
+      parent: parentName,
+      frame: false,
+      transparent: true,
+      backgroundColor: "#00000000",
+      width: 240,
+      height: 160,
+      resizable: false,
+      alwaysOnTop: true,
+    });
+    expect(parent.windowId).toBeGreaterThan(0);
+    expect(child.windowId).toBeGreaterThan(0);
+    expect(child.windowId).not.toBe(parent.windowId);
+  });
+
   test("alwaysOnTop + fullscreen + resizable=false 동시 set", async () => {
     const r = await coreCall({
       cmd: "create_window",

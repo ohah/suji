@@ -49,6 +49,7 @@ const log = logger.module("cef");
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
 const is_windows = builtin.os.tag == .windows;
+const views_native_window_options_platform = is_macos or is_linux;
 const cef_views_platform: cef_views_policy.Platform = switch (builtin.os.tag) {
     .macos => .macos,
     .linux => .linux,
@@ -483,6 +484,7 @@ const ViewsWindowDelegate = struct {
     allocator: std.mem.Allocator,
     ref_count: std.atomic.Value(u32) = .init(1),
     browser_view: ?*c.cef_browser_view_t,
+    parent_window: ?*c.cef_window_t = null,
     cef_window: ?*c.cef_window_t = null,
     handle: u64 = 0,
     title_buf: [512]u8 = undefined,
@@ -529,6 +531,12 @@ fn releaseBrowserViewRef(browser_view: ?*c.cef_browser_view_t) void {
 fn releaseWindowRef(window: ?*c.cef_window_t) void {
     const win = window orelse return;
     releaseCefBase(&win.base.base.base);
+}
+
+fn retainWindowRef(window: ?*c.cef_window_t) ?*c.cef_window_t {
+    const win = window orelse return null;
+    if (win.base.base.base.add_ref) |add_ref| add_ref(&win.base.base.base);
+    return win;
 }
 
 fn releaseOverlayRef(controller: ?*c.cef_overlay_controller_t) void {
@@ -592,6 +600,25 @@ fn cefColorFromHex(hex: []const u8) ?c.cef_color_t {
         (@as(c.cef_color_t, r) << 16) |
         (@as(c.cef_color_t, g) << 8) |
         @as(c.cef_color_t, b);
+}
+
+fn viewsInitialBackgroundColor(appearance: window_mod.Appearance) ?c.cef_color_t {
+    if (appearance.transparent) return 0;
+    if (appearance.background_color) |hex| return cefColorFromHex(hex);
+    return null;
+}
+
+fn applyViewsBackgroundColor(
+    window: ?*c.cef_window_t,
+    browser_view: ?*c.cef_browser_view_t,
+    color: c.cef_color_t,
+) void {
+    if (window) |win| {
+        if (win.base.base.set_background_color) |set_bg| set_bg(&win.base.base, color);
+    }
+    if (browser_view) |bv| {
+        if (bv.base.set_background_color) |set_bg| set_bg(&bv.base, color);
+    }
 }
 
 fn viewsBrowserAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
@@ -671,6 +698,8 @@ fn viewsWindowRelease(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
     if (d.ref_count.fetchSub(1, .acq_rel) != 1) return 0;
     releaseBrowserViewRef(d.browser_view);
     d.browser_view = null;
+    releaseWindowRef(d.parent_window);
+    d.parent_window = null;
     d.allocator.destroy(d);
     return 1;
 }
@@ -782,6 +811,29 @@ fn viewsWindowCanMaximize(
 fn viewsWindowCanMinimize(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) i32 {
     releaseWindowRef(@ptrCast(window));
     return 1;
+}
+
+fn viewsWindowGetParentWindow(
+    self: ?*c._cef_window_delegate_t,
+    window: ?*c._cef_window_t,
+    is_menu: ?*c_int,
+    can_activate_menu: ?*c_int,
+) callconv(.c) ?*c._cef_window_t {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return null;
+    };
+    releaseWindowRef(@ptrCast(window));
+    if (is_menu) |ptr| ptr.* = 0;
+    if (can_activate_menu) |ptr| ptr.* = 1;
+    const parent = d.parent_window orelse return null;
+    _ = retainWindowRef(parent);
+    return parent;
+}
+
+fn viewsWindowIsModalDialog(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) i32 {
+    releaseWindowRef(@ptrCast(window));
+    return 0;
 }
 
 fn viewsWindowAcceptsFirstMouse(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) c.cef_state_t {
@@ -909,19 +961,11 @@ fn viewsWindowOnCreated(self: ?*c._cef_window_delegate_t, window: ?*c._cef_windo
     d.last_maximized = viewsWindowIsMaximized(win);
     d.last_fullscreen = viewsWindowIsFullscreen(win);
 
-    if (d.appearance.background_color) |hex| {
-        if (cefColorFromHex(hex)) |color| {
-            if (win.base.base.set_background_color) |set_bg| set_bg(&win.base.base, color);
-        }
-    }
+    const bg_color = if (comptime views_native_window_options_platform) viewsInitialBackgroundColor(d.appearance) else null;
+    if (bg_color) |color| applyViewsBackgroundColor(win, d.browser_view, color);
 
     if (d.browser_view) |bv| {
         if (bv.base.base.add_ref) |add_ref| add_ref(&bv.base.base);
-        if (d.appearance.background_color) |hex| {
-            if (cefColorFromHex(hex)) |color| {
-                if (bv.base.set_background_color) |set_bg| set_bg(&bv.base, color);
-            }
-        }
         if (win.base.set_to_fill_layout) |set_fill| _ = set_fill(&win.base);
         win.base.add_child_view.?(&win.base, &bv.base);
     }
@@ -956,11 +1000,13 @@ fn createViewsWindowDelegate(
     allocator: std.mem.Allocator,
     browser_view: *c.cef_browser_view_t,
     opts: *const window_mod.CreateOptions,
+    parent_window: ?*c.cef_window_t,
 ) !*ViewsWindowDelegate {
     const d = try allocator.create(ViewsWindowDelegate);
     d.* = .{
         .allocator = allocator,
         .browser_view = browser_view,
+        .parent_window = retainWindowRef(parent_window),
         .bounds = opts.bounds,
         .appearance = opts.appearance,
         .constraints = opts.constraints,
@@ -984,6 +1030,8 @@ fn createViewsWindowDelegate(
     d.delegate.can_resize = &viewsWindowCanResize;
     d.delegate.can_maximize = &viewsWindowCanMaximize;
     d.delegate.can_minimize = &viewsWindowCanMinimize;
+    d.delegate.get_parent_window = &viewsWindowGetParentWindow;
+    d.delegate.is_window_modal_dialog = &viewsWindowIsModalDialog;
     d.delegate.accepts_first_mouse = &viewsWindowAcceptsFirstMouse;
     d.delegate.can_close = &viewsWindowCanClose;
     d.delegate.get_window_runtime_style = &viewsWindowRuntimeStyle;
@@ -1273,7 +1321,7 @@ pub const CefNative = struct {
             .appearance = .{ .frame = false },
             .constraints = .{ .resizable = false },
         };
-        const window_delegate = try createViewsWindowDelegate(self.allocator, browser_view, &child_opts);
+        const window_delegate = try createViewsWindowDelegate(self.allocator, browser_view, &child_opts, null);
         browser_view_owned_by_delegate = true;
         errdefer releaseCefBase(&window_delegate.delegate.base.base.base);
 
@@ -1595,7 +1643,12 @@ pub const CefNative = struct {
         var browser_view_owned_by_delegate = false;
         errdefer if (!browser_view_owned_by_delegate) releaseBrowserViewRef(browser_view);
 
-        const window_delegate = try createViewsWindowDelegate(self.allocator, browser_view, opts);
+        const parent_views_window: ?*c.cef_window_t = if (comptime is_linux) blk: {
+            if (opts.parent_id) |pid| break :blk resolveParentViewsWindow(self, pid);
+            break :blk null;
+        } else null;
+
+        const window_delegate = try createViewsWindowDelegate(self.allocator, browser_view, opts, parent_views_window);
         browser_view_owned_by_delegate = true;
         errdefer releaseCefBase(&window_delegate.delegate.base.base.base);
 
@@ -1642,6 +1695,8 @@ pub const CefNative = struct {
                 if (resolveParentNSWindow(self, pid)) |parent_ns| {
                     if (ns_window) |child_ns| attachMacChildWindow(parent_ns, child_ns);
                 }
+            } else if (comptime is_linux and parent_views_window == null) {
+                log.warn("createWindow: parent_id={d} 해석 실패 — CEF Views parent attach 스킵", .{pid});
             }
         }
         forceInitialLoadUrl(br, url_z);
@@ -1746,6 +1801,16 @@ pub const CefNative = struct {
         const parent_win = wm.get(parent_id) orelse return null;
         const parent_entry = self.browsers.get(parent_win.native_handle) orelse return null;
         return parent_entry.ns_window;
+    }
+
+    /// parent_id → CefWindow* for the CEF Views top-level path. Linux uses this
+    /// via CefWindowDelegate.get_parent_window so child windows do not get their
+    /// own taskbar entry and stay associated with the parent.
+    fn resolveParentViewsWindow(self: *CefNative, parent_id: u32) ?*c.cef_window_t {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const parent_win = wm.get(parent_id) orelse return null;
+        const parent_entry = self.browsers.get(parent_win.native_handle) orelse return null;
+        return parent_entry.views_window;
     }
 
     fn destroyWindow(ctx: ?*anyopaque, handle: u64) void {
@@ -2033,9 +2098,23 @@ pub const CefNative = struct {
     }
 
     fn setBackgroundColorImpl(ctx: ?*anyopaque, handle: u64, hex: []const u8) void {
-        if (!comptime is_macos) return;
         assertUiThread();
-        const ns = fromCtx(ctx).nsWindowFor(handle) orelse return;
+        const self = fromCtx(ctx);
+        if (comptime views_native_window_options_platform) {
+            if (self.browsers.get(handle)) |entry| {
+                if (entry.views_window) |views_window| {
+                    if (cefColorFromHex(hex)) |color| {
+                        applyViewsBackgroundColor(views_window, entry.browser_view, color);
+                    }
+                    if (comptime is_macos) {
+                        if (self.nsWindowFor(handle)) |ns| applyBackgroundColor(ns, hex);
+                    }
+                    return;
+                }
+            }
+        }
+        if (!comptime is_macos) return;
+        const ns = self.nsWindowFor(handle) orelse return;
         applyBackgroundColor(ns, hex);
     }
 

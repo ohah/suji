@@ -506,15 +506,15 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `windows[].frame: false` — macOS는 NSWindowStyleMaskBorderless, Linux는 CEF Views
           `CefWindowDelegate.is_frameless` 경로로 완료(`run-frameless-drag-region.sh` E2E).
           Windows는 후속.
-    - [x] `windows[].transparent: true` — NSWindow.opaque=NO + clearColor + hasShadow=NO + CEF browser background_color=0.
-    - [x] `windows[].parent: "<name>"` — NSWindow.addChildWindow:ordered:NSWindowAbove로 시각 관계만 (PLAN 재귀 close X).
+    - [x] `windows[].transparent: true` — macOS NSWindow.opaque=NO + clearColor + hasShadow=NO, Linux CEF Views window/browser view background_color=0.
+    - [x] `windows[].parent: "<name>"` — macOS NSWindow.addChildWindow:ordered:NSWindowAbove, Linux CEF Views `get_parent_window`로 시각 관계만 (PLAN 재귀 close X).
           parent name lookup은 main.zig의 wm.fromName으로 처리 — 따라서 부모는 windows[] 배열 순서상 더 앞에 와야.
     - [x] `windows[].x / y` — 명시 위치. 0이면 OS cascade 자동 (cascadeTopLeftFromPoint:).
-    - [x] `windows[].alwaysOnTop` — NSFloatingWindowLevel(3).
-    - [x] `windows[].resizable: false` — NSWindowStyleMaskResizable 비트 제외.
-    - [x] `windows[].minWidth/minHeight/maxWidth/maxHeight` — NSWindow.contentMinSize/contentMaxSize.
-    - [x] `windows[].fullscreen: true` — toggleFullScreen: (makeKeyAndOrderFront 이후).
-    - [x] `windows[].backgroundColor: "#RRGGBB(AA)"` — NSColor.colorWithRed:green:blue:alpha:.
+    - [x] `windows[].alwaysOnTop` — macOS NSFloatingWindowLevel(3), Linux CEF Views `set_always_on_top`.
+    - [x] `windows[].resizable: false` — macOS NSWindowStyleMaskResizable 비트 제외, Linux CEF Views `can_resize/can_maximize`.
+    - [x] `windows[].minWidth/minHeight/maxWidth/maxHeight` — macOS NSWindow.contentMinSize/contentMaxSize, Linux CEF Views min/max delegate.
+    - [x] `windows[].fullscreen: true` — macOS toggleFullScreen:, Linux CEF Views `set_fullscreen`.
+    - [x] `windows[].backgroundColor: "#RRGGBB(AA)"` — macOS NSColor.colorWithRed:green:blue:alpha:, Linux CEF Views `set_background_color`.
     - [x] `windows[].titleBarStyle: "hidden" | "hiddenInset"` — titlebarAppearsTransparent + NSWindowStyleMaskFullSizeContentView.
     - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만. 실수요 발견 시 SujiCore.get_window_api로 도입.
     - **플랫폼 한계**: macOS/Linux는 frameless의 `-webkit-app-region: drag` 라우팅 완료.
@@ -560,10 +560,12 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `CefWindow.set_draggable_regions` 경로로 native drag/no-drag를 보존.
           검증: `cef_drag_region.zig` 단위, `cef_window_options.zig` 단위,
           `tests/e2e/run-frameless-drag-region.sh` macOS/Linux runtime E2E.
-    - [ ] (backlog) **Windows frameless native window + Linux 잔여 native 옵션** —
-          Windows `frame:false`/drag region은 아직 실 런타임 검증 전. Linux도
-          `transparent`/`parent` 같은 macOS NSWindow 기반 옵션은 별도 native parity
-          검증이 필요하다.
+    - [x] **Linux 잔여 native 창 옵션** — CEF Views top-level 경로에서
+          `transparent`/`parent`/alwaysOnTop/resizable/min·max/fullscreen/backgroundColor를
+          native delegate/API로 배선. `parent`는 `get_parent_window` + non-modal로
+          부모 컨트롤을 비활성화하지 않는다.
+    - [ ] (backlog) **Windows frameless native window** —
+          Windows `frame:false`/drag region은 아직 실 런타임 검증 전.
     - [x] **`capture_page`** — 구현 완료(상위 Phase 4-D 항목 참조): CDP
           `Page.captureScreenshot` + dev_tools observer → file-path 방식.
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
@@ -1534,8 +1536,9 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 8. ✅ **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
 9. ✅ **보안 모델** (Phase 7: fs sandbox + cache 격리 + IPC 검증 + CSP + contextIsolation audit) — Phase 7 핵심 완료
 10. **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — 진입 장벽 즉각 해소
-11. **Windows frameless drag region + Linux 잔여 창 옵션 후속** — macOS/Linux `frame:false`
-    drag/no-drag는 E2E 완료. Windows와 Linux `transparent`/`parent` parity는 후속.
+11. **Windows frameless drag region 후속** — macOS/Linux `frame:false`
+    drag/no-drag는 E2E 완료. Linux 잔여 창 옵션(`transparent`/`parent` 등)은 CEF Views
+    native path로 완료. Windows frameless parity는 후속.
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. 🟡 **자동 업데이트** — manifest check + artifact download + SHA-256 verify + macOS/Linux/Windows prepareInstall/quit-and-install 1차 완료. macOS `.zip/.dmg` stage, Windows `.zip` PowerShell stage/helper, Linux `.AppImage`/raw 교체 입력, `.deb` package-manager handoff 정책까지 문서화/검증(macOS `.zip` + Linux `.AppImage` E2E). 남은 것: Windows 실제 교체 E2E/인스톨러 연계
 14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 backend 전용 HTTP(`suji.http.fetch`) 완료. renderer-safe HTTP는 `@suji/plugin-http` 공식 플러그인으로 완료. SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.

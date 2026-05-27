@@ -51,15 +51,11 @@ html, body { background: transparent; }
 
 메인 창에서 "HUD에 toast" 버튼 → Zig backend의 `hud-toast` 핸들러 → `suji.send('hud:toast', ...)` broadcast → HUD만 `on('hud:toast')` 구독해서 표시.
 
-## 알려진 한계
+## 플랫폼 상태
 
-**Linux/Windows frameless 제한**: macOS는 `-webkit-app-region: drag`가 native window drag로 라우팅된다. Linux/Windows는 아직 `frame:false` native window 적용 자체가 미구현이라 frameless drag도 후속 플랫폼 작업이 필요하다.
+macOS와 Linux CEF Views 경로에서는 `frame:false`, `transparent:true`, `parent`, drag/no-drag region을 확인할 수 있다. Linux는 `parent`를 CEF Views parent window로 연결하므로 별도 taskbar 항목 없이 부모 창과 묶인다.
 
-지금은 macOS에서 frame/transparent/parent와 frameless drag를 확인할 수 있다.
-
-## 플랫폼
-
-현재 frame/transparent/parent는 **macOS만 지원** (NSWindow API). Linux/Windows에서는 옵션이 무시되고 일반 창으로 뜸.
+Windows frameless drag region은 아직 후속 플랫폼 작업이다.
 
 ## DevTools Reload Sync 수동 검증 (Phase 4-C)
 

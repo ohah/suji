@@ -826,6 +826,29 @@ test "CEF Views top-level initial navigation is forced after BrowserView materia
     try std.testing.expect(std.mem.indexOf(u8, body, retry_needle) != null);
 }
 
+test "CEF Views top-level window options use native delegate paths" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+
+    inline for (.{
+        "parent_window: ?*c.cef_window_t",
+        "fn retainWindowRef",
+        "fn viewsWindowGetParentWindow",
+        "d.delegate.get_parent_window = &viewsWindowGetParentWindow",
+        "d.delegate.is_window_modal_dialog = &viewsWindowIsModalDialog",
+        "fn resolveParentViewsWindow",
+        "resolveParentViewsWindow(self, pid)",
+        "createViewsWindowDelegate(self.allocator, browser_view, opts, parent_views_window)",
+        "fn viewsInitialBackgroundColor",
+        "if (appearance.transparent) return 0",
+        "fn applyViewsBackgroundColor",
+        "applyViewsBackgroundColor(win, d.browser_view, color)",
+        "applyViewsBackgroundColor(views_window, entry.browser_view, color)",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "Phase 17-B docs record Linux Windows runtime E2E completion" {
     const plan = try readProjectFile("docs/PLAN.md", 2 * 1024 * 1024);
     defer std.testing.allocator.free(plan);
