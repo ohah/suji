@@ -61,3 +61,33 @@ describe("error propagation", () => {
     );
   });
 });
+
+describe("richNotification image + allowlist", () => {
+  it("show passes image through", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { id: 1 } });
+    await richNotification.show({ title: "T", body: "B", image: "C:/Users/me/icons/x.png" });
+    expect(mockBridge.invoke).toHaveBeenCalledWith("notification:rich_show", {
+      title: "T",
+      body: "B",
+      image: "C:/Users/me/icons/x.png",
+    });
+  });
+
+  it("setImageRoots routes roots array", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { ok: true } });
+    await richNotification.setImageRoots(["C:/icons", "D:/img"]);
+    expect(mockBridge.invoke).toHaveBeenCalledWith("notification:set_image_roots", {
+      roots: ["C:/icons", "D:/img"],
+    });
+  });
+
+  it("getImageRoots returns array", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: { roots: ["C:/a"] } });
+    expect(await richNotification.getImageRoots()).toEqual(["C:/a"]);
+  });
+
+  it("getImageRoots returns empty when missing", async () => {
+    mockBridge.invoke.mockResolvedValueOnce({ result: {} });
+    expect(await richNotification.getImageRoots()).toEqual([]);
+  });
+});

@@ -146,3 +146,80 @@ test "notification-rich plugin: invalid scenario silently dropped (Windows)" {
     try std.testing.expect(r != null);
     try std.testing.expect(std.mem.indexOf(u8, r.?, "load xml") == null);
 }
+
+test "notification-rich plugin: image roots set/get round-trip" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    const s = invokePlugin(&reg, "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:/Users/me/icons\",\"D:/img\"]}");
+    defer freeResp(&reg, s);
+    try std.testing.expect(std.mem.indexOf(u8, s.?, "\"ok\":true") != null);
+
+    const g = invokePlugin(&reg, "{\"cmd\":\"notification:get_image_roots\"}");
+    defer freeResp(&reg, g);
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "\"C:/Users/me/icons\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, g.?, "\"D:/img\"") != null);
+
+    // 두 번째 set 은 replace (append 아님)
+    const s2 = invokePlugin(&reg, "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:/new\"]}");
+    defer freeResp(&reg, s2);
+
+    const g2 = invokePlugin(&reg, "{\"cmd\":\"notification:get_image_roots\"}");
+    defer freeResp(&reg, g2);
+    try std.testing.expect(std.mem.indexOf(u8, g2.?, "\"C:/Users/me/icons\"") == null);
+    try std.testing.expect(std.mem.indexOf(u8, g2.?, "\"C:/new\"") != null);
+}
+
+test "notification-rich plugin: image roots reject .. and over-limit" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    const cases = [_][]const u8{
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:/../etc\"]}", // traversal
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"../escape\"]}", // bare ..
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":[123]}", // non-string
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"\"]}", // empty
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":\"not-array\"}", // wrong type
+    };
+    for (cases) |c| {
+        const r = invokePlugin(&reg, c);
+        defer freeResp(&reg, r);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\"") != null);
+    }
+}
+
+// 이미지 gate 동작: roots 비어 있으면 image 무시 → 정상 show.
+// 화이트리스트 외 경로도 무시. 화이트 안 경로는 XML 에 들어감.
+// 헤드리스에서도 XML build/LoadXml 까지는 검증.
+test "notification-rich plugin: image gated by allowlist (Windows)" {
+    if (comptime builtin.os.tag != .windows) return;
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    // roots 비어 → image 무시
+    const s_clear = invokePlugin(&reg, "{\"cmd\":\"notification:set_image_roots\",\"roots\":[]}");
+    defer freeResp(&reg, s_clear);
+
+    const r1 = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"C:/blocked/img.png\"}");
+    defer freeResp(&reg, r1);
+    try std.testing.expect(r1 != null);
+    try std.testing.expect(std.mem.indexOf(u8, r1.?, "load xml") == null);
+
+    // 화이트리스트 외 경로 — 무시되어 정상 show
+    const s_set = invokePlugin(&reg, "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:/Users/me/icons\"]}");
+    defer freeResp(&reg, s_set);
+    const r2 = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"D:/elsewhere.png\"}");
+    defer freeResp(&reg, r2);
+    try std.testing.expect(std.mem.indexOf(u8, r2.?, "load xml") == null);
+
+    // 화이트리스트 안 경로 — 동일하게 정상 show (XML 안 image 포함)
+    const r3 = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"C:/Users/me/icons/app.png\"}");
+    defer freeResp(&reg, r3);
+    try std.testing.expect(std.mem.indexOf(u8, r3.?, "load xml") == null);
+}
