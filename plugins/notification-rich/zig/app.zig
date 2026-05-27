@@ -81,11 +81,24 @@ fn hasParentTraversal(path: []const u8) bool {
     return false;
 }
 
+/// `/` 와 `\` 를 동치 separator 로 보고, 호스트 OS 가 path case-insensitive 면
+/// (Windows/macOS) ASCII case 무시. Linux 만 case-sensitive 비교.
+fn pathByteEqual(a: u8, b: u8) bool {
+    if (a == b) return true;
+    if ((a == '/' or a == '\\') and (b == '/' or b == '\\')) return true;
+    if (builtin.os.tag != .linux) {
+        return std.ascii.toLower(a) == std.ascii.toLower(b);
+    }
+    return false;
+}
+
 fn pathPrefixMatchesRoot(path: []const u8, root: []const u8) bool {
     if (root.len == 0) return false;
     if (path.len < root.len) return false;
-    // 대소문자 구분 (Windows 도 OS 호출은 case-insensitive 지만 우리는 strict).
-    if (!std.mem.startsWith(u8, path, root)) return false;
+    var i: usize = 0;
+    while (i < root.len) : (i += 1) {
+        if (!pathByteEqual(path[i], root[i])) return false;
+    }
     if (path.len == root.len) return true;
     // separator boundary — root 끝이 / 거나 \ 면 OK, 아니면 다음 char 가 separator 여야.
     const last = root[root.len - 1];
@@ -402,10 +415,12 @@ const winrt = if (builtin.os.tag == .windows) struct {
         notifier: *IToastNotifier,
     };
 
-    fn rememberToast(id: u64, toast: *IToastNotification, notifier: *IToastNotifier) void {
+    /// OOM 시 toast/notifier release (COM AddRef 해제) — 호출자가 fail 알기.
+    fn rememberToast(id: u64, toast: *IToastNotification, notifier: *IToastNotifier) bool {
         live_toasts_mutex.lockUncancelable(suji.io());
         defer live_toasts_mutex.unlock(suji.io());
-        live_toasts.put(id, .{ .toast = toast, .notifier = notifier }) catch {};
+        live_toasts.put(id, .{ .toast = toast, .notifier = notifier }) catch return false;
+        return true;
     }
 
     fn forgetAndHide(id: u64) bool {
@@ -508,9 +523,11 @@ const winrt = if (builtin.os.tag == .windows) struct {
         // 7. notifier.Show(toast)
         if (notifier_obj.show(toast_obj) != S_OK) return error.Show;
 
-        // 8. live_toasts 에 보관 (hide 가능하도록 — release 보류).
+        // 8. live_toasts 에 보관 (hide 가능하도록 — release 보류). put OOM 시
+        // error 반환하면 위쪽 errdefer toast_obj.release/notifier_obj.release 가
+        // AddRef 된 COM 객체 정리 — silent leak 방지.
         const id = nextId();
-        rememberToast(id, toast_obj, notifier_obj);
+        if (!rememberToast(id, toast_obj, notifier_obj)) return error.RegistryFull;
         return id;
     }
 } else struct {};
@@ -630,6 +647,7 @@ fn richShow(req: suji.Request, _: suji.InvokeEvent) suji.Response {
             error.GetNotifier => "get notifier failed",
             error.Show => "show failed",
             error.NoWinRT => "winrt unavailable",
+            error.RegistryFull => "registry full",
             else => "winrt failed",
         };
         return req.err(msg);

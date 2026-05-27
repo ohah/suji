@@ -192,6 +192,70 @@ test "notification-rich plugin: image roots reject .. and over-limit" {
     }
 }
 
+// pathPrefixMatchesRoot separator-boundary 회귀 가드:
+// root "C:/foo" 는 "C:/foo/x.png" 매치, "C:/foobar/x.png" 거부.
+// 헤드리스 윈도우에서도 XML build/LoadXml 까지는 검증.
+test "notification-rich plugin: image root prefix separator boundary (Windows)" {
+    if (comptime builtin.os.tag != .windows) return;
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    const s = invokePlugin(&reg, "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:/foo\"]}");
+    defer freeResp(&reg, s);
+
+    // boundary 안 → image 가 XML 에 들어가서 LoadXml 통과
+    const r_in = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"C:/foo/x.png\"}");
+    defer freeResp(&reg, r_in);
+    try std.testing.expect(std.mem.indexOf(u8, r_in.?, "load xml") == null);
+
+    // boundary 밖 ("C:/foobar/...") → image silently 무시, 그래도 LoadXml 통과
+    const r_out = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"C:/foobar/x.png\"}");
+    defer freeResp(&reg, r_out);
+    try std.testing.expect(std.mem.indexOf(u8, r_out.?, "load xml") == null);
+}
+
+// `["*"]` escape hatch — ".." 만 차단, 임의 경로 통과.
+test "notification-rich plugin: image roots wildcard escape hatch (Windows)" {
+    if (comptime builtin.os.tag != .windows) return;
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    const s = invokePlugin(&reg, "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"*\"]}");
+    defer freeResp(&reg, s);
+
+    // 임의 경로 통과 — image 가 XML 에 포함, LoadXml 통과
+    const r_any = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"D:/anywhere/img.png\"}");
+    defer freeResp(&reg, r_any);
+    try std.testing.expect(std.mem.indexOf(u8, r_any.?, "load xml") == null);
+
+    // 그래도 ".." 는 거부 (image 만 silently drop, toast 자체는 표시)
+    const r_dotdot = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"t\",\"body\":\"b\",\"image\":\"C:/foo/../escape.png\"}");
+    defer freeResp(&reg, r_dotdot);
+    try std.testing.expect(std.mem.indexOf(u8, r_dotdot.?, "load xml") == null);
+}
+
+// 백슬래시 / 혼합 separator ".." 도 차단.
+test "notification-rich plugin: image roots reject backslash and mixed .." {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    const cases = [_][]const u8{
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:\\\\foo\\\\..\\\\etc\"]}",
+        "{\"cmd\":\"notification:set_image_roots\",\"roots\":[\"C:/foo/..\\\\etc\"]}",
+    };
+    for (cases) |c| {
+        const r = invokePlugin(&reg, c);
+        defer freeResp(&reg, r);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\"") != null);
+    }
+}
+
 // 이미지 gate 동작: roots 비어 있으면 image 무시 → 정상 show.
 // 화이트리스트 외 경로도 무시. 화이트 안 경로는 XML 에 들어감.
 // 헤드리스에서도 XML build/LoadXml 까지는 검증.
