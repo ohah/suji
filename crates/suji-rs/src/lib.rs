@@ -686,7 +686,9 @@ pub mod windows {
         )
     }
 
-    /// PDF 인쇄 (콜백 async — 결과는 `window:pdf-print-finished` 이벤트).
+    /// PDF 인쇄. 코어가 CDP 완료까지 응답 보류 → 응답 JSON 에 `success` 직접 포함
+    /// (예: `{"from":"zig-core","cmd":"print_to_pdf","path":"...","success":true}`).
+    /// EventBus emit `window:pdf-print-finished` 도 동시 발화(다른 구독자 호환).
     pub fn print_to_pdf(window_id: u32, path: &str) -> Option<String> {
         invoke(
             "__core__",
@@ -699,8 +701,8 @@ pub mod windows {
     }
 
     /// 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage`, CDP
-    /// Page.captureScreenshot). 즉시 ack 반환 + 완료는 `window:page-captured`
-    /// 이벤트({path,success}) — caller 가 on 으로 path 매칭(printToPDF 동형).
+    /// Page.captureScreenshot). 코어 deferred response — 응답 JSON 에 `success`
+    /// 직접 포함. EventBus emit `window:page-captured` 도 동시 발화.
     pub fn capture_page(window_id: u32, path: &str) -> Option<String> {
         invoke(
             "__core__",

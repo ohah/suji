@@ -670,26 +670,47 @@ describe("windows.setUserAgent/getUserAgent", () => {
   });
 });
 
-describe("windows.capturePage", () => {
+describe("windows.capturePage (#16 deferred Promise)", () => {
   beforeEach(() => { mockBridge.core.mockClear(); mockBridge.on.mockClear(); });
-  it("capture_page 라우팅 + page-captured 이벤트로 resolve", async () => {
-    mockBridge.core.mockResolvedValueOnce({ ok: true });
-    const p = windows.capturePage(2, "/tmp/s.png");
-    // on('window:page-captured', wrapper) 등록 확인 + coreCall 라우팅
-    expect(mockBridge.on.mock.calls[0][0]).toBe("window:page-captured");
+
+  it("capture_page 라우팅 + coreCall 응답이 곧 결과 (no listener)", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    const r = await windows.capturePage(2, "/tmp/s.png");
     expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "capture_page", windowId: 2, path: "/tmp/s.png" });
-    // 코어가 완료 이벤트 발화 시뮬
-    const wrapper = mockBridge.on.mock.calls[0][1] as (d: unknown) => void;
-    wrapper({ path: "/tmp/s.png", success: true });
-    expect(await p).toEqual({ success: true });
+    expect(r).toEqual({ success: true });
+    // listener pattern 제거 — on() 호출 없음
+    expect(mockBridge.on).not.toHaveBeenCalled();
   });
-  it("다른 path 이벤트는 무시(매칭 path 만 resolve)", async () => {
-    mockBridge.core.mockResolvedValueOnce({ ok: true });
-    const p = BrowserWindow.fromId(9).capturePage("/a.png");
-    const wrapper = mockBridge.on.mock.calls[0][1] as (d: unknown) => void;
-    wrapper({ path: "/other.png", success: true }); // 무시
-    wrapper({ path: "/a.png", success: false });
-    expect(await p).toEqual({ success: false });
+
+  it("rect 지정 시 clipX/clipY/clipWidth/clipHeight 전송", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    await BrowserWindow.fromId(9).capturePage("/a.png", { x: 10, y: 20, width: 100, height: 50 });
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({
+      cmd: "capture_page", windowId: 9, path: "/a.png",
+      clipX: 10, clipY: 20, clipWidth: 100, clipHeight: 50,
+    });
+  });
+
+  it("success:false 그대로 반환", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false });
+    expect(await windows.capturePage(1, "/x.png")).toEqual({ success: false });
+  });
+});
+
+describe("windows.printToPDF (#16 deferred Promise)", () => {
+  beforeEach(() => { mockBridge.core.mockClear(); mockBridge.on.mockClear(); });
+
+  it("print_to_pdf 라우팅 + 단일 await", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: true });
+    const r = await windows.printToPDF(1, "/tmp/ok.pdf");
+    expect(JSON.parse(mockBridge.core.mock.calls[0][0])).toEqual({ cmd: "print_to_pdf", windowId: 1, path: "/tmp/ok.pdf" });
+    expect(r).toEqual({ success: true });
+    expect(mockBridge.on).not.toHaveBeenCalled();
+  });
+
+  it("success:false 그대로 반환", async () => {
+    mockBridge.core.mockResolvedValueOnce({ success: false });
+    expect(await windows.printToPDF(1, "/bad.pdf")).toEqual({ success: false });
   });
 });
 

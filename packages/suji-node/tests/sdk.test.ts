@@ -162,21 +162,33 @@ describe("windows.setUserAgent/getUserAgent (node)", () => {
   });
 });
 
-describe("windows.capturePage (node)", () => {
-  test("capture_page 라우팅 + page-captured 이벤트 resolve (path 매칭)", async () => {
+describe("windows.capturePage (node, #16 deferred Promise)", () => {
+  test("capture_page coreCall 응답이 곧 결과 (listener 없음)", async () => {
     const calls: string[] = [];
-    let evCb: ((ch: string, raw: string) => void) | null = null;
+    let onCalled = false;
     (globalThis as any).suji = {
       quit: () => {}, platform: () => "macos", handle: () => {},
-      invoke: async (_b: string, j: string) => { calls.push(j); return JSON.stringify({ ok: true }); },
+      invoke: async (_b: string, j: string) => { calls.push(j); return JSON.stringify({ success: true }); },
       invokeSync: () => "", send: () => {},
-      on: (_e: string, cb: (ch: string, raw: string) => void) => { evCb = cb; return () => {}; },
+      on: () => { onCalled = true; return () => {}; },
       off: () => {}, register: () => {},
     };
-    const p = BrowserWindow.fromId(4).capturePage("/t.png");
+    const r = await BrowserWindow.fromId(4).capturePage("/t.png");
     expect(JSON.parse(calls[0])).toEqual({ cmd: "capture_page", windowId: 4, path: "/t.png" });
-    evCb!("window:page-captured", JSON.stringify({ path: "/other.png", success: true })); // 무시
-    evCb!("window:page-captured", JSON.stringify({ path: "/t.png", success: true }));
-    expect(await p).toEqual({ success: true });
+    expect(r).toEqual({ success: true });
+    expect(onCalled).toBe(false);
+  });
+
+  test("printToPDF coreCall 응답이 곧 결과", async () => {
+    const calls: string[] = [];
+    (globalThis as any).suji = {
+      quit: () => {}, platform: () => "macos", handle: () => {},
+      invoke: async (_b: string, j: string) => { calls.push(j); return JSON.stringify({ success: false }); },
+      invokeSync: () => "", send: () => {},
+      on: () => () => {}, off: () => {}, register: () => {},
+    };
+    const r = await BrowserWindow.fromId(7).printToPDF("/x.pdf");
+    expect(JSON.parse(calls[0])).toEqual({ cmd: "print_to_pdf", windowId: 7, path: "/x.pdf" });
+    expect(r).toEqual({ success: false });
   });
 });

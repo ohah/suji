@@ -8,6 +8,17 @@ const std = @import("std");
 const window = @import("window");
 const util = @import("util");
 
+// ============================================
+// Deferred response 콜백 (issue #16, Promise pattern)
+// ============================================
+//
+// 일부 핸들러(print_to_pdf/capture_page)는 CDP 콜백 완료 후에야 결과를 안다.
+// `g_defer_response_cb` 가 set 돼 있으면 핸들러가 path 키로 응답을 보류하고
+// (cef.zig pending registry 에 저장) CDP 콜백 시 송신. 미설정(테스트/모바일)
+// 이면 기존 ack-only 동작 fallback. main.zig 가 `cef.cefDeferResponse` 주입.
+pub const DeferResponseFn = *const fn (path: []const u8) bool;
+pub var g_defer_response_cb: ?DeferResponseFn = null;
+
 /// Phase 2.5 — 요청 JSON에 sender 컨텍스트 자동 주입.
 ///   - `__window`: 항상 (sender 창의 WM id)
 ///   - `__window_name`: name이 있고 JSON-safe할 때만
@@ -583,6 +594,13 @@ pub const PrintToPDFReq = struct {
 pub fn handlePrintToPDF(req: PrintToPDFReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     const ok = if (wm.printToPDF(req.window_id, req.path)) |_| true else |_| false;
+    // CDP 호출 성공 + defer 가능 → Promise 보류, CDP 콜백에서 응답 송신.
+    // 실패하거나 슬롯 풀이면 즉시 ack 응답(이전 동작 fallback).
+    if (ok) {
+        if (g_defer_response_cb) |cb| {
+            if (cb(req.path)) return null; // sentinel: caller skip immediate response
+        }
+    }
     return respondWindowOp(response_buf, "print_to_pdf", req.window_id, ok);
 }
 
@@ -598,6 +616,11 @@ pub const CapturePageReq = struct {
 pub fn handleCapturePage(req: CapturePageReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     const ok = if (wm.capturePage(req.window_id, req.path, req.clip)) |_| true else |_| false;
+    if (ok) {
+        if (g_defer_response_cb) |cb| {
+            if (cb(req.path)) return null; // deferred — emitPageCaptured 가 응답 송신
+        }
+    }
     return respondWindowOp(response_buf, "capture_page", req.window_id, ok);
 }
 

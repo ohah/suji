@@ -1674,6 +1674,9 @@ fn openWindow(
     // CEF IPC 콜백 연결
     cef.setInvokeHandler(&cefInvokeHandler);
     cef.setEmitHandler(&cefEmitHandler);
+    // Deferred response — print_to_pdf/capture_page 가 CDP 콜백 완료까지 응답 보류
+    // (issue #16, SDK 가 listener-leak 없는 단순 await 가능).
+    window_ipc.g_defer_response_cb = &cef.cefDeferResponse;
 
     // WindowManager 배선 (CefNative + EventBusSink)
     var cef_native = cef.CefNative.init(allocator);
