@@ -3,6 +3,11 @@ name = "suji"
 version = "0.1.0"
 edition = "2021"
 description = "Suji desktop framework - Rust SDK"
+repository = "https://github.com/ohah/suji"
+homepage = "https://github.com/ohah/suji"
+documentation = "https://github.com/ohah/suji/tree/main/documents"
+keywords = ["suji", "desktop", "ipc", "sdk"]
+categories = ["api-bindings", "gui"]
 
 [dependencies]
 # crates.io 발행 시 path dep 도 version 필수(레지스트리 버전으로 해소).

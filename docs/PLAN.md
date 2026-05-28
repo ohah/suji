@@ -801,7 +801,10 @@ suji dev
   - [x] Zig: `src/core/app.zig` (suji.app().handle(), exportApp(), req.invoke/send)
   - [x] C: `include/suji.h` 헤더 — dlopen backend/plugin C ABI + WindowApi v1
         raw dispatcher 선언, C11 syntax smoke 테스트
-  - [ ] SDK crates.io / go pkg 배포
+  - [~] SDK crates.io / go pkg 배포 — `sdk-publish.yml` 검증/발행 게이트 완료
+        (`npm publish --dry-run`, `suji-macros` dry-run, `suji` compile, Go build/vet).
+        실제 npm/crates.io publish는 `NPM_TOKEN`/`CARGO_REGISTRY_TOKEN`과 `sdk-vX.Y.Z`
+        태그 필요. Go는 별도 레지스트리 없이 VCS 태그 소비.
 - [x] 각 언어별 예제 프로젝트 (examples/zig-backend, rust-backend, go-backend, multi-backend)
 - [x] 자동 라우팅 (register): 백엔드가 채널을 등록하면 프론트엔드에서 채널명만으로 호출 가능
 - [x] 중복 채널 에러 처리: 동일 채널을 여러 백엔드가 등록 시 에러 반환

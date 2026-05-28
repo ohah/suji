@@ -2,6 +2,12 @@
 name = "suji-macros"
 version = "0.1.0"
 edition = "2021"
+description = "Procedural macros for the Suji Rust SDK"
+repository = "https://github.com/ohah/suji"
+homepage = "https://github.com/ohah/suji"
+documentation = "https://github.com/ohah/suji/tree/main/documents/backend-rust.mdx"
+keywords = ["suji", "desktop", "ipc", "sdk"]
+categories = ["api-bindings", "gui"]
 
 [lib]
 proc-macro = true
