@@ -788,6 +788,49 @@ fn readProjectFile(path: []const u8, limit: usize) ![]u8 {
     );
 }
 
+fn countOccurrences(haystack: []const u8, needle: []const u8) usize {
+    var count: usize = 0;
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, haystack, pos, needle)) |i| {
+        count += 1;
+        pos = i + needle.len;
+    }
+    return count;
+}
+
+test "contextIsolation: frozen bridge + isolated-world CEF API gap stays explicit" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+
+    inline for (.{
+        "Object.freeze(window.__suji__)",
+        "Object.defineProperty(window,\\\"__suji__\\\"",
+        "isolated-world 아님",
+        "combined_js",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    const inject_start = std.mem.indexOf(u8, cef_src, "fn injectJsHelpers") orelse
+        return error.InjectJsHelpersMissing;
+    const inject_end = std.mem.indexOfPos(u8, cef_src, inject_start, "/// 컴파일타임 플랫폼 문자열") orelse
+        return error.InjectJsHelpersEndMissing;
+    const inject_body = cef_src[inject_start..inject_end];
+    try std.testing.expectEqual(@as(usize, 1), countOccurrences(inject_body, "ctx.eval.?"));
+
+    const plan_src = try readProjectFile("docs/PLAN.md", 1024 * 1024);
+    defer std.testing.allocator.free(plan_src);
+    inline for (.{
+        "진짜 isolated-world",
+        "cef_register_extension",
+        "cef_v8_context_t::eval",
+        "world id",
+        "메인 월드 frozen bridge",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, plan_src, needle) != null);
+    }
+}
+
 test "CEF renderer IPC — native dispatch failure does not leave JS promise pending" {
     const cef_src = try readCefSource();
     defer std.testing.allocator.free(cef_src);

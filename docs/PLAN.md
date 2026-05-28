@@ -696,13 +696,15 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           진짜 isolated-world 격리는 후속(아래 backlog). e2e 5 케이스
           (`tests/e2e/context-isolation.test.ts`) 로 frozen/변조차단/슬롯봉인/
           기능보존 실증. (preload.js / contextBridge 자체는 **비제공**)
-    - [ ] (backlog) 진짜 isolated-world — 별도 V8 컨텍스트에 bridge 두고 메인 월드엔
+    - [~] (blocked) 진짜 isolated-world — 별도 V8 컨텍스트에 bridge 두고 메인 월드엔
           frozen 프록시만 노출(pre-bind XSS 도 차단). 위 frozen 하드닝의 상위 단계.
           2026-05-28 조사: 현재 CEF C API에는 `cef_register_extension`과
           `cef_v8_context_t::eval`만 보이고, Electron `contextBridge`처럼 world id를
           지정해 메인 월드 프록시를 노출하는 API는 확인되지 않음. 별도 구현은 Chrome
           extension/content-script 경로 또는 CDP 기반 주입 설계가 필요하므로 현재 구현
-          상태는 메인 월드 frozen bridge로 유지.
+          상태는 메인 월드 frozen bridge로 유지. 회귀 가드:
+          `tests/cef_ipc_test.zig` 가 frozen bridge 불변식 + 이 CEF API 갭 문서를
+          정적 검증.
     - [x] **macOS App Sandbox 인프라** — `suji build --sandbox` / `SUJI_SANDBOX` 옵션.
           `BundleOptions.sandbox` (기본 false) → `codesignWithEntitlements` 가
           `assets/entitlements/{,sandbox/}<helper>.plist` 서브디렉토리 선택. 루트 5개=

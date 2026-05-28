@@ -683,8 +683,9 @@ Android Node 는 NDK로 가능하나 예제 미배선(후속).
 `_pending`/`_listeners` 는 가변 → invoke/on/off 무손상. **항상 적용**.
 
 **한계(정직)**: 우리 바인드보다 *먼저* 실행된 스크립트는 못 막음(메인 월드
-frozen — Chrome isolated-world 아님). 진짜 별도-world 격리는 backlog
-(docs/PLAN.md Phase 7). ⚠️ `onContextCreated` 의 `ctx.eval` 은 **정확히 1회**
+frozen — Chrome isolated-world 아님). 진짜 별도-world 격리는 CEF C API
+world-id/contextBridge 부재로 blocked(docs/PLAN.md Phase 7, 정적 가드 있음).
+⚠️ `onContextCreated` 의 `ctx.eval` 은 **정확히 1회**
 (js_code+bootstrap 단일 `combined_js`. 추가 eval 금지 — 늘리면 CEF inspector
 attach 30s 행, `e2e set-user-agent` 가드. 새 JS 는 별도 eval 아니라
 combined_js 에 이어붙일 것).
