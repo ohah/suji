@@ -19,6 +19,17 @@ rm -rf "$VENDOR"; mkdir -p "$VENDOR"
 ( cd "$REPO" && zig build lib -Dtarget="$ZIG_T" -Doptimize=ReleaseSmall )
 cp "$REPO/zig-out/lib/libsuji_core.a" "$VENDOR/libsuji_core.a"
 
+CA_SRC=""
+for p in /etc/ssl/cert.pem /etc/ssl/certs/ca-certificates.crt; do
+  if [ -f "$p" ]; then CA_SRC="$p"; break; fi
+done
+if [ -n "$CA_SRC" ]; then
+  cp "$CA_SRC" "$VENDOR/cacert.pem"
+else
+  : > "$VENDOR/cacert.pem"
+  echo "warn: system CA bundle not found; iOS HTTPS needs Vendor/cacert.pem"
+fi
+
 # Zig 백엔드 staticlib (suji_zig_* 고유 심볼). build.zig 없이 직접 build-lib.
 zig build-lib -target "$ZIG_T" -O ReleaseSmall -fPIC -lc \
   -femit-bin="$VENDOR/libsuji_zig_backend.a" \

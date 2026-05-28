@@ -15,6 +15,9 @@ private func zigFree(_ p: UnsafePointer<CChar>?) {
 
 func registerStaticBackends() {
     suji_zig_backend_init(nil)
+    if let caPath = Bundle.main.path(forResource: "cacert", ofType: "pem") {
+        caPath.withCString { suji_zig_backend_set_ca_bundle_path($0) }
+    }
     sujiReg("zig:ping", zigHandler, zigFree)
     sujiReg("zig:rev", zigHandler, zigFree)
 }

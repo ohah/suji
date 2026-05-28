@@ -38,6 +38,8 @@ xcrun simctl install booted "$(find ~/Library/Developer/Xcode/DerivedData -name 
 > `build-lib.sh [sim|device]` — **sim 기본**(디바이스/프로비저닝 불필요).
 > 코어는 `ReleaseSmall`(임베드 모바일 적합: 작고, 패닉 스택트레이스의 dyld
 > 의존 제거 — 시뮬레이터 링크에 필수). Apple Silicon 가정(arm64 sim).
+> Zig 변형은 iOS std TLS 용 `Vendor/cacert.pem` 도 함께 스테이징한다
+> (호스트 `/etc/ssl/cert.pem` 또는 `/etc/ssl/certs/ca-certificates.crt`).
 
 ## 구조
 
@@ -49,6 +51,9 @@ xcrun simctl install booted "$(find ~/Library/Developer/Xcode/DerivedData -name 
 - `backends/{rust,go,zig}` — iOS·Android 공유 백엔드 소스(언어 고유 심볼
   `suji_rs_*`/`suji_go_*`/`suji_zig_*`). rust/go 메커니즘은 `tests/mobile-backends`
   가 호스트 실증(zig 백엔드는 동일 ABI, 예제 시연).
+- Zig HTTPS 는 `suji_zig_backend_set_ca_bundle_path()` 로 앱 번들 `cacert.pem`
+  경로를 넘겨 `std.http.Client` CA bundle 을 채운다. Security.framework
+  `SecTrust` 훅이 아니라 앱 번들 PEM 주입 방식이다.
 
 API 차이: 모바일은 invoke/emit/on + 호스트 핸들러만. `windows.*`/`clipboard`/
 `dialog`/플러그인 등 데스크톱 네이티브 API·플러그인은 CEF 호스트 전용.

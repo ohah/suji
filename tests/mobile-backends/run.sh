@@ -11,7 +11,98 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 OUT="$HERE/.build"
 mkdir -p "$OUT"
-trap 'rm -rf "$OUT"' EXIT
+HTTPS_PID=""
+cleanup() {
+  if [ -n "$HTTPS_PID" ]; then
+    kill "$HTTPS_PID" 2>/dev/null || true
+    wait "$HTTPS_PID" 2>/dev/null || true
+  fi
+  rm -rf "$OUT"
+}
+trap cleanup EXIT
+
+start_https_fixture() {
+  if ! command -v python3 >/dev/null || ! command -v openssl >/dev/null; then
+    echo "[https] python3/openssl 미발견 — HTTPS subtest skip"
+    return 0
+  fi
+
+  cat > "$OUT/localhost-openssl.cnf" <<'EOF'
+[req]
+distinguished_name = dn
+x509_extensions = v3_req
+prompt = no
+[dn]
+CN = localhost
+[v3_req]
+basicConstraints = critical,CA:TRUE
+keyUsage = critical,keyCertSign,digitalSignature,keyEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+  openssl req -x509 -newkey rsa:2048 -nodes -days 1 -sha256 \
+    -keyout "$OUT/localhost.key" -out "$OUT/localhost.crt" \
+    -config "$OUT/localhost-openssl.cnf" >/dev/null 2>&1 || {
+      echo "[https] openssl self-signed cert 생성 실패 — HTTPS subtest skip"
+      return 0
+    }
+
+  cat > "$OUT/https_server.py" <<'PY'
+import http.server
+import ssl
+import sys
+
+cert, key, port_file = sys.argv[1:4]
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b"SUJI_HTTPS_OK"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, fmt, *args):
+        pass
+
+server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(certfile=cert, keyfile=key)
+server.socket = ctx.wrap_socket(server.socket, server_side=True)
+with open(port_file, "w", encoding="utf-8") as f:
+    f.write(str(server.server_address[1]))
+server.serve_forever()
+PY
+
+  local port_file="$OUT/https-port"
+  python3 "$OUT/https_server.py" \
+    "$OUT/localhost.crt" "$OUT/localhost.key" "$port_file" \
+    >"$OUT/https.log" 2>&1 &
+  HTTPS_PID="$!"
+
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    [ -s "$port_file" ] && break
+    sleep 0.2
+  done
+  if [ ! -s "$port_file" ]; then
+    echo "[https] HTTPS fixture 기동 실패 — HTTPS subtest skip"
+    if [ -s "$OUT/https.log" ]; then cat "$OUT/https.log"; fi
+    kill "$HTTPS_PID" 2>/dev/null || true
+    HTTPS_PID=""
+    return 0
+  fi
+
+  export SUJI_TEST_HTTPS_URL="https://localhost:$(cat "$port_file")/"
+  export SUJI_TEST_CA_BUNDLE="$OUT/localhost.crt"
+}
+
+start_https_fixture
 
 echo "[1/5] core (zig build lib, host)"
 ( cd "$REPO" && zig build lib >/dev/null )

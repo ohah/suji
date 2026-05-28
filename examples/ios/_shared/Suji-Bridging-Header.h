@@ -14,6 +14,7 @@ extern void suji_go_backend_free(char *ptr);
 extern void suji_go_backend_destroy(void);
 
 extern void suji_zig_backend_init(const void *core);
+extern void suji_zig_backend_set_ca_bundle_path(const char *path);
 extern char *suji_zig_backend_handle_ipc(const char *request);
 extern void suji_zig_backend_free(char *ptr);
 extern void suji_zig_backend_destroy(void);

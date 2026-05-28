@@ -9,8 +9,9 @@
 // 충돌 없이 공존" 한다는 실증. WKWebView/iOS 코드서명/JIT 만 실기기 몫.
 //
 // `zig:http` 는 모바일 백엔드의 std.http 경로(suji.http.fetch 동등)를 실증한다.
-// 외부 네트워크/TLS 의존 0 — 인프로세스 localhost 평문 HTTP 미니서버로 왕복.
-// ⚠️ 모바일 HTTPS/TLS(특히 iOS std CA 번들 공백)·실기기·실 네트워크는 미검증.
+// 외부 네트워크 의존 0 — 인프로세스 localhost 평문 HTTP 미니서버 + run.sh 의
+// 로컬 HTTPS fixture(자체 서명 cert를 PEM CA로 주입)로 왕복. ⚠️ 실기기·실
+// 네트워크는 미검증.
 //
 // 빌드·실행: tests/mobile-backends/run.sh
 
@@ -34,6 +35,7 @@ extern void suji_go_backend_init(const void *core);
 extern char *suji_zig_backend_handle_ipc(const char *req);
 extern void suji_zig_backend_free(char *p);
 extern void suji_zig_backend_init(const void *core);
+extern void suji_zig_backend_set_ca_bundle_path(const char *path);
 extern char *suji_sqlite_backend_handle_ipc(const char *req);
 extern void suji_sqlite_backend_free(char *p);
 extern void suji_sqlite_backend_init(const void *core);
@@ -436,6 +438,24 @@ int main(void) {
         roundtrip("zig:http", post_url, "ZIGPOST42", "zig http POST echo");
     }
     roundtrip("zig:http", "{}", "MissingUrl", "zig http missing url → error");
+    suji_zig_backend_set_ca_bundle_path("/definitely/missing/suji-cacert.pem");
+    roundtrip("zig:http", "{\"url\":\"https://localhost:1/\"}", "FileNotFound",
+              "zig https missing CA path → error");
+    suji_zig_backend_set_ca_bundle_path(NULL);
+
+    printf("== Zig https (std.http + injected PEM CA bundle) ==\n");
+    const char *https_url = getenv("SUJI_TEST_HTTPS_URL");
+    const char *ca_bundle = getenv("SUJI_TEST_CA_BUNDLE");
+    if (https_url && ca_bundle) {
+        suji_zig_backend_set_ca_bundle_path(ca_bundle);
+        char https_req[512];
+        snprintf(https_req, sizeof(https_req), "{\"url\":\"%s\"}", https_url);
+        roundtrip("zig:http", https_req, "\"status\":200", "zig https GET status");
+        roundtrip("zig:http", https_req, "SUJI_HTTPS_OK", "zig https GET body");
+        suji_zig_backend_set_ca_bundle_path(NULL);
+    } else {
+        printf("  [SKIP] zig https local server unavailable\n");
+    }
 
     printf("== __core__ 네이티브 디스패치 (clipboard, 모바일=iOS/Android 동형) ==\n");
     roundtrip("__core__", "{\"cmd\":\"clipboard_write_text\",\"text\":\"SujiClip\"}",

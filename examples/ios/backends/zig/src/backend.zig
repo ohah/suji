@@ -5,6 +5,7 @@
 //! 표준 라이브러리만 사용 (suji 코어와 독립 — 별도 staticlib).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const alloc = std.heap.c_allocator;
 
 /// `zig:http` 전용 Io. 모바일 백엔드는 코어/SDK 독립(handle_ipc 에 io 인자
@@ -12,6 +13,7 @@ const alloc = std.heap.c_allocator;
 /// `std.Io.Threaded.init_single_threaded` 패턴을 이 파일 안에서 자체 보유.
 /// 동기 단발 fetch 라 단일 스레드로 충분(deinit 불요).
 var http_threaded: std.Io.Threaded = std.Io.Threaded.init_single_threaded;
+var ca_bundle_path: ?[]u8 = null;
 
 /// JSON 요청에서 "key":"..." 문자열 값 추출 (이스케이프 미지원 단순 스캐너 —
 /// 예제 수준. 채널/인자는 프론트 shim 의 JSON.stringify 산출이라 충분).
@@ -34,6 +36,43 @@ export fn suji_zig_backend_init(core: ?*const anyopaque) callconv(.c) void {
     _ = core; // cross-call 미사용
 }
 
+/// Optional PEM CA bundle for HTTPS. iOS has no `std.crypto.Certificate.Bundle`
+/// rescan branch, so app hosts can pass `Bundle.main`'s bundled cacert.pem path.
+export fn suji_zig_backend_set_ca_bundle_path(path: ?[*:0]const u8) callconv(.c) void {
+    if (ca_bundle_path) |old| alloc.free(old);
+    ca_bundle_path = null;
+
+    const raw = path orelse return;
+    const s = std.mem.span(raw);
+    ca_bundle_path = alloc.dupe(u8, s) catch null;
+}
+
+fn isHttpsUrl(url: []const u8) bool {
+    return std.ascii.startsWithIgnoreCase(url, "https://");
+}
+
+fn configureCaBundle(client: *std.http.Client, url: []const u8) !void {
+    if (std.http.Client.disable_tls or !isHttpsUrl(url)) return;
+
+    const path = ca_bundle_path orelse {
+        if (builtin.os.tag == .ios) return error.MissingCaBundlePath;
+        return;
+    };
+    if (!std.fs.path.isAbsolute(path)) return error.RelativeCaBundlePath;
+
+    const io = http_threaded.io();
+    const now = std.Io.Clock.real.now(io);
+    var bundle: std.crypto.Certificate.Bundle = .empty;
+    errdefer bundle.deinit(alloc);
+
+    try bundle.addCertsFromFilePathAbsolute(alloc, io, now, path);
+    if (bundle.bytes.items.len == 0) return error.EmptyCaBundle;
+
+    std.mem.swap(std.crypto.Certificate.Bundle, &client.ca_bundle, &bundle);
+    bundle.deinit(alloc);
+    client.now = now;
+}
+
 /// `suji.http.fetch`(src/core/app.zig) 와 동일한 std.http wrap — 모바일 백엔드는
 /// 코어-독립이라 SDK 대신 std 를 직접 사용. payload null=GET / non-null=POST.
 /// ⚠️ backend-only: 프론트(WebView) shim 에 `zig:http` 채널을 노출하지 말 것
@@ -46,6 +85,7 @@ fn httpFetchImpl(r: []const u8) ![*:0]u8 {
 
     var client: std.http.Client = .{ .allocator = alloc, .io = http_threaded.io() };
     defer client.deinit();
+    try configureCaBundle(&client, url);
 
     var aw = std.Io.Writer.Allocating.init(alloc);
     errdefer aw.deinit();
@@ -108,4 +148,7 @@ export fn suji_zig_backend_free(p: ?[*:0]u8) callconv(.c) void {
     }
 }
 
-export fn suji_zig_backend_destroy() callconv(.c) void {}
+export fn suji_zig_backend_destroy() callconv(.c) void {
+    if (ca_bundle_path) |old| alloc.free(old);
+    ca_bundle_path = null;
+}
