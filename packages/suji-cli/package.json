@@ -13,10 +13,15 @@
   "bin": {
     "suji": "bin/suji.js",
     "suji-cli": "bin/cli.js",
-    "create-suji": "bin/cli.js"
+    "create-suji": "bin/cli.js",
+    "suji-config": "bin/load-config.js"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.0"
   },
   "files": [
     "bin",
+    "lib",
     "index.js",
     "index.d.ts",
     "templates",

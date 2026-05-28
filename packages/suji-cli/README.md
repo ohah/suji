@@ -25,7 +25,7 @@ npx @suji/cli init my-app \
 생성물:
 
 - 루트 `package.json` (`dev/build/types` scripts, `@suji/cli` devDependency)
-- `suji.config.ts` source config + materialized `suji.json`
+- 실제 JS/TS로 평가되는 `suji.config.ts` source config + materialized `suji.json`
 - `frontend.dev_url=http://localhost:12300`, `dev_command`, `build_command`
 - 백엔드 템플릿 (`zig`, `rust`, `go`, `node`, `lua`, `multi`)
 - `frontend/` 템플릿 (Vite, Rsbuild, Next static export)
@@ -46,6 +46,30 @@ vp install
 vp run dev
 ```
 
-`bin/cli.js` 산출물은 `src/core/init.zig`(로컬 `suji init`)와 동형이고
+## Config Loader
+
+```ts
+import { defineConfig } from "@suji/cli";
+
+const port = 12300;
+
+export default defineConfig(({ mode }) => ({
+  app: { name: mode === "production" ? "My App" : "My App Dev" },
+  frontend: {
+    dir: "frontend",
+    dev_url: `http://localhost:${port}`,
+    dev_command: "npm run dev",
+    build_command: "npm run build",
+    dist_dir: "frontend/dist",
+  },
+}));
+```
+
+`suji` JS launcher는 native binary를 실행할 때 `SUJI_CONFIG_LOADER`와
+`SUJI_NODE_BIN`을 전달합니다. Native는 `suji.config.ts`/`.mts`/`.cts`/`.js`/
+`.mjs`/`.cjs`를 `@suji/cli` loader로 평가한 JSON을 읽고, 없으면 `suji.json`을
+읽습니다. Config 파일은 신뢰한 프로젝트 코드로 실행됩니다.
+
+`lib/init.js` 산출물은 `src/core/init.zig`(로컬 `suji init`)와 동형이고
 `templates/*`는 `src/templates/*`의 사본입니다. 변경 시 양쪽을 lockstep으로
 유지하세요.

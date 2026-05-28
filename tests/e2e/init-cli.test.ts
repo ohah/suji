@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(import.meta.dir, "../..");
 const SUJI_BIN = process.platform === "win32"
@@ -9,6 +10,7 @@ const SUJI_BIN = process.platform === "win32"
   : path.join(ROOT, "zig-out", "bin", "suji");
 const CLI_BIN = path.join(ROOT, "packages", "suji-cli", "bin", "cli.js");
 const SUJI_JS_BIN = path.join(ROOT, "packages", "suji-cli", "bin", "suji.js");
+const LOAD_CONFIG_BIN = path.join(ROOT, "packages", "suji-cli", "bin", "load-config.js");
 
 const tempDirs: string[] = [];
 
@@ -233,14 +235,63 @@ for (const [frontend, toolchain] of frontendCases) {
 test("@suji/cli suji bin launches resolved native binary", async () => {
   const dir = await tempDir();
   const fakeBin = path.join(dir, "fake-suji");
-  await writeFile(fakeBin, "#!/bin/sh\necho fake-suji \"$@\"\n");
+  await writeFile(fakeBin, "#!/bin/sh\necho fake-suji \"$@\"\necho loader=\"$SUJI_CONFIG_LOADER\"\necho node=\"$SUJI_NODE_BIN\"\n");
   await chmod(fakeBin, 0o755);
 
   const result = await run("node", [SUJI_JS_BIN, "--version"], ROOT, 30_000, {
     SUJI_NATIVE_BIN: fakeBin,
   });
   expectClean(result, "suji js launcher");
-  expect(result.stdout.trim()).toBe("fake-suji --version");
+  expect(result.stdout).toContain("fake-suji --version");
+  expect(result.stdout).toContain(`loader=${LOAD_CONFIG_BIN}`);
+  expect(result.stdout).toMatch(/node=.*node(?:\.exe)?/);
+});
+
+test("@suji/cli load-config evaluates TypeScript config", async () => {
+  const dir = await tempDir();
+  const cliUrl = pathToFileURL(path.join(ROOT, "packages", "suji-cli", "index.js")).href;
+  await writeFile(path.join(dir, "suji.config.ts"), `import { defineConfig } from ${JSON.stringify(cliUrl)};
+
+const port: number = 12345;
+
+export default defineConfig(({ mode }: { mode: string }) => ({
+  app: { name: "Evaluated TS", version: mode === "production" ? "9.9.9" : "0.0.0" },
+  frontend: {
+    dir: "frontend",
+    dev_url: \`http://localhost:\${port}\`,
+    dev_command: "npm run dev",
+    build_command: "npm run build",
+    dist_dir: "frontend/dist"
+  }
+}));
+`);
+
+  const result = await run("node", [LOAD_CONFIG_BIN, "--cwd", dir, "--command", "build", "--mode", "production"], ROOT);
+  expectClean(result, "suji-config load TypeScript config");
+  const loaded = JSON.parse(result.stdout);
+  expect(loaded.app).toEqual({ name: "Evaluated TS", version: "9.9.9" });
+  expect(loaded.frontend.dev_url).toBe("http://localhost:12345");
+});
+
+test("@suji/cli suji launcher lets native evaluate TypeScript config", async () => {
+  const dir = await tempDir();
+  const cliUrl = pathToFileURL(path.join(ROOT, "packages", "suji-cli", "index.js")).href;
+  await writeFile(path.join(dir, "suji.config.ts"), `import { defineConfig } from ${JSON.stringify(cliUrl)};
+
+const title: string = "Native TS Config";
+
+export default defineConfig({
+  app: { name: title, version: "1.0.0" },
+  frontend: { dev_url: "http://localhost:12300" }
+});
+`);
+
+  const result = await run("node", [SUJI_JS_BIN, "types"], dir, 30_000, {
+    SUJI_NATIVE_BIN: SUJI_BIN,
+  });
+  expectClean(result, "native config loader through suji launcher");
+  expect(result.stderr).toContain("[suji types] 생성할 schema 없음");
+  expect(result.stderr).not.toContain("Error: suji.json not found");
 });
 
 test("@suji/cli npm package includes bins and hidden GitHub Actions template", async () => {
@@ -250,7 +301,10 @@ test("@suji/cli npm package includes bins and hidden GitHub Actions template", a
   const [meta] = JSON.parse(pack.stdout);
   const paths = meta.files.map((f: { path: string }) => f.path);
   expect(paths).toContain("bin/cli.js");
+  expect(paths).toContain("bin/load-config.js");
   expect(paths).toContain("bin/suji.js");
+  expect(paths).toContain("lib/config-loader.js");
+  expect(paths).toContain("lib/init.js");
   expect(paths).toContain("index.js");
   expect(paths).toContain("index.d.ts");
   expect(paths).toContain("templates/.github/workflows/suji.yml");

@@ -270,18 +270,119 @@ pub const Config = struct {
 
     // util.nonNegU32 직접 사용 (이 모듈 내부 alias 불필요).
 
+    pub const CONFIG_FILE_PATHS = [_][]const u8{
+        "suji.config.ts",
+        "suji.config.mts",
+        "suji.config.cts",
+        "suji.config.js",
+        "suji.config.mjs",
+        "suji.config.cjs",
+        "suji.json",
+    };
+
+    const CONFIG_CODE_MAX_BYTES = 1024 * 256;
+    const CONFIG_JSON_MAX_BYTES = 1024 * 256;
+    const CONFIG_LOADER_STDERR_MAX_BYTES = 1024 * 64;
+    const DEFAULT_CONFIG_LOADER_PATH = "node_modules/@suji/cli/bin/load-config.js";
+
     fn loadConfigFile(allocator: std.mem.Allocator) !Config {
-        if (std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.config.ts", allocator, .limited(1024 * 128))) |content| {
-            defer allocator.free(content);
-            return loadFromTsConfigBytes(allocator, content);
-        } else |_| {}
+        const config_path = findConfigFilePath() orelse return error.ConfigNotFound;
+        if (isJsonConfigPath(config_path)) return loadJsonConfigFile(allocator, config_path);
+        return loadCodeConfigFile(allocator, config_path);
+    }
 
-        const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
+    fn findConfigFilePath() ?[]const u8 {
+        for (CONFIG_FILE_PATHS) |path| {
+            std.Io.Dir.cwd().access(runtime.io, path, .{}) catch continue;
+            return path;
+        }
+        return null;
+    }
+
+    fn isJsonConfigPath(path: []const u8) bool {
+        return std.mem.eql(u8, path, "suji.json");
+    }
+
+    fn loadJsonConfigFile(allocator: std.mem.Allocator, path: []const u8) !Config {
+        const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, allocator, .limited(CONFIG_JSON_MAX_BYTES)) catch return error.ConfigNotFound;
         defer allocator.free(content);
-
         return loadFromJsonBytes(allocator, content);
     }
 
+    fn loadCodeConfigFile(allocator: std.mem.Allocator, path: []const u8) !Config {
+        if (resolveConfigLoader()) |loader_path| {
+            return loadFromCodeConfigWithLoader(allocator, path, loader_path);
+        }
+
+        std.debug.print(
+            "[suji] warning: JS config loader not found; using static JSON-compatible fallback for {s}\n",
+            .{path},
+        );
+        const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, allocator, .limited(CONFIG_CODE_MAX_BYTES)) catch return error.ConfigNotFound;
+        defer allocator.free(content);
+        return loadFromTsConfigBytes(allocator, content);
+    }
+
+    fn resolveConfigLoader() ?[]const u8 {
+        if (runtime.env("SUJI_CONFIG_LOADER")) |path| {
+            if (path.len > 0) return path;
+        }
+        std.Io.Dir.cwd().access(runtime.io, DEFAULT_CONFIG_LOADER_PATH, .{}) catch return null;
+        return DEFAULT_CONFIG_LOADER_PATH;
+    }
+
+    fn loadFromCodeConfigWithLoader(allocator: std.mem.Allocator, path: []const u8, loader_path: []const u8) !Config {
+        const node_bin = runtime.env("SUJI_NODE_BIN") orelse "node";
+        const argv = [_][]const u8{
+            node_bin,
+            loader_path,
+            "--cwd",
+            ".",
+            "--config",
+            path,
+        };
+
+        const result = std.process.run(allocator, runtime.io, .{
+            .argv = &argv,
+            .stdout_limit = .limited(CONFIG_JSON_MAX_BYTES),
+            .stderr_limit = .limited(CONFIG_LOADER_STDERR_MAX_BYTES),
+        }) catch |err| {
+            std.debug.print("[suji] failed to execute JS config loader ({s}): {}\n", .{ loader_path, err });
+            return error.InvalidConfig;
+        };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+
+        switch (result.term) {
+            .exited => |code| {
+                if (code != 0) {
+                    if (result.stderr.len > 0) {
+                        std.debug.print("[suji] JS config loader failed:\n{s}\n", .{result.stderr});
+                    } else {
+                        std.debug.print("[suji] JS config loader exited with code {d}\n", .{code});
+                    }
+                    return error.InvalidConfig;
+                }
+            },
+            .signal => |sig| {
+                std.debug.print("[suji] JS config loader terminated by signal {}\n", .{sig});
+                return error.InvalidConfig;
+            },
+            .stopped => |sig| {
+                std.debug.print("[suji] JS config loader stopped by signal {}\n", .{sig});
+                return error.InvalidConfig;
+            },
+            .unknown => |code| {
+                std.debug.print("[suji] JS config loader terminated unexpectedly: {d}\n", .{code});
+                return error.InvalidConfig;
+            },
+        }
+
+        return loadFromJsonBytes(allocator, result.stdout);
+    }
+
+    /// Last-resort fallback for environments that run the native binary without
+    /// @suji/cli installed. It only accepts JSON-compatible defineConfig({...}).
     pub fn loadFromTsConfigBytes(allocator: std.mem.Allocator, content: []const u8) !Config {
         const json = extractDefineConfigJson(content) orelse return error.InvalidConfig;
         return loadFromJsonBytes(allocator, json);

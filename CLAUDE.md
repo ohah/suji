@@ -422,9 +422,9 @@ suji.platform                                                // "macos" | "linux
 //   → RV_CONTINUE_ASYNC + listener round-trip cancel/allow (e2e 13 pass)
 ```
 
-## suji.json 설정
+## Suji 설정
 
-`suji.config.ts`가 생성 프로젝트의 source config이고, `suji.json`은 materialized JSON입니다. 네이티브 로더는 `suji.config.ts`를 먼저 읽고 없으면 `suji.json`을 읽습니다. JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
+`suji.config.ts`가 생성 프로젝트의 source config이고, `suji.json`은 materialized JSON입니다. 네이티브 로더는 `suji.config.ts`/`.mts`/`.cts`/`.js`/`.mjs`/`.cjs`를 먼저 찾고, `@suji/cli`의 JS/TS config loader로 실제 코드를 평가한 뒤 JSON만 Zig 파서에 넘깁니다. 로더가 없는 직접 native 실행 환경에서는 JSON-compatible `defineConfig({ ... })` 정적 fallback만 사용합니다. config 파일은 신뢰한 프로젝트 코드로 실행됩니다. JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
 
 ```json
 {
@@ -837,7 +837,7 @@ runtime 동시 map, LuaRocks/배포 번들링은 후속.
 |------|--------|------|
 | GitHub Releases | 직접 다운로드 | ✅ `release.yml` (dry_run 검증 + v* 태그 릴리스) |
 | Homebrew | `brew install ohah/suji/suji` | ✅ `release.yml` homebrew job + Formula 생성/검증. 외부 tap push는 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 대기 |
-| npm/npx | `npx @suji/cli init my-app` / `npx create-suji my-app` | ✅ `packages/suji-cli`(의존 0 스캐폴더 + `defineConfig` helper + `suji` JS launcher, init.zig 동형, `suji.config.ts`/`suji.json`, 12300 기본 포트, backend none/zig/rust/go/node/lua/multi, frontend Vite/Rsbuild/Next, pm npm/pnpm/bun/VoidZero `vp`) — npm publish 토큰 대기 |
+| npm/npx | `npx @suji/cli init my-app` / `npx create-suji my-app` | ✅ `packages/suji-cli`(스캐폴더 + `defineConfig`/JS·TS config loader + `suji` JS launcher, init.zig 동형, `suji.config.ts`/`suji.json`, 12300 기본 포트, backend none/zig/rust/go/node/lua/multi, frontend Vite/Rsbuild/Next, pm npm/pnpm/bun/VoidZero `vp`) — npm publish 토큰 대기 |
 | curl 스크립트 | `curl -fsSL https://github.com/ohah/suji/releases/latest/download/install.sh \| sh` | ✅ `scripts/install.sh` — 최신/특정 버전 릴리스 asset 다운로드 + `.sha256` 검증 + `~/.suji/bin` 설치. release asset 포함, 유닛/E2E 계약 고정 |
 
 ### SDK 배포

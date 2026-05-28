@@ -122,7 +122,7 @@ test "Config.loadFromJsonBytes parses frontend commands" {
     try std.testing.expectEqualStrings("ui/out", cfg.frontend.dist_dir);
 }
 
-test "Config.loadFromTsConfigBytes parses defineConfig JSON object" {
+test "Config.loadFromTsConfigBytes parses static defineConfig fallback" {
     var cfg = try config.Config.loadFromTsConfigBytes(std.testing.allocator,
         \\import { defineConfig } from "@suji/cli";
         \\
@@ -149,6 +149,37 @@ test "Config.loadFromTsConfigBytes parses defineConfig JSON object" {
     try std.testing.expectEqualStrings("vp run dev", cfg.frontend.dev_command);
     try std.testing.expectEqualStrings("vp run build", cfg.frontend.build_command);
     try std.testing.expectEqualStrings("frontend/out", cfg.frontend.dist_dir);
+}
+
+test "Config config file priority prefers code config variants before suji.json" {
+    const paths = config.Config.CONFIG_FILE_PATHS;
+    try std.testing.expectEqualStrings("suji.config.ts", paths[0]);
+    try std.testing.expectEqualStrings("suji.config.mts", paths[1]);
+    try std.testing.expectEqualStrings("suji.config.cts", paths[2]);
+    try std.testing.expectEqualStrings("suji.config.js", paths[3]);
+    try std.testing.expectEqualStrings("suji.config.mjs", paths[4]);
+    try std.testing.expectEqualStrings("suji.config.cjs", paths[5]);
+    try std.testing.expectEqualStrings("suji.json", paths[6]);
+}
+
+test "Config code config path uses @suji/cli JS loader before fallback" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/core/config.zig",
+        std.testing.allocator,
+        .limited(256 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    inline for (.{
+        "SUJI_CONFIG_LOADER",
+        "SUJI_NODE_BIN",
+        "node_modules/@suji/cli/bin/load-config.js",
+        "loadFromCodeConfigWithLoader",
+        "loadFromTsConfigBytes",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
+    }
 }
 
 // ============================================
