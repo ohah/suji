@@ -245,11 +245,33 @@
     },
     "plugins": {
       "type": "array",
-      "description": "활성화할 플러그인 목록",
+      "description": "활성화할 플러그인 목록. 문자열은 공식/로컬 플러그인 이름, 객체는 외부 source와 outbound permissions를 지정.",
       "items": {
-        "type": "string"
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "플러그인 식별자. 라우팅/패키징 디렉토리 이름으로 사용."
+              },
+              "source": {
+                "type": "string",
+                "description": "외부 플러그인 source. 로컬 경로(./plugins/x, ~/x, /abs/x) 또는 GitHub URL(github.com/owner/repo, https://github.com/owner/repo)."
+              },
+              "permissions": {
+                "type": "array",
+                "description": "플러그인이 다른 채널로 invoke할 때 허용할 outbound cmd 목록. 생략하면 기존 호환을 위해 unrestricted, []는 deny-all. '*' 또는 'prefix:*' 허용.",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+          }
+        ]
       },
-      "examples": [["state"]]
+      "examples": [["state", { "name": "analytics", "source": "github.com/someone/suji-plugin-analytics", "permissions": ["state:get", "state:set"] }]]
     },
     "asset_dir": {
       "type": "string",

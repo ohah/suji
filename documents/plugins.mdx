@@ -74,11 +74,27 @@ plugins/my-plugin/
 
 ```json
 {
-  "plugins": ["my-plugin"]
+  "plugins": [
+    "state",
+    {
+      "name": "my-plugin",
+      "source": "./plugins/my-plugin",
+      "permissions": ["state:get", "state:set"]
+    }
+  ]
 }
 ```
 
-→ suji 시작 시 `plugins/my-plugin/zig/zig-out/lib/libmy-plugin.dylib` 자동 로드.
+문자열은 로컬/내장 `plugins/<name>/`을 찾는다. 객체 form의 `source`는 로컬 경로
+또는 GitHub source(`github.com/owner/repo`, `https://github.com/owner/repo`)를
+받는다. GitHub source는 `~/.suji/plugins/` 아래에 shallow clone/pull 후 빌드한다.
+
+`permissions`는 플러그인이 init/handler 실행 중 다른 채널로 `core.invoke`할 때의 outbound
+allowlist다. 생략하면 기존 호환을 위해 unrestricted, 빈 배열은 deny-all, `"*"`와
+`"state:*"` 같은 prefix wildcard를 지원한다.
+
+→ suji 시작 시 `plugins/my-plugin/zig/zig-out/lib/libbackend.dylib` 같은 backend ABI
+dylib가 자동 빌드/로드된다.
 
 ### Plugin C ABI
 

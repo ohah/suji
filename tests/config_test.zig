@@ -215,6 +215,40 @@ test "JSON multi-backend parsing" {
     try std.testing.expectEqualStrings("backends/go", bs.items[1].object.get("entry").?.string);
 }
 
+test "Config.loadFromJsonBytes parses plugin string and object specs" {
+    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{
+        \\  "plugins": [
+        \\    "state",
+        \\    {
+        \\      "name": "analytics",
+        \\      "source": "github.com/someone/suji-plugin-analytics",
+        \\      "permissions": ["state:get", "state:set", "log:*"]
+        \\    },
+        \\    { "name": "local", "source": "./plugins/local", "permissions": [] }
+        \\  ]
+        \\}
+    );
+    defer cfg.deinit();
+
+    const plugins = cfg.plugins.?;
+    try std.testing.expectEqual(@as(usize, 3), plugins.len);
+    try std.testing.expectEqualStrings("state", plugins[0].name);
+    try std.testing.expect(plugins[0].source == null);
+    try std.testing.expect(plugins[0].permissions == null);
+
+    try std.testing.expectEqualStrings("analytics", plugins[1].name);
+    try std.testing.expectEqualStrings("github.com/someone/suji-plugin-analytics", plugins[1].source.?);
+    try std.testing.expectEqual(@as(usize, 3), plugins[1].permissions.?.len);
+    try std.testing.expectEqualStrings("state:get", plugins[1].permissions.?[0]);
+    try std.testing.expectEqualStrings("state:set", plugins[1].permissions.?[1]);
+    try std.testing.expectEqualStrings("log:*", plugins[1].permissions.?[2]);
+
+    try std.testing.expectEqualStrings("local", plugins[2].name);
+    try std.testing.expectEqualStrings("./plugins/local", plugins[2].source.?);
+    try std.testing.expectEqual(@as(usize, 0), plugins[2].permissions.?.len);
+}
+
 test "JSON minimal config" {
     const json_content = "{}";
     const parsed = try parseRoot(json_content);

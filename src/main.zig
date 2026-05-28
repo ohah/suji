@@ -445,8 +445,9 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     }
 
     if (config.plugins) |plugin_names| {
-        for (plugin_names) |pname| {
-            const pdir = getPluginDir(allocator, pname) orelse {
+        for (plugin_names) |plugin| {
+            const pname = plugin.name;
+            const pdir = getPluginDirForSpec(allocator, plugin) orelse {
                 std.debug.print("[suji] WARN: plugin '{s}' not found — plugin will be absent from package\n", .{pname});
                 missing_count += 1;
                 continue;
@@ -676,7 +677,8 @@ fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Confi
     // packaged 면 build 스킵 + `<exe_dir>/plugins/<name>/<dylib>` 에서 직접 로드.
     if (packagedExeDir(allocator)) |exe_dir| {
         defer allocator.free(exe_dir);
-        for (plugins) |plugin_name| {
+        for (plugins) |plugin| {
+            const plugin_name = plugin.name;
             std.debug.print("[suji] loading plugin (packaged): {s}\n", .{plugin_name});
             // packaged 의 plugin dir 는 같은 layout — plugins/<name>/<lang>/<entry>
             // 가 없고 dylib 만 평탄. lang 을 모르므로 known 4종 시도.
@@ -697,8 +699,10 @@ fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Confi
                 std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch continue;
                 var path_z: [1024]u8 = undefined;
                 const path_zt = util.nullTerminate(dylib, &path_z);
+                setPluginPermissionPolicy(allocator, registry, plugin);
                 registry.register(plugin_name, path_zt) catch |err| {
                     std.debug.print("[suji] plugin '{s}' load failed: {}\n", .{ plugin_name, err });
+                    continue;
                 };
                 break;
             }
@@ -706,11 +710,12 @@ fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Confi
         return;
     }
 
-    for (plugins) |plugin_name| {
+    for (plugins) |plugin| {
+        const plugin_name = plugin.name;
         std.debug.print("[suji] loading plugin: {s}\n", .{plugin_name});
 
         // suji-plugin.json 읽어서 lang 결정
-        const plugin_dir = getPluginDir(allocator, plugin_name) orelse {
+        const plugin_dir = getPluginDirForSpec(allocator, plugin) orelse {
             std.debug.print("[suji] plugin '{s}' not found\n", .{plugin_name});
             continue;
         };
@@ -736,10 +741,29 @@ fn loadPluginsFromConfig(allocator: std.mem.Allocator, config: *const suji.Confi
         var path_z: [1024]u8 = undefined;
         const path_zt = util.nullTerminate(dylib_path, &path_z);
 
+        setPluginPermissionPolicy(allocator, registry, plugin);
         registry.register(plugin_name, path_zt) catch |err| {
             std.debug.print("[suji] plugin '{s}' load failed: {}\n", .{ plugin_name, err });
+            continue;
         };
     }
+}
+
+fn setPluginPermissionPolicy(allocator: std.mem.Allocator, registry: *suji.BackendRegistry, plugin: suji.Config.Plugin) void {
+    const permissions = plugin.permissions orelse return;
+    var perms = allocator.alloc([]const u8, permissions.len) catch return;
+    defer allocator.free(perms);
+    for (permissions, 0..) |p, i| perms[i] = p;
+    registry.setPluginPermissions(plugin.name, perms) catch |err| {
+        std.debug.print("[suji] plugin '{s}' permission setup failed: {}\n", .{ plugin.name, err });
+    };
+}
+
+fn getPluginDirForSpec(allocator: std.mem.Allocator, plugin: suji.Config.Plugin) ?[]const u8 {
+    if (plugin.source) |source| {
+        return getPluginSourceDir(allocator, plugin.name, source);
+    }
+    return getPluginDir(allocator, plugin.name);
 }
 
 /// 플러그인 디렉토리 탐색: 로컬 → suji 설치 경로 순
@@ -777,6 +801,92 @@ fn getPluginDir(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
     allocator.free(builtin_dir);
 
     return null;
+}
+
+fn getPluginSourceDir(allocator: std.mem.Allocator, name: []const u8, source: []const u8) ?[]const u8 {
+    if (isLocalPluginSource(source)) {
+        const expanded = expandPluginSourcePath(allocator, source) orelse return null;
+        if (pluginManifestExists(allocator, expanded)) return expanded;
+        allocator.free(expanded);
+        return null;
+    }
+
+    const clone_url = pluginGitCloneUrl(allocator, source) orelse return null;
+    defer allocator.free(clone_url);
+    const cache_dir = pluginSourceCacheDir(allocator, source) orelse return null;
+    errdefer allocator.free(cache_dir);
+
+    if (pluginManifestExists(allocator, cache_dir)) {
+        runCmd(allocator, &.{ "git", "-C", cache_dir, "pull", "--ff-only" }) catch |err| {
+            std.debug.print("[suji] plugin '{s}' source update skipped: {}\n", .{ name, err });
+        };
+        return cache_dir;
+    }
+
+    if (std.fs.path.dirname(cache_dir)) |parent| {
+        std.Io.Dir.cwd().createDirPath(runtime.io, parent) catch return null;
+    }
+    runCmd(allocator, &.{ "git", "clone", "--depth=1", clone_url, cache_dir }) catch |err| {
+        std.debug.print("[suji] plugin '{s}' source clone failed: {}\n", .{ name, err });
+        allocator.free(cache_dir);
+        return null;
+    };
+    if (pluginManifestExists(allocator, cache_dir)) return cache_dir;
+    allocator.free(cache_dir);
+    return null;
+}
+
+fn isLocalPluginSource(source: []const u8) bool {
+    return std.fs.path.isAbsolute(source) or
+        std.mem.startsWith(u8, source, ".") or
+        std.mem.startsWith(u8, source, "~");
+}
+
+fn expandPluginSourcePath(allocator: std.mem.Allocator, source: []const u8) ?[]u8 {
+    if (std.mem.eql(u8, source, "~") or std.mem.startsWith(u8, source, "~/")) {
+        const home = runtime.env(if (builtin.os.tag == .windows) "USERPROFILE" else "HOME") orelse return null;
+        const rest = if (source.len == 1) "" else source[1..];
+        return std.fmt.allocPrint(allocator, "{s}{s}", .{ home, rest }) catch null;
+    }
+    return allocator.dupe(u8, source) catch null;
+}
+
+fn pluginGitCloneUrl(allocator: std.mem.Allocator, source: []const u8) ?[]u8 {
+    if (std.mem.startsWith(u8, source, "github.com/")) {
+        return std.fmt.allocPrint(allocator, "https://{s}", .{source}) catch null;
+    }
+    if (std.mem.startsWith(u8, source, "https://github.com/")) {
+        return allocator.dupe(u8, source) catch null;
+    }
+    return null;
+}
+
+fn pluginSourceCacheDir(allocator: std.mem.Allocator, source: []const u8) ?[]u8 {
+    const home = runtime.env(if (builtin.os.tag == .windows) "USERPROFILE" else "HOME") orelse return null;
+    const safe = sanitizePluginSource(allocator, source) orelse return null;
+    defer allocator.free(safe);
+    return std.fmt.allocPrint(allocator, "{s}/.suji/plugins/{s}", .{ home, safe }) catch null;
+}
+
+fn sanitizePluginSource(allocator: std.mem.Allocator, source: []const u8) ?[]u8 {
+    var out = std.ArrayList(u8).empty;
+    defer out.deinit(allocator);
+    for (source) |c| {
+        const ok = (c >= 'a' and c <= 'z') or
+            (c >= 'A' and c <= 'Z') or
+            (c >= '0' and c <= '9') or
+            c == '-' or c == '_' or c == '.';
+        out.append(allocator, if (ok) c else '_') catch return null;
+    }
+    if (out.items.len == 0) out.appendSlice(allocator, "plugin") catch return null;
+    return out.toOwnedSlice(allocator) catch null;
+}
+
+fn pluginManifestExists(allocator: std.mem.Allocator, dir: []const u8) bool {
+    const manifest = std.fmt.allocPrint(allocator, "{s}/suji-plugin.json", .{dir}) catch return false;
+    defer allocator.free(manifest);
+    std.Io.Dir.cwd().access(runtime.io, manifest, .{}) catch return false;
+    return true;
 }
 
 /// suji-plugin.json에서 lang 읽기

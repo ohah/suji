@@ -510,6 +510,10 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //   const db = await sqlite.open(":memory:"); await sqlite.execute(db, "INSERT...VALUES(?)", ["x"])
 //   const rows = await sqlite.query(db, "SELECT * FROM t WHERE n=?", ["x"]); await sqlite.close(db)
 
+// suji.json plugins: "state" 또는 {name, source?, permissions?}
+//   source=로컬 경로 또는 github.com/owner/repo. GitHub source는 ~/.suji/plugins에 clone/pull.
+//   permissions 생략=unrestricted, []=deny-all, exact / "prefix:*" / "*" outbound invoke allowlist.
+
 // TypeScript type-safe — `@suji/node`도 SujiHandlers augment 지원.
 //   await invoke('zig', { cmd: 'greet', name: 'x' }) // res: string 추론
 //   await call('zig', 'greet', { name: 'x' })   // res: string 추론

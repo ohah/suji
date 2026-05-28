@@ -265,6 +265,19 @@ Go 백엔드  → invoke("state:get", {key:"user"}) ──┘
 CLI가 다운로드 + 빌드 + dlopen을 알아서 처리.
 사용자는 플러그인이 어떤 언어로 만들어졌는지 알 필요 없음.
 
+**현재 구현 상태**:
+- 문자열 form: `"state"` → 로컬/내장 `plugins/state` 탐색.
+- 객체 form: `{ "name", "source", "permissions" }` 파싱 완료.
+- `source`는 로컬 경로(`./plugins/x`, `~/x`, `/abs/x`) 또는 GitHub
+  source(`github.com/owner/repo`, `https://github.com/owner/repo`) 지원.
+  GitHub source는 `~/.suji/plugins/<safe-source>`에 shallow clone/pull 후
+  동일한 `suji-plugin.json` + lang 디렉토리 규칙으로 빌드/로드.
+- `permissions`가 있으면 해당 플러그인이 init/handler 실행 중 다른 채널을
+  `core.invoke`할 때 outbound `cmd` allowlist를 적용. 생략 시 기존 문자열
+  플러그인 호환을 위해 unrestricted, `[]`는 deny-all, `"*"`와 `"prefix:*"`
+  지원. 플러그인 내부에서 별도 스레드로 지연 호출하는 경우 caller thread-local
+  컨텍스트가 없어 현재 enforcement 범위 밖.
+
 **suji-plugin.json (플러그인 개발자)**:
 ```json
 {
@@ -345,7 +358,7 @@ plugins/
 구현은 하나의 언어로만 존재 (state는 Zig, 다른 플러그인은 Rust나 Go 가능).
 SDK 래퍼는 각 언어에서 `invoke` 호출을 편하게 감싸주는 얇은 레이어.
 
-**권한 시스템 (나중에)**:
+**권한 시스템**:
 ```json
 {
   "plugins": [

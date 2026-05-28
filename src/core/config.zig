@@ -13,7 +13,7 @@ pub const Config = struct {
     windows: []const Window = &.{Window{}},
     backend: ?SingleBackend = null,
     backends: ?[]const MultiBackend = null,
-    plugins: ?[]const [:0]const u8 = null,
+    plugins: ?[]const Plugin = null,
     asset_dir: [:0]const u8 = "assets",
     frontend: Frontend = .{},
     fs: Fs = .{},
@@ -130,6 +130,13 @@ pub const Config = struct {
         name: [:0]const u8,
         lang: [:0]const u8,
         entry: [:0]const u8,
+    };
+
+    pub const Plugin = struct {
+        name: [:0]const u8,
+        source: ?[:0]const u8 = null,
+        /// null = legacy/unrestricted. [] = explicit deny-all outbound invoke.
+        permissions: ?[]const [:0]const u8 = null,
     };
 
     pub const Frontend = struct {
@@ -419,10 +426,18 @@ pub const Config = struct {
 
         if (root.get("plugins")) |pl_val| {
             if (pl_val == .array) {
-                var list = std.ArrayList([:0]const u8).empty;
+                var list = std.ArrayList(Plugin).empty;
                 for (pl_val.array.items) |item| {
                     if (item == .string) {
-                        list.append(a, dupeStr(a, item.string)) catch continue;
+                        list.append(a, .{ .name = dupeStr(a, item.string) }) catch continue;
+                    } else if (item == .object) {
+                        const obj = item.object;
+                        const name = getStr(obj, "name") orelse continue;
+                        list.append(a, .{
+                            .name = dupeStr(a, name),
+                            .source = if (getStr(obj, "source")) |s| dupeStr(a, s) else null,
+                            .permissions = if (obj.get("permissions")) |v| parseStringList(a, v) else null,
+                        }) catch continue;
                     }
                 }
                 config.plugins = list.toOwnedSlice(a) catch null;
@@ -488,6 +503,16 @@ pub const Config = struct {
         if (self.backends) |bs| return bs.len;
         if (self.backend != null) return 1;
         return 0;
+    }
+
+    fn parseStringList(a: std.mem.Allocator, v: std.json.Value) []const [:0]const u8 {
+        if (v != .array) return &.{};
+        var list = std.ArrayList([:0]const u8).empty;
+        for (v.array.items) |item| {
+            if (item != .string) continue;
+            list.append(a, dupeStr(a, item.string)) catch continue;
+        }
+        return list.toOwnedSlice(a) catch &.{};
     }
 };
 

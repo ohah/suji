@@ -438,6 +438,29 @@ fn freeInvokeResp(reg_api: loader.SujiCore, resp: ?[]const u8) void {
     reg_api.free(@ptrCast(r.ptr));
 }
 
+const PermissionBackend = struct {
+    var core_api: ?*const loader.SujiCore = null;
+
+    fn init(core: ?*const loader.SujiCore) callconv(.c) void {
+        core_api = core;
+    }
+
+    fn handle(_: [*:0]const u8) callconv(.c) ?[*:0]u8 {
+        const api = core_api orelse return null;
+        const channel: [:0]const u8 = "__core__";
+        const request: [:0]const u8 = "{\"cmd\":\"fs:read_text\",\"path\":\"/tmp/a\"}";
+        const resp = api.invoke(@ptrCast(channel.ptr), @ptrCast(request.ptr));
+        return @ptrCast(@constCast(resp));
+    }
+
+    fn free(ptr: ?[*:0]u8) callconv(.c) void {
+        const p = ptr orelse return;
+        if (core_api) |api| api.free(@ptrCast(p));
+    }
+
+    fn destroy() callconv(.c) void {}
+};
+
 test "special_dispatch null이면 __core__ 호출은 빈 {} 반환 (회귀: a0d00d1 이전 동작 보장)" {
     SpecialDispatchSpy.reset();
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
@@ -595,4 +618,81 @@ test "non-special channel은 dispatcher를 거치지 않음 (회귀 방지)" {
     const resp = invokeAsCString(reg.core_api, "zig", "{\"cmd\":\"ping\"}");
     try std.testing.expectEqualStrings("{}", resp.?);
     try std.testing.expectEqual(@as(usize, 0), SpecialDispatchSpy.call_count);
+}
+
+test "plugin permission policy supports exact, prefix wildcard, and deny-all" {
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    defer reg.deinit();
+
+    try reg.setPluginPermissions("analytics", &.{ "state:get", "state:set", "log:*" });
+    try std.testing.expect(reg.canInvokeFrom("analytics", "state", "{\"cmd\":\"state:get\"}"));
+    try std.testing.expect(reg.canInvokeFrom("analytics", "log", "{\"cmd\":\"log:write\"}"));
+    try std.testing.expect(!reg.canInvokeFrom("analytics", "__core__", "{\"cmd\":\"fs:read_text\"}"));
+    try std.testing.expect(!reg.canInvokeFrom("analytics", "state", "{\"cmd\":\"state:delete\"}"));
+
+    // No policy means legacy unrestricted for existing string-form plugins/backends.
+    try std.testing.expect(reg.canInvokeFrom("state", "__core__", "{\"cmd\":\"fs:read_text\"}"));
+    try std.testing.expect(reg.canInvokeFrom(null, "__core__", "{\"cmd\":\"fs:read_text\"}"));
+
+    try reg.setPluginPermissions("deny", &.{});
+    try std.testing.expect(!reg.canInvokeFrom("deny", "state", "{\"cmd\":\"state:get\"}"));
+
+    try reg.setPluginPermissions("all", &.{"*"});
+    try std.testing.expect(reg.canInvokeFrom("all", "__core__", "{\"cmd\":\"fs:read_text\"}"));
+}
+
+test "plugin permission policy gates backend core.invoke calls" {
+    SpecialDispatchSpy.reset();
+    SpecialDispatchSpy.stub_response = "{\"ok\":true}";
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+
+    PermissionBackend.core_api = &reg.core_api;
+    defer PermissionBackend.core_api = null;
+    try reg.backends.put("analytics", .{
+        .name = "analytics",
+        .lib = null,
+        .vtable = .{
+            .init = PermissionBackend.init,
+            .handle_ipc = PermissionBackend.handle,
+            .free = PermissionBackend.free,
+            .destroy = PermissionBackend.destroy,
+        },
+    });
+
+    try reg.setPluginPermissions("analytics", &.{"state:get"});
+    const denied = reg.invoke("analytics", "{}").?;
+    defer reg.freeResponse("analytics", denied);
+    try std.testing.expect(std.mem.indexOf(u8, denied, "plugin permission denied") != null);
+    try std.testing.expectEqual(@as(usize, 0), SpecialDispatchSpy.call_count);
+
+    try reg.setPluginPermissions("analytics", &.{"fs:*"});
+    const allowed = reg.invoke("analytics", "{}").?;
+    defer reg.freeResponse("analytics", allowed);
+    try std.testing.expect(std.mem.indexOf(u8, allowed, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(usize, 1), SpecialDispatchSpy.call_count);
+}
+
+test "main.zig: plugin object source and permission hooks are wired" {
+    const source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(source);
+
+    inline for (.{
+        "fn getPluginDirForSpec(",
+        "fn getPluginSourceDir(",
+        "fn pluginGitCloneUrl(",
+        "\"git\", \"clone\", \"--depth=1\"",
+        "registry.setPluginPermissions(plugin.name, perms)",
+        "plugin.permissions",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
+    }
 }

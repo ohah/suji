@@ -159,6 +159,8 @@ pub const BackendRegistry = struct {
     event_bus: ?*events.EventBus = null,
     /// 채널 → 백엔드 이름 라우팅 테이블
     routes: std.StringHashMap([]const u8),
+    /// plugin name → outbound invoke allowlist. Missing entry means legacy unrestricted.
+    plugin_permissions: std.StringHashMap([]const []const u8),
     /// register 중인 백엔드 이름 (backend_init 호출 중에만 유효)
     registering_backend: ?[]const u8 = null,
     /// 핫 리로드: invoke 중 언로드 방지 (Zig 0.16: std.Io.RwLock)
@@ -202,6 +204,7 @@ pub const BackendRegistry = struct {
             .backends = std.StringHashMap(Backend).init(allocator),
             .allocator = allocator,
             .routes = std.StringHashMap([]const u8).init(allocator),
+            .plugin_permissions = std.StringHashMap([]const []const u8).init(allocator),
             .io = io,
             .core_api = SujiCore{
                 .invoke = coreInvoke,
@@ -257,6 +260,9 @@ pub const BackendRegistry = struct {
         // init 중 register() 콜백에서 이 이름 사용
         self.registering_backend = name;
         defer self.registering_backend = null;
+        const prev = current_invoker;
+        current_invoker = name;
+        defer current_invoker = prev;
         backend.init(&self.core_api);
         try self.backends.put(name, backend);
     }
@@ -270,6 +276,9 @@ pub const BackendRegistry = struct {
         self.rw_lock.lockSharedUncancelable(self.io);
         defer self.rw_lock.unlockShared(self.io);
         const backend = self.get(backend_name) orelse return null;
+        const prev = current_invoker;
+        current_invoker = backend.name;
+        defer current_invoker = prev;
         return backend.invoke(request);
     }
 
@@ -300,6 +309,9 @@ pub const BackendRegistry = struct {
         // 새 백엔드 등록 + 초기화
         self.registering_backend = name;
         defer self.registering_backend = null;
+        const prev = current_invoker;
+        current_invoker = name;
+        defer current_invoker = prev;
         backend.init(&self.core_api);
         try self.backends.put(name, backend);
     }
@@ -311,6 +323,48 @@ pub const BackendRegistry = struct {
         const owned = try self.allocator.dupe(u8, channel);
         errdefer self.allocator.free(owned);
         try self.routes.put(owned, backend);
+    }
+
+    pub fn setPluginPermissions(self: *BackendRegistry, plugin_name: []const u8, permissions: []const []const u8) !void {
+        if (self.plugin_permissions.fetchRemove(plugin_name)) |entry| {
+            freePermissionEntry(self.allocator, entry.key, entry.value);
+        }
+
+        const owned_name = try self.allocator.dupe(u8, plugin_name);
+        errdefer self.allocator.free(owned_name);
+
+        var owned_permissions = try self.allocator.alloc([]const u8, permissions.len);
+        errdefer self.allocator.free(owned_permissions);
+        var copied: usize = 0;
+        errdefer {
+            for (owned_permissions[0..copied]) |p| self.allocator.free(p);
+        }
+        for (permissions, 0..) |permission, i| {
+            owned_permissions[i] = try self.allocator.dupe(u8, permission);
+            copied += 1;
+        }
+
+        try self.plugin_permissions.put(owned_name, owned_permissions);
+    }
+
+    pub fn canInvokeFrom(self: *const BackendRegistry, invoker: ?[]const u8, target_name: []const u8, req_json: []const u8) bool {
+        const caller = invoker orelse return true;
+        const permissions = self.plugin_permissions.get(caller) orelse return true;
+        const requested = extractCmdField(req_json) orelse target_name;
+        for (permissions) |permission| {
+            if (permissionAllows(permission, requested)) return true;
+        }
+        return false;
+    }
+
+    pub fn permissionAllows(permission: []const u8, requested: []const u8) bool {
+        if (std.mem.eql(u8, permission, "*")) return true;
+        if (std.mem.eql(u8, permission, requested)) return true;
+        if (std.mem.endsWith(u8, permission, ":*")) {
+            const prefix = permission[0 .. permission.len - 1];
+            return std.mem.startsWith(u8, requested, prefix);
+        }
+        return false;
     }
 
     /// 특정 백엔드의 라우팅 엔트리 제거
@@ -339,6 +393,12 @@ pub const BackendRegistry = struct {
             self.allocator.free(entry.key_ptr.*);
         }
         self.routes.deinit();
+
+        var perm_iter = self.plugin_permissions.iterator();
+        while (perm_iter.next()) |entry| {
+            freePermissionEntry(self.allocator, entry.key_ptr.*, entry.value_ptr.*);
+        }
+        self.plugin_permissions.deinit();
 
         // embed_runtimes는 프로세스 전역. 마지막 registry가 deinit될 때 비운다.
         if (embed_runtimes_initialized) {
@@ -392,6 +452,12 @@ pub const BackendRegistry = struct {
     fn coreInvoke(backend_name: [*c]const u8, request: [*c]const u8) callconv(.c) [*c]const u8 {
         const reg = global orelse return @ptrCast(@constCast(""));
         const name = std.mem.span(@as([*:0]const u8, @ptrCast(backend_name)));
+        const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
+
+        if (!reg.canInvokeFrom(current_invoker, name, req_span)) {
+            const owned = dupeOwnedResponse(reg.allocator, "{\"error\":\"plugin permission denied\"}") orelse return @ptrCast(@constCast("{}"));
+            return @ptrCast(owned);
+        }
 
         // special channel — main이 inject한 dispatcher. CEF의 cefInvokeHandler와 동일
         // 라우팅을 backend SDK 경로에서도 제공.
@@ -400,7 +466,6 @@ pub const BackendRegistry = struct {
                 std.mem.eql(u8, name, CHANNEL_FANOUT) or
                 std.mem.eql(u8, name, CHANNEL_CHAIN))
             {
-                const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
                 var resp_buf: [16384]u8 = undefined;
                 const out = dispatch(name, req_span, &resp_buf) orelse return @ptrCast(@constCast("{}"));
                 const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(@constCast("{}"));
@@ -424,7 +489,6 @@ pub const BackendRegistry = struct {
         // 임베드 런타임 폴백 (Node.js, 향후 Python/Lua 등)
         if (embed_runtimes_initialized) {
             if (embed_runtimes.get(name)) |rt| {
-                const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
                 var ch_buf: [256]u8 = undefined;
                 const channel = extractCmdField(req_span) orelse name;
                 const len = @min(channel.len, ch_buf.len - 1);
@@ -559,6 +623,13 @@ pub const BackendRegistry = struct {
 };
 
 var quit_handler: ?*const fn () void = null;
+threadlocal var current_invoker: ?[]const u8 = null;
+
+fn freePermissionEntry(allocator: std.mem.Allocator, key: []const u8, permissions: []const []const u8) void {
+    allocator.free(key);
+    for (permissions) |permission| allocator.free(permission);
+    allocator.free(permissions);
+}
 
 /// 플랫폼 문자열 상수 — loader / SDK / tests가 동일 문자열 공유.
 /// 데스크톱 macOS/Linux/Windows + 모바일 iOS/Android. 그 외 OS는 컴파일 단계 에러.
