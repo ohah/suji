@@ -1072,10 +1072,13 @@ Suji 코어 (Zig)
 - [x] 이벤트 루프 공존 (tokio + Go runtime + Zig, 충돌 없음)
 - [x] Zig 백엔드도 dlopen (exportApp으로 C ABI 자동 생성)
 - [x] Zig→Rust, Zig→Go 크로스 호출 (chain/fanout IPC 경유로 동작)
-- [ ] 공유 상태 관리
+- [x] 공유 상태 관리 — 첫 공식 `plugins/state` 로 완료. Zig 플러그인이
+      HashMap+Mutex+JSON 영속성을 소유하고 JS/Rust/Go/Node 래퍼가 동일
+      `state:*` 와이어를 사용. `state:set` 은 `state:{key}` EventBus 이벤트를
+      발행해 여러 창/백엔드가 구독 가능.
 
 **검증 결과**:
-- 총 141개+ 테스트 (유닛 + 통합 + 스트레스 + CEF IPC)
+- 총 878개 테스트(현재 `zig build test`) + 플러그인 래퍼/e2e 하니스
 - Zig + Rust(tokio) + Go(goroutine) 한 프로세스 동시 로드
 - CHAOS 테스트: 20개 동시 호출 (직접+크로스+협업+팬아웃+체인)
 - RAPID FIRE: 100개 동시 핑 (3개 백엔드)
