@@ -603,6 +603,20 @@ pub fn build(b: *std.Build) void {
     // Unit tests
     const test_step = b.step("test", "Run unit tests");
 
+    // Public C backend header smoke test. The header has no Zig import path, so
+    // compile it as C syntax to catch ABI declaration drift.
+    if (os_tag != .windows) {
+        const c_header_smoke = b.addSystemCommand(&.{
+            "cc",
+            "-std=c11",
+            "-fsyntax-only",
+            "-Iinclude",
+            "tests/fixtures/suji_header_smoke.c",
+        });
+        c_header_smoke.setCwd(b.path("."));
+        test_step.dependOn(&c_header_smoke.step);
+    }
+
     // Loader tests
     const loader_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/loader_test.zig"),

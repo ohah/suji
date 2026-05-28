@@ -61,7 +61,7 @@ dylib으로 빌드, `suji.json` `plugins: ["my-plugin"]`에 등록. 5 SDK wrappe
 plugins/my-plugin/
 ├── zig/                    # plugin 본체 (Zig)
 │   ├── build.zig
-│   └── src/main.zig        # plugin_init, plugin_handle_ipc, plugin_destroy
+│   └── src/main.zig        # backend_init, backend_handle_ipc, backend_free, backend_destroy
 ├── rust/                   # 5 SDK wrapper (선택)
 ├── go/
 ├── node/
@@ -85,12 +85,16 @@ plugins/my-plugin/
 backend dlopen과 같은 entry:
 
 ```zig
-export fn plugin_init(...) callconv(.c) c_int { ... }
-export fn plugin_handle_ipc(channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) [*:0]const u8 { ... }
-export fn plugin_destroy() callconv(.c) void { ... }
+export fn backend_init(core: ?*const SujiCore) callconv(.c) void { ... }
+export fn backend_handle_ipc(request: [*:0]const u8) callconv(.c) ?[*:0]u8 { ... }
+export fn backend_free(ptr: ?[*:0]u8) callconv(.c) void { ... }
+export fn backend_destroy() callconv(.c) void { ... }
 ```
 
 → 5 SDK가 `suji.invoke('my-channel', request)` 같이 호출.
+
+C/C++ 플러그인은 `include/suji.h`를 include하면 동일 ABI와 `WindowApi` v1 raw
+dispatcher 선언을 사용할 수 있다.
 
 ## OS native API의 코드 위치 (참고)
 

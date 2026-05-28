@@ -698,6 +698,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           기능보존 실증. (preload.js / contextBridge 자체는 **비제공**)
     - [ ] (backlog) 진짜 isolated-world — 별도 V8 컨텍스트에 bridge 두고 메인 월드엔
           frozen 프록시만 노출(pre-bind XSS 도 차단). 위 frozen 하드닝의 상위 단계.
+          2026-05-28 조사: 현재 CEF C API에는 `cef_register_extension`과
+          `cef_v8_context_t::eval`만 보이고, Electron `contextBridge`처럼 world id를
+          지정해 메인 월드 프록시를 노출하는 API는 확인되지 않음. 별도 구현은 Chrome
+          extension/content-script 경로 또는 CDP 기반 주입 설계가 필요하므로 현재 구현
+          상태는 메인 월드 frozen bridge로 유지.
     - [x] **macOS App Sandbox 인프라** — `suji build --sandbox` / `SUJI_SANDBOX` 옵션.
           `BundleOptions.sandbox` (기본 false) → `codesignWithEntitlements` 가
           `assets/entitlements/{,sandbox/}<helper>.plist` 서브디렉토리 선택. 루트 5개=
@@ -794,7 +799,8 @@ suji dev
   - [x] Rust: `crates/suji-rs` (#[suji::handle], export_handlers!, invoke/send/on/off)
   - [x] Go: `sdks/suji-go` (suji.Bind, Invoke/Send/On/Off, bridge.c로 EventBus 연결)
   - [x] Zig: `src/core/app.zig` (suji.app().handle(), exportApp(), req.invoke/send)
-  - [ ] C: `suji.h` 헤더
+  - [x] C: `include/suji.h` 헤더 — dlopen backend/plugin C ABI + WindowApi v1
+        raw dispatcher 선언, C11 syntax smoke 테스트
   - [ ] SDK crates.io / go pkg 배포
 - [x] 각 언어별 예제 프로젝트 (examples/zig-backend, rust-backend, go-backend, multi-backend)
 - [x] 자동 라우팅 (register): 백엔드가 채널을 등록하면 프론트엔드에서 채널명만으로 호출 가능

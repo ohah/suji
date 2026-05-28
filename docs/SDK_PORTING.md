@@ -24,23 +24,33 @@ Suji 백엔드는 두 가지 모델 중 하나로 동작한다:
 `src/backends/loader.zig:7` `pub const SujiCore = extern struct`:
 
 ```c
+typedef struct SujiWindowApi SujiWindowApi;
+
 typedef struct SujiCore {
     const char* (*invoke)(const char* backend, const char* request);
     void        (*free)(const char* response);
     void        (*emit)(const char* channel, const char* data);
     uint64_t    (*on)(const char* channel, void (*cb)(const char*, const char*, void*), void* arg);
     void        (*off)(uint64_t listener_id);
-    void        (*register)(const char* channel);
+    void        (*register_channel)(const char* channel); // C keyword `register` 회피용 이름
     const void* (*get_io)(void);                   // Zig 전용
     void        (*quit)(void);
     const char* (*platform)(void);                  // 0-term "macos"|"linux"|"windows"
     void        (*emit_to)(uint32_t window_id, const char* channel, const char* data);
+    const SujiWindowApi* (*get_window_api)(void);   // NULL 가능
 } SujiCore;
+
+struct SujiWindowApi {
+    const char* (*request_json)(const char* request_json);
+    void        (*free_response)(const char* response);
+};
 ```
 
 - **모든 문자열은 0-terminated UTF-8.**
 - `invoke` 응답은 SDK가 free 안 함 — Suji core가 자기 allocator로 관리. SDK는 **즉시 사본을 만든 뒤** 반환된 포인터 수명에 의존하지 말 것.
 - `on` 콜백은 코어 스레드(CEF UI 스레드)에서 호출됨 — SDK가 자체 스레드/event loop으로 옮겨야 안전.
+- C backend/plugin용 공개 헤더는 `include/suji.h`. `register`는 C keyword라 헤더에서는
+  같은 오프셋의 필드를 `register_channel`로 노출한다.
 
 ---
 

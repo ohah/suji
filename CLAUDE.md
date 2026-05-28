@@ -371,6 +371,7 @@ suji.platform                                                // "macos" | "linux
 //   remaining view/recreate를 E2E로 검증. 단순 동적 hide/show는 setViewVisible 사용.
 // Zig plugin/backend low-level: suji.getWindowApi() → WindowApi? (request_json/free_response).
 //   windows.*는 주입된 WindowApi를 우선 사용하고 없으면 invoke("__core__")로 폴백.
+// C plugin/backend low-level: include/suji.h declares SujiCore + WindowApi v1.
 
 // import { clipboard, shell, dialog } from '@suji/api';
 // await clipboard.readText() / writeText(text) / clear()                  (macOS NSPasteboard / Linux GTK text / Windows CF_UNICODETEXT)

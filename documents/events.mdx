@@ -63,7 +63,7 @@ macOS는 창이 모두 닫혀도 앱은 dock에 유지 (Electron과 동일). 나
 | `MessageChannelMain` | **미지원 (V1)** |
 | `remote` 모듈 | **미지원** (Electron도 deprecated) |
 | `preload.js` | **미지원** — Suji 렌더러는 Node 노출 자체가 없음 |
-| `contextBridge` | **미제공** — 대신 `contextIsolation: true`면 `Object.freeze` 프록시 자동 주입 (roadmap) |
+| `contextBridge` | **미제공** — `window.__suji__`는 메인 월드 frozen bridge로 하드닝, 진짜 isolated-world는 roadmap |
 
 ## Electron과의 차이 (주요)
 

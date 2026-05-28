@@ -126,6 +126,6 @@ const text = await fs.readFile('/tmp/suji/hello.txt');
 | `process.platform` | `platform` (`"macos"` not `"darwin"`) |
 | `BrowserWindow.getAllWindows()` | `core({cmd:"core_info"})` (추후 별도 API 예정) |
 | `preload.js` | **미제공** — CEF 환경이라 Node API 노출 X |
-| `contextBridge` | **미제공** — 대신 `contextIsolation: true` 옵션 (roadmap) |
+| `contextBridge` | **미제공** — `window.__suji__`는 메인 월드 frozen bridge로 하드닝, 진짜 isolated-world는 roadmap |
 
 자세한 차이는 [`events.mdx`](./events.mdx#electron과의-차이) 참조.
