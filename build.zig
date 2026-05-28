@@ -35,6 +35,14 @@ fn firstExistingAbsolute(b: *std.Build, candidates: []const []const u8) []const 
     return candidates[0];
 }
 
+fn firstExistingAbsoluteOrNull(b: *std.Build, candidates: []const []const u8) ?[]const u8 {
+    for (candidates) |path| {
+        if (!absolutePathExists(b, path)) continue;
+        return path;
+    }
+    return null;
+}
+
 fn absolutePathExists(b: *std.Build, path: []const u8) bool {
     std.Io.Dir.accessAbsolute(b.graph.io, path, .{}) catch return false;
     return true;
@@ -454,6 +462,45 @@ pub fn build(b: *std.Build) void {
             root_module.addLibraryPath(.{ .cwd_relative = node_path });
             root_module.linkSystemLibrary("node", .{});
         }
+    }
+
+    // LuaJIT 임베딩 — opt-in. 기본 빌드는 새 동적 의존성을 만들지 않는다.
+    // Phase 5.5 Lua 1차 슬라이스는 macOS/Linux 개발 환경에서 `zig build -Dlua`
+    // 로 켠다. Windows 런타임/패키징은 별도 후속이라 여기서는 명시적으로 제외.
+    const lua_requested = b.option(bool, "lua", "Enable embedded LuaJIT backend runtime") orelse false;
+    if (lua_requested and os_tag == .windows) {
+        @panic("-Dlua is not wired for Windows yet");
+    }
+    const lua_include_dir = if (lua_requested) firstExistingAbsoluteOrNull(b, &.{
+        "/opt/homebrew/include/luajit-2.1",
+        "/usr/local/include/luajit-2.1",
+        "/usr/include/luajit-2.1",
+        "/usr/include/lua5.1",
+    }) else null;
+    const lua_lib_path = if (lua_requested) firstExistingAbsoluteOrNull(b, &.{
+        "/opt/homebrew/lib/libluajit-5.1.dylib",
+        "/opt/homebrew/lib/libluajit-5.1.a",
+        "/usr/local/lib/libluajit-5.1.dylib",
+        "/usr/local/lib/libluajit-5.1.a",
+        "/usr/lib/x86_64-linux-gnu/libluajit-5.1.so",
+        "/usr/lib/x86_64-linux-gnu/libluajit-5.1.a",
+        "/usr/lib64/libluajit-5.1.so",
+        "/usr/lib64/libluajit-5.1.a",
+        "/usr/lib/libluajit-5.1.so",
+        "/usr/lib/libluajit-5.1.a",
+    }) else null;
+    const lua_lib_dir = if (lua_lib_path) |p| std.fs.path.dirname(p) else null;
+    if (lua_requested and (lua_include_dir == null or lua_lib_path == null or lua_lib_dir == null)) {
+        @panic("-Dlua requires LuaJIT headers and libluajit-5.1 (for example: brew install luajit or apt install libluajit-5.1-dev)");
+    }
+    const lua_enabled = lua_requested and lua_include_dir != null and lua_lib_dir != null;
+    const lua_options = b.addOptions();
+    lua_options.addOption(bool, "lua_enabled", lua_enabled);
+    root_module.addImport("lua_config", lua_options.createModule());
+    if (lua_enabled) {
+        root_module.addIncludePath(.{ .cwd_relative = lua_include_dir.? });
+        root_module.addLibraryPath(.{ .cwd_relative = lua_lib_dir.? });
+        root_module.linkSystemLibrary("luajit-5.1", .{});
     }
 
     const exe = b.addExecutable(.{
@@ -1142,6 +1189,43 @@ pub fn build(b: *std.Build) void {
     node_test_mod.addImport("node", node_module);
     const node_test = b.addTest(.{ .root_module = node_test_mod });
     dependOnTestWithProjectCwd(b, test_step, node_test);
+
+    // Lua runtime tests. Default test path keeps lua_config=false so CI does not
+    // require LuaJIT; `zig build -Dlua` separately compiles the real C boundary.
+    const lua_test_opts = b.addOptions();
+    lua_test_opts.addOption(bool, "lua_enabled", false);
+    const lua_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/lua_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const lua_module = b.createModule(.{
+        .root_source_file = b.path("src/platform/lua.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lua_module.addImport("lua_config", lua_test_opts.createModule());
+    lua_module.addImport("runtime", runtime_module);
+    lua_test_mod.addImport("lua", lua_module);
+    const lua_test = b.addTest(.{ .root_module = lua_test_mod });
+    dependOnTestWithProjectCwd(b, test_step, lua_test);
+
+    if (lua_enabled) {
+        const lua_runtime_test_opts = b.addOptions();
+        lua_runtime_test_opts.addOption(bool, "lua_enabled", true);
+        const lua_runtime_test_mod = b.createModule(.{
+            .root_source_file = b.path("src/platform/lua.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        lua_runtime_test_mod.addImport("lua_config", lua_runtime_test_opts.createModule());
+        lua_runtime_test_mod.addImport("runtime", runtime_module);
+        lua_runtime_test_mod.addIncludePath(.{ .cwd_relative = lua_include_dir.? });
+        lua_runtime_test_mod.addLibraryPath(.{ .cwd_relative = lua_lib_dir.? });
+        lua_runtime_test_mod.linkSystemLibrary("luajit-5.1", .{});
+        const lua_runtime_test = b.addTest(.{ .root_module = lua_runtime_test_mod });
+        dependOnTestWithProjectCwd(b, test_step, lua_runtime_test);
+    }
 
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{

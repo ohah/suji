@@ -797,6 +797,24 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
 BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runtimes` 테이블로 관리
 (main이 `registerEmbedRuntime("node", ...)`로 주입).
 
+### Lua 임베드 런타임 (Phase 5.5 1차)
+
+`zig build -Dlua`에서 LuaJIT(`libluajit-5.1`) 기반 Lua backend가 활성화된다.
+기본 빌드는 런타임 의존성을 추가하지 않기 위해 `lua_enabled=false`이며,
+`lang:"lua"` backend는 실행 시 "rebuild with -Dlua" 메시지로 graceful skip.
+
+현재 Lua ABI는 raw JSON string in/out:
+
+```lua
+suji.handle("ping", function(request_json)
+  return '{"msg":"pong"}'
+end)
+```
+
+구현 범위: `src/platform/lua.zig`, `main.zig` load/route/teardown, schema
+`lang:"lua"`, `examples/lua-backend`. `cjson` 번들, 정적 liblua, 여러 Lua
+runtime 동시 map, LuaRocks/배포 번들링은 후속.
+
 검증:
 - 깊은 재귀 체인(node→zig→rust→go→node→... 최대 depth=40, 10사이클)
 - 다른 스레드 재진입 (`rust-thread-node` + `node-thread-deadlock`)

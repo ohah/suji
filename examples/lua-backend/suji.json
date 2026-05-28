@@ -1,0 +1,25 @@
+{
+  "$schema": "../../suji.schema.json",
+  "app": {
+    "name": "Suji Lua Backend",
+    "version": "0.1.0"
+  },
+  "windows": [
+    {
+      "name": "main",
+      "title": "Suji Lua Backend",
+      "width": 900,
+      "height": 640,
+      "debug": true
+    }
+  ],
+  "backend": {
+    "lang": "lua",
+    "entry": "backends/lua/main.lua"
+  },
+  "frontend": {
+    "dir": "frontend",
+    "dev_url": "http://localhost:5173",
+    "dist_dir": "frontend/dist"
+  }
+}

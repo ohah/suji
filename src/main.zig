@@ -19,6 +19,9 @@ const Watcher = @import("platform/watcher.zig").Watcher;
 const node_mod = @import("platform/node.zig");
 const NodeRuntime = node_mod.NodeRuntime;
 const node_enabled = node_mod.node_enabled;
+const lua_mod = @import("platform/lua.zig");
+const LuaRuntime = lua_mod.LuaRuntime;
+const lua_enabled = lua_mod.lua_enabled;
 const builtin = @import("builtin");
 // bundle_macos 의 모든 참조(createBundle/BundleOptions/notarizeBundle/
 // createDmg)가 runBuild 의 `switch (comptime builtin.os.tag) { .macos =>
@@ -368,31 +371,31 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         std.debug.print("[suji] frontend build failed: {}\n", .{err});
     };
 
-    // Backend / plugin dylib + Node entry path 수집 (OS-agnostic).
+    // Backend / plugin dylib + embedded-runtime entry path 수집 (OS-agnostic).
     // 각 OS packaging 함수가 BackendArtifact 슬라이스를 받아 stage 에 평탄 복사.
     var backends_list = std.ArrayList(package_desktop.BackendArtifact).empty;
     defer backends_list.deinit(allocator);
     defer for (backends_list.items) |a| {
-        if (!a.is_node) allocator.free(@constCast(a.source_path));
+        if (!a.is_source_dir) allocator.free(@constCast(a.source_path));
     };
     var plugins_list = std.ArrayList(package_desktop.BackendArtifact).empty;
     defer plugins_list.deinit(allocator);
-    // is_node filter — 현재 plugins 는 항상 non-Node 라 모두 free 대상이지만,
-    // 미래 Node plugin 지원 추가 시 entry path 가 heap 이 아닐 수 있어 가드.
+    // is_source_dir filter — 현재 plugins 는 항상 dylib 라 모두 free 대상이지만,
+    // 미래 embedded plugin 지원 추가 시 entry path 가 heap 이 아닐 수 있어 가드.
     defer for (plugins_list.items) |a| {
-        if (!a.is_node) allocator.free(@constCast(a.source_path));
+        if (!a.is_source_dir) allocator.free(@constCast(a.source_path));
     };
     var missing_count: usize = 0;
 
     if (config.isMultiBackend()) {
         if (config.backends) |bes| {
             for (bes) |be| {
-                if (std.mem.eql(u8, be.lang, "node")) {
+                if (std.mem.eql(u8, be.lang, "node") or std.mem.eql(u8, be.lang, "lua")) {
                     try backends_list.append(allocator, .{
                         .name = be.name,
                         .lang = be.lang,
-                        .source_path = be.entry,
-                        .is_node = true,
+                        .source_path = embeddedBackendSourceDir(be.lang, be.entry),
+                        .is_source_dir = true,
                     });
                     continue;
                 }
@@ -411,17 +414,17 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     .name = be.name,
                     .lang = be.lang,
                     .source_path = dylib,
-                    .is_node = false,
+                    .is_source_dir = false,
                 });
             }
         }
     } else if (config.backend) |be| {
-        if (std.mem.eql(u8, be.lang, "node")) {
+        if (std.mem.eql(u8, be.lang, "node") or std.mem.eql(u8, be.lang, "lua")) {
             try backends_list.append(allocator, .{
                 .name = be.lang,
                 .lang = be.lang,
-                .source_path = be.entry,
-                .is_node = true,
+                .source_path = embeddedBackendSourceDir(be.lang, be.entry),
+                .is_source_dir = true,
             });
         } else if (getDylibPath(allocator, be.lang, be.entry, true)) |dylib| {
             std.Io.Dir.cwd().access(runtime.io, dylib, .{}) catch {
@@ -433,7 +436,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                 .name = be.lang,
                 .lang = be.lang,
                 .source_path = dylib,
-                .is_node = false,
+                .is_source_dir = false,
             });
         } else |_| {
             std.debug.print("[suji] WARN: backend lang={s} unsupported — backend will be absent from package\n", .{be.lang});
@@ -472,7 +475,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                 .name = pname,
                 .lang = plang,
                 .source_path = dylib,
-                .is_node = false,
+                .is_source_dir = false,
             }) catch {
                 allocator.free(dylib);
                 missing_count += 1;
@@ -793,12 +796,20 @@ fn readPluginLang(allocator: std.mem.Allocator, plugin_dir: []const u8) ?[]const
     return allocator.dupe(u8, lang_val.string) catch null;
 }
 
+fn embeddedBackendSourceDir(lang: []const u8, entry: []const u8) []const u8 {
+    if (std.mem.eql(u8, lang, "lua") and std.mem.endsWith(u8, entry, ".lua")) {
+        return std.fs.path.dirname(entry) orelse ".";
+    }
+    return entry;
+}
+
 // ============================================
 // 백엔드 빌드/로드
 // ============================================
 
-/// Node 런타임 글로벌 참조 (dev 모드에서 정리용)
+/// Embedded 런타임 글로벌 참조 (dev 모드에서 정리용)
 var g_node_runtime: ?*NodeRuntime = null;
+var g_lua_runtime: ?*LuaRuntime = null;
 
 fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, registry: *suji.BackendRegistry, release: bool) !void {
     // packaged 환경: build 스킵 + packaged dylib 경로에서 직접 로드.
@@ -813,6 +824,14 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
                         defer allocator.free(node_dir);
                         startNodeBackend(allocator, node_dir) catch |err| {
                             std.debug.print("[suji] node start failed for {s}: {}\n", .{ be.name, err });
+                        };
+                        continue;
+                    }
+                    if (std.mem.eql(u8, be.lang, "lua")) {
+                        const lua_dir = std.fmt.allocPrintSentinel(allocator, "{s}/backends/{s}", .{ exe_dir, be.name }, 0) catch continue;
+                        defer allocator.free(lua_dir);
+                        startLuaBackend(allocator, be.name, lua_dir) catch |err| {
+                            std.debug.print("[suji] lua start failed for {s}: {}\n", .{ be.name, err });
                         };
                         continue;
                     }
@@ -831,6 +850,14 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
                 defer allocator.free(node_dir);
                 startNodeBackend(allocator, node_dir) catch |err| {
                     std.debug.print("[suji] node start failed: {}\n", .{err});
+                };
+                return;
+            }
+            if (std.mem.eql(u8, be.lang, "lua")) {
+                const lua_dir = std.fmt.allocPrintSentinel(allocator, "{s}/backends/{s}", .{ exe_dir, be.lang }, 0) catch return;
+                defer allocator.free(lua_dir);
+                startLuaBackend(allocator, be.lang, lua_dir) catch |err| {
+                    std.debug.print("[suji] lua start failed: {}\n", .{err});
                 };
                 return;
             }
@@ -861,6 +888,12 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
                     };
                     continue;
                 }
+                if (std.mem.eql(u8, be.lang, "lua")) {
+                    startLuaBackend(allocator, be.name, be.entry) catch |err| {
+                        std.debug.print("[suji] lua start failed for {s}: {}\n", .{ be.name, err });
+                    };
+                    continue;
+                }
 
                 const path = getDylibPath(allocator, be.lang, be.entry, release) catch continue;
                 defer allocator.free(path);
@@ -881,6 +914,12 @@ fn loadBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Conf
         if (std.mem.eql(u8, be.lang, "node")) {
             startNodeBackend(allocator, be.entry) catch |err| {
                 std.debug.print("[suji] node start failed: {}\n", .{err});
+            };
+            return;
+        }
+        if (std.mem.eql(u8, be.lang, "lua")) {
+            startLuaBackend(allocator, be.lang, be.entry) catch |err| {
+                std.debug.print("[suji] lua start failed: {}\n", .{err});
             };
             return;
         }
@@ -932,6 +971,60 @@ fn startNodeBackend(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
             std.debug.print("[suji] node embed registration failed: {}\n", .{err});
         };
     }
+}
+
+fn luaEntryCandidate(allocator: std.mem.Allocator, entry_arg: []const u8) ![]u8 {
+    if (entry_arg.len == 0) return error.InvalidLuaEntry;
+    if (std.mem.endsWith(u8, entry_arg, ".lua")) {
+        return allocator.dupe(u8, entry_arg);
+    }
+    return std.fs.path.join(allocator, &.{ entry_arg, "main.lua" });
+}
+
+fn registerLuaRoute(backend_name: []const u8, channel: []const u8) void {
+    const g = suji.BackendRegistry.global orelse return;
+    if (g.routes.getPtr(channel)) |existing_ptr| {
+        if (std.mem.eql(u8, existing_ptr.*, backend_name)) return;
+        if (existing_ptr.*.len == 0) return;
+        std.debug.print("[suji] WARN: channel '{s}' registered by multiple backends ('{s}', '{s}') — auto-routing disabled, use {{ target: \"<backend>\" }} to disambiguate\n", .{ channel, existing_ptr.*, backend_name });
+        existing_ptr.* = "";
+        return;
+    }
+    g.putRoute(channel, backend_name) catch |err| {
+        std.debug.print("[suji] lua route registration failed for '{s}': {}\n", .{ channel, err });
+    };
+}
+
+fn startLuaBackend(allocator: std.mem.Allocator, backend_name: [:0]const u8, entry: [:0]const u8) !void {
+    if (!lua_enabled) {
+        std.debug.print("[suji] Lua backend not available (rebuild Suji with -Dlua and LuaJIT installed)\n", .{});
+        return;
+    }
+
+    const candidate = try luaEntryCandidate(allocator, entry);
+    defer allocator.free(candidate);
+    const abs_entry = try std.Io.Dir.cwd().realPathFileAlloc(runtime.io, candidate, allocator);
+    defer allocator.free(abs_entry);
+
+    const entry_lua = try allocator.dupeZ(u8, abs_entry);
+    errdefer allocator.free(entry_lua);
+    const owned_name = try allocator.dupeZ(u8, backend_name);
+    errdefer allocator.free(owned_name);
+
+    const rt = try allocator.create(LuaRuntime);
+    errdefer allocator.destroy(rt);
+    rt.* = LuaRuntime.init(allocator, owned_name, entry_lua, &registerLuaRoute, true);
+    errdefer rt.shutdown();
+
+    try rt.start();
+    g_lua_runtime = rt;
+
+    suji.BackendRegistry.registerEmbedRuntime(owned_name, .{
+        .invoke = LuaRuntime.invokeC,
+        .free_response = LuaRuntime.freeResponseC,
+    }) catch |err| {
+        std.debug.print("[suji] lua embed registration failed for {s}: {}\n", .{ owned_name, err });
+    };
 }
 
 fn nodeRunEntryCandidate(allocator: std.mem.Allocator, entry_arg: []const u8) ![]u8 {
@@ -1006,6 +1099,22 @@ test "nodeRunEntryCandidate resolves file and directory forms" {
     try std.testing.expectError(error.InvalidNodeEntry, nodeRunEntryCandidate(allocator, ""));
 }
 
+test "luaEntryCandidate resolves file and directory forms" {
+    const allocator = std.testing.allocator;
+
+    const file = try luaEntryCandidate(allocator, "main.lua");
+    defer allocator.free(file);
+    try std.testing.expectEqualStrings("main.lua", file);
+
+    const dir = try luaEntryCandidate(allocator, "backends/lua");
+    defer allocator.free(dir);
+    try std.testing.expect(std.mem.endsWith(u8, dir, "main.lua"));
+    try std.testing.expect(std.mem.indexOf(u8, dir, "backends") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dir, "lua") != null);
+
+    try std.testing.expectError(error.InvalidLuaEntry, luaEntryCandidate(allocator, ""));
+}
+
 fn buildBackendsFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {
     if (config.isMultiBackend()) {
         if (config.backends) |backends| {
@@ -1061,6 +1170,10 @@ fn buildBackendByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []c
         defer allocator.free(abs_entry);
         const npm_cmd = if (release) &[_][]const u8{ "npm", "install", "--production" } else &[_][]const u8{ "npm", "install" };
         try runCmdInDir(npm_cmd, abs_entry);
+    } else if (std.mem.eql(u8, lang, "lua")) {
+        // Lua 백엔드: 빌드 단계 없음. startLuaBackend가 main.lua 존재 여부와
+        // LuaJIT 활성화 여부를 런타임에서 검증한다.
+        return;
     } else if (std.mem.eql(u8, lang, "zig")) {
         // Zig 백엔드는 자체 build.zig가 있어야 함
         // --prefix로 빌드 결과물을 entry 디렉토리에 설치
@@ -1745,6 +1858,11 @@ fn openWindow(
         allocator.destroy(rt);
         g_node_runtime = null;
     }
+    if (g_lua_runtime) |rt| {
+        rt.shutdown();
+        allocator.destroy(rt);
+        g_lua_runtime = null;
+    }
 
     // cef.shutdown() 전에 정리: user close → OnBeforeClose → wm.markClosedExternal로
     // 이미 destroyed=true 세팅된 상태. WM.deinit은 살아있는 창에만 native.destroyWindow를
@@ -1795,6 +1913,19 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
             @memcpy(response_buf[0..len], resp[0..len]);
             NodeRuntime.freeResponse(resp);
             return response_buf[0..len];
+        }
+    }
+
+    if (lua_enabled) {
+        if (g_lua_runtime) |rt| {
+            const lua_channel = util.extractJsonString(data, "cmd") orelse channel;
+            if (rt.invoke(lua_channel, data)) |resp| {
+                const body = std.mem.span(resp);
+                const len = @min(body.len, response_buf.len);
+                @memcpy(response_buf[0..len], body[0..len]);
+                LuaRuntime.freeResponseC(resp);
+                return response_buf[0..len];
+            }
         }
     }
 

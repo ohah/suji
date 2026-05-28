@@ -207,7 +207,7 @@
       "properties": {
         "lang": {
           "type": "string",
-          "enum": ["zig", "rust", "go", "node"],
+          "enum": ["zig", "rust", "go", "node", "lua"],
           "default": "zig",
           "description": "백엔드 언어"
         },
@@ -231,7 +231,7 @@
           },
           "lang": {
             "type": "string",
-            "enum": ["zig", "rust", "go", "node"],
+            "enum": ["zig", "rust", "go", "node", "lua"],
             "description": "백엔드 언어"
           },
           "entry": {

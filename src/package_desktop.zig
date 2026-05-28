@@ -492,14 +492,14 @@ pub fn packageLinuxDebAt(
 ///
 /// Linux 와 달리 Windows 는 bash/cp/zip 의존 제거 — PowerShell Compress-Archive
 /// 가 OS native. signtool 도 정식 Windows 도구로 PATH 에 있어야.
-/// 백엔드/플러그인 dylib 아티팩트 — packageWindows/Linux/macOS 가 stage 로 복사.
-/// is_node = true 면 source_path 는 디렉토리(main.js + package.json + node_modules)
+/// 백엔드/플러그인 아티팩트 — packageWindows/Linux/macOS 가 stage 로 복사.
+/// is_source_dir = true 면 source_path 는 embedded runtime 디렉토리(Node/Lua 등)를
 /// 통째 복사. 그렇지 않으면 단일 dylib 파일.
 pub const BackendArtifact = struct {
     name: []const u8,
     lang: []const u8,
     source_path: []const u8,
-    is_node: bool,
+    is_source_dir: bool,
 };
 
 /// stage 디렉토리에 빈 `.suji-packaged` sentinel 작성 — runtime 의 packagedExeDir
@@ -516,7 +516,8 @@ pub fn writePackagedSentinel(allocator: std.mem.Allocator, root_dir: []const u8)
 }
 
 /// backends/plugins dylib 들을 `<root>/backends/<name>/<basename>` 와
-/// `<root>/plugins/<name>/<basename>` 로 평탄 배치. Node entry 면 디렉토리 통째.
+/// `<root>/plugins/<name>/<basename>` 로 평탄 배치. embedded runtime entry 면
+/// 디렉토리 통째 복사.
 /// runtime path resolution 이 packaged 환경에서 동일 layout 을 기대.
 /// (root = Windows/Linux 의 stage, macOS .app/Contents/Resources)
 pub fn stageBackendArtifacts(
@@ -533,9 +534,9 @@ pub fn stageBackendArtifacts(
             const be_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ be_root, art.name });
             defer allocator.free(be_dir);
             try Dir.cwd().createDirPath(runtime.io, be_dir);
-            if (art.is_node) {
+            if (art.is_source_dir) {
                 copyDirContents(allocator, art.source_path, be_dir) catch |err| {
-                    std.debug.print("[suji] node backend '{s}' copy failed: {s}\n", .{ art.name, @errorName(err) });
+                    std.debug.print("[suji] embedded backend '{s}' copy failed: {s}\n", .{ art.name, @errorName(err) });
                 };
             } else {
                 const basename = std.fs.path.basename(art.source_path);

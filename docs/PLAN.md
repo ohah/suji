@@ -1016,17 +1016,33 @@ app.on("ready", () => {
 
 **Lua 임베드**:
 
-- [ ] Lua 런타임 빌드 (정적 링크 `liblua.a` 수백 KB, 또는 LuaJIT)
-- [ ] `src/platform/lua.zig` — `luaL_newstate`, `lua_pcall`, `lua_tostring`, `cjson` 라이브러리 번들
-- [ ] state 격리 (스레드마다 별도 `lua_State`)
-- [ ] Lua 모듈 (`suji.lua`):
+- [~] Lua 런타임 빌드 — 1차는 **LuaJIT opt-in** (`zig build -Dlua`).
+      macOS/Homebrew·Linux dev 패키지의 `libluajit-5.1`을 링크한다. 기본
+      `zig build`/CI는 새 런타임 의존성을 만들지 않도록 비활성. 정적
+      `liblua.a`/배포 번들링은 후속.
+- [~] `src/platform/lua.zig` — `luaL_newstate`, `luaL_loadfile`,
+      `lua_pcall`, `lua_tolstring`, registry ref 기반 handler dispatch 완료.
+      1차 ABI는 raw JSON string in/out 이고, `cjson` 번들은 후속.
+- [~] state 격리 — `LuaRuntime`마다 별도 `lua_State`와 Mutex를 가진다.
+      현재 `main.zig` 런타임 참조는 단일 Lua backend 우선 path라, 여러 Lua
+      backend 동시 실행/이름별 runtime map은 후속.
+- [~] Lua 모듈 (`suji` global):
   ```lua
-  local suji = require("suji")
-  suji.handle("ping", function() return {msg = "pong"} end)
-  suji.handle("greet", function(data) return {hello = data.name} end)
+  suji.handle("ping", function(request_json)
+    return '{"msg":"pong"}'
+  end)
   ```
-- [ ] 예제 (`examples/lua-backend`)
-- [ ] suji.json 설정: `{ "lang": "lua", "entry": "backend/main.lua" }`
+- [x] 예제 (`examples/lua-backend`) — raw JSON handler + minimal Vite frontend.
+- [x] suji.json 설정 — schema가 `{ "lang": "lua", "entry":
+      "backend/main.lua" }`와 entry directory(`backend`)를 허용. 패키징은
+      Lua entry 파일이면 부모 디렉토리를 stage 해서 packaged runtime도
+      `main.lua`를 찾는다.
+
+**검증 결과 (Lua 1차)**:
+- `zig build test --summary all` — 883/885 pass (2 skip)
+- `zig build -Dlua test --summary all` — 884/886 pass (2 skip, 실제
+  LuaJIT로 예제 `ping`/`echo` handler 호출)
+- `zig build -Dlua --summary all` — 실제 LuaJIT C boundary 포함 앱 빌드 성공
 
 **언어별 특성 요약**:
 
