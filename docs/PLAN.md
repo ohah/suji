@@ -139,11 +139,14 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
   - [x] JS on/emit/off → WebView ↔ EventBus
   - [x] EventBus ↔ WebView 연결 (webview_eval)
 - [x] 플러그인 시스템
-  - [x] suji.json `plugins` 필드 파싱 (문자열 배열)
+  - [x] suji.json `plugins` 필드 파싱 (문자열 + 객체 `{name,source,permissions}`)
   - [x] main.zig에서 플러그인 빌드 + dlopen + BackendRegistry 등록
   - [x] 채널 접두사 컨벤션 (`state:get`, `fs:read` 등)
   - [x] `suji-plugin.json` 스펙 (플러그인 메타데이터)
-  - [~] 권한 시스템 — fs(default-deny) + shell/dialog allowlist(opt-in,
+  - [x] 외부 plugin source resolver — 로컬 경로 / GitHub shallow clone-pull
+  - [x] 플러그인 outbound 권한 시스템 — `permissions` allowlist,
+        생략=unrestricted, `[]`=deny-all, exact/`prefix:*`/`*`
+  - [~] 앱 API 권한 시스템 — fs(default-deny) + shell/dialog allowlist(opt-in,
         비파괴) 완료. network(webRequest setter)는 sink 아니라 범위 제외,
         모바일은 OS 샌드박스 경계(후속 결정)
 - [x] State 플러그인 (첫 번째 공식 플러그인)
@@ -1052,8 +1055,8 @@ app.on("ready", () => {
       `main.lua`를 찾는다.
 
 **검증 결과 (Lua 1차)**:
-- `zig build test --summary all` — 883/885 pass (2 skip)
-- `zig build -Dlua test --summary all` — 884/886 pass (2 skip, 실제
+- `zig build test --summary all` — 887/889 pass (2 skip)
+- `zig build -Dlua test --summary all` — 888/890 pass (2 skip, 실제
   LuaJIT로 예제 `ping`/`echo` handler 호출)
 - `zig build -Dlua --summary all` — 실제 LuaJIT C boundary 포함 앱 빌드 성공
 
