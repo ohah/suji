@@ -1,7 +1,7 @@
 {
   "name": "@suji/plugin-notification-rich-node",
   "version": "0.1.0",
-  "description": "Rich toast notifications for Suji Node backends.",
+  "description": "Rich notifications for Suji Node backends.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

@@ -1,5 +1,5 @@
 {
   "name": "notification-rich",
   "lang": "zig",
-  "description": "Rich toast notifications — Windows WinRT (action buttons + Action Center persistence), macOS UNUserNotificationCenter actions, Linux libnotify actions."
+  "description": "Rich notifications — Windows WinRT (action buttons + Action Center persistence), macOS UNUserNotificationCenter actions, Linux Freedesktop D-Bus actions."
 }

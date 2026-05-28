@@ -20,7 +20,7 @@ zig build test-sqlite   # sqlite 플러그인 (벤더 SQLite 3.51, sql:open/exec
 zig build test-log      # log 플러그인 (rotating file logger, level filter, JSON Lines)
 zig build test-store    # store 플러그인 (file-backed config store, named instances, atomic persist)
 zig build test-http     # http 플러그인 (renderer-safe fetch with URL allowlist, deny-by-default)
-zig build test-notification-rich # notification-rich 플러그인 (Windows WinRT toast: action buttons + Action Center persistence)
+zig build test-notification-rich # notification-rich 플러그인 (WinRT/UNUserNotificationCenter/Freedesktop actions)
 
 # 임베드 코어 라이브러리 (CEF 무관 — 모바일/임베드용)
 zig build lib                                  # libsuji_core.a (host)
@@ -766,15 +766,13 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
   `addInstallCefRuntimeStep` 으로 zig-out/bin 옆에 자동 배치되어 ANGLE/SwiftShader
   로딩 가능 → WebGL/CSS 합성/비디오 가속 활성. CI headless 환경은 GPU 없어
   SwiftShader CPU fallback 자동(정상 동작).
-- **`@suji/plugin-notification-rich` macOS/Linux 액션 버튼 미구현**: 현재
-  Windows WinRT toast 만 정식 구현. macOS/Linux 는 `unsupported_platform` 반환.
-  - macOS: `UNUserNotificationCenter` + `UNNotificationCategory`/
-    `UNNotificationAction` 패턴 (기존 `src/platform/notification.m` 의 click
-    delegate 재사용). .app 번들 + Info.plist 필요.
-  - Linux: `libnotify` `notify_notification_add_action` + GLib main loop
-    signal callback (CEF 가 GLib 루프 통합 운영 — plugin 호출 가능).
-  - 두 플랫폼 모두 액션 클릭 콜백은 코어 `notification:click` 채널과 동형으로
-    라우팅하면 SDK 면 일관됨. 후속 PR. 우선순위 중.
+- **`@suji/plugin-notification-rich` macOS/Linux 액션 버튼 구현됨**:
+  macOS는 `UNUserNotificationCenter` category/action + attachment best-effort,
+  Linux는 Freedesktop Notifications D-Bus `Notify` actions +
+  `ActionInvoked` signal subscribe 경로. 액션 클릭은 기존
+  `notification:click` 채널에 `{notificationId, actionId}`로 라우팅한다.
+  정직 경계: macOS loose binary는 Bundle ID/권한 한계로 표시 실패 가능,
+  Linux는 session bus/notification daemon 부재 시 `show failed`.
 - **`@suji/plugin-notification-rich` Windows 액션 클릭 콜백 미구현**:
   WinRT toast 액션 버튼 클릭은 `NotificationActivator` COM 클래스 등록 필요
   (별도 인스톨러 + HKCU 레지스트리). 현재는 표시/Action Center 영속까지만.

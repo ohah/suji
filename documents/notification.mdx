@@ -41,7 +41,7 @@ OS가 balloon을 toast UI처럼 렌더링하지만 action button/reply/custom im
 
 | 미지원 | 비고 |
 |---|---|
-| **Actions / 버튼** | UNNotificationCategory / WinRT toast activator 작업 — v2 |
+| **Actions / 버튼** | 코어 `notification` v1에는 없음. 공식 `notification-rich` plugin은 macOS/Linux action click 라우팅을 지원하고, Windows click callback은 WinRT activator 등록 후속. |
 | **Reply input** | macOS/Windows native reply는 v2 |
 | **커스텀 icon** | macOS는 앱 아이콘만 자동, Windows는 backing tray icon 기본값. attachment/iconPath는 v2 |
 | **커스텀 sound** | macOS default/silent. Linux `silent`는 `suppress-sound` hint, Windows는 `NIIF_NOSOUND` |
@@ -150,7 +150,9 @@ await notification.close(notificationId);
   `uint32` id를 Suji `notificationId`와 매핑한다. `silent:true`면
   `hints["suppress-sound"] = true`를 전달한다.
 - `close()`는 Suji `notificationId`로 저장된 D-Bus id를 찾아 `CloseNotification(uint32)` 호출.
-- Linux click/action signal 라우팅, custom icon, reply, action button은 v1 범위 밖.
+- Linux click/action signal 라우팅, custom icon, reply, action button은 코어 v1 범위 밖.
+  action button이 필요하면 공식 `notification-rich` plugin의 Freedesktop
+  Notifications D-Bus action 경로를 사용한다.
 
 ### Windows Shell_NotifyIcon backend
 

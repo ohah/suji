@@ -1,6 +1,9 @@
 /**
  * @suji/plugin-notification-rich-node — Node backend wrapper.
- * Wire contract 은 renderer 변형과 동일.
+ * Wire contract 은 renderer 변형과 동일. macOS/Linux action clicks are
+ * emitted through `notification:click` with `{ notificationId, actionId }`.
+ * Windows button click callback still requires NotificationActivator COM
+ * registration.
  */
 
 interface SujiBridge {
@@ -43,6 +46,11 @@ export interface ShowOpts {
   image?: string;
   scenario?: "alarm" | "reminder" | "incomingCall" | "urgent";
   silent?: boolean;
+}
+
+export interface RichNotificationClick {
+  notificationId: string;
+  actionId?: string;
 }
 
 export const richNotification = {

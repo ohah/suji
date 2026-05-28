@@ -983,7 +983,7 @@ pub fn build(b: *std.Build) void {
     const http_test_step = b.step("test-http", "Run http plugin tests (requires built dylib)");
     http_test_step.dependOn(&http_test_run.step);
 
-    // notification-rich plugin tests (Windows WinRT toast; non-Windows = unsupported_platform 검증)
+    // notification-rich plugin tests (Windows WinRT toast, macOS/Linux rich action path)
     const nrich_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/notification_rich_plugin_test.zig"),
         .target = target,

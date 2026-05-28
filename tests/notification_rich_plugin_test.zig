@@ -80,14 +80,10 @@ test "notification-rich plugin: hide of unknown id fails" {
     const r = invokePlugin(&reg, "{\"cmd\":\"notification:rich_hide\",\"id\":99999}");
     defer freeResp(&reg, r);
     try std.testing.expect(r != null);
-    if (builtin.os.tag == .windows) {
-        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"not_found\"") != null);
-    } else {
-        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"unsupported_platform\"") != null);
-    }
+    try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"not_found\"") != null);
 }
 
-test "notification-rich plugin: show returns id on Windows / unsupported elsewhere" {
+test "notification-rich plugin: show returns id or graceful native error" {
     var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
@@ -104,8 +100,27 @@ test "notification-rich plugin: show returns id on Windows / unsupported elsewhe
         const has_error = std.mem.indexOf(u8, r.?, "\"error\"") != null;
         try std.testing.expect(has_id or has_error);
     } else {
-        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"unsupported_platform\"") != null);
+        // macOS loose binary(Bundle ID/권한 없음)나 Linux 세션 bus/daemon 부재 환경은
+        // 표시 실패가 정상일 수 있다. 중요한 건 플랫폼 경로가 배선되어 더 이상
+        // unsupported_platform 으로 즉시 거부하지 않는 것.
+        const has_id = std.mem.indexOf(u8, r.?, "\"id\":") != null;
+        const has_error = std.mem.indexOf(u8, r.?, "\"error\"") != null;
+        try std.testing.expect(has_id or has_error);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"unsupported_platform\"") == null);
     }
+}
+
+test "notification-rich plugin: actions are accepted on macOS/Linux path" {
+    if (comptime builtin.os.tag == .windows) return;
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadPlugin(&reg);
+
+    const r = invokePlugin(&reg, "{\"cmd\":\"notification:rich_show\",\"title\":\"hi\",\"body\":\"there\",\"actions\":[{\"id\":\"open\",\"label\":\"Open\"},{\"id\":\"dismiss\",\"label\":\"Dismiss\"}]}");
+    defer freeResp(&reg, r);
+    try std.testing.expect(r != null);
+    try std.testing.expect(std.mem.indexOf(u8, r.?, "\"error\":\"unsupported_platform\"") == null);
 }
 
 // XML injection 회귀 가드 — title/body 안 XML 특수문자가 그대로 들어가면 toast XML

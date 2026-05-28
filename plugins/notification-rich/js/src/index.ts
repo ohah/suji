@@ -1,9 +1,10 @@
 /**
  * @suji/plugin-notification-rich — Rich toast notifications for Suji renderer.
  *
- * Windows 에서 WinRT ToastNotificationManager 로 정식 toast (action button,
- * Action Center 영속). 코어 `suji.notification.show` 는 Shell_NotifyIcon balloon
- * 기반이라 이런 기능이 제한적.
+ * Platform rich notification wrapper:
+ * - Windows: WinRT ToastNotificationManager action buttons + Action Center persistence.
+ * - macOS: UNUserNotificationCenter action buttons + image attachment best effort.
+ * - Linux: Freedesktop Notifications action buttons via D-Bus.
  *
  * ```ts
  * import { richNotification } from '@suji/plugin-notification-rich';
@@ -17,8 +18,9 @@
  * await richNotification.hide(id);
  * ```
  *
- * ⚠️ Action 버튼 click 콜백은 NotificationActivator COM 등록 필요 — v1 정직 경계.
- * 표시/영속/AUMID set 까지 동작 보증.
+ * Action clicks are emitted through `notification:click` with
+ * `{ notificationId, actionId }`. Windows still needs a NotificationActivator
+ * COM registration before button clicks can call back into the app.
  */
 
 interface SujiBridge {
@@ -45,6 +47,11 @@ export interface ShowOpts {
   image?: string;
   scenario?: "alarm" | "reminder" | "incomingCall" | "urgent";
   silent?: boolean;
+}
+
+export interface RichNotificationClick {
+  notificationId: string;
+  actionId?: string;
 }
 
 async function call(cmd: string, payload: Record<string, unknown>): Promise<any> {

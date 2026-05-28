@@ -16,12 +16,17 @@
 //!     ⚠️ action 버튼 click 콜백은 NotificationActivator COM 클래스 등록 필요
 //!     (별도 인스톨러 + AppUserModelID HKCU 등록) — 미등록 시 click 무반응.
 //!     v1 정직 경계: 표시/영속/AUMID set 까지. click→back-channel 은 backlog.
-//!   macOS/Linux: v1 미배선 — 코어 suji.notification.show 로 대체 사용 권장
-//!     (action 버튼 채널 보존, 플랫폼별 후속에서 채울 자리).
+//!   macOS: UNUserNotificationCenter category/action 기반 버튼 + attachment
+//!     image(best-effort). loose binary 에서는 Bundle ID/권한 한계로 show 실패 가능.
+//!   Linux: Freedesktop Notifications D-Bus Notify actions + ActionInvoked
+//!     signal. notification daemon/session bus 부재 시 graceful error.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const suji = @import("suji");
+
+const is_macos = builtin.os.tag == .macos;
+const is_linux = builtin.os.tag == .linux;
 
 pub const app = suji.app()
     .named("notification-rich")
@@ -532,6 +537,107 @@ const winrt = if (builtin.os.tag == .windows) struct {
     }
 } else struct {};
 
+const CStr = [*:0]const u8;
+
+const macos_rich = if (is_macos) struct {
+    extern fn suji_notification_rich_macos_set_action_callback(
+        cb: ?*const fn (CStr, CStr) callconv(.c) void,
+    ) void;
+    extern fn suji_notification_rich_macos_show(
+        id: CStr,
+        title: CStr,
+        body: CStr,
+        image_path: ?CStr,
+        silent: c_int,
+        action_ids: [*]const CStr,
+        action_labels: [*]const CStr,
+        action_count: c_int,
+    ) c_int;
+    extern fn suji_notification_rich_macos_hide(id: CStr) void;
+} else struct {};
+
+const linux_rich = if (is_linux) struct {
+    extern fn suji_notification_rich_linux_set_action_callback(
+        cb: ?*const fn (CStr, CStr) callconv(.c) void,
+    ) void;
+    extern fn suji_notification_rich_linux_show(
+        id: CStr,
+        title: CStr,
+        body: CStr,
+        image_path: ?CStr,
+        silent: c_int,
+        action_ids: [*]const CStr,
+        action_labels: [*]const CStr,
+        action_count: c_int,
+    ) c_int;
+    extern fn suji_notification_rich_linux_hide(id: CStr) void;
+} else struct {};
+
+fn emitRichActionClick(notification_id_c: CStr, action_id_c: CStr) callconv(.c) void {
+    const notification_id = std.mem.span(notification_id_c);
+    const action_id = std.mem.span(action_id_c);
+    var id_esc: [MAX_ID * 6]u8 = undefined;
+    var action_esc: [MAX_ID * 6]u8 = undefined;
+    const id_n = escapeJsonFixed(notification_id, &id_esc) orelse return;
+    const action_n = escapeJsonFixed(action_id, &action_esc) orelse return;
+    var payload: [MAX_ID * 12 + 80]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &payload,
+        "{{\"notificationId\":\"{s}\",\"actionId\":\"{s}\"}}",
+        .{ id_esc[0..id_n], action_esc[0..action_n] },
+    ) catch return;
+    suji.send("notification:click", json);
+}
+
+fn ensurePlatformActionCallback() void {
+    if (comptime is_macos) {
+        macos_rich.suji_notification_rich_macos_set_action_callback(&emitRichActionClick);
+    } else if (comptime is_linux) {
+        linux_rich.suji_notification_rich_linux_set_action_callback(&emitRichActionClick);
+    }
+}
+
+fn escapeJsonFixed(src: []const u8, dst: []u8) ?usize {
+    var n: usize = 0;
+    for (src) |c| {
+        const out = switch (c) {
+            '"' => "\\\"",
+            '\\' => "\\\\",
+            '\n' => "\\n",
+            '\r' => "\\r",
+            '\t' => "\\t",
+            0...8, 11, 12, 14...31 => return null,
+            else => null,
+        };
+        if (out) |s| {
+            if (n + s.len > dst.len) return null;
+            @memcpy(dst[n .. n + s.len], s);
+            n += s.len;
+        } else {
+            if (n + 1 > dst.len) return null;
+            dst[n] = c;
+            n += 1;
+        }
+    }
+    return n;
+}
+
+var live_notifications_mutex: std.Io.Mutex = .init;
+var live_notifications: std.AutoHashMap(u64, void) = std.AutoHashMap(u64, void).init(alloc);
+
+fn rememberLiveNotification(id: u64) bool {
+    live_notifications_mutex.lockUncancelable(suji.io());
+    defer live_notifications_mutex.unlock(suji.io());
+    live_notifications.put(id, {}) catch return false;
+    return true;
+}
+
+fn forgetLiveNotification(id: u64) bool {
+    live_notifications_mutex.lockUncancelable(suji.io());
+    defer live_notifications_mutex.unlock(suji.io());
+    return live_notifications.remove(id);
+}
+
 // ============================================
 // XML 빌더
 // ============================================
@@ -603,6 +709,102 @@ fn buildToastXml(a: std.mem.Allocator, title: []const u8, body: []const u8, acti
     return buf.toOwnedSlice(a) catch null;
 }
 
+const ActionPointers = struct {
+    ids: [MAX_ACTIONS]CStr = undefined,
+    labels: [MAX_ACTIONS]CStr = undefined,
+    count: usize = 0,
+};
+
+fn containsNul(s: []const u8) bool {
+    return std.mem.indexOfScalar(u8, s, 0) != null;
+}
+
+fn collectActionPointers(req: suji.Request, actions_raw: ?[]const u8) !ActionPointers {
+    var out: ActionPointers = .{};
+    const raw = actions_raw orelse return out;
+    if (raw.len == 0) return out;
+
+    const parsed = std.json.parseFromSlice(std.json.Value, req.arena, raw, .{}) catch return error.InvalidActions;
+    defer parsed.deinit();
+    if (parsed.value != .array) return error.InvalidActions;
+
+    for (parsed.value.array.items) |item| {
+        if (out.count >= MAX_ACTIONS) break;
+        if (item != .object) continue;
+        const id_val = item.object.get("id") orelse continue;
+        const label_val = item.object.get("label") orelse continue;
+        if (id_val != .string or label_val != .string) continue;
+        if (id_val.string.len == 0 or id_val.string.len > MAX_ID) continue;
+        if (label_val.string.len == 0 or label_val.string.len > MAX_LABEL) continue;
+        if (containsNul(id_val.string) or containsNul(label_val.string)) continue;
+        const id_z = req.arena.dupeZ(u8, id_val.string) catch return error.Alloc;
+        const label_z = req.arena.dupeZ(u8, label_val.string) catch return error.Alloc;
+        out.ids[out.count] = id_z.ptr;
+        out.labels[out.count] = label_z.ptr;
+        out.count += 1;
+    }
+
+    return out;
+}
+
+fn platformShowRich(
+    req: suji.Request,
+    id: u64,
+    title: []const u8,
+    body: []const u8,
+    image_path: ?[]const u8,
+    silent: bool,
+    actions: *const ActionPointers,
+) !void {
+    if (containsNul(title) or containsNul(body)) return error.InvalidString;
+    if (image_path) |img| if (containsNul(img)) return error.InvalidString;
+
+    var id_buf: [32]u8 = undefined;
+    const id_z = std.fmt.bufPrintZ(&id_buf, "{d}", .{id}) catch return error.Alloc;
+    const title_z = req.arena.dupeZ(u8, title) catch return error.Alloc;
+    const body_z = req.arena.dupeZ(u8, body) catch return error.Alloc;
+    const image_z: ?[:0]u8 = if (image_path) |img| req.arena.dupeZ(u8, img) catch return error.Alloc else null;
+    const image_ptr: ?CStr = if (image_z) |img| img.ptr else null;
+
+    ensurePlatformActionCallback();
+    const ok = if (comptime is_macos)
+        macos_rich.suji_notification_rich_macos_show(
+            id_z.ptr,
+            title_z.ptr,
+            body_z.ptr,
+            image_ptr,
+            if (silent) 1 else 0,
+            actions.ids[0..].ptr,
+            actions.labels[0..].ptr,
+            @intCast(actions.count),
+        ) != 0
+    else if (comptime is_linux)
+        linux_rich.suji_notification_rich_linux_show(
+            id_z.ptr,
+            title_z.ptr,
+            body_z.ptr,
+            image_ptr,
+            if (silent) 1 else 0,
+            actions.ids[0..].ptr,
+            actions.labels[0..].ptr,
+            @intCast(actions.count),
+        ) != 0
+    else
+        false;
+
+    if (!ok) return error.ShowFailed;
+}
+
+fn platformHideRich(id: u64) void {
+    var id_buf: [32]u8 = undefined;
+    const id_z = std.fmt.bufPrintZ(&id_buf, "{d}", .{id}) catch return;
+    if (comptime is_macos) {
+        macos_rich.suji_notification_rich_macos_hide(id_z.ptr);
+    } else if (comptime is_linux) {
+        linux_rich.suji_notification_rich_linux_hide(id_z.ptr);
+    }
+}
+
 // ============================================
 // Handlers
 // ============================================
@@ -626,10 +828,33 @@ fn richShow(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const silent_str = suji.extractJsonValue(req.raw, "silent");
     const silent = if (silent_str) |s| std.mem.eql(u8, std.mem.trim(u8, s, " \t\n\r"), "true") else false;
 
-    if (comptime builtin.os.tag != .windows) {
-        // v1 미배선: 코어 notification 으로 fallback 권장 (action 없음).
-        return req.err("unsupported_platform");
+    const actions = collectActionPointers(req, actions_raw) catch |e| switch (e) {
+        error.InvalidActions => return req.err("invalid actions"),
+        else => return req.err("alloc"),
+    };
+
+    if (comptime is_macos or is_linux) {
+        const id = nextId();
+        platformShowRich(req, id, title, body, image_path, silent, &actions) catch |e| {
+            const msg = switch (e) {
+                error.InvalidString => "invalid string",
+                error.ShowFailed => "show failed",
+                else => "alloc",
+            };
+            return req.err(msg);
+        };
+        if (!rememberLiveNotification(id)) {
+            platformHideRich(id);
+            return req.err("registry full");
+        }
+        var buf: [64]u8 = undefined;
+        const body_out = std.fmt.bufPrint(&buf, "{{\"id\":{d}}}", .{id}) catch return req.err("alloc");
+        const owned = alloc.dupe(u8, body_out) catch return req.err("alloc");
+        defer alloc.free(owned);
+        return req.okRaw(owned);
     }
+
+    if (comptime builtin.os.tag != .windows) return req.err("unsupported_platform");
 
     const xml = buildToastXml(alloc, title, body, actions_raw, image_path, scenario, silent) orelse return req.err("xml build failed");
     defer alloc.free(xml);
@@ -661,9 +886,15 @@ fn richShow(req: suji.Request, _: suji.InvokeEvent) suji.Response {
 }
 
 fn richHide(req: suji.Request, _: suji.InvokeEvent) suji.Response {
-    if (comptime builtin.os.tag != .windows) return req.err("unsupported_platform");
     const id_i = req.int("id") orelse return req.err("missing id");
     if (id_i < 0) return req.err("invalid id");
+    if (comptime is_macos or is_linux) {
+        const id: u64 = @intCast(id_i);
+        if (!forgetLiveNotification(id)) return req.err("not_found");
+        platformHideRich(id);
+        return req.okRaw("{\"ok\":true}");
+    }
+    if (comptime builtin.os.tag != .windows) return req.err("unsupported_platform");
     const ok = if (comptime builtin.os.tag == .windows) winrt.forgetAndHide(@intCast(id_i)) else unreachable;
     if (!ok) return req.err("not_found");
     return req.okRaw("{\"ok\":true}");

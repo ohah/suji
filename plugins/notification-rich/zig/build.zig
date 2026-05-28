@@ -29,7 +29,24 @@ pub fn build(b: *std.Build) void {
     });
     lib.root_module.addImport("suji", suji_mod);
 
-    if (target.result.os.tag == .windows) {
+    if (target.result.os.tag == .macos) {
+        lib.root_module.addCSourceFile(.{
+            .file = b.path("notification_rich_macos.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
+        lib.root_module.linkSystemLibrary("objc", .{});
+        lib.root_module.linkFramework("AppKit", .{});
+        lib.root_module.linkFramework("Foundation", .{});
+        lib.root_module.linkFramework("UserNotifications", .{});
+    } else if (target.result.os.tag == .linux) {
+        lib.root_module.addCSourceFile(.{
+            .file = b.path("notification_rich_linux.c"),
+            .flags = &[_][]const u8{},
+        });
+        lib.root_module.linkSystemLibrary("gio-2.0", .{});
+        lib.root_module.linkSystemLibrary("gobject-2.0", .{});
+        lib.root_module.linkSystemLibrary("glib-2.0", .{});
+    } else if (target.result.os.tag == .windows) {
         // WinRT 함수는 모두 combase.dll/shell32.dll 동적 로드(LoadLibraryW +
         // GetProcAddress)로 호출 — MinGW import lib 부재 회피 + graceful
         // degradation (Win7-/no-WinRT 환경 자동 fallback).
