@@ -415,7 +415,7 @@ pub const SujiWindowAPI = extern struct {
       "devTools": false
     }
   ],
-  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173" },
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:12300", "dev_command": "npm run dev", "build_command": "npm run build" },
   "backend": { "lang": "zig", "entry": "." }
 }
 ```

@@ -4,9 +4,12 @@ const runtime = @import("runtime");
 const Dir = std.Io.Dir;
 
 pub const BackendLang = enum {
+    none,
     zig,
     rust,
     go,
+    node,
+    lua,
     multi,
 
     pub fn fromString(s: []const u8) ?BackendLang {
@@ -14,30 +17,170 @@ pub const BackendLang = enum {
     }
 };
 
-pub const FrontendTemplate = enum {
+pub const FrontendFramework = enum {
     react,
     vue,
     svelte,
     solid,
     preact,
     vanilla,
+    next,
+
+    pub fn fromString(s: []const u8) ?FrontendFramework {
+        return std.meta.stringToEnum(FrontendFramework, s);
+    }
+};
+
+pub const FrontendToolchain = enum {
+    vite,
+    rsbuild,
+    next,
+
+    pub fn fromString(s: []const u8) ?FrontendToolchain {
+        if (std.mem.eql(u8, s, "rspack")) return .rsbuild;
+        return std.meta.stringToEnum(FrontendToolchain, s);
+    }
+};
+
+pub const FrontendTemplate = enum {
+    react_vite,
+    vue_vite,
+    svelte_vite,
+    solid_vite,
+    preact_vite,
+    vanilla_vite,
+    react_rsbuild,
+    vue_rsbuild,
+    next_static,
 
     pub fn fromString(s: []const u8) ?FrontendTemplate {
-        return std.meta.stringToEnum(FrontendTemplate, s);
+        if (std.meta.stringToEnum(FrontendTemplate, s)) |t| return t;
+        if (FrontendFramework.fromString(s)) |framework| return fromFrameworkToolchain(framework, .vite);
+        return null;
+    }
+
+    pub fn fromFrameworkToolchain(framework: FrontendFramework, toolchain: FrontendToolchain) ?FrontendTemplate {
+        return switch (toolchain) {
+            .vite => switch (framework) {
+                .react => .react_vite,
+                .vue => .vue_vite,
+                .svelte => .svelte_vite,
+                .solid => .solid_vite,
+                .preact => .preact_vite,
+                .vanilla => .vanilla_vite,
+                .next => null,
+            },
+            .rsbuild => switch (framework) {
+                .react => .react_rsbuild,
+                .vue => .vue_rsbuild,
+                else => null,
+            },
+            .next => switch (framework) {
+                .next, .react => .next_static,
+                else => null,
+            },
+        };
+    }
+
+    pub fn frameworkName(self: FrontendTemplate) []const u8 {
+        return switch (self) {
+            .react_vite, .react_rsbuild => "react",
+            .vue_vite, .vue_rsbuild => "vue",
+            .svelte_vite => "svelte",
+            .solid_vite => "solid",
+            .preact_vite => "preact",
+            .vanilla_vite => "vanilla",
+            .next_static => "next",
+        };
+    }
+
+    pub fn toolchainName(self: FrontendTemplate) []const u8 {
+        return switch (self) {
+            .react_vite, .vue_vite, .svelte_vite, .solid_vite, .preact_vite, .vanilla_vite => "vite",
+            .react_rsbuild, .vue_rsbuild => "rsbuild",
+            .next_static => "next",
+        };
+    }
+
+    pub fn devUrl(self: FrontendTemplate) []const u8 {
+        _ = self;
+        return "http://localhost:12300";
+    }
+
+    pub fn distDir(self: FrontendTemplate) []const u8 {
+        return switch (self) {
+            .next_static => "frontend/out",
+            else => "frontend/dist",
+        };
+    }
+};
+
+pub const PackageManager = enum {
+    npm,
+    pnpm,
+    bun,
+    vp,
+
+    pub fn fromString(s: []const u8) ?PackageManager {
+        if (std.mem.eql(u8, s, "vz")) return .vp;
+        if (std.mem.eql(u8, s, "voidzero")) return .vp;
+        if (std.mem.eql(u8, s, "viteplus")) return .vp;
+        return std.meta.stringToEnum(PackageManager, s);
+    }
+
+    pub fn runCommand(self: PackageManager, script: []const u8) []const u8 {
+        return switch (self) {
+            .npm => if (std.mem.eql(u8, script, "dev")) "npm run dev" else "npm run build",
+            .pnpm => if (std.mem.eql(u8, script, "dev")) "pnpm run dev" else "pnpm run build",
+            .bun => if (std.mem.eql(u8, script, "dev")) "bun run dev" else "bun run build",
+            .vp => if (std.mem.eql(u8, script, "dev")) "vp run dev" else "vp run build",
+        };
+    }
+
+    pub fn installArgv(self: PackageManager) []const []const u8 {
+        return switch (self) {
+            .npm => &.{ "npm", "install" },
+            .pnpm => &.{ "pnpm", "install" },
+            .bun => &.{ "bun", "install" },
+            .vp => &.{ "vp", "install" },
+        };
+    }
+
+    pub fn installCommand(self: PackageManager) []const u8 {
+        return switch (self) {
+            .npm => "npm install",
+            .pnpm => "pnpm install",
+            .bun => "bun install",
+            .vp => "vp install",
+        };
+    }
+
+    pub fn packageManagerField(self: PackageManager) []const u8 {
+        return switch (self) {
+            .npm => "npm@latest",
+            .pnpm => "pnpm@latest",
+            .bun => "bun@latest",
+            .vp => "pnpm@latest",
+        };
     }
 };
 
 pub const InitOptions = struct {
     name: []const u8,
-    backend: BackendLang = .rust,
-    frontend: FrontendTemplate = .react,
+    backend: BackendLang = .zig,
+    frontend: FrontendTemplate = .react_vite,
+    package_manager: PackageManager = .npm,
+    install_dependencies: bool = false,
 };
 
 pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     const name = opts.name;
     const io = runtime.io;
 
-    std.debug.print("[suji] creating project '{s}' (backend: {s})\n", .{ name, @tagName(opts.backend) });
+    std.debug.print(
+        "[suji] creating project '{s}' (backend: {s}, frontend: {s}+{s})\n",
+        .{ name, @tagName(opts.backend), opts.frontend.frameworkName(), opts.frontend.toolchainName() },
+    );
 
     Dir.cwd().createDir(io, name, .default_dir) catch |err| {
         if (err == error.PathAlreadyExists) {
@@ -50,14 +193,35 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     var project_dir = try Dir.cwd().openDir(io, name, .{});
     defer project_dir.close(io);
 
+    try writeRootPackage(allocator, project_dir, name, opts.package_manager);
+
     // suji.json
-    try writeConfig(allocator, project_dir, name, opts.backend);
+    try writeConfig(allocator, project_dir, name, opts.backend, opts.frontend, opts.package_manager);
 
     // 백엔드 스캐폴딩
     switch (opts.backend) {
+        .none => {},
         .zig => try scaffoldZig(project_dir),
         .rust => try scaffoldRust(project_dir),
         .go => try scaffoldGo(allocator, project_dir, name),
+        .node => {
+            try project_dir.createDir(io, "backends", .default_dir);
+            var backends_dir = try project_dir.openDir(io, "backends", .{});
+            defer backends_dir.close(io);
+            try backends_dir.createDir(io, "node", .default_dir);
+            var node_dir = try backends_dir.openDir(io, "node", .{});
+            defer node_dir.close(io);
+            try scaffoldNode(node_dir);
+        },
+        .lua => {
+            try project_dir.createDir(io, "backends", .default_dir);
+            var backends_dir = try project_dir.openDir(io, "backends", .{});
+            defer backends_dir.close(io);
+            try backends_dir.createDir(io, "lua", .default_dir);
+            var lua_dir = try backends_dir.openDir(io, "lua", .{});
+            defer lua_dir.close(io);
+            try scaffoldLua(lua_dir);
+        },
         .multi => {
             try project_dir.createDir(io, "backends", .default_dir);
             var backends_dir = try project_dir.openDir(io, "backends", .{});
@@ -81,20 +245,60 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     }
 
     // 프론트엔드
-    std.debug.print("[suji] creating frontend (Vite + {s})...\n", .{@tagName(opts.frontend)});
+    std.debug.print("[suji] creating frontend ({s} + {s})...\n", .{ opts.frontend.frameworkName(), opts.frontend.toolchainName() });
     try scaffoldFrontend(project_dir, opts.frontend);
-    try bunInstall(allocator, name);
+    if (opts.install_dependencies) try installFrontendDependencies(allocator, name, opts.package_manager);
 
     // .gitignore
     try writeFileContent(project_dir, ".gitignore", @embedFile("../templates/gitignore"));
     try scaffoldGitHubActions(project_dir);
 
-    std.debug.print("\n[suji] project '{s}' created!\n\n  cd {s}\n  suji dev\n\n", .{ name, name });
+    std.debug.print("\n[suji] project '{s}' created!\n\n  cd {s}\n  {s}\n  {s}\n\n", .{ name, name, opts.package_manager.installCommand(), opts.package_manager.runCommand("dev") });
 }
 
-fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend: BackendLang) !void {
-    var buf: [2048]u8 = undefined;
+fn writeRootPackage(allocator: std.mem.Allocator, dir: Dir, name: []const u8, pm: PackageManager) !void {
+    var buf: [1024]u8 = undefined;
+    const content = try std.fmt.bufPrint(&buf,
+        \\{{
+        \\  "name": "{s}",
+        \\  "version": "0.1.0",
+        \\  "private": true,
+        \\  "type": "module",
+        \\  "packageManager": "{s}",
+        \\  "scripts": {{
+        \\    "dev": "suji dev",
+        \\    "build": "suji build",
+        \\    "types": "suji types --out frontend/src/suji.generated.d.ts"
+        \\  }},
+        \\  "devDependencies": {{
+        \\    "@suji/cli": "^0.1.0"
+        \\  }}
+        \\}}
+        \\
+    , .{ name, pm.packageManagerField() });
+    _ = allocator;
+    try writeFileContent(dir, "package.json", content);
+}
+
+fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend: BackendLang, frontend: FrontendTemplate, pm: PackageManager) !void {
+    var buf: [3072]u8 = undefined;
+    const frontend_json = try std.fmt.allocPrint(
+        allocator,
+        \\  "frontend": {{ "dir": "frontend", "dev_url": "{s}", "dev_command": "{s}", "build_command": "{s}", "dist_dir": "{s}" }}
+    ,
+        .{ frontend.devUrl(), pm.runCommand("dev"), pm.runCommand("build"), frontend.distDir() },
+    );
+    defer allocator.free(frontend_json);
+
     const content = switch (backend) {
+        .none => try std.fmt.bufPrint(&buf,
+            \\{{
+            \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
+            \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
+            \\  "windows": [{{ "name": "main", "title": "{s}", "width": 1024, "height": 768, "debug": true }}],
+            \\{s}
+            \\}}
+        , .{ name, name, frontend_json }),
         .multi => try std.fmt.bufPrint(&buf,
             \\{{
             \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
@@ -105,21 +309,41 @@ fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend
             \\    {{ "name": "rust", "lang": "rust", "entry": "backends/rust" }},
             \\    {{ "name": "go", "lang": "go", "entry": "backends/go" }}
             \\  ],
-            \\  "frontend": {{ "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }}
+            \\{s}
             \\}}
-        , .{ name, name }),
+        , .{ name, name, frontend_json }),
         else => try std.fmt.bufPrint(&buf,
             \\{{
             \\  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
             \\  "app": {{ "name": "{s}", "version": "0.1.0" }},
             \\  "windows": [{{ "name": "main", "title": "{s}", "width": 1024, "height": 768, "debug": true }}],
-            \\  "backend": {{ "lang": "{s}", "entry": "." }},
-            \\  "frontend": {{ "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }}
+            \\  "backend": {{ "lang": "{s}", "entry": "{s}" }},
+            \\{s}
             \\}}
-        , .{ name, name, @tagName(backend) }),
+        , .{ name, name, @tagName(backend), backendEntry(backend), frontend_json }),
     };
-    _ = allocator;
     try writeFileContent(dir, "suji.json", content);
+    try writeTsConfig(allocator, dir, content);
+}
+
+fn backendEntry(backend: BackendLang) []const u8 {
+    return switch (backend) {
+        .node => "backends/node",
+        .lua => "backends/lua",
+        else => ".",
+    };
+}
+
+fn writeTsConfig(allocator: std.mem.Allocator, dir: Dir, json_content: []const u8) !void {
+    const content = try std.fmt.allocPrint(allocator,
+        \\import {{ defineConfig }} from "@suji/cli";
+        \\
+        \\export default defineConfig(
+        \\{s});
+        \\
+    , .{json_content});
+    defer allocator.free(content);
+    try writeFileContent(dir, "suji.config.ts", content);
 }
 
 fn scaffoldZig(dir: Dir) !void {
@@ -143,18 +367,58 @@ fn scaffoldGo(allocator: std.mem.Allocator, dir: Dir, name: []const u8) !void {
     try writeFileContent(dir, "main.go", @embedFile("../templates/go_main.go"));
 }
 
+fn scaffoldNode(dir: Dir) !void {
+    try writeFileContent(dir, "package.json", @embedFile("../templates/node_package.json"));
+    try writeFileContent(dir, "main.js", @embedFile("../templates/node_main.js"));
+}
+
+fn scaffoldLua(dir: Dir) !void {
+    try writeFileContent(dir, "main.lua", @embedFile("../templates/lua_main.lua"));
+}
+
 // 번들 프론트엔드 템플릿의 상대 파일 목록 (src/templates/frontend/<fw>/).
 // @embedFile 가 comptime 이라 목록/파일 불일치는 컴파일 단계에서 실패 →
 // 템플릿 회귀 가드. 전 6 프레임워크 bun build 실증(검증 천장: CEF 런타임
 // suji.invoke 왕복은 e2e 영역, 여기선 빌드·존재만).
 pub fn feFiles(comptime t: FrontendTemplate) []const []const u8 {
     return switch (t) {
-        .react => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/App.tsx" },
-        .vue => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.vue" },
-        .svelte => &.{ "package.json", "vite.config.ts", "svelte.config.js", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.svelte" },
-        .solid => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/index.tsx", "src/App.tsx" },
-        .preact => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/app.tsx" },
-        .vanilla => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts" },
+        .react_vite => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/App.tsx" },
+        .vue_vite => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.vue" },
+        .svelte_vite => &.{ "package.json", "vite.config.ts", "svelte.config.js", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.svelte" },
+        .solid_vite => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/index.tsx", "src/App.tsx" },
+        .preact_vite => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/app.tsx" },
+        .vanilla_vite => &.{ "package.json", "vite.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts" },
+        .react_rsbuild => &.{ "package.json", "rsbuild.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.tsx", "src/App.tsx" },
+        .vue_rsbuild => &.{ "package.json", "rsbuild.config.ts", "tsconfig.json", "index.html", "src/suji.ts", "src/main.ts", "src/App.vue" },
+        .next_static => &.{ "package.json", "next.config.mjs", "tsconfig.json", "next-env.d.ts", "app/suji.ts", "app/layout.tsx", "app/page.tsx" },
+    };
+}
+
+fn templateDir(comptime t: FrontendTemplate) []const u8 {
+    return switch (t) {
+        .react_vite => "../templates/frontend/react/",
+        .vue_vite => "../templates/frontend/vue/",
+        .svelte_vite => "../templates/frontend/svelte/",
+        .solid_vite => "../templates/frontend/solid/",
+        .preact_vite => "../templates/frontend/preact/",
+        .vanilla_vite => "../templates/frontend/vanilla/",
+        .react_rsbuild => "../templates/frontend/rsbuild-react/",
+        .vue_rsbuild => "../templates/frontend/rsbuild-vue/",
+        .next_static => "../templates/frontend/next/",
+    };
+}
+
+pub fn templateDirectoryName(t: FrontendTemplate) []const u8 {
+    return switch (t) {
+        .react_vite => "react",
+        .vue_vite => "vue",
+        .svelte_vite => "svelte",
+        .solid_vite => "solid",
+        .preact_vite => "preact",
+        .vanilla_vite => "vanilla",
+        .react_rsbuild => "rsbuild-react",
+        .vue_rsbuild => "rsbuild-vue",
+        .next_static => "next",
     };
 }
 
@@ -163,22 +427,25 @@ fn scaffoldFrontend(project_dir: Dir, template: FrontendTemplate) !void {
     try project_dir.createDir(io, "frontend", .default_dir);
     var fe = try project_dir.openDir(io, "frontend", .{});
     defer fe.close(io);
-    try fe.createDir(io, "src", .default_dir);
-    var src = try fe.openDir(io, "src", .{});
-    defer src.close(io);
 
     switch (template) {
-        inline else => |t| {
-            const base = "../templates/frontend/" ++ @tagName(t) ++ "/";
-            inline for (comptime feFiles(t)) |rel| {
-                const content = @embedFile(base ++ rel);
-                if (comptime std.mem.startsWith(u8, rel, "src/")) {
-                    try writeFileContent(src, rel["src/".len..], content);
-                } else {
-                    try writeFileContent(fe, rel, content);
-                }
-            }
-        },
+        .react_vite => try scaffoldFrontendTemplate(.react_vite, fe),
+        .vue_vite => try scaffoldFrontendTemplate(.vue_vite, fe),
+        .svelte_vite => try scaffoldFrontendTemplate(.svelte_vite, fe),
+        .solid_vite => try scaffoldFrontendTemplate(.solid_vite, fe),
+        .preact_vite => try scaffoldFrontendTemplate(.preact_vite, fe),
+        .vanilla_vite => try scaffoldFrontendTemplate(.vanilla_vite, fe),
+        .react_rsbuild => try scaffoldFrontendTemplate(.react_rsbuild, fe),
+        .vue_rsbuild => try scaffoldFrontendTemplate(.vue_rsbuild, fe),
+        .next_static => try scaffoldFrontendTemplate(.next_static, fe),
+    }
+}
+
+fn scaffoldFrontendTemplate(comptime template: FrontendTemplate, fe: Dir) !void {
+    inline for (comptime feFiles(template)) |rel| {
+        const base = comptime templateDir(template);
+        const content = @embedFile(base ++ rel);
+        try writeNestedFileContent(fe, rel, content);
     }
 }
 
@@ -193,7 +460,7 @@ fn scaffoldGitHubActions(project_dir: Dir) !void {
     try writeFileContent(workflows_dir, "suji.yml", @embedFile("../templates/.github/workflows/suji.yml"));
 }
 
-fn bunInstall(allocator: std.mem.Allocator, project_name: []const u8) !void {
+fn installFrontendDependencies(allocator: std.mem.Allocator, project_name: []const u8, pm: PackageManager) !void {
     const io = runtime.io;
     const frontend_path = try std.fmt.allocPrint(allocator, "{s}/frontend", .{project_name});
     defer allocator.free(frontend_path);
@@ -201,7 +468,7 @@ fn bunInstall(allocator: std.mem.Allocator, project_name: []const u8) !void {
     defer if (frontend_real) |p| allocator.free(p);
 
     var install = try std.process.spawn(io, .{
-        .argv = &.{ "bun", "install" },
+        .argv = pm.installArgv(),
         .cwd = if (frontend_real) |p| .{ .path = p } else .inherit,
     });
     _ = try install.wait(io);
@@ -215,4 +482,16 @@ fn writeFileContent(dir: Dir, name: []const u8, content: []const u8) !void {
     var fw = file.writer(io, &buf);
     try fw.interface.writeAll(content);
     try fw.interface.flush();
+}
+
+fn writeNestedFileContent(dir: Dir, rel: []const u8, content: []const u8) !void {
+    const io = runtime.io;
+    if (std.fs.path.dirname(rel)) |parent| {
+        try dir.createDirPath(io, parent);
+        var sub = try dir.openDir(io, parent, .{});
+        defer sub.close(io);
+        const base = std.fs.path.basename(rel);
+        return try writeFileContent(sub, base, content);
+    }
+    try writeFileContent(dir, rel, content);
 }

@@ -373,7 +373,7 @@ describe("다중 창 클립보드 공유", () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",
       title: "Clipboard Test B",
-      url: "http://localhost:5173/",
+      url: "http://localhost:12300/",
       width: 400,
       height: 300,
     });

@@ -139,7 +139,7 @@ Frontend `@suji/api`의 `windows.*` 와 같은 cmd JSON을 코어로 보낸다 (
 use suji::windows;
 
 // 새 창
-let _ = windows::create_simple("Settings", "http://localhost:5173/settings");
+let _ = windows::create_simple("Settings", "http://localhost:12300/settings");
 let _ = windows::create(r#""name":"hud","frame":false,"transparent":true"#);
 
 // 페이지 조작

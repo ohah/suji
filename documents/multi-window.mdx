@@ -17,7 +17,7 @@ import { windows } from '@suji/api';
 
 const { windowId } = await windows.create({
   title: 'Second Window',
-  url: 'http://localhost:5173/secondary',
+  url: 'http://localhost:12300/secondary',
 });
 ```
 
@@ -31,7 +31,7 @@ const { windowId } = await windows.create({
 const w = await window.__suji__.core(JSON.stringify({
   cmd: 'create_window',
   title: 'Second Window',
-  url: 'http://localhost:5173/secondary',
+  url: 'http://localhost:12300/secondary',
 }));
 // w = { from: "zig-core", cmd: "create_window", windowId: 2 }
 ```
@@ -42,7 +42,7 @@ const w = await window.__suji__.core(JSON.stringify({
 await windows.create({
   title: 'Settings',
   name: 'settings',                      // WM 등록 이름 — 이후 event.window.name으로 식별
-  url: 'http://localhost:5173/settings',
+  url: 'http://localhost:12300/settings',
 });
 ```
 
@@ -53,7 +53,7 @@ await windows.create({
 ```ts
 await windows.create({
   title: 'HUD',
-  url: 'http://localhost:5173/overlay',
+  url: 'http://localhost:12300/overlay',
   frame: false,                          // frameless
   transparent: true,                     // 투명 배경 (HTML body도 transparent여야)
   parent: 'main',                        // 부모 창 이름 — native parent/child attach
@@ -268,7 +268,7 @@ windows.PrintToPDF(2, "/tmp/report.pdf")
   "content": "...",
   "__window": 2,                              // 항상 — sender 창의 WM id
   "__window_name": "settings",                // 창에 name이 설정된 경우만
-  "__window_url": "http://localhost:5173/",   // sender 창의 main frame URL (있을 때만)
+  "__window_url": "http://localhost:12300/",   // sender 창의 main frame URL (있을 때만)
   "__window_main_frame": true                 // sender frame이 main인지 (false면 iframe)
 }
 ```

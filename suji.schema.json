@@ -289,8 +289,18 @@
         },
         "dev_url": {
           "type": "string",
-          "default": "http://localhost:5173",
+          "default": "http://localhost:12300",
           "description": "개발 서버 URL (suji dev 시 사용)"
+        },
+        "dev_command": {
+          "type": "string",
+          "default": "bun run dev",
+          "description": "suji dev가 frontend.dir에서 실행할 개발 서버 명령."
+        },
+        "build_command": {
+          "type": "string",
+          "default": "bun run build",
+          "description": "suji build가 frontend.dir에서 실행할 빌드 명령."
         },
         "dist_dir": {
           "type": "string",

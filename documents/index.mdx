@@ -11,9 +11,10 @@ Zig 코어 기반의 올인원 데스크톱 앱 프레임워크. Electron의 IPC
 ## 빠른 시작
 
 ```bash
-npx @suji/cli init my-app --backend=multi
+npx @suji/cli init my-app --backend=multi --frontend=react --toolchain=vite --pm=npm
 cd my-app
-suji dev
+npm install
+npm run dev
 ```
 
 ## API 구성

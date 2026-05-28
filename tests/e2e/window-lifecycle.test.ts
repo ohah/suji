@@ -265,7 +265,7 @@ describe("create_window Phase 3 옵션 (frame/transparent/parent/min·max/...)",
     const r = await coreCall({
       cmd: "create_window",
       title: "drag-region-probe",
-      url: "http://localhost:5173",
+      url: "http://localhost:12300",
       width: 360,
       height: 180,
       frame: false,

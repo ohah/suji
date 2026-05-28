@@ -347,7 +347,7 @@ describe("다중 창", () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",
       title: "Shell Test B",
-      url: "http://localhost:5173/",
+      url: "http://localhost:12300/",
       width: 400,
       height: 300,
     });

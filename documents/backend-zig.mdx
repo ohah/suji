@@ -137,7 +137,7 @@ Frontend `@suji/api`의 `windows.*`와 같은 cmd JSON을 코어로 보낸다 (d
 
 ```zig
 // 새 창 (단축)
-_ = suji.windows.createSimple("Settings", "http://localhost:5173/settings");
+_ = suji.windows.createSimple("Settings", "http://localhost:12300/settings");
 
 // 옵션 풀 셋 — opts_json은 cmd 객체 안의 raw 필드 (camelCase)
 _ = suji.windows.create("\"name\":\"hud\",\"frame\":false,\"transparent\":true,\"alwaysOnTop\":true");

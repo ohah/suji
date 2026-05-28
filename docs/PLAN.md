@@ -747,7 +747,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - **구현 순서**: Phase 2 (기본) + Phase 2.5 (데이터 인프라) **분리 유지**. 2.5 없이 Phase 2만 완료되면 플러그인이 멀티 윈도우 인지 불가
     - **E2E 실행**: macOS/Linux/Windows CI + CEF runtime subset.
 - [x] CLI 도구
-  - [x] `suji init` — 프로젝트 스캐폴딩 (backend zig/rust/go/multi + frontend react/vue/svelte/solid/preact/vanilla)
+  - [x] `suji init` — 프로젝트 스캐폴딩 (backend none/zig/rust/go/node/lua/multi + frontend Vite/Rsbuild/Next + pm npm/pnpm/bun/VoidZero `vp`)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
   - [x] `suji run` — 빌드된 앱 실행
@@ -758,18 +758,20 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 ```bash
 suji init my-app
 # 대화형으로 선택:
-#   Backend language? [zig/rust/go/node/multi]
-#   Frontend framework? [react/vue/svelte/vanilla]
-#   Package manager? [bun/npm/pnpm]
+#   Backend language? [none/zig/rust/go/node/lua/multi]
+#   Frontend framework? [react/vue/svelte/solid/preact/vanilla/next]
+#   Toolchain? [vite/rsbuild/next]
+#   Package manager? [npm/pnpm/bun/vp]
 ```
 
-단일 백엔드 (예: `suji init my-app --backend=rust --frontend=react`):
+단일 백엔드 (예: `suji init my-app --backend=rust --frontend=react --toolchain=vite`):
 ```
 my-app/
 ├── suji.json
+├── package.json
 ├── Cargo.toml
 ├── src/lib.rs
-└── frontend/          ← 번들 Vite 템플릿 — --frontend=react|vue|svelte|solid|preact|vanilla (기본 react, invoke 데모 동작)
+└── frontend/          ← 번들 템플릿 — Vite/Rsbuild/Next, invoke 데모 동작
     ├── package.json
     ├── src/App.tsx
     └── ...
@@ -796,7 +798,7 @@ my-app/
 suji dev
 # 1. suji.json 읽기 (설정 파일)
 # 2. 백엔드 빌드 (cargo build / go build / zig build)
-# 3. 프론트엔드 dev 서버 실행 (bun dev → localhost:5173)
+# 3. frontend.dev_command 실행 (기본 생성값 npm run dev → localhost:12300)
 # 4. WebView 창 열기 (dev_url 로드)
 # 5. 파일 감시 → 백엔드 변경 시 자동 재빌드 + 리로드
 ```
@@ -1322,7 +1324,7 @@ my-app/
   "app": { "name": "My App", "version": "0.1.0" },
   "window": { "title": "My App", "width": 800, "height": 600, "debug": true },
   "backend": { "lang": "rust", "entry": "." },
-  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:12300", "dev_command": "npm run dev", "build_command": "npm run build", "dist_dir": "frontend/dist" }
 }
 ```
 
@@ -1335,7 +1337,7 @@ my-app/
     { "name": "rust", "lang": "rust", "entry": "backends/rust" },
     { "name": "go", "lang": "go", "entry": "backends/go" }
   ],
-  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:12300", "dev_command": "npm run dev", "build_command": "npm run build", "dist_dir": "frontend/dist" }
 }
 ```
 
@@ -1473,7 +1475,7 @@ suji build → 결과물:
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ✅ `.github/workflows/release.yml` — `v*.*.*` 태그 정식 릴리스 + `workflow_dispatch dry_run=true` 검증 모드. macOS/Linux/Windows CLI 패키지 + checksums + embed core libs 크로스빌드 아티팩트, 태그↔`build.zig.zon` 버전 일치 검증, release publish gate. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 workflow 계약 고정 |
 | Homebrew tap | 사용자 직접 | -- | ✅ `release.yml` `homebrew` job — 릴리스 아티팩트 checksum으로 `Formula/suji.rb` 생성 + `ruby -c` 검증 + `homebrew-formula` artifact 업로드. 정식 릴리스 시 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 있으면 외부 tap repo push, 없으면 경고 후 skip. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 Formula 계약 고정 |
 | curl installer | 직접 다운로드 | -- | ✅ `scripts/install.sh` — 최신/특정 버전 GitHub Release asset 다운로드 + `.sha256` 검증 + 기본 `~/.suji/bin` 설치. release job이 `dist/install.sh`에 포함. macOS arm64/Linux x64 tar.gz + Windows x64 zip 매핑. 유닛(`release_workflow_test.zig`) + E2E(fake release archive 설치/체크섬 mismatch)로 계약 고정 |
-| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 순수 Node, suji 바이너리/Releases 불요) — `npx @suji/cli init <name> [--backend=zig\|rust\|go\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla]`(create-suji 별칭). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep — `--frontend` 도 양쪽 반영) + `.github/workflows/suji.yml` 생성 앱 CI 템플릿. 로컬 실증: npm pack→npx zig/rust/go/multi + frontend 분기 + 에러케이스, `suji init`/`@suji/cli` 산출 workflow + frontend build E2E. npm publish 는 토큰 대기(워크플로 후속) |
+| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(의존 0 스캐폴더 + `defineConfig` helper + `suji` JS launcher) — `npx @suji/cli init <name> [--backend=none\|zig\|rust\|go\|node\|lua\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla\|next] [--toolchain=vite\|rsbuild\|next] [--pm=npm\|pnpm\|bun\|vp]`(`create-suji` 별칭, `vz`/`voidzero`/`viteplus`는 VoidZero Vite+ `vp` alias). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep), `suji.config.ts` source config + materialized `suji.json`, 12300 기본 포트, `.github/workflows/suji.yml`. 검증: `zig build test`, `zig build`, init CLI E2E 14개(native init, npx CLI, npm pack, JS launcher, Vite 6종, Rsbuild 2종, Next static export build). npm publish 는 토큰 대기 |
 
 ### 플러그인 / 확장 API
 
@@ -1528,7 +1530,7 @@ suji build → 결과물:
 | DevTools | Chromium 내장 | WebView inspect | ✅ (인앱 DevTools, F12/Cmd+Shift+I 토글) |
 | E2E 테스트 | Spectron/Playwright | - | ✅ (Puppeteer + CDP `tests/e2e/`, GitHub Actions e2e workflow macOS 자동 실행) |
 | TypeScript 타입 자동 생성 | - | specta 연동 | ✅ 옵션 A+B 1차 완료 — `@suji/api` invoke<K> + `@suji/node` invoke/invokeSync/call/callSync 모두 SujiHandlers conditional generic으로 cmd/req/res 추론. Zig SDK는 comptime `typeToTs` + `App.schema` chain + `suji types` CLI(stdout/`--out`). Rust SDK는 specta v2 re-export (`#[derive(suji::Type)]`) + `suji::typescript::SujiHandlers` helper로 수동 등록한 req/res를 `.d.ts` module augmentation으로 emit. Go SDK는 `suji.NewTSHandlers()` + struct/json tag reflection helper로 동일 emit. 검증: app_test 골든 + 실 CLI 통합 + JS/Node type tests + Rust/Go SDK unit + Rust/Go/Node 외부 consumer E2E. Node 자동 생성은 런타임 타입메타 부재로 범위 밖 |
-| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla`(기본 react). **번들 Vite 템플릿**(Tauri식, create-vite 미위임 — `src/templates/frontend/<fw>/` 트리 comptime `@embedFile`; 누락 시 컴파일 실패=회귀 가드). 각 템플릿은 스캐폴딩 백엔드의 `ping`/`greet` 를 호출하는 동작 데모. `--backend` 대칭, `FrontendTemplate=std.meta.stringToEnum`. ⚠️ **정직 한계**: `@suji/api` npm 미발행 → 템플릿은 발행 불요 로컬 래퍼 `src/suji.ts`(런타임 `window.__suji__` 감쌈, @suji/api 와 표면 동형 — 발행 시 import 경로만 교체)로 동작. suji-cli(npx)는 `cpSync` 로 동일 트리 복사(lockstep). 검증=전 6 fw `bun install`+`bun run build`=0+dist 실증, 실 `suji init` E2E(zig+svelte 스캐폴딩→빌드), `tests/init_test.zig`(enum 구동 계약 + **suji-cli 미러 byte-동형 drift 가드** + 루트 템플릿 미러). 미검증=CEF 런타임 invoke 왕복(globalShortcut 동급 e2e 경계) |
+| 프론트엔드 프레임워크 템플릿 | - | create-tauri-app | ✅ `suji init --frontend=react\|vue\|svelte\|solid\|preact\|vanilla\|next --toolchain=vite\|rsbuild\|next`(기본 react+vite). 번들 템플릿은 Vite 6종, Rsbuild react/vue, Next static export를 포함하며 `dev_url` 기본은 `http://localhost:12300`. 각 템플릿은 스캐폴딩 백엔드의 `ping`/`greet` 호출 데모. `@suji/api` npm 미발행 전까지 로컬 `suji.ts` 래퍼 사용. 검증=init CLI E2E에서 Vite 6종 + Rsbuild 2종 + Next `bun install`/`bun run build`, `tests/init_test.zig` enum/미러 drift 가드. 미검증=CEF 런타임 invoke 왕복(globalShortcut 동급 e2e 경계) |
 | 플러그인 생태계 | npm 생태계 | 공식 플러그인 30+개 | 🟡 공식 6개(`state`, `sqlite`, `log`, `store`, `http`, `notification-rich`) + JS/Node wrapper 계약 테스트. `notification-rich`는 Windows WinRT toast 표시/영속, macOS UNUserNotificationCenter actions, Linux Freedesktop D-Bus actions 지원. 남은 한계는 Windows action click activator 등록 |
 | CI/CD 템플릿 | - | GitHub Actions 공식 제공 | ✅ `suji init` / `@suji/cli`가 `.github/workflows/suji.yml` 생성. 템플릿은 frontend `bun run build`, Zig backend fmt check, Rust/Go backend build를 포함하고, init.zig와 npm CLI 미러 byte-동형 단위 테스트 + init CLI E2E로 고정 |
 
@@ -1553,7 +1555,7 @@ Electron `protocol.handle(scheme, handler)`(임의 scheme 의 동적 백엔드
 
 **루트커즈(확정, 이분탐색 + macOS .ips 네이티브 스택)**:
 `cef_register_scheme_handler_factory` 로 등록한 커스텀 standard-scheme 에
-대한 **cross-origin 요청**(예: dev 문서 `http://localhost:5173` →
+대한 **cross-origin 요청**(예: dev 문서 `http://localhost:12300` →
 `myscheme://...`)이면 **CEF IO 스레드(Chrome_IOThread) 내부에서
 SIGSEGV**. 우리 Zig 0 프레임(Debug 빌드 Zig 패닉 0, faulting thread
 전 프레임 `Chromium Embedded Framework`). 이분탐색으로 배제 확정:

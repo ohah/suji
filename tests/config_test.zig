@@ -27,7 +27,9 @@ test "Config default values" {
     try std.testing.expect(cfg.backend == null);
     try std.testing.expect(cfg.backends == null);
     try std.testing.expectEqualStrings("frontend", cfg.frontend.dir);
-    try std.testing.expectEqualStrings("http://localhost:5173", cfg.frontend.dev_url);
+    try std.testing.expectEqualStrings("http://localhost:12300", cfg.frontend.dev_url);
+    try std.testing.expectEqualStrings("bun run dev", cfg.frontend.dev_command);
+    try std.testing.expectEqualStrings("bun run build", cfg.frontend.build_command);
     try std.testing.expectEqualStrings("frontend/dist", cfg.frontend.dist_dir);
 }
 
@@ -93,8 +95,60 @@ test "Config default SingleBackend" {
 test "Config default Frontend" {
     const fe = config.Config.Frontend{};
     try std.testing.expectEqualStrings("frontend", fe.dir);
-    try std.testing.expectEqualStrings("http://localhost:5173", fe.dev_url);
+    try std.testing.expectEqualStrings("http://localhost:12300", fe.dev_url);
+    try std.testing.expectEqualStrings("bun run dev", fe.dev_command);
+    try std.testing.expectEqualStrings("bun run build", fe.build_command);
     try std.testing.expectEqualStrings("frontend/dist", fe.dist_dir);
+}
+
+test "Config.loadFromJsonBytes parses frontend commands" {
+    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{
+        \\  "frontend": {
+        \\    "dir": "ui",
+        \\    "dev_url": "http://localhost:3000",
+        \\    "dev_command": "npm run dev",
+        \\    "build_command": "npm run build",
+        \\    "dist_dir": "ui/out"
+        \\  }
+        \\}
+    );
+    defer cfg.deinit();
+
+    try std.testing.expectEqualStrings("ui", cfg.frontend.dir);
+    try std.testing.expectEqualStrings("http://localhost:3000", cfg.frontend.dev_url);
+    try std.testing.expectEqualStrings("npm run dev", cfg.frontend.dev_command);
+    try std.testing.expectEqualStrings("npm run build", cfg.frontend.build_command);
+    try std.testing.expectEqualStrings("ui/out", cfg.frontend.dist_dir);
+}
+
+test "Config.loadFromTsConfigBytes parses defineConfig JSON object" {
+    var cfg = try config.Config.loadFromTsConfigBytes(std.testing.allocator,
+        \\import { defineConfig } from "@suji/cli";
+        \\
+        \\export default defineConfig({
+        \\  "$schema": "./suji.schema.json",
+        \\  "app": { "name": "TS Config App", "version": "1.2.3" },
+        \\  "backend": { "lang": "node", "entry": "backends/node" },
+        \\  "frontend": {
+        \\    "dir": "frontend",
+        \\    "dev_url": "http://localhost:12300",
+        \\    "dev_command": "vp run dev",
+        \\    "build_command": "vp run build",
+        \\    "dist_dir": "frontend/out"
+        \\  }
+        \\});
+    );
+    defer cfg.deinit();
+
+    try std.testing.expectEqualStrings("TS Config App", cfg.app.name);
+    try std.testing.expectEqualStrings("1.2.3", cfg.app.version);
+    try std.testing.expectEqualStrings("node", cfg.backend.?.lang);
+    try std.testing.expectEqualStrings("backends/node", cfg.backend.?.entry);
+    try std.testing.expectEqualStrings("http://localhost:12300", cfg.frontend.dev_url);
+    try std.testing.expectEqualStrings("vp run dev", cfg.frontend.dev_command);
+    try std.testing.expectEqualStrings("vp run build", cfg.frontend.build_command);
+    try std.testing.expectEqualStrings("frontend/out", cfg.frontend.dist_dir);
 }
 
 // ============================================

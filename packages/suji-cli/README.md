@@ -1,32 +1,51 @@
 # @suji/cli
 
-Suji 프로젝트 스캐폴더. **`suji` 바이너리 없이** `npx` 만으로 새 프로젝트 생성
-(Tauri `create-tauri-app` 대응).
+Suji 프로젝트 스캐폴더. `npx @suji/cli init` 또는 `npx create-suji`로
+프로젝트를 만들고, 설치 후에는 `suji dev/build/types`를 npm script처럼 실행합니다.
 
 ```bash
-npx @suji/cli init my-app                 # 기본 backend=rust, frontend=react
-npx @suji/cli init my-app --backend=zig   # zig | rust | go | multi
-npx @suji/cli init my-app --frontend=vue  # react | vue | svelte | solid | preact | vanilla
-# 별칭: npx create-suji my-app
+npx @suji/cli init my-app
+npx create-suji my-app
+
+npx @suji/cli init my-app \
+  --backend=zig \
+  --frontend=react \
+  --toolchain=vite \
+  --pm=npm
 ```
 
-생성물: `suji.json` · 백엔드(zig=`app.zig` / rust=`Cargo.toml`+`src/lib.rs` /
-go=`go.mod`+`main.go` / multi=`backends/{zig,rust,go}`) · `.gitignore` ·
-`.github/workflows/suji.yml` ·
-`frontend/`(`--frontend` 프레임워크의 번들 Vite 템플릿 — `invoke("ping")`/
-`invoke("greet")` 데모가 스캐폴딩 백엔드와 연결되어 동작).
+옵션:
+
+- `--backend=none|zig|rust|go|node|lua|multi`
+- `--frontend=react|vue|svelte|solid|preact|vanilla|next`
+- `--toolchain=vite|rsbuild|next` (`rspack`은 `rsbuild` 별칭)
+- `--pm=npm|pnpm|bun|vp` (`vz`, `voidzero`, `viteplus`는 VoidZero Vite+ `vp` 별칭)
+- `--install`은 생성 직후 `frontend/`에서 선택한 패키지 매니저 install 실행
+
+생성물:
+
+- 루트 `package.json` (`dev/build/types` scripts, `@suji/cli` devDependency)
+- `suji.config.ts` source config + materialized `suji.json`
+- `frontend.dev_url=http://localhost:12300`, `dev_command`, `build_command`
+- 백엔드 템플릿 (`zig`, `rust`, `go`, `node`, `lua`, `multi`)
+- `frontend/` 템플릿 (Vite, Rsbuild, Next static export)
+- `.github/workflows/suji.yml`
 
 다음 단계:
 
 ```bash
-cd my-app/frontend && bun install   # 또는 npm/pnpm install
-cd .. && suji dev                   # suji 바이너리 필요 (별도 설치)
+cd my-app
+npm install
+npm run dev
 ```
 
-> ℹ️ 프론트엔드는 `src/suji.ts`(런타임 `window.__suji__` 래퍼)로 백엔드를
-> 호출합니다. `@suji/api` 가 npm 에 발행되면 `import ... from "@suji/api"`
-> 로 교체 가능(표면 동일, 코드 변경 0).
+`--pm=vp`를 선택하면 Vite+ 명령을 사용합니다:
 
-> ⚠️ `bin/cli.js` 산출물은 `src/core/init.zig`(로컬 `suji init`)와 **동형**이고
-> `templates/*` 는 `src/templates/*` 의 사본입니다. **단일출처는 init.zig** —
-> 변경 시 양쪽을 lockstep 으로 유지하세요.
+```bash
+vp install
+vp run dev
+```
+
+`bin/cli.js` 산출물은 `src/core/init.zig`(로컬 `suji init`)와 동형이고
+`templates/*`는 `src/templates/*`의 사본입니다. 변경 시 양쪽을 lockstep으로
+유지하세요.

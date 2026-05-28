@@ -23,10 +23,10 @@ suji dev
 ```json
 {
   "windows": [
-    { "name": "main", "title": "Main", "width": 720, "height": 480, "url": "http://localhost:5173/" },
-    { "name": "panel", "frame": false, "url": "http://localhost:5173/panel.html" },
+    { "name": "main", "title": "Main", "width": 720, "height": 480, "url": "http://localhost:12300/" },
+    { "name": "panel", "frame": false, "url": "http://localhost:12300/panel.html" },
     { "name": "hud", "frame": false, "transparent": true, "parent": "main",
-      "url": "http://localhost:5173/overlay.html" }
+      "url": "http://localhost:12300/overlay.html" }
   ]
 }
 ```

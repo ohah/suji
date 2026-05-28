@@ -8,7 +8,7 @@
       "width": 720,
       "height": 480,
       "debug": true,
-      "url": "http://localhost:5173/"
+      "url": "http://localhost:12300/"
     },
     {
       "name": "panel",
@@ -16,7 +16,7 @@
       "width": 320,
       "height": 420,
       "frame": false,
-      "url": "http://localhost:5173/panel.html"
+      "url": "http://localhost:12300/panel.html"
     },
     {
       "name": "hud",
@@ -26,9 +26,9 @@
       "frame": false,
       "transparent": true,
       "parent": "main",
-      "url": "http://localhost:5173/overlay.html"
+      "url": "http://localhost:12300/overlay.html"
     }
   ],
   "backend": { "lang": "zig", "entry": "." },
-  "frontend": { "dir": "frontend", "dev_url": "http://localhost:5173", "dist_dir": "frontend/dist" }
+  "frontend": { "dir": "frontend", "dev_url": "http://localhost:12300", "dev_command": "bun run dev", "build_command": "bun run build", "dist_dir": "frontend/dist" }
 }

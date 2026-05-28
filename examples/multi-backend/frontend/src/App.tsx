@@ -55,7 +55,7 @@ function App() {
               () => core({
                 cmd: "create_window",
                 title: "Frameless Drag Demo",
-                url: "http://localhost:5173",
+                url: "http://localhost:12300",
                 name: "frameless-drag",
                 frame: false,
                 width: 920,
@@ -81,7 +81,7 @@ function App() {
                 () => suji.core(JSON.stringify({
                   cmd: "create_window",
                   title: "Window 2",
-                  url: "http://localhost:5173",
+                  url: "http://localhost:12300",
                   name: "second",
                 })),
                 "create-window-2",
@@ -95,7 +95,7 @@ function App() {
                 () => suji.core(JSON.stringify({
                   cmd: "create_window",
                   title: "Window 3",
-                  url: "http://localhost:5173",
+                  url: "http://localhost:12300",
                   name: "third",
                 })),
                 "create-window-3",

@@ -58,7 +58,7 @@ const createWindow = (p: Page, title: string, name?: string) =>
         JSON.stringify({
           cmd: "create_window",
           title: t,
-          url: "http://localhost:5173",
+          url: "http://localhost:12300",
           ...(n ? { name: n } : {}),
         }),
       ),
@@ -157,13 +157,13 @@ describe("Phase 2.5 — __window wire injection (1~3 windows)", () => {
   });
 
   test("event.window.url이 sender 창의 main frame URL을 반영", async () => {
-    // page1은 http://localhost:5173 을 로드한 상태 (suji dev 환경).
+    // page1은 http://localhost:12300 을 로드한 상태 (suji dev 환경).
     // zig-whoami(2-arity)가 응답에 window_url을 담아 보내준다.
     const resp = (await page1.evaluate(() =>
       (window as any).__suji__.invoke("zig-whoami", {}, { target: "zig" }),
     )) as { result: { window_id: number; window_name: string; window_url: string } };
     expect(resp.result.window_id).toBe(1);
-    expect(resp.result.window_url).toMatch(/^http:\/\/localhost:5173/);
+    expect(resp.result.window_url).toMatch(/^http:\/\/localhost:12300/);
   });
 
   test("명명된 창: event.window.name이 wire + InvokeEvent를 거쳐 핸들러까지 전달", async () => {

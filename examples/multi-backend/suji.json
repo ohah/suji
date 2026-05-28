@@ -23,7 +23,9 @@
   ],
   "frontend": {
     "dir": "frontend",
-    "dev_url": "http://localhost:5173",
+    "dev_url": "http://localhost:12300",
+    "dev_command": "bun run dev",
+    "build_command": "bun run build",
     "dist_dir": "frontend/dist"
   },
   "fs": {

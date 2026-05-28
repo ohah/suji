@@ -4,7 +4,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let coreSeq = 0;
 
 function isMainAppUrl(url: string): boolean {
-  return url.startsWith("http://localhost:5173") || url.startsWith("http://127.0.0.1:5173");
+  return url.startsWith("http://localhost:12300") || url.startsWith("http://127.0.0.1:12300");
 }
 
 async function hasSujiBridge(page: Page): Promise<boolean> {

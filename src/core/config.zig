@@ -5,11 +5,11 @@ const util = @import("util");
 const crash_reporter = @import("crash_reporter.zig");
 
 /// Suji 프로젝트 설정
-/// suji.json에서 로드
+/// suji.config.ts 또는 suji.json에서 로드
 pub const Config = struct {
     app: App = .{},
     /// 시작 시 자동 생성할 창 목록. 첫 항목이 main 창 (CEF 초기화 시 사이즈/타이틀 사용).
-    /// suji.json에 `windows` 배열이 없거나 비어있으면 default 1개.
+    /// config에 `windows` 배열이 없거나 비어있으면 default 1개.
     windows: []const Window = &.{Window{}},
     backend: ?SingleBackend = null,
     backends: ?[]const MultiBackend = null,
@@ -141,7 +141,9 @@ pub const Config = struct {
 
     pub const Frontend = struct {
         dir: [:0]const u8 = "frontend",
-        dev_url: [:0]const u8 = "http://localhost:5173",
+        dev_url: [:0]const u8 = "http://localhost:12300",
+        dev_command: [:0]const u8 = "bun run dev",
+        build_command: [:0]const u8 = "bun run build",
         dist_dir: [:0]const u8 = "frontend/dist",
     };
 
@@ -184,7 +186,7 @@ pub const Config = struct {
     pub const MAX_STARTUP_WINDOWS: usize = 32;
 
     pub fn load(allocator: std.mem.Allocator) !Config {
-        return loadJson(allocator);
+        return loadConfigFile(allocator);
     }
 
     pub fn deinit(self: *Config) void {
@@ -268,11 +270,56 @@ pub const Config = struct {
 
     // util.nonNegU32 직접 사용 (이 모듈 내부 alias 불필요).
 
-    fn loadJson(allocator: std.mem.Allocator) !Config {
+    fn loadConfigFile(allocator: std.mem.Allocator) !Config {
+        if (std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.config.ts", allocator, .limited(1024 * 128))) |content| {
+            defer allocator.free(content);
+            return loadFromTsConfigBytes(allocator, content);
+        } else |_| {}
+
         const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, "suji.json", allocator, .limited(1024 * 64)) catch return error.ConfigNotFound;
         defer allocator.free(content);
 
         return loadFromJsonBytes(allocator, content);
+    }
+
+    pub fn loadFromTsConfigBytes(allocator: std.mem.Allocator, content: []const u8) !Config {
+        const json = extractDefineConfigJson(content) orelse return error.InvalidConfig;
+        return loadFromJsonBytes(allocator, json);
+    }
+
+    fn extractDefineConfigJson(content: []const u8) ?[]const u8 {
+        const marker = "defineConfig";
+        const marker_at = std.mem.indexOf(u8, content, marker) orelse return null;
+        const start = std.mem.indexOfScalarPos(u8, content, marker_at + marker.len, '{') orelse return null;
+
+        var depth: usize = 0;
+        var in_string = false;
+        var escaped = false;
+        var i = start;
+        while (i < content.len) : (i += 1) {
+            const c = content[i];
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    in_string = false;
+                }
+                continue;
+            }
+
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '{') {
+                depth += 1;
+            } else if (c == '}') {
+                if (depth == 0) return null;
+                depth -= 1;
+                if (depth == 0) return content[start .. i + 1];
+            }
+        }
+        return null;
     }
 
     pub fn loadFromJsonBytes(allocator: std.mem.Allocator, content: []const u8) !Config {
@@ -449,6 +496,8 @@ pub const Config = struct {
                 const fe = fe_val.object;
                 if (getStr(fe, "dir")) |s| config.frontend.dir = dupeStr(a, s);
                 if (getStr(fe, "dev_url")) |s| config.frontend.dev_url = dupeStr(a, s);
+                if (getStr(fe, "dev_command")) |s| config.frontend.dev_command = dupeStr(a, s);
+                if (getStr(fe, "build_command")) |s| config.frontend.build_command = dupeStr(a, s);
                 if (getStr(fe, "dist_dir")) |s| config.frontend.dist_dir = dupeStr(a, s);
             }
         }

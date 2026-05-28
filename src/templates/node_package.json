@@ -1,0 +1,9 @@
+{
+  "name": "suji-node-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "@suji/node": "^0.1.0"
+  }
+}

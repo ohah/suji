@@ -269,15 +269,17 @@ fn printUsage() void {
         \\Suji - Zig core multi-backend desktop framework
         \\
         \\Usage:
-        \\  suji init <name> [--backend=rust|go|multi]   Create new project
-        \\         [--frontend=react|vue|svelte|solid|preact|vanilla]
+        \\  suji init <name> [--backend=none|zig|rust|go|node|lua|multi]
+        \\         [--frontend=react|vue|svelte|solid|preact|vanilla|next]
+        \\         [--toolchain=vite|rsbuild|next]
+        \\         [--pm=npm|pnpm|bun|vp] [--install]
         \\  suji dev                                     Development mode
         \\  suji build                                   Production build
         \\  suji run [main.js]                           Run production build or embedded Node.js file
         \\  suji types [--out <path>]                    Gen SujiHandlers .d.ts (zig .schema())
         \\
         \\Example:
-        \\  suji init my-app --backend=rust --frontend=vue
+        \\  suji init my-app --backend=zig --frontend=react --toolchain=vite
         \\  cd my-app && suji dev
         \\
     , .{});
@@ -287,28 +289,55 @@ const init_mod = @import("core/init.zig");
 const proc = @import("core/proc.zig");
 const release_opts = @import("core/release_opts.zig");
 
-const INIT_USAGE = "Usage: suji init <project-name> [--backend=rust|go|multi] [--frontend=react|vue|svelte|solid|preact|vanilla]\n";
+const INIT_USAGE = "Usage: suji init <project-name> [--backend=none|zig|rust|go|node|lua|multi] [--frontend=react|vue|svelte|solid|preact|vanilla|next] [--toolchain=vite|rsbuild|next] [--pm=npm|pnpm|bun|vp] [--install]\n";
 
 fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
     var name: []const u8 = "";
-    var backend = init_mod.BackendLang.rust;
-    var frontend = init_mod.FrontendTemplate.react;
+    var backend = init_mod.BackendLang.zig;
+    var frontend_framework = init_mod.FrontendFramework.react;
+    var frontend_toolchain = init_mod.FrontendToolchain.vite;
+    var frontend_template: ?init_mod.FrontendTemplate = null;
+    var package_manager = init_mod.PackageManager.npm;
+    var install_dependencies = false;
 
     const backend_prefix = "--backend=";
     const frontend_prefix = "--frontend=";
+    const toolchain_prefix = "--toolchain=";
+    const pm_prefix = "--pm=";
     for (init_args) |arg| {
         if (std.mem.startsWith(u8, arg, backend_prefix)) {
             const lang_str = arg[backend_prefix.len..];
             backend = init_mod.BackendLang.fromString(lang_str) orelse {
-                std.debug.print("Unknown backend: {s}. Use: rust, go, multi\n", .{lang_str});
+                std.debug.print("Unknown backend: {s}. Use: none, zig, rust, go, node, lua, multi\n", .{lang_str});
                 return;
             };
         } else if (std.mem.startsWith(u8, arg, frontend_prefix)) {
             const fe_str = arg[frontend_prefix.len..];
-            frontend = init_mod.FrontendTemplate.fromString(fe_str) orelse {
-                std.debug.print("Unknown frontend: {s}. Use: react, vue, svelte, solid, preact, vanilla\n", .{fe_str});
+            if (init_mod.FrontendTemplate.fromString(fe_str)) |tpl| {
+                frontend_template = tpl;
+            } else if (init_mod.FrontendFramework.fromString(fe_str)) |fw| {
+                frontend_framework = fw;
+                if (fw == .next) frontend_toolchain = .next;
+            } else {
+                std.debug.print("Unknown frontend: {s}. Use: react, vue, svelte, solid, preact, vanilla, next\n", .{fe_str});
+                return;
+            }
+        } else if (std.mem.startsWith(u8, arg, toolchain_prefix)) {
+            const tc_str = arg[toolchain_prefix.len..];
+            frontend_toolchain = init_mod.FrontendToolchain.fromString(tc_str) orelse {
+                std.debug.print("Unknown toolchain: {s}. Use: vite, rsbuild, next\n", .{tc_str});
                 return;
             };
+        } else if (std.mem.startsWith(u8, arg, pm_prefix)) {
+            const pm_str = arg[pm_prefix.len..];
+            package_manager = init_mod.PackageManager.fromString(pm_str) orelse {
+                std.debug.print("Unknown package manager: {s}. Use: npm, pnpm, bun, vp\n", .{pm_str});
+                return;
+            };
+        } else if (std.mem.eql(u8, arg, "--install")) {
+            install_dependencies = true;
+        } else if (std.mem.eql(u8, arg, "--no-install")) {
+            install_dependencies = false;
         } else {
             name = arg;
         }
@@ -320,10 +349,17 @@ fn runInit(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void 
         return;
     }
 
+    const frontend = frontend_template orelse init_mod.FrontendTemplate.fromFrameworkToolchain(frontend_framework, frontend_toolchain) orelse {
+        std.debug.print("Unsupported frontend/toolchain combination: {s}+{s}\n", .{ @tagName(frontend_framework), @tagName(frontend_toolchain) });
+        return;
+    };
+
     try init_mod.run(allocator, .{
         .name = name,
         .backend = backend,
         .frontend = frontend,
+        .package_manager = package_manager,
+        .install_dependencies = install_dependencies,
     });
 }
 
@@ -367,7 +403,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
 
     // 프론트엔드 빌드
     std.debug.print("[suji] building frontend...\n", .{});
-    buildFrontend(allocator, config.frontend.dir) catch |err| {
+    buildFrontend(allocator, config.frontend) catch |err| {
         std.debug.print("[suji] frontend build failed: {}\n", .{err});
     };
 
@@ -1487,35 +1523,31 @@ fn runCmdEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pairs: 
 // 프론트엔드
 // ============================================
 
-fn startFrontendDev(allocator: std.mem.Allocator, frontend_dir: []const u8) !std.process.Child {
-    const has_bun = blk: {
-        var buf: [512]u8 = undefined;
-        const p = std.fmt.bufPrint(&buf, "{s}/bun.lock", .{frontend_dir}) catch break :blk false;
-        std.Io.Dir.cwd().access(runtime.io, p, .{}) catch break :blk false;
-        break :blk true;
-    };
-
+fn startFrontendDev(allocator: std.mem.Allocator, frontend: suji.Config.Frontend) !std.process.Child {
     _ = allocator;
-    const argv: []const []const u8 = if (has_bun)
-        &.{ "bun", "run", "--cwd", frontend_dir, "dev" }
-    else
-        &.{ "npm", "--prefix", frontend_dir, "run", "dev" };
-    return try std.process.spawn(runtime.io, .{ .argv = argv });
+    return try spawnShellInDir(frontend.dev_command, frontend.dir);
 }
 
-fn buildFrontend(allocator: std.mem.Allocator, frontend_dir: []const u8) !void {
-    var buf: [512]u8 = undefined;
-    const p = std.fmt.bufPrint(&buf, "{s}/bun.lock", .{frontend_dir}) catch return;
-    const has_bun = blk: {
-        std.Io.Dir.cwd().access(runtime.io, p, .{}) catch break :blk false;
-        break :blk true;
-    };
+fn spawnShellInDir(command: []const u8, cwd_path: []const u8) !std.process.Child {
+    const argv: []const []const u8 = if (builtin.os.tag == .windows)
+        &.{ "cmd", "/C", command }
+    else
+        &.{ "sh", "-c", command };
+    return try std.process.spawn(runtime.io, .{ .argv = argv, .cwd = .{ .path = cwd_path } });
+}
 
-    if (has_bun) {
-        try runCmd(allocator, &.{ "bun", "run", "--cwd", frontend_dir, "build" });
-    } else {
-        try runCmd(allocator, &.{ "npm", "--prefix", frontend_dir, "run", "build" });
+fn runShellInDir(command: []const u8, cwd_path: []const u8) !void {
+    var child = try spawnShellInDir(command, cwd_path);
+    const result = try child.wait(runtime.io);
+    switch (result) {
+        .exited => |code| if (code != 0) return error.CommandFailed,
+        else => return error.CommandFailed,
     }
+}
+
+fn buildFrontend(allocator: std.mem.Allocator, frontend: suji.Config.Frontend) !void {
+    _ = allocator;
+    try runShellInDir(frontend.build_command, frontend.dir);
 }
 
 // ============================================
@@ -1582,7 +1614,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
 
     // 프론트엔드 dev 서버
     std.debug.print("[suji] starting frontend dev server...\n", .{});
-    var frontend_proc = startFrontendDev(allocator, config.frontend.dir) catch |err| {
+    var frontend_proc = startFrontendDev(allocator, config.frontend) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
         try openWindow(allocator, &config, event_bus, .dev, main_url);
         return;
