@@ -270,8 +270,10 @@ fn wallClockMs() i64 {
     }
     // POSIX: clock_gettime(CLOCK_REALTIME) → seconds + nanoseconds.
     var ts: std.posix.timespec = undefined;
-    std.posix.clock_gettime(std.posix.CLOCK.REALTIME, &ts) catch return 0;
-    return @as(i64, @intCast(ts.sec)) * 1000 + @as(i64, @intCast(@divTrunc(ts.nsec, 1_000_000)));
+    switch (std.posix.errno(std.posix.system.clock_gettime(.REALTIME, &ts))) {
+        .SUCCESS => return @as(i64, @intCast(ts.sec)) * 1000 + @as(i64, @intCast(@divTrunc(ts.nsec, 1_000_000))),
+        else => return 0,
+    }
 }
 
 fn appendJsonEscaped(buf: *std.ArrayList(u8), s: []const u8) !void {
