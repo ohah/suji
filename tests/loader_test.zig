@@ -10,7 +10,7 @@ test "SujiCore struct size" {
     try std.testing.expect(@sizeOf(loader.SujiCore) > 0);
 }
 
-test "SujiCore exposes quit + platform fn pointers" {
+test "SujiCore exposes quit + platform + window_api fn pointers" {
     // 필드 존재 확인 — 컴파일 성공이 핵심 (타입 불일치 시 빌드 실패)
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
@@ -18,6 +18,7 @@ test "SujiCore exposes quit + platform fn pointers" {
     // 두 함수 포인터는 init 시점에 항상 non-null 값이 설정됨
     try std.testing.expect(@intFromPtr(api.quit) != 0);
     try std.testing.expect(@intFromPtr(api.platform) != 0);
+    try std.testing.expect(@intFromPtr(api.get_window_api) != 0);
 }
 
 test "loader.platformName returns macos/linux/windows" {
@@ -348,7 +349,9 @@ test "registerEmbedRuntime + deinit: no leak on happy path" {
     var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
     defer reg.deinit();
     reg.setGlobal();
-    defer { loader.BackendRegistry.global = null; }
+    defer {
+        loader.BackendRegistry.global = null;
+    }
 
     const stub: loader.EmbedRuntime = .{
         .invoke = undefined,
@@ -496,6 +499,56 @@ test "special_dispatch는 __fanout__ / __chain__ channel도 dispatch" {
     try std.testing.expectEqualStrings("__chain__", SpecialDispatchSpy.lastChannel());
 
     try std.testing.expectEqual(@as(usize, 2), SpecialDispatchSpy.call_count);
+}
+
+fn requestViaWindowApi(api: *const loader.WindowApi, request: [:0]const u8) ?[]const u8 {
+    const resp_ptr = api.request_json(@ptrCast(request.ptr));
+    if (resp_ptr == null) return null;
+    const span = std.mem.span(@as([*:0]const u8, @ptrCast(resp_ptr)));
+    if (span.len == 0) return null;
+    return span;
+}
+
+fn freeWindowApiResp(api: *const loader.WindowApi, resp: ?[]const u8) void {
+    const r = resp orelse return;
+    api.free_response(@ptrCast(r.ptr));
+}
+
+test "get_window_api returns null until registry global and special_dispatch are ready" {
+    SpecialDispatchSpy.reset();
+    loader.BackendRegistry.global = null;
+    loader.BackendRegistry.special_dispatch = null;
+
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    defer reg.deinit();
+
+    try std.testing.expect(reg.core_api.get_window_api() == null);
+
+    reg.setGlobal();
+    try std.testing.expect(reg.core_api.get_window_api() == null);
+
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+    try std.testing.expect(reg.core_api.get_window_api() != null);
+}
+
+test "window_api request_json dispatches through __core__ and returns owned response" {
+    SpecialDispatchSpy.reset();
+    SpecialDispatchSpy.stub_response = "{\"from\":\"zig-core\",\"cmd\":\"get_url\",\"url\":\"suji://app/\"}";
+    var reg = loader.BackendRegistry.init(std.testing.allocator, std.testing.io);
+    reg.setGlobal();
+    defer reg.deinit();
+    loader.BackendRegistry.special_dispatch = SpecialDispatchSpy.dispatch;
+    defer loader.BackendRegistry.special_dispatch = null;
+
+    const api = reg.core_api.get_window_api() orelse return error.WindowApiMissing;
+    const resp = requestViaWindowApi(api, "{\"cmd\":\"get_url\",\"windowId\":1}").?;
+    defer freeWindowApiResp(api, resp);
+
+    try std.testing.expectEqual(@as(usize, 1), SpecialDispatchSpy.call_count);
+    try std.testing.expectEqualStrings("__core__", SpecialDispatchSpy.lastChannel());
+    try std.testing.expectEqualStrings("{\"cmd\":\"get_url\",\"windowId\":1}", SpecialDispatchSpy.lastData());
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"url\":\"suji://app/\"") != null);
 }
 
 // ============================================

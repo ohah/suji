@@ -279,6 +279,12 @@ impl InvokeEvent {
 }
 
 #[repr(C)]
+pub struct SujiWindowApi {
+    pub request_json: extern "C" fn(*const std::os::raw::c_char) -> *const std::os::raw::c_char,
+    pub free_response: extern "C" fn(*const std::os::raw::c_char),
+}
+
+#[repr(C)]
 pub struct SujiCore {
     pub invoke: extern "C" fn(
         *const std::os::raw::c_char,
@@ -307,6 +313,8 @@ pub struct SujiCore {
     pub platform: extern "C" fn() -> *const std::os::raw::c_char,
     /// 특정 창(WindowManager id)에만 이벤트 전달 (Electron `webContents.send`).
     pub emit_to: extern "C" fn(u32, *const std::os::raw::c_char, *const std::os::raw::c_char),
+    /// WindowManager 전용 API table. 없으면 null 포인터 반환.
+    pub get_window_api: extern "C" fn() -> *const SujiWindowApi,
 }
 
 unsafe impl Send for SujiCore {}

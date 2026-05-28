@@ -499,7 +499,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `suji.send(event, data, {to: winId})` + 4개 언어 SDK 모두 `sendTo(id, ch, data)` — Electron `webContents.send` 대응. E2E 통과 (4언어 × target 라우팅).
     - [x] state 플러그인 scope 확장 (`global` / `window:{id}` / `window`(자동) / `session:*`).
           기존 데이터는 자동 마이그레이션 (`<scope>::<key>` prefix). watch 채널도 scope별 분리.
-    - [ ] `SujiCore.get_window_api` — 플러그인이 BrowserWindow 조작 가능 (Phase 3+)
+    - [x] `SujiCore.get_window_api` — 플러그인이 WindowManager 전용 C ABI
+          table을 받아 BrowserWindow/WebContentsView cmd JSON을 직접 dispatch 가능.
+          Zig `windows.*`는 이 table이 있으면 우선 사용하고 없으면 기존
+          `invoke("__core__", ...)`로 폴백한다. Rust/Go C ABI struct도 tail field
+          동기화 완료.
     - [x] 생명주기 이벤트 payload `{windowId, name?}` 표준화 — created/close/closed 모두 일관.
           name은 destroy 전 캡처해서 closed에도 포함 → 플러그인이 wm 조회 없이 분기.
   - [x] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식, 추가 외형 옵션)
@@ -516,7 +520,9 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] `windows[].fullscreen: true` — macOS toggleFullScreen:, Linux CEF Views `set_fullscreen`.
     - [x] `windows[].backgroundColor: "#RRGGBB(AA)"` — macOS NSColor.colorWithRed:green:blue:alpha:, Linux CEF Views `set_background_color`.
     - [x] `windows[].titleBarStyle: "hidden" | "hiddenInset"` — titlebarAppearsTransparent + NSWindowStyleMaskFullSizeContentView.
-    - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만. 실수요 발견 시 SujiCore.get_window_api로 도입.
+    - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만.
+      `SujiCore.get_window_api` v1은 기존 window cmd dispatcher라, 이 3개는 별도 cmd가
+      추가될 때까지 여전히 범위 밖.
     - **플랫폼 한계**: macOS/Linux는 frameless의 `-webkit-app-region: drag` 라우팅 완료.
       Windows는 아직 별도 native 검증 전이라 후속 플랫폼 작업 필요.
   - [~] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)

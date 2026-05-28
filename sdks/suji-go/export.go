@@ -4,6 +4,11 @@ package suji
 #include <stdlib.h>
 
 typedef struct {
+    const char* (*request_json)(const char* request);
+    void (*free_response)(const char* response);
+} SujiWindowApi;
+
+typedef struct {
     const char* (*invoke)(const char* backend_name, const char* request);
     void (*free_fn)(const char* response);
     void (*emit)(const char* channel, const char* data);
@@ -18,6 +23,8 @@ typedef struct {
     const char* (*platform)(void);
     // 특정 창에만 이벤트 전달 (Electron webContents.send). 대상이 닫혔으면 no-op.
     void (*emit_to)(unsigned int window_id, const char* channel, const char* data);
+    // WindowManager 전용 API table. 없으면 NULL 반환.
+    const SujiWindowApi* (*get_window_api)(void);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* channel) {

@@ -116,6 +116,11 @@ macOS는 `UNUserNotificationCenter` action category, Linux는 Freedesktop
 Notifications D-Bus action signal을 사용하고, action click은 기존
 `notification:click {notificationId, actionId}` 채널로 라우팅된다.
 
+플러그인이 창이나 WebContentsView를 직접 조작해야 할 때는 `SujiCore.get_window_api`
+로 WindowManager 전용 C ABI table을 받을 수 있다. v1 table은 기존 `__core__`
+window cmd JSON을 받는 `request_json` dispatcher와 `free_response`를 제공하며,
+주입되지 않은 호스트에서는 기존 `invoke("__core__", ...)` 경로로 폴백한다.
+
 ## 후속 검토 (Phase 6+)
 
 - **Build-time feature flag** (Tauri 패턴): `zig build -Dfeatures=fs,clipboard` 또는

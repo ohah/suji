@@ -4,6 +4,11 @@ package main
 #include <stdlib.h>
 
 typedef struct {
+    const char* (*request_json)(const char* request);
+    void (*free_response)(const char* response);
+} SujiWindowApi;
+
+typedef struct {
     const char* (*invoke)(const char* backend_name, const char* request);
     void (*free_fn)(const char* response);
     void (*emit)(const char* channel, const char* data);
@@ -14,6 +19,7 @@ typedef struct {
     void (*quit)(void);
     const char* (*platform)(void);
     void (*emit_to)(unsigned int window_id, const char* channel, const char* data);
+    const SujiWindowApi* (*get_window_api)(void);
 } SujiCore;
 
 static void core_register(SujiCore* core, const char* ch) {

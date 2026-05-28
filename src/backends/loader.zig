@@ -2,7 +2,6 @@ const std = @import("std");
 const events = @import("events");
 const util = @import("util");
 
-
 /// Zig 코어가 백엔드에게 제공하는 API
 /// 백엔드에서 다른 백엔드를 호출할 때 사용
 pub const SujiCore = extern struct {
@@ -23,6 +22,18 @@ pub const SujiCore = extern struct {
     /// 특정 창(WindowManager id)에만 이벤트 전달 (Electron `webContents.send`).
     /// 대상이 닫혔거나 존재하지 않으면 no-op.
     emit_to: *const fn (u32, [*c]const u8, [*c]const u8) callconv(.c) void,
+    /// WindowManager 전용 API table. 플러그인이 창/webContents를 조작할 때
+    /// generic `invoke("__core__", ...)` 대신 사용할 수 있다.
+    get_window_api: *const fn () callconv(.c) ?*const WindowApi,
+};
+
+/// 플러그인/백엔드에 노출되는 창 전용 C ABI.
+///
+/// v1은 기존 `__core__` window cmd JSON을 그대로 받는 raw dispatcher다. 이 표면을
+/// 먼저 고정해 두면 후속으로 typed function을 추가하더라도 기존 플러그인과 호환된다.
+pub const WindowApi = extern struct {
+    request_json: *const fn ([*c]const u8) callconv(.c) [*c]const u8,
+    free_response: *const fn ([*c]const u8) callconv(.c) void,
 };
 
 /// dlopen 바깥에서 프로세스 내에 임베드되는 언어 런타임 (Node.js, 향후 Python/Lua).
@@ -203,6 +214,7 @@ pub const BackendRegistry = struct {
                 .quit = coreQuit,
                 .platform = corePlatform,
                 .emit_to = coreEmitTo,
+                .get_window_api = coreGetWindowApi,
             },
         };
         _ = &reg;
@@ -520,6 +532,29 @@ pub const BackendRegistry = struct {
 
     fn corePlatform() callconv(.c) [*:0]const u8 {
         return platformName();
+    }
+
+    const window_api = WindowApi{
+        .request_json = windowApiRequestJson,
+        .free_response = coreFree,
+    };
+
+    fn coreGetWindowApi() callconv(.c) ?*const WindowApi {
+        _ = global orelse return null;
+        _ = special_dispatch orelse return null;
+        return &window_api;
+    }
+
+    fn windowApiRequestJson(request: [*c]const u8) callconv(.c) [*c]const u8 {
+        const reg = global orelse return @ptrCast(@constCast(""));
+        const dispatch = special_dispatch orelse return @ptrCast(@constCast("{}"));
+        if (request == null) return @ptrCast(@constCast("{}"));
+
+        const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
+        var resp_buf: [16384]u8 = undefined;
+        const out = dispatch(CHANNEL_CORE, req_span, &resp_buf) orelse return @ptrCast(@constCast("{}"));
+        const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(@constCast("{}"));
+        return @ptrCast(owned);
     }
 };
 

@@ -311,5 +311,7 @@ File system wire shape:
 
 - **Python embed runtime** — 현재 dlopen만. Python은 GIL/thread 모델 때문에 embed가 자연. `EmbedRuntime` 테이블에 등록.
 - **Ruby embed runtime** — 동일.
-- **`SujiCore.get_window_api`** — 플러그인이 BrowserWindow를 직접 조작 (현재는 invoke `__core__` 경유만). Phase 4 후반에 도입.
+- **Window API 확장** — `SujiCore.get_window_api` v1은 완료(raw `__core__`
+  window cmd JSON dispatcher). 후속 typed function 추가 시 tail-add 방식으로
+  ABI 호환을 유지한다.
 - **테스트 spy 표준화** — 현재 각 SDK가 invoke spy를 자체 구현. 공통 패턴 문서화 또는 reusable harness 검토.

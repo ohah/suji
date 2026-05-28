@@ -602,6 +602,49 @@ const InvokeSpy = struct {
     }
 };
 
+const WindowApiSpy = struct {
+    var call_count: usize = 0;
+    var last_request: [4096]u8 = undefined;
+    var last_request_len: usize = 0;
+    var stub_response: [256:0]u8 = undefined;
+    var stub_response_len: usize = 0;
+    var api = app_mod.WindowApi{
+        .request_json = &onRequest,
+        .free_response = null,
+    };
+
+    fn onRequest(request: [*c]const u8) callconv(.c) [*c]const u8 {
+        call_count += 1;
+        const r_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
+        last_request_len = @min(r_span.len, last_request.len);
+        @memcpy(last_request[0..last_request_len], r_span[0..last_request_len]);
+        if (stub_response_len == 0) return null;
+        return @ptrCast(&stub_response);
+    }
+
+    fn get() callconv(.c) ?*const app_mod.WindowApi {
+        return &api;
+    }
+
+    fn reset() void {
+        call_count = 0;
+        last_request_len = 0;
+        stub_response_len = 0;
+        stub_response[0] = 0;
+    }
+
+    fn setStub(body: []const u8) void {
+        const n = @min(body.len, stub_response.len - 1);
+        @memcpy(stub_response[0..n], body[0..n]);
+        stub_response[n] = 0;
+        stub_response_len = n;
+    }
+
+    fn lastRequest() []const u8 {
+        return last_request[0..last_request_len];
+    }
+};
+
 fn withInvokeCore(body: anytype) !void {
     InvokeSpy.reset();
     InvokeSpy.setStub("{\"ok\":true}");
@@ -618,6 +661,40 @@ fn withInvokeCore(body: anytype) !void {
     app_mod.setGlobalCore(&core);
     defer app_mod.setGlobalCore(null);
     try body();
+}
+
+test "getWindowApi returns null when core does not expose window api" {
+    app_mod.setGlobalCore(null);
+    try std.testing.expect(app_mod.getWindowApi() == null);
+}
+
+test "windows.* prefers SujiCore window_api over generic __core__ invoke" {
+    InvokeSpy.reset();
+    InvokeSpy.setStub("{\"ok\":true}");
+    WindowApiSpy.reset();
+    WindowApiSpy.setStub("{\"ok\":true,\"via\":\"window_api\"}");
+
+    var core = app_mod.ExternSujiCore{
+        .invoke_fn = &InvokeSpy.onInvoke,
+        .free_fn = null,
+        .emit = null,
+        .on_fn = null,
+        .off_fn = null,
+        .register_fn = null,
+        .get_io = null,
+        .emit_to_fn = null,
+        .get_window_api_fn = &WindowApiSpy.get,
+    };
+    app_mod.setGlobalCore(&core);
+    defer app_mod.setGlobalCore(null);
+
+    const resp = app_mod.windows.loadURL(7, "http://example.com/").?;
+    try std.testing.expect(std.mem.indexOf(u8, resp, "\"via\":\"window_api\"") != null);
+    try std.testing.expectEqual(@as(usize, 0), InvokeSpy.call_count);
+    try std.testing.expectEqual(@as(usize, 1), WindowApiSpy.call_count);
+    const r = WindowApiSpy.lastRequest();
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"load_url\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"windowId\":7") != null);
 }
 
 test "windows.loadURL: __core__ + load_url + windowId/url 전송" {

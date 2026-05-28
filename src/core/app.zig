@@ -518,6 +518,13 @@ pub const ExternSujiCore = extern struct {
     platform_fn: ?*const fn () callconv(.c) [*:0]const u8 = null,
     /// 특정 창에만 이벤트 전달 (Electron `webContents.send`). 없으면 sendTo는 no-op.
     emit_to_fn: ?*const fn (u32, [*c]const u8, [*c]const u8) callconv(.c) void = null,
+    /// WindowManager 전용 API table getter. 없으면 windows.*는 기존 `invoke("__core__")`로 폴백.
+    get_window_api_fn: ?*const fn () callconv(.c) ?*const WindowApi = null,
+};
+
+pub const WindowApi = extern struct {
+    request_json: ?*const fn ([*c]const u8) callconv(.c) [*c]const u8,
+    free_response: ?*const fn ([*c]const u8) callconv(.c) void,
 };
 
 var _global_core: ?*const ExternSujiCore = null;
@@ -560,12 +567,22 @@ pub fn io() std.Io {
     return ptr.*;
 }
 
+/// 플러그인 개발자 API — WindowManager 전용 C ABI table 조회.
+/// null이면 현재 host가 window API를 주입하지 않은 것이므로 `windows.*`와 동일하게
+/// 기존 `invoke("__core__", ...)` 경로를 사용하면 된다.
+pub fn getWindowApi() ?*const WindowApi {
+    const core = _global_core orelse return null;
+    const get = core.get_window_api_fn orelse return null;
+    return get();
+}
+
 // ============================================
 // windows API — 백엔드 SDK
 //
 // dlopen된 백엔드 dylib에서는 in-process WindowManager.global 접근이 불가하므로
-// (각 모듈 인스턴스는 자기 BSS만 봄) 모든 호출이 `callBackend("__core__", ...)`로
-// IPC를 거친다. Frontend `@suji/api`의 windows.* 와 같은 cmd JSON 형식.
+// (각 모듈 인스턴스는 자기 BSS만 봄) `SujiCore.get_window_api()`가 있으면 그
+// 전용 dispatcher를, 없으면 기존 `callBackend("__core__", ...)` 폴백을 쓴다.
+// Frontend `@suji/api`의 windows.* 와 같은 cmd JSON 형식.
 //
 // 응답은 `{from, cmd, windowId, ok, ...}` 형태 — caller가 std.json으로 파싱.
 // ============================================
@@ -577,7 +594,7 @@ pub const windows = struct {
     /// (예: `"title":"x","frame":false,"width":400`). caller가 JSON-safe 보장.
     /// 옵션 풀 셋은 documents/multi-window.mdx 참조. 단순 경우는 createSimple() 권장.
     pub fn create(opts_json: []const u8) ?[]const u8 {
-        return coreCmd("create_window", opts_json);
+        return windowCoreCmd("create_window", opts_json);
     }
 
     /// 단축: title + url만 지정해 익명 창 생성.
@@ -596,13 +613,13 @@ pub const windows = struct {
         const u_n = util.escapeJsonStr(url, &u_buf) orelse return null;
         var fields_buf: [2400]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"url\":\"{s}\"", .{ id, u_buf[0..u_n] }) catch return null;
-        return coreCmd("load_url", fields);
+        return windowCoreCmd("load_url", fields);
     }
 
     pub fn reload(id: u32, ignore_cache: bool) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"ignoreCache\":{}", .{ id, ignore_cache }) catch return null;
-        return coreCmd("reload", fields);
+        return windowCoreCmd("reload", fields);
     }
 
     /// 렌더러에 임의 JS 실행. fire-and-forget — 결과 회신 없음.
@@ -620,7 +637,7 @@ pub const windows = struct {
         };
         var fields_buf: [JS_CODE_STACK_BUF + 128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"code\":\"{s}\"", .{ id, c_buf[0..c_n] }) catch return null;
-        return coreCmd("execute_javascript", fields);
+        return windowCoreCmd("execute_javascript", fields);
     }
 
     pub fn getURL(id: u32) ?[]const u8 {
@@ -647,7 +664,7 @@ pub const windows = struct {
     pub fn setZoomLevel(id: u32, level: f64) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"level\":{d}", .{ id, level }) catch return null;
-        return coreCmd("set_zoom_level", fields);
+        return windowCoreCmd("set_zoom_level", fields);
     }
     pub fn getZoomLevel(id: u32) ?[]const u8 {
         return windowIdCmd("get_zoom_level", id);
@@ -655,7 +672,7 @@ pub const windows = struct {
     pub fn setZoomFactor(id: u32, factor: f64) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"factor\":{d}", .{ id, factor }) catch return null;
-        return coreCmd("set_zoom_factor", fields);
+        return windowCoreCmd("set_zoom_factor", fields);
     }
     pub fn getZoomFactor(id: u32) ?[]const u8 {
         return windowIdCmd("get_zoom_factor", id);
@@ -665,7 +682,7 @@ pub const windows = struct {
     pub fn setAudioMuted(id: u32, muted: bool) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"muted\":{}", .{ id, muted }) catch return null;
-        return coreCmd("set_audio_muted", fields);
+        return windowCoreCmd("set_audio_muted", fields);
     }
 
     /// 창 오디오 mute 상태. 응답: `{"muted":bool, "ok":bool}`.
@@ -677,7 +694,7 @@ pub const windows = struct {
     pub fn setOpacity(id: u32, opacity: f64) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"opacity\":{d}", .{ id, opacity }) catch return null;
-        return coreCmd("set_opacity", fields);
+        return windowCoreCmd("set_opacity", fields);
     }
 
     /// 응답: `{"opacity":f64,"ok":bool}`.
@@ -691,14 +708,14 @@ pub const windows = struct {
         const c_n = util.escapeJsonStrFull(color, &c_buf) orelse return null;
         var fields_buf: [192]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"color\":\"{s}\"", .{ id, c_buf[0..c_n] }) catch return null;
-        return coreCmd("set_background_color", fields);
+        return windowCoreCmd("set_background_color", fields);
     }
 
     /// 그림자 표시 여부. Electron `BrowserWindow.setHasShadow`. 응답: windowOp.
     pub fn setHasShadow(id: u32, has: bool) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"hasShadow\":{}", .{ id, has }) catch return null;
-        return coreCmd("set_has_shadow", fields);
+        return windowCoreCmd("set_has_shadow", fields);
     }
 
     /// 응답: `{"hasShadow":bool,"ok":bool}`.
@@ -739,13 +756,13 @@ pub const windows = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"text\":\"{s}\",\"forward\":{},\"matchCase\":{},\"findNext\":{}", .{
             id, t_buf[0..t_n], opts.forward, opts.match_case, opts.find_next,
         }) catch return null;
-        return coreCmd("find_in_page", fields);
+        return windowCoreCmd("find_in_page", fields);
     }
 
     pub fn stopFindInPage(id: u32, clear_selection: bool) ?[]const u8 {
         var fields_buf: [128]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"clearSelection\":{}", .{ id, clear_selection }) catch return null;
-        return coreCmd("stop_find_in_page", fields);
+        return windowCoreCmd("stop_find_in_page", fields);
     }
 
     /// PDF 인쇄 요청. CEF가 콜백 기반 async라 코어는 즉시 ok 응답하고
@@ -756,14 +773,14 @@ pub const windows = struct {
         const p_n = util.escapeJsonStr(path, &p_buf) orelse return null;
         var fields_buf: [2400]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"path\":\"{s}\"", .{ id, p_buf[0..p_n] }) catch return null;
-        return coreCmd("print_to_pdf", fields);
+        return windowCoreCmd("print_to_pdf", fields);
     }
 
     /// `windowId`만 들어가는 단순 cmd 헬퍼 — getURL/isLoading/openDevTools/... 공통.
     fn windowIdCmd(cmd: []const u8, id: u32) ?[]const u8 {
         var fields_buf: [64]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d}", .{id}) catch return null;
-        return coreCmd(cmd, fields);
+        return windowCoreCmd(cmd, fields);
     }
 
     pub fn setTitle(id: u32, title: []const u8) ?[]const u8 {
@@ -771,7 +788,7 @@ pub const windows = struct {
         const t_n = util.escapeJsonStr(title, &t_buf) orelse return null;
         var fields_buf: [640]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"title\":\"{s}\"", .{ id, t_buf[0..t_n] }) catch return null;
-        return coreCmd("set_title", fields);
+        return windowCoreCmd("set_title", fields);
     }
 
     pub fn setBounds(id: u32, bounds: SetBoundsArgs) ?[]const u8 {
@@ -781,15 +798,50 @@ pub const windows = struct {
             "\"windowId\":{d},\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}",
             .{ id, bounds.x, bounds.y, bounds.width, bounds.height },
         ) catch return null;
-        return coreCmd("set_bounds", fields);
+        return windowCoreCmd("set_bounds", fields);
     }
 
     /// JS code escape용 stack 버퍼 — cef.zig executeJavascript와 동일 임계값.
     const JS_CODE_STACK_BUF: usize = 4096;
 };
 
-/// internal: cmd + payload fields → "__core__" 채널로 invoke. windows/clipboard/shell/dialog
-/// 네 namespace 공통.
+/// internal: window cmd + payload fields → window_api 우선, 없으면 "__core__" 폴백.
+fn windowCoreCmd(cmd: []const u8, fields_json: []const u8) ?[]const u8 {
+    var buf: [util.MAX_REQUEST]u8 = undefined;
+    const sep: []const u8 = if (fields_json.len > 0) "," else "";
+    const req = std.fmt.bufPrint(&buf, "{{\"cmd\":\"{s}\"{s}{s}}}", .{ cmd, sep, fields_json }) catch return null;
+
+    if (getWindowApi()) |api| {
+        if (api.request_json) |request_json| {
+            var request_buf: [util.MAX_REQUEST]u8 = undefined;
+            _ = util.nullTerminate(req, &request_buf);
+            const resp_ptr = request_json(@ptrCast(&request_buf));
+            const resp: [*]const u8 = @ptrCast(resp_ptr orelse return null);
+            if (resp[0] == 0) {
+                if (api.free_response) |free_response| free_response(resp_ptr);
+                return null;
+            }
+            var len: usize = 0;
+            while (resp[len] != 0) : (len += 1) {}
+            if (len == 0 or len > window_api_response_buf.len) {
+                if (api.free_response) |free_response| free_response(resp_ptr);
+                return null;
+            }
+            @memcpy(window_api_response_buf[0..len], resp[0..len]);
+            if (api.free_response) |free_response| free_response(resp_ptr);
+            return window_api_response_buf[0..len];
+        }
+    }
+
+    return callBackend("__core__", req);
+}
+
+/// window_api 응답 복사용 thread-local scratch. 기존 `windows.*` API가 raw slice를
+/// 반환하는 형태라 window_api의 owned response는 즉시 복사 후 해제한다.
+threadlocal var window_api_response_buf: [util.MAX_REQUEST]u8 = undefined;
+
+/// internal: cmd + payload fields → "__core__" 채널로 invoke.
+/// clipboard/shell/dialog/tray/menu 등 non-window native namespace 공통.
 fn coreCmd(cmd: []const u8, fields_json: []const u8) ?[]const u8 {
     var buf: [util.MAX_REQUEST]u8 = undefined;
     const sep: []const u8 = if (fields_json.len > 0) "," else "";
