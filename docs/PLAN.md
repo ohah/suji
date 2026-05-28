@@ -957,7 +957,7 @@ func backend_handle_ipc(request *C.char) *C.char {
       `tests/e2e/run-node-run.sh` + GitHub Actions macOS. Linux/Windows direct-run은
       libnode C++ ABI/런타임 패키징 정리 후 별도 활성화.
 - [ ] Node 바이너리 번들링 (배포 시)
-- [ ] Electron 마이그레이션 가이드
+- [x] Electron 마이그레이션 가이드 — `documents/electron-migration.mdx`
 
 **결과물**:
 ```bash
