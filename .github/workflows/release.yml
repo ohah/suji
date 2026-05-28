@@ -202,6 +202,10 @@ jobs:
           DIR="${{ matrix.asset }}-$V"
           mkdir -p "$DIR"
           cp zig-out/bin/suji "$DIR/"
+          for f in zig-out/bin/libnode*; do
+            [ -e "$f" ] || continue
+            cp -P "$f" "$DIR/"
+          done
           # macOS: CLI 바이너리 서명. identity secret 있으면 그걸로(hardened
           # runtime+timestamp), 없으면 ad-hoc. 배포 식별자 상세는 RELEASING.md.
           if [ "${{ runner.os }}" = "macOS" ]; then

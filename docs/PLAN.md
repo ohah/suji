@@ -959,7 +959,10 @@ func backend_handle_ipc(request *C.char) *C.char {
       단위: `nodeRunEntryCandidate` 파일/디렉터리 해석. E2E:
       `tests/e2e/run-node-run.sh` + GitHub Actions macOS. Linux/Windows direct-run은
       libnode C++ ABI/런타임 패키징 정리 후 별도 활성화.
-- [ ] Node 바이너리 번들링 (배포 시)
+- [x] Node 바이너리 번들링 (배포 시) — macOS/Linux `zig build`가
+      `@executable_path`/`$ORIGIN` rpath를 추가하고 `zig-out/bin/libnode*`
+      runtime을 stage, release tarball이 `libnode*`를 함께 포함. Windows는 기존
+      MSYS2 MinGW `libnode.dll`/deps copy path 유지.
 - [x] Electron 마이그레이션 가이드 — `documents/electron-migration.mdx`
 
 **결과물**:

@@ -309,6 +309,44 @@ test "build.zig: Linux Node bridge uses g++ and libstdc++ ABI" {
     }
 }
 
+test "build/release: Unix Node runtime is bundled beside CLI binary" {
+    const build_source = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "build.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(build_source);
+
+    inline for (.{
+        "root_module.addRPathSpecial(\"@executable_path\")",
+        "root_module.addRPathSpecial(\"$ORIGIN\")",
+        "fn addInstallNodeRuntimeStep",
+        "install-node-runtime",
+        "libnode.*.dylib",
+        "libnode.so.*",
+        "copy_node.dependOn(prev_step)",
+        "copy_node.dependOn(copy_cef_runtime)",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, build_source, needle) != null);
+    }
+
+    const release_workflow = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        ".github/workflows/release.yml",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(release_workflow);
+
+    inline for (.{
+        "for f in zig-out/bin/libnode*; do",
+        "cp -P \"$f\" \"$DIR/\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, release_workflow, needle) != null);
+    }
+}
+
 test "Windows Node bridge accepts MSYS2 MinGW layout in CI" {
     const build_source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

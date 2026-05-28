@@ -322,6 +322,11 @@ pub fn build(b: *std.Build) void {
     if (node_available) {
         const node_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{node_path}) catch @panic("OOM");
         root_module.addIncludePath(.{ .cwd_relative = node_include });
+        switch (os_tag) {
+            .macos => root_module.addRPathSpecial("@executable_path"),
+            .linux => root_module.addRPathSpecial("$ORIGIN"),
+            else => {},
+        }
     }
 
     var gpp_bridge_step: ?*std.Build.Step = null;
@@ -503,6 +508,12 @@ pub fn build(b: *std.Build) void {
             prev_step = &symlink_cmd.step;
         }
 
+        if (node_available) {
+            const copy_node = addInstallNodeRuntimeStep(b, node_path, node_lib_name, bin_dir);
+            copy_node.dependOn(prev_step);
+            prev_step = copy_node;
+        }
+
         const codesign = b.addSystemCommand(&.{
             "codesign", "--force", "--sign", "-", "--deep",
         });
@@ -516,6 +527,12 @@ pub fn build(b: *std.Build) void {
         const copy_cef_runtime = addInstallCefRuntimeStep(b, os_tag, cef_base, b.getInstallPath(.bin, ""));
         copy_cef_runtime.dependOn(&install_artifact.step);
         b.getInstallStep().dependOn(copy_cef_runtime);
+
+        if (node_available and os_tag == .linux) {
+            const copy_node = addInstallNodeRuntimeStep(b, node_path, node_lib_name, b.getInstallPath(.bin, ""));
+            copy_node.dependOn(copy_cef_runtime);
+            b.getInstallStep().dependOn(copy_node);
+        }
 
         // Windows: libnode.dll + mingw runtime + libnode deps 를 zig-out/bin/
         // 옆으로 복사. libnode 는 libnode.dll.a 의 import descriptor 가 가리키는
@@ -1220,6 +1237,30 @@ pub fn build(b: *std.Build) void {
 /// directory for subprocess startup paths. Keep dev `zig build` output
 /// self-contained enough for E2E without requiring callers to mirror CEF's
 /// distribution layout manually.
+fn addInstallNodeRuntimeStep(b: *std.Build, node_path: []const u8, node_lib_name: []const u8, bin_dir: []const u8) *std.Build.Step {
+    const copy = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\set -eu
+        \\node_dir="$1"
+        \\lib_name="$2"
+        \\bin_dir="$3"
+        \\mkdir -p "$bin_dir"
+        \\cp -f "$node_dir/$lib_name" "$bin_dir/$lib_name"
+        \\for f in "$node_dir"/libnode.*.dylib "$node_dir"/libnode.so.*; do
+        \\  [ -e "$f" ] || continue
+        \\  base=$(basename "$f")
+        \\  ln -sf "$lib_name" "$bin_dir/$base"
+        \\done
+        ,
+        "install-node-runtime",
+        node_path,
+        node_lib_name,
+        bin_dir,
+    });
+    return &copy.step;
+}
+
 fn addInstallCefRuntimeStep(b: *std.Build, os_tag: std.Target.Os.Tag, cef_base: []const u8, bin_dir: []const u8) *std.Build.Step {
     if (os_tag == .windows) {
         const copy = b.addSystemCommand(&.{
