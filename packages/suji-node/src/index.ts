@@ -523,10 +523,12 @@ export interface GetChildViewsResponse {
  *  보내는 극단(렌더러/GPU 크래시) 에서도 Promise hang 방지. 코어 늦은 응답 무해. */
 function withDeferTimeout<T extends { success?: boolean }>(p: Promise<T>, timeoutMs?: number): Promise<T> {
   const ms = timeoutMs ?? 35_000;
-  return Promise.race([
-    p,
-    new Promise<T>((resolve) => setTimeout(() => resolve({ success: false } as T), ms)),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve({ success: false } as T), ms);
+  });
+  // race 승자 결정 후 clearTimeout — 호출당 dangling 35s 타이머 누수 방지.
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
 export const windows = {

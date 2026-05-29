@@ -2486,21 +2486,20 @@ const PendingResp = struct {
     kind: window_ipc.DeferKind = .print,
     /// 창 close 시 purge 키 (PR #54 review #1, UAF). 0 은 실 browser 아님(CEF id ≥ 1).
     browser_handle: u64 = 0,
-    /// 단조 증가 토큰 — overflow lazy-eviction 시 가장 오래된 슬롯 식별(PR #54 review #5).
-    generation: u64 = 0,
     path_buf: [PDF_PATH_STACK_BUF]u8 = undefined,
     path_len: usize = 0,
 };
-/// CapturePending 과 동등한 16 슬롯 — 동시 deferred 16 까지. 초과 시 가장 오래된
-/// in_use 슬롯을 success:false 로 evict 후 재사용(pool leak bound). 헤드리스 e2e
-/// 도 동시 8 미만이라 정상 경로는 미발생.
+/// CapturePending 과 동등한 16 슬롯 — 동시 deferred 16 까지. 가득 차면 신규 defer
+/// 를 refuse(handler 가 success:false fallback) — 진행 중 슬롯을 evict·재사용하지
+/// 않아 evicted op 의 late CDP 가 새 occupant 와 (kind,path) 오매칭하는 race 회피
+/// (max code-review #57 후속). pool 은 onBeforeClose purge + SDK 타임아웃으로 bound.
+/// 헤드리스 e2e 도 동시 8 미만이라 정상 경로는 refuse 미발생.
 var g_pending_responses = [_]PendingResp{.{}} ** 16;
-var g_defer_generation: u64 = 0;
 
 /// 핸들러가 호출: 응답을 보류하고 (kind, path) 키로 컨텍스트 보관. 컨텍스트
-/// 미설정이면 false — 호출자가 fallback. 슬롯이 꽉 차면 가장 오래된(최소
-/// generation) 슬롯을 success:false 로 settle 후 재사용 → SDK Promise leak +
-/// 영구 pool 고갈 방지(PR #54 review #5; cef_task_t 타이머 없이 bound).
+/// 미설정/path 무효/슬롯 풀이면 false → 호출자(handler)가 success:false fallback.
+/// 슬롯 풀 시 evict 하지 않고 refuse — 진행 중 슬롯을 재사용하면 evicted op 의
+/// 늦은 CDP 콜백이 새 occupant 와 (kind,path) 오매칭할 수 있어 회피.
 pub fn cefDeferResponse(kind: window_ipc.DeferKind, path: []const u8) bool {
     if (path.len == 0 or path.len > PDF_PATH_STACK_BUF) return false;
     var ctx = g_current_call_ctx orelse return false;
@@ -2512,44 +2511,21 @@ pub fn cefDeferResponse(kind: window_ipc.DeferKind, path: []const u8) bool {
             break;
         }
     }
-    if (target == null) {
-        // 빈 슬롯 없음 — 가장 오래된 in_use 슬롯 evict.
-        var oldest: ?*PendingResp = null;
-        for (&g_pending_responses) |*slot| {
-            if (oldest == null or slot.generation < oldest.?.generation) oldest = slot;
-        }
-        const ev = oldest orelse return false;
-        // 버려지는 호출자 Promise 를 success:false 로 settle (영구 hang 방지).
-        var fb: [128]u8 = undefined;
-        const body = cmdFailureJson(ev.kind, &fb);
-        sendInvokeResponse(ev.browser, ev.frame, ev.seq_id, true, body);
-        target = ev;
-    }
+    // 빈 슬롯 없음(16 동시 미완료 — 비현실적) → refuse. 호출자(handler)가
+    // success:false fallback 송신. evict·재사용 안 함(cross-resolve race 회피).
+    const slot = target orelse return false;
 
-    const slot = target.?;
-    g_defer_generation +%= 1;
     slot.in_use = true;
     slot.browser = ctx.browser;
     slot.frame = ctx.frame;
     slot.seq_id = ctx.seq_id;
     slot.kind = kind;
     slot.browser_handle = ctx.browser_handle;
-    slot.generation = g_defer_generation;
     @memcpy(slot.path_buf[0..path.len], path);
     slot.path_len = path.len;
     ctx.deferred = true;
     g_current_call_ctx = ctx;
     return true;
-}
-
-/// `{from,cmd,ok:false,success:false}` 실패 본문 — evict/timeout 시 settle 용.
-fn cmdFailureJson(kind: window_ipc.DeferKind, buf: []u8) []const u8 {
-    const cmd = if (kind == .print) "print_to_pdf" else "capture_page";
-    return std.fmt.bufPrint(
-        buf,
-        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"ok\":false,\"success\":false}}",
-        .{cmd},
-    ) catch "{\"from\":\"zig-core\",\"ok\":false,\"success\":false}";
 }
 
 /// CDP 콜백 등에서 호출: (kind, path) 매칭 pending 에 응답 송신.

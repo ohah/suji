@@ -296,10 +296,12 @@ async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
  *  이미 정해져 무해. getCookies 의 setTimeout 패턴과 동형. */
 function withDeferTimeout<T extends { success?: boolean }>(p: Promise<T>, timeoutMs?: number): Promise<T> {
   const ms = timeoutMs ?? 35_000;
-  return Promise.race([
-    p,
-    new Promise<T>((resolve) => setTimeout(() => resolve({ success: false } as T), ms)),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve({ success: false } as T), ms);
+  });
+  // race 승자 결정 후 clearTimeout — 호출당 dangling 35s 타이머 누수 방지.
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
 
 export const windows = {
