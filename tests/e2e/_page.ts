@@ -57,10 +57,27 @@ export async function getMainPage(browser: Browser, timeoutMs = 25000): Promise<
   const deadline = Date.now() + timeoutMs;
   let lastUrls = "";
   while (Date.now() < deadline) {
-    const pages = await browser.pages();
+    let pages: Page[];
+    try {
+      pages = await browser.pages();
+    } catch {
+      // target 목록 자체가 attach 중 — 다음 루프에서 재시도.
+      await wait(100);
+      continue;
+    }
     const snapshots: string[] = [];
     for (const page of pages) {
-      const targetUrl = page.url() || "<empty>";
+      // page.url() 은 main frame 이 아직 attach 안 된 transient target 에서
+      // "Requesting main frame too early!" assert 를 던진다. Debug 빌드는
+      // 타이밍상 모든 frame 이 준비된 뒤 enumerate 되지만 ReleaseSafe/ReleaseFast
+      // 는 startup 이 빨라 attach 중 target 이 노출됨 → skip 후 다음 루프 재시도
+      // (바이너리 자체는 정상; 하니스를 binary-flavor 무관하게 하드닝).
+      let targetUrl: string;
+      try {
+        targetUrl = page.url() || "<empty>";
+      } catch {
+        continue;
+      }
       const href = await pageLocationHref(page);
       snapshots.push(`${targetUrl} -> ${href || "<unreadable>"}`);
       if (!isMainAppUrl(href)) continue;
