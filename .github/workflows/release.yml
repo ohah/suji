@@ -183,15 +183,12 @@ jobs:
       - name: Build suji CLI
         shell: bash
         run: |
-          # Windows 는 ReleaseSafe 에서 translate-c 가 cimport 'unused local
-          # constant' 를 내 컴파일 실패(ci.yml 의 Debug `zig build` 는 green).
-          # 검증된 경로 사용: Windows=Debug, mac/linux=ReleaseSafe. Windows
-          # release 최적화는 후속(translate-c quirk) — #14.
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            zig build
-          else
-            zig build -Doptimize=ReleaseSafe
-          fi
+          # 전 플랫폼 ReleaseSafe (#14 해결). 과거 Windows 는 translate-c 가
+          # MinGW fortify wcscat/wcscpy override 를 'unused local constant' 로
+          # 생성해 ReleaseSafe 실패 → Debug 로 우회했음. cef.zig @cImport 에
+          # `_FORTIFY_SOURCE=0` 추가로 override 게이트(_FORTIFY_SOURCE>0 &&
+          # __OPTIMIZE__>0)를 닫아 근본 해결 → Windows 도 최적화 빌드.
+          zig build -Doptimize=ReleaseSafe
       - name: Package (Unix)
         if: runner.os != 'Windows'
         env:
