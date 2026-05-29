@@ -290,6 +290,18 @@ async function coreCall<T>(request: Record<string, unknown>): Promise<T> {
   return (typeof raw === "string" ? JSON.parse(raw) : raw) as T;
 }
 
+/** deferred-response(`printToPDF`/`capturePage`) 전용 타임아웃 가드. 코어 TTL(30s)
+ *  보다 여유를 둔 35s 후 `{success:false}` 로 resolve — 코어가 끝내 응답을 못 보내는
+ *  극단(렌더러/GPU 크래시) 에서도 Promise hang 방지. 코어가 늦게 응답해도 race 승자가
+ *  이미 정해져 무해. getCookies 의 setTimeout 패턴과 동형. */
+function withDeferTimeout<T extends { success?: boolean }>(p: Promise<T>, timeoutMs?: number): Promise<T> {
+  const ms = timeoutMs ?? 35_000;
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve({ success: false } as T), ms)),
+  ]);
+}
+
 export const windows = {
   /**
    * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
@@ -466,25 +478,36 @@ export const windows = {
 
   /** PDF로 인쇄 (Electron `webContents.printToPDF`). 코어가 CDP 완료까지 응답
    *  보류 → 단일 await 로 결과(`{success}`) 받음. EventBus `window:pdf-print-
-   *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지. */
-  async printToPDF(windowId: number, path: string): Promise<{ success: boolean }> {
-    const r = await coreCall<{ success?: boolean }>({ cmd: "print_to_pdf", windowId, path });
+   *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지.
+   *
+   *  defense-in-depth: 코어가 CDP 콜백 미발화(렌더러/GPU 크래시 등)로 응답을
+   *  영영 안 보내는 극단 경우, SDK 타임아웃(기본 35s)이 `{success:false}`로
+   *  settle 해 Promise 영구 hang 방지. 코어가 늦게 응답해도 무해(이미 settled). */
+  async printToPDF(windowId: number, path: string, opts?: { timeoutMs?: number }): Promise<{ success: boolean }> {
+    const r = await withDeferTimeout(
+      coreCall<{ success?: boolean }>({ cmd: "print_to_pdf", windowId, path }),
+      opts?.timeoutMs,
+    );
     return { success: r?.success === true };
   },
 
   /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage` — CDP
    *  Page.captureScreenshot). 코어 deferred response 로 단일 await.
    *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
-   *  rect 지정 시 부분 영역만; 미지정=전체. */
+   *  rect 지정 시 부분 영역만; 미지정=전체. defense-in-depth 타임아웃은 printToPDF 동일. */
   async capturePage(
     windowId: number,
     path: string,
     rect?: { x: number; y: number; width: number; height: number },
+    opts?: { timeoutMs?: number },
   ): Promise<{ success: boolean }> {
-    const r = await coreCall<{ success?: boolean }>({
-      cmd: "capture_page", windowId, path,
-      ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
-    });
+    const r = await withDeferTimeout(
+      coreCall<{ success?: boolean }>({
+        cmd: "capture_page", windowId, path,
+        ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
+      }),
+      opts?.timeoutMs,
+    );
     return { success: r?.success === true };
   },
 

@@ -518,6 +518,17 @@ export interface GetChildViewsResponse {
   viewIds: number[];
 }
 
+/** deferred-response(printToPDF/capturePage) defense-in-depth 타임아웃. 코어
+ *  TTL(30s) 보다 여유 둔 35s 후 {success:false} resolve — 코어가 끝내 응답 못
+ *  보내는 극단(렌더러/GPU 크래시) 에서도 Promise hang 방지. 코어 늦은 응답 무해. */
+function withDeferTimeout<T extends { success?: boolean }>(p: Promise<T>, timeoutMs?: number): Promise<T> {
+  const ms = timeoutMs ?? 35_000;
+  return Promise.race([
+    p,
+    new Promise<T>((resolve) => setTimeout(() => resolve({ success: false } as T), ms)),
+  ]);
+}
+
 export const windows = {
   /** suji.json `windows[]`와 동일한 옵션 셋 — frame/transparent/parent/x/y/etc. 모두 런타임 지정 가능. */
   create(opts: WindowOptions = {}): Promise<CreateWindowResponse> {
@@ -680,9 +691,13 @@ export const windows = {
   },
 
   /** PDF 인쇄. 코어가 CDP 완료까지 응답 보류 → 단일 await 로 `{success}` 받음.
-   *  EventBus `window:pdf-print-finished` emit 은 다른 구독자 호환 유지. */
-  async printToPDF(windowId: number, path: string): Promise<{ success: boolean }> {
-    const r = await invoke<{ success?: boolean }>('__core__', { cmd: 'print_to_pdf', windowId, path });
+   *  EventBus `window:pdf-print-finished` emit 은 다른 구독자 호환 유지.
+   *  defense-in-depth 타임아웃(기본 35s)으로 극단 hang 방지. */
+  async printToPDF(windowId: number, path: string, opts?: { timeoutMs?: number }): Promise<{ success: boolean }> {
+    const r = await withDeferTimeout(
+      invoke<{ success?: boolean }>('__core__', { cmd: 'print_to_pdf', windowId, path }),
+      opts?.timeoutMs,
+    );
     return { success: r?.success === true };
   },
 
@@ -691,11 +706,15 @@ export const windows = {
     windowId: number,
     path: string,
     rect?: { x: number; y: number; width: number; height: number },
+    opts?: { timeoutMs?: number },
   ): Promise<{ success: boolean }> {
-    const r = await invoke<{ success?: boolean }>('__core__', {
-      cmd: 'capture_page', windowId, path,
-      ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
-    });
+    const r = await withDeferTimeout(
+      invoke<{ success?: boolean }>('__core__', {
+        cmd: 'capture_page', windowId, path,
+        ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
+      }),
+      opts?.timeoutMs,
+    );
     return { success: r?.success === true };
   },
 };

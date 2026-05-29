@@ -1646,3 +1646,95 @@ test "handleSetVisible: 작은 버퍼면 null (회귀)" {
     try std.testing.expect(ipc.handleSetVisible(.{ .window_id = 1, .visible = false }, &tiny, &wm) == null);
     try std.testing.expectEqual(@as(usize, 0), native.set_visible_calls);
 }
+
+// ============================================
+// Deferred response — defer 콜백 계약 (PR #54 review #2/#3 후속)
+// ============================================
+
+// 콜백이 받은 kind 를 기록 + 반환값 제어.
+var g_recorded_kind: ?ipc.DeferKind = null;
+var g_defer_return: bool = true;
+fn recordingDeferCb(kind: ipc.DeferKind, path: []const u8) bool {
+    _ = path;
+    g_recorded_kind = kind;
+    return g_defer_return;
+}
+
+test "handlePrintToPDF: defer 콜백에 kind=.print 전달, 성공 시 null(보류)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    g_recorded_kind = null;
+    g_defer_return = true;
+    ipc.g_defer_response_cb = &recordingDeferCb;
+    defer ipc.g_defer_response_cb = null;
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handlePrintToPDF(.{ .window_id = 1, .path = "/tmp/a.pdf" }, &buf, &wm);
+    try std.testing.expect(r == null); // deferred → caller skip immediate response
+    try std.testing.expectEqual(ipc.DeferKind.print, g_recorded_kind.?);
+}
+
+test "handleCapturePage: defer 콜백에 kind=.capture 전달" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    g_recorded_kind = null;
+    g_defer_return = true;
+    ipc.g_defer_response_cb = &recordingDeferCb;
+    defer ipc.g_defer_response_cb = null;
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleCapturePage(.{ .window_id = 1, .path = "/tmp/s.png" }, &buf, &wm);
+    try std.testing.expect(r == null);
+    try std.testing.expectEqual(ipc.DeferKind.capture, g_recorded_kind.?);
+}
+
+test "handlePrintToPDF: defer 거부(슬롯 풀) → ok:false, success:false (명시적 false)" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    g_defer_return = false; // 슬롯 풀 시뮬
+    ipc.g_defer_response_cb = &recordingDeferCb;
+    defer ipc.g_defer_response_cb = null;
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handlePrintToPDF(.{ .window_id = 1, .path = "/tmp/a.pdf" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"success\":false") != null);
+}
+
+test "handleCapturePage: defer 거부 → ok:false, success:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    g_defer_return = false;
+    ipc.g_defer_response_cb = &recordingDeferCb;
+    defer ipc.g_defer_response_cb = null;
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleCapturePage(.{ .window_id = 1, .path = "/tmp/s.png" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"success\":false") != null);
+}
+
+test "handlePrintToPDF: 콜백 미설정(테스트/모바일) → 기존 ack ok:true 불변" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    ipc.g_defer_response_cb = null; // no-cb 경로
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handlePrintToPDF(.{ .window_id = 1, .path = "/tmp/a.pdf" }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}

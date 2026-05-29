@@ -2255,6 +2255,7 @@ pub const CefNative = struct {
         @memcpy(sl.path_buf[0..n], path[0..n]);
         sl.path_len = n;
         sl.id = id;
+        sl.browser_handle = handle;
         sl.used = true;
 
         var msg: [256]u8 = undefined;
@@ -2456,6 +2457,9 @@ const CallCtx = struct {
     browser: ?*c._cef_browser_t,
     frame: ?*c._cef_frame_t,
     seq_id: i32,
+    /// sender browser 의 stable u64 식별자 (br.get_identifier). 창 close 시
+    /// onBeforeClose 가 이 핸들로 매칭 슬롯을 purge — dangling 포인터 deref 차단.
+    browser_handle: u64,
     deferred: bool,
 };
 var g_current_call_ctx: ?CallCtx = null;
@@ -2465,49 +2469,113 @@ const PendingResp = struct {
     browser: ?*c._cef_browser_t = null,
     frame: ?*c._cef_frame_t = null,
     seq_id: i32 = 0,
+    /// print vs capture — 같은 path 교차충돌(PR #54 review #3) 방지 위해 매칭에 포함.
+    kind: window_ipc.DeferKind = .print,
+    /// 창 close 시 purge 키 (PR #54 review #1, UAF). 0 은 실 browser 아님(CEF id ≥ 1).
+    browser_handle: u64 = 0,
+    /// 단조 증가 토큰 — overflow lazy-eviction 시 가장 오래된 슬롯 식별(PR #54 review #5).
+    generation: u64 = 0,
     path_buf: [PDF_PATH_STACK_BUF]u8 = undefined,
     path_len: usize = 0,
 };
-/// CapturePending 과 동등한 16 슬롯 — 동시 deferred 16 까지. 초과 시 fallback
-/// (즉시 ok:false 응답). 헤드리스 e2e 도 동시 8 미만이라 여유.
+/// CapturePending 과 동등한 16 슬롯 — 동시 deferred 16 까지. 초과 시 가장 오래된
+/// in_use 슬롯을 success:false 로 evict 후 재사용(pool leak bound). 헤드리스 e2e
+/// 도 동시 8 미만이라 정상 경로는 미발생.
 var g_pending_responses = [_]PendingResp{.{}} ** 16;
+var g_defer_generation: u64 = 0;
 
-/// 핸들러가 호출: 응답을 보류하고 path 키로 컨텍스트 보관. 슬롯 풀 OR 컨텍스트
-/// 미설정이면 false — 호출자가 즉시 ok:false 응답 fallback.
-pub fn cefDeferResponse(path: []const u8) bool {
+/// 핸들러가 호출: 응답을 보류하고 (kind, path) 키로 컨텍스트 보관. 컨텍스트
+/// 미설정이면 false — 호출자가 fallback. 슬롯이 꽉 차면 가장 오래된(최소
+/// generation) 슬롯을 success:false 로 settle 후 재사용 → SDK Promise leak +
+/// 영구 pool 고갈 방지(PR #54 review #5; cef_task_t 타이머 없이 bound).
+pub fn cefDeferResponse(kind: window_ipc.DeferKind, path: []const u8) bool {
     if (path.len == 0 or path.len > PDF_PATH_STACK_BUF) return false;
     var ctx = g_current_call_ctx orelse return false;
+
+    var target: ?*PendingResp = null;
     for (&g_pending_responses) |*slot| {
         if (!slot.in_use) {
-            slot.in_use = true;
-            slot.browser = ctx.browser;
-            slot.frame = ctx.frame;
-            slot.seq_id = ctx.seq_id;
-            @memcpy(slot.path_buf[0..path.len], path);
-            slot.path_len = path.len;
-            ctx.deferred = true;
-            g_current_call_ctx = ctx;
-            return true;
+            target = slot;
+            break;
         }
     }
-    return false;
+    if (target == null) {
+        // 빈 슬롯 없음 — 가장 오래된 in_use 슬롯 evict.
+        var oldest: ?*PendingResp = null;
+        for (&g_pending_responses) |*slot| {
+            if (oldest == null or slot.generation < oldest.?.generation) oldest = slot;
+        }
+        const ev = oldest orelse return false;
+        // 버려지는 호출자 Promise 를 success:false 로 settle (영구 hang 방지).
+        var fb: [128]u8 = undefined;
+        const body = cmdFailureJson(ev.kind, &fb);
+        sendInvokeResponse(ev.browser, ev.frame, ev.seq_id, true, body);
+        target = ev;
+    }
+
+    const slot = target.?;
+    g_defer_generation +%= 1;
+    slot.in_use = true;
+    slot.browser = ctx.browser;
+    slot.frame = ctx.frame;
+    slot.seq_id = ctx.seq_id;
+    slot.kind = kind;
+    slot.browser_handle = ctx.browser_handle;
+    slot.generation = g_defer_generation;
+    @memcpy(slot.path_buf[0..path.len], path);
+    slot.path_len = path.len;
+    ctx.deferred = true;
+    g_current_call_ctx = ctx;
+    return true;
 }
 
-/// CDP 콜백 등에서 호출: path 매칭 pending 에 응답 송신.
-/// `result_json` 은 `cefHandleSuji` 가 반환했을 본문 (e.g. `{"cmd":"print_to_pdf",
-/// "windowId":N,"ok":true}`). EventBus emit 은 호출자가 별도로 진행 — 이 함수는
-/// **deferred Promise resolve 만** 담당.
-pub fn cefCompletePending(path: []const u8, result_json: []const u8) bool {
+/// `{from,cmd,ok:false,success:false}` 실패 본문 — evict/timeout 시 settle 용.
+fn cmdFailureJson(kind: window_ipc.DeferKind, buf: []u8) []const u8 {
+    const cmd = if (kind == .print) "print_to_pdf" else "capture_page";
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"ok\":false,\"success\":false}}",
+        .{cmd},
+    ) catch "{\"from\":\"zig-core\",\"ok\":false,\"success\":false}";
+}
+
+/// CDP 콜백 등에서 호출: (kind, path) 매칭 pending 에 응답 송신.
+/// `result_json` 은 응답 본문. EventBus emit 은 호출자가 별도로 진행 — 이 함수는
+/// **deferred Promise resolve 만** 담당. kind 매칭으로 print↔capture 교차충돌 방지.
+pub fn cefCompletePending(kind: window_ipc.DeferKind, path: []const u8, result_json: []const u8) bool {
     for (&g_pending_responses) |*slot| {
         if (!slot.in_use) continue;
+        if (slot.kind != kind) continue;
         const stored = slot.path_buf[0..slot.path_len];
         if (!std.mem.eql(u8, stored, path)) continue;
         sendInvokeResponse(slot.browser, slot.frame, slot.seq_id, true, result_json);
         slot.in_use = false;
         slot.path_len = 0;
+        slot.browser = null;
+        slot.frame = null;
+        slot.browser_handle = 0;
         return true;
     }
     return false;
+}
+
+/// 닫히는 browser 의 deferred slot 정리(PR #54 review #1, UAF). 곧 freed 될
+/// browser/frame 포인터를 deref 하지 않고 in_use=false + null 클리어. 렌더러가
+/// 창과 함께 사라지므로 wire 송신 없이 Promise 는 컨텍스트 파괴로 settle.
+/// onBeforeClose 에서 cn.purge 직후 호출 — 같은 CEF UI 스레드라 lock 불필요.
+fn purgePendingResponsesForBrowser(handle: u64) void {
+    if (handle == 0) return; // 0 은 실 browser 아님 — mass-purge 방지
+    for (&g_pending_responses) |*slot| {
+        if (!slot.in_use or slot.browser_handle != handle) continue;
+        slot.in_use = false;
+        slot.path_len = 0;
+        slot.browser = null;
+        slot.frame = null;
+        slot.browser_handle = 0;
+    }
+    for (&g_capture_pending) |*s| {
+        if (s.used and s.browser_handle == handle) s.used = false;
+    }
 }
 
 /// 글로벌 cef_pdf_print_callback_t — 매 print 마다 alloc하면 ref-counted 수명 추적
@@ -2540,7 +2608,7 @@ fn onPdfPrintFinished(_: [*c]c.cef_pdf_print_callback_t, path: [*c]const c.cef_s
         "{{\"from\":\"zig-core\",\"cmd\":\"print_to_pdf\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
         .{ escaped_buf[0..escaped_n], ok != 0 },
     ) catch return;
-    _ = cefCompletePending(path_str, rw.buffered());
+    _ = cefCompletePending(.print, path_str, rw.buffered());
 
     // 2) EventBus emit — 다른 SDK/백엔드 구독자 호환 보존.
     const emit = g_emit_callback orelse return;
@@ -2581,7 +2649,7 @@ fn emitPageCaptured(path: []const u8, ok: bool) void {
         "{{\"from\":\"zig-core\",\"cmd\":\"capture_page\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
         .{ esc[0..en], ok },
     ) catch return;
-    _ = cefCompletePending(path, rw.buffered());
+    _ = cefCompletePending(.capture, path, rw.buffered());
 
     // 2) EventBus emit.
     const emit = g_emit_callback orelse return;
@@ -2595,6 +2663,8 @@ fn emitPageCaptured(path: []const u8, ok: bool) void {
 const CapturePending = struct {
     id: c_int = 0,
     used: bool = false,
+    /// 창 close 시 purge 키 (PR #54 review #1). captureePageImpl 가 handle 로 채움.
+    browser_handle: u64 = 0,
     path_buf: [PDF_PATH_STACK_BUF]u8 = undefined,
     path_len: usize = 0,
 };
@@ -11121,7 +11191,9 @@ fn handleBrowserInvoke(
     };
 
     // 핸들러가 deferred 응답을 등록할 수 있도록 컨텍스트 노출(`cefDeferResponse`).
-    g_current_call_ctx = .{ .browser = browser, .frame = frame, .seq_id = seq_id, .deferred = false };
+    // browser_handle 은 창 close 시 purge 키 (UAF 방지). browser 없으면 0(실 핸들 아님).
+    const sender_handle: u64 = if (browser) |br| @intCast(br.get_identifier.?(br)) else 0;
+    g_current_call_ctx = .{ .browser = browser, .frame = frame, .seq_id = seq_id, .browser_handle = sender_handle, .deferred = false };
     defer g_current_call_ctx = null;
 
     // 백엔드 호출
@@ -11302,6 +11374,9 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
     log.debug("OnBeforeClose handle={d}", .{handle});
 
     if (g_cef_native) |cn| cn.purge(handle);
+    // 닫히는 browser 의 deferred-response 슬롯도 정리 — CDP 콜백이 close 후
+    // 도착해도 dangling browser/frame 을 deref 하지 않도록(PR #54 review #1, UAF).
+    purgePendingResponsesForBrowser(handle);
 
     // DevTools 닫히면 (1) inspectee 창에 키 포커스 복귀, (2) 매핑 제거.
     // makeKey는 다음 런루프 틱에 지연 실행해야 함 — onBeforeClose는 NSWindow close

@@ -13,10 +13,15 @@ const util = @import("util");
 // ============================================
 //
 // 일부 핸들러(print_to_pdf/capture_page)는 CDP 콜백 완료 후에야 결과를 안다.
-// `g_defer_response_cb` 가 set 돼 있으면 핸들러가 path 키로 응답을 보류하고
+// `g_defer_response_cb` 가 set 돼 있으면 핸들러가 (kind, path) 키로 응답을 보류하고
 // (cef.zig pending registry 에 저장) CDP 콜백 시 송신. 미설정(테스트/모바일)
 // 이면 기존 ack-only 동작 fallback. main.zig 가 `cef.cefDeferResponse` 주입.
-pub const DeferResponseFn = *const fn (path: []const u8) bool;
+//
+// DeferKind 는 이 CEF-free 모듈에 선언 — cef.zig 가 `window_ipc.DeferKind` 로
+// 참조(역방향 import 금지, 단위 테스트가 CEF 없이 가능해야 함). path 단독 매칭은
+// print/capture 가 같은 경로일 때 교차충돌(PR #54 review #3) → kind 로 discriminate.
+pub const DeferKind = enum { print, capture };
+pub const DeferResponseFn = *const fn (kind: DeferKind, path: []const u8) bool;
 pub var g_defer_response_cb: ?DeferResponseFn = null;
 
 /// Phase 2.5 — 요청 JSON에 sender 컨텍스트 자동 주입.
@@ -175,6 +180,18 @@ fn respondWindowOp(buf: []u8, cmd: []const u8, window_id: u32, ok: bool) ?[]cons
         buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":{}}}",
         .{ cmd, window_id, ok },
+    ) catch null;
+}
+
+/// defer 가 거부된(슬롯 풀/ctx 미설정) 경로 — 명시적 `success:false`.
+/// CDP 호출은 성공했지만 결과를 관측할 수 없어 ok:false. 이전엔 respondWindowOp
+/// 로 ok:true(success 필드 없음) 보내 SDK 가 undefined→false 강제했음(PR #54
+/// review #2). 이제 결정적 false 로 정직화.
+fn respondDeferFallback(buf: []u8, cmd: []const u8, window_id: u32) ?[]const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":false,\"success\":false}}",
+        .{ cmd, window_id },
     ) catch null;
 }
 
@@ -595,10 +612,12 @@ pub fn handlePrintToPDF(req: PrintToPDFReq, response_buf: []u8, wm: *window.Wind
     if (response_buf.len < RESPONSE_MIN_LEN) return null;
     const ok = if (wm.printToPDF(req.window_id, req.path)) |_| true else |_| false;
     // CDP 호출 성공 + defer 가능 → Promise 보류, CDP 콜백에서 응답 송신.
-    // 실패하거나 슬롯 풀이면 즉시 ack 응답(이전 동작 fallback).
+    // defer 거부(슬롯 풀) 시 명시적 success:false. no-cb 경로(테스트/모바일)는
+    // 기존 ack-only(respondWindowOp) 유지.
     if (ok) {
         if (g_defer_response_cb) |cb| {
-            if (cb(req.path)) return null; // sentinel: caller skip immediate response
+            if (cb(.print, req.path)) return null; // sentinel: caller skip immediate response
+            return respondDeferFallback(response_buf, "print_to_pdf", req.window_id);
         }
     }
     return respondWindowOp(response_buf, "print_to_pdf", req.window_id, ok);
@@ -618,7 +637,8 @@ pub fn handleCapturePage(req: CapturePageReq, response_buf: []u8, wm: *window.Wi
     const ok = if (wm.capturePage(req.window_id, req.path, req.clip)) |_| true else |_| false;
     if (ok) {
         if (g_defer_response_cb) |cb| {
-            if (cb(req.path)) return null; // deferred — emitPageCaptured 가 응답 송신
+            if (cb(.capture, req.path)) return null; // deferred — emitPageCaptured 가 응답 송신
+            return respondDeferFallback(response_buf, "capture_page", req.window_id);
         }
     }
     return respondWindowOp(response_buf, "capture_page", req.window_id, ok);
