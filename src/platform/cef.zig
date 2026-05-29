@@ -12215,33 +12215,20 @@ fn schemeFactoryCreate(
     var file_path_buf: [2048]u8 = undefined;
     const file_path = std.fmt.bufPrint(&file_path_buf, "{s}{s}", .{ dist, path }) catch return null;
 
-    // 파일 읽기 (동기 — IO 스레드에서 실행됨)
+    // 파일 내용 읽기 (최대 64MB). readFileAlloc 로 정확한 길이의 owned slice 확보
+    // (이전 `file.reader(io, &[0]u8)`+readSliceShort 는 zero-length reader 버퍼).
     const io = runtime.io;
-    var file = std.Io.Dir.openFileAbsolute(io, file_path, .{}) catch {
-        std.debug.print("[suji] scheme 404: {s}\n", .{file_path});
-        return createErrorHandler(404);
-    };
-    defer file.close(io);
-
-    const stat = file.stat(io) catch return null;
-    const file_size = stat.size;
-
-    // 파일 내용 읽기 (최대 64MB)
     const max_size: usize = 64 * 1024 * 1024;
-    const read_size: usize = @intCast(@min(file_size, @as(u64, max_size)));
-    const data = std.heap.page_allocator.alloc(u8, read_size) catch return null;
-    var rd_buf: [0]u8 = undefined;
-    var fr = file.reader(io, &rd_buf);
-    const bytes_read = fr.interface.readSliceShort(data) catch {
-        std.heap.page_allocator.free(data);
-        return null;
+    const data = std.Io.Dir.cwd().readFileAlloc(io, file_path, std.heap.page_allocator, .limited(max_size)) catch {
+        std.debug.print("[suji] scheme 404/read-fail: {s}\n", .{file_path});
+        return createErrorHandler(404);
     };
 
     // MIME type 결정
     const mime = mimeTypeForPath(path);
 
     // ResourceHandler 생성
-    return createResourceHandler(data[0..bytes_read], mime) orelse {
+    return createResourceHandler(data, mime) orelse {
         std.heap.page_allocator.free(data);
         return null;
     };
@@ -12251,25 +12238,63 @@ fn schemeFactoryCreate(
 
 const ResourceHandlerData = struct {
     handler: c.cef_resource_handler_t,
+    ref_count: std.atomic.Value(u32),
     data: []u8,
     mime: [:0]const u8,
     offset: usize,
     status_code: i32,
 };
 
-fn createResourceHandler(data: []u8, mime: [:0]const u8) ?*c.cef_resource_handler_t {
-    const rh = std.heap.page_allocator.create(ResourceHandlerData) catch return null;
+// per-request 동적 객체 — 글로벌 no-op refcount(release 항상 1)를 쓰면 안 됨.
+// CEF 가 응답 완료 후 cancel() 을 호출하는데, 거기서 free 하면 그 뒤 CEF 의
+// 추가 release()/접근이 freed 메모리를 건드려 UAF segfault(#60 packaged crash).
+// 인스턴스별 실 refcount 로 CEF 가 수명 제어 — 마지막 release 에서만 free,
+// cancel 은 free 하지 않음. (InitialLoadTask 와 동형 패턴.)
+fn rhFromBase(base: ?*c.cef_base_ref_counted_t) ?*ResourceHandlerData {
+    return @ptrCast(@alignCast(base orelse return null));
+}
+fn rhAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
+    const rh = rhFromBase(base) orelse return;
+    _ = rh.ref_count.fetchAdd(1, .acq_rel);
+}
+fn rhReleaseRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const rh = rhFromBase(base) orelse return 0;
+    if (rh.ref_count.fetchSub(1, .acq_rel) != 1) return 0;
+    if (rh.data.len > 0) std.heap.page_allocator.free(rh.data);
+    std.heap.page_allocator.destroy(rh);
+    return 1;
+}
+fn rhHasOneRefCb(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const rh = rhFromBase(base) orelse return 0;
+    return if (rh.ref_count.load(.acquire) == 1) 1 else 0;
+}
+fn rhHasAtLeastOneRefCb(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const rh = rhFromBase(base) orelse return 0;
+    return if (rh.ref_count.load(.acquire) >= 1) 1 else 0;
+}
+
+fn initResourceHandler(rh: *ResourceHandlerData, data: []u8, mime: [:0]const u8, status: i32) void {
     zeroCefStruct(c.cef_resource_handler_t, &rh.handler);
-    initBaseRefCounted(&rh.handler.base);
+    // base 는 글로벌 no-op 대신 인스턴스별 refcount (UAF 방지).
+    rh.handler.base.add_ref = &rhAddRef;
+    rh.handler.base.release = &rhReleaseRef;
+    rh.handler.base.has_one_ref = &rhHasOneRefCb;
+    rh.handler.base.has_at_least_one_ref = &rhHasAtLeastOneRefCb;
     rh.handler.open = &rhOpen;
     rh.handler.get_response_headers = &rhGetResponseHeaders;
     rh.handler.read = &rhRead;
     rh.handler.cancel = &rhCancel;
-    // deprecated 콜백은 null로 (Zig가 0으로 초기화)
+    // deprecated 콜백은 null로 (zeroCefStruct가 0으로 초기화)
+    rh.ref_count = .init(1);
     rh.data = data;
     rh.mime = mime;
     rh.offset = 0;
-    rh.status_code = 200;
+    rh.status_code = status;
+}
+
+fn createResourceHandler(data: []u8, mime: [:0]const u8) ?*c.cef_resource_handler_t {
+    const rh = std.heap.page_allocator.create(ResourceHandlerData) catch return null;
+    initResourceHandler(rh, data, mime, 200);
     return &rh.handler;
 }
 
@@ -12279,16 +12304,7 @@ fn createErrorHandler(status: i32) ?*c.cef_resource_handler_t {
         std.heap.page_allocator.free(body);
         return null;
     };
-    zeroCefStruct(c.cef_resource_handler_t, &rh.handler);
-    initBaseRefCounted(&rh.handler.base);
-    rh.handler.open = &rhOpen;
-    rh.handler.get_response_headers = &rhGetResponseHeaders;
-    rh.handler.read = &rhRead;
-    rh.handler.cancel = &rhCancel;
-    rh.data = body;
-    rh.mime = "text/plain";
-    rh.offset = 0;
-    rh.status_code = status;
+    initResourceHandler(rh, body, "text/plain", status);
     return &rh.handler;
 }
 
@@ -12480,13 +12496,9 @@ fn rhRead(
     return 1;
 }
 
-fn rhCancel(self: ?*c._cef_resource_handler_t) callconv(.c) void {
-    const rh = getRhData(self) orelse return;
-    if (rh.data.len > 0) {
-        std.heap.page_allocator.free(rh.data);
-        rh.data = &.{};
-    }
-    std.heap.page_allocator.destroy(rh);
+fn rhCancel(_: ?*c._cef_resource_handler_t) callconv(.c) void {
+    // free 하지 않음 — 수명은 base refcount(rhReleaseRef)가 소유. CEF 가 cancel
+    // 후에도 release 까지 핸들러를 참조하므로 여기서 destroy 하면 UAF(#60). no-op.
 }
 
 fn mimeTypeForPath(path: []const u8) [:0]const u8 {
