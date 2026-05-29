@@ -2594,7 +2594,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "print_to_pdf")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
-        const pdf_path = util.extractJsonString(req_clean, "path") orelse "";
+        // extractJsonString 은 raw(escaped) 슬라이스 반환 — Windows 경로의 `\\` 가
+        // 그대로 CEF·응답·event 로 흘러 path 라운드트립이 깨진다(JS 단 single
+        // backslash ≠ echo double). unescape 로 실제 경로 복원(deferred-response
+        // event 매칭 + FS gate 정확도). macOS 경로(`/`)는 unescape no-op.
+        var pdf_path_buf: [2048]u8 = undefined;
+        const pdf_raw = util.extractJsonString(req_clean, "path") orelse "";
+        const pdf_path = if (util.unescapeJsonStr(pdf_raw, &pdf_path_buf)) |n| pdf_path_buf[0..n] else pdf_raw;
         if (rendererPathFsGate(response_buf, "print_to_pdf", pdf_path)) |e| return e;
         return window_ipc.handlePrintToPDF(.{
             .window_id = win_id,
@@ -2618,7 +2624,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             }
         else
             null;
-        const cap_path = util.extractJsonString(req_clean, "path") orelse "";
+        // print_to_pdf 와 동일 — raw escaped 경로를 unescape 해 Windows `\\`
+        // 라운드트립 + event path 매칭 정상화.
+        var cap_path_buf: [2048]u8 = undefined;
+        const cap_raw = util.extractJsonString(req_clean, "path") orelse "";
+        const cap_path = if (util.unescapeJsonStr(cap_raw, &cap_path_buf)) |n| cap_path_buf[0..n] else cap_raw;
         if (rendererPathFsGate(response_buf, "capture_page", cap_path)) |e| return e;
         return window_ipc.handleCapturePage(.{
             .window_id = win_id,

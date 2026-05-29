@@ -59,6 +59,7 @@ bash tests/e2e/run-splash.sh            # 스플래시 스크린 패턴 (windows
 bash tests/e2e/run-web-request.sh       # webRequest URL glob blocklist + completed 이벤트
 bash tests/e2e/run-system-integration.sh # screen/desktopCapturer/crashReporter/app 등 통합
 bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
+bash tests/e2e/run-deferred-response.sh # deferred-response criticals — cross-kind 라우팅/close-during-defer 무crash/path 라운드트립
 bash tests/e2e/run-gpu-accel.sh         # GPU 가속 회귀 가드 (#12) — WebGL ANGLE/D3D11/SwiftShader fallback
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
@@ -790,6 +791,15 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
 - **`@suji/plugin-notification-rich` Windows 액션 클릭 콜백 미구현**:
   WinRT toast 액션 버튼 클릭은 `NotificationActivator` COM 클래스 등록 필요
   (별도 인스톨러 + HKCU 레지스트리). 현재는 표시/Action Center 영속까지만.
+- **deferred-response same-path/same-kind 상관 (의도적 미수정)**: 동일 window·
+  동일 path·동일 종류(`printToPDF`×2 또는 `capturePage`×2)를 **동시** 호출하면
+  두 슬롯이 path 로만 구분돼 완료 콜백이 등록 순서로 매칭(물리적 완료 순서
+  아님). 관측 가능한 차이는 caller 별 `success` bool 뿐이고 디스크 결과는
+  last-writer-wins 로 동일, 동일 조건 print/capture 는 성공/실패가 거의 완벽히
+  상관돼 사실상 비가시. 정직한 correlation-id 재설계는 per-call ref-counted CEF
+  콜백 수명 관리(issue #16 가 leak 이던 표면)를 재도입하므로 비용 대비 가치 낮아
+  미수정. **서로 다른 종류**(print↔capture)의 같은-path 교차충돌은 `kind`
+  디스크리미네이터로 해소됨(PR #54 review #3). UAF/슬롯 고갈/타임아웃은 모두 수정.
 
 ## 구현 노트
 

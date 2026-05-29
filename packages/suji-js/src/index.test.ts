@@ -731,6 +731,20 @@ describe("windows.printToPDF (#16 deferred Promise)", () => {
     mockBridge.core.mockResolvedValueOnce({ success: false });
     expect(await windows.printToPDF(1, "/bad.pdf")).toEqual({ success: false });
   });
+
+  // #5 defense-in-depth: 코어가 끝내 응답 안 보내도(never resolve) SDK 타임아웃이
+  // {success:false} 로 settle → Promise 영구 hang 방지.
+  it("코어 무응답 시 타임아웃으로 success:false", async () => {
+    mockBridge.core.mockReturnValueOnce(new Promise(() => {})); // never resolves
+    const r = await windows.printToPDF(1, "/stuck.pdf", { timeoutMs: 10 });
+    expect(r).toEqual({ success: false });
+  });
+
+  it("capturePage 도 코어 무응답 시 타임아웃 success:false", async () => {
+    mockBridge.core.mockReturnValueOnce(new Promise(() => {}));
+    const r = await windows.capturePage(1, "/stuck.png", undefined, { timeoutMs: 10 });
+    expect(r).toEqual({ success: false });
+  });
 });
 
 describe("webRequest.onBeforeRequest timeout fallback", () => {
