@@ -771,6 +771,17 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
   격리 — default 빌드에선 specta 없이 stable Rust 빌드 통과. TypeScript
   declaration 필요 시 `--features typescript` (nightly Rust 또는
   RUSTC_BOOTSTRAP=1 + 패치 필요). `test-state-rust` 가 0→11/11 pass.
+- ~~Windows ReleaseSafe translate-c 'unused local constant' 컴파일 실패~~
+  **해결됨** ([#14](https://github.com/ohah/suji/issues/14)). MinGW `<string.h>` 가
+  `__MINGW_FORTIFY_LEVEL > 0`(게이트 `_FORTIFY_SOURCE>0 && __OPTIMIZE__>0`,
+  `_mingw_mac.h:331`)일 때 `wcscat`/`wcscpy` 를 `wcscat_s`/`wcscpy_s` 호출하는
+  bos-check inline override 로 재정의. Zig 0.16 translate-c 가 그 fortified
+  wrapper struct(`extern_local_wcscat_s`)를 `_ = &` discard 없이 생성 →
+  ReleaseSafe(C 를 `__OPTIMIZE__>0` 로 번역) 의미분석에서 unused-local 실패.
+  Debug(-O0)는 `__OPTIMIZE__` 미정의라 override 미생성→통과. `cef.zig`
+  `@cImport` 에 Windows-only `@cDefine("_FORTIFY_SOURCE","0")` 로 게이트를 닫아
+  근본 해결(fortify 는 CEF 바인딩 무관 — prebuilt lib + 헤더 번역만). release.yml
+  Windows=Debug 워크어라운드 제거 → 전 플랫폼 ReleaseSafe.
 - ~~Windows 네이티브 API 격차 (tray click/menu, globalShortcut trigger,
   nativeTheme event, opacity/shadow non-Views, OS-initiated window state,
   directory picker, custom dialog buttons, notification click)~~ **해결됨**
