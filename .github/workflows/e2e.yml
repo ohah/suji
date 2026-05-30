@@ -897,6 +897,21 @@ jobs:
           export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
           bash tests/e2e/run-badge-count.sh
 
+      # #60 part 2 회귀 가드 — 반드시 마지막 Windows 스텝(ReleaseSafe 재빌드로
+      # Debug zig-out 을 덮어쓰므로). 최적화 빌드에서 렌더러 V8 부트스트랩이
+      # window.__suji__ 를 바인딩하는지 검증 — 재발 시 getMainPage 타임아웃으로 fail.
+      - name: E2E — ReleaseSafe renderer boot (#60 part 2 guard, Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-rs-renderer-boot.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-releasesafe-renderer-boot.sh
+
       - name: Collect cross-platform suji logs on failure
         if: failure()
         shell: bash
