@@ -21,8 +21,6 @@ const log = logger.module("main");
 pub const panic = std.debug.FullPanic(sujiDiagPanic);
 
 fn sujiDiagPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
-    // CEF 디버그 모드에서만 stderr 직출력 — 렌더러(샌드박스) 패닉이 buffered
-    // stderr 로 유실되는 경우 대비. 평상시엔 표준 패닉 경로만.
     if (builtin.os.tag == .windows and cef.cefDebug()) diagWritePanic(msg);
     std.debug.defaultPanic(msg, first_trace_addr);
 }
@@ -32,15 +30,15 @@ fn diagWritePanic(msg: []const u8) void {
     const k32 = struct {
         extern "kernel32" fn GetStdHandle(nStdHandle: w.DWORD) callconv(.winapi) w.HANDLE;
         extern "kernel32" fn WriteFile(hFile: w.HANDLE, lpBuffer: [*]const u8, nNumberOfBytesToWrite: w.DWORD, lpNumberOfBytesWritten: ?*w.DWORD, lpOverlapped: ?*anyopaque) callconv(.winapi) w.BOOL;
-        extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) w.DWORD;
     };
     // 렌더러는 샌드박스 — 파일 쓰기 차단. stderr 는 inherited handle 이라 허용.
     const STD_ERROR_HANDLE: w.DWORD = @bitCast(@as(i32, -12));
     const h = k32.GetStdHandle(STD_ERROR_HANDLE);
-    if (h == w.INVALID_HANDLE_VALUE) return;
+    // stderr 핸들이 없는 서브프로세스는 GetStdHandle 가 NULL(0) 또는
+    // INVALID_HANDLE_VALUE 반환 — 둘 다 거른다(WriteFile(NULL) no-op 회피).
+    if (h == w.INVALID_HANDLE_VALUE or @intFromPtr(h) == 0) return;
     var hdr_buf: [80]u8 = undefined;
-    const pid = k32.GetCurrentProcessId();
-    const hdr = std.fmt.bufPrint(&hdr_buf, "\n[ZIGPANIC pid={d}] ", .{pid}) catch "[ZIGPANIC] ";
+    const hdr = std.fmt.bufPrint(&hdr_buf, "\n[ZIGPANIC pid={d}] ", .{getCurrentPid()}) catch "[ZIGPANIC] ";
     var wrote: w.DWORD = 0;
     _ = k32.WriteFile(h, hdr.ptr, @intCast(hdr.len), &wrote, null);
     _ = k32.WriteFile(h, msg.ptr, @intCast(msg.len), &wrote, null);
@@ -69,6 +67,12 @@ pub fn main(init: std.process.Init) !void {
         .args_vector = init.minimal.args.vector,
     });
 
+    // SUJI_CEF_DEBUG 캐시를 env 가용 직후(단일 스레드)에 1회 채운다 — 이후 CEF
+    // 콜백(IO/UI/렌더러 스레드)에서의 cefDebug() 는 전부 읽기만 하므로 비원자
+    // 캐시의 동시-쓰기 레이스/torn-read 가 제거된다. 또 패닉이 runtime.init 이후
+    // 발생하면 캐시가 올바른 값으로 고정돼 SUJI_CEF_DEBUG 가 무시되지 않는다.
+    _ = cef.cefDebug();
+
     // Windows: CEF 146 이 medium-integrity 사용자 세션에서도 de-elevation 을
     // 시도(`MaybeDeElevateOnStartup`) → de-elevation child 를 spawn 하고 parent
     // 의 cef_initialize 는 0 반환 → CefInitFailed. cmdline 에 `--do-not-de-elevate`
@@ -80,13 +84,16 @@ pub fn main(init: std.process.Init) !void {
         if (cef.cefDebug()) {
             const cl = std.os.windows.peb().ProcessParameters.CommandLine.slice();
             const is_renderer = util.utf16ContainsAscii(cl, "--type=renderer");
-            const is_sub = util.utf16ContainsAscii(cl, "--type=");
+            const is_sub = is_renderer or util.utf16ContainsAscii(cl, "--type=");
             std.debug.print("[cef-debug] main entry: sub={} renderer={}\n", .{ is_sub, is_renderer });
             cef.diagPrintCefAbi();
         }
         // SUJI_NO_RELAUNCH — de-elevation self-relaunch 디버그 우회(렌더러 서브프로세스
-        // 경로 격리용). 설정 시 일부 integrity 환경에서 CefInitFailed 가능(정직 한계).
-        const skip_relaunch = (runtime.env("SUJI_NO_RELAUNCH") != null);
+        // 경로 격리용). **반드시 CEF 디버그 모드에서만** 동작 — 그렇지 않으면 ambient
+        // 환경에 이 변수가 떠 있을 때 프로덕션 앱이 de-elevation 우회를 건너뛰어
+        // CefInitFailed(빈 화면)로 조용히 죽을 수 있다(#60 증상 재현). 디버그 게이트로
+        // 한정해 ambient-env 풋건을 차단한다.
+        const skip_relaunch = cef.cefDebug() and (runtime.env("SUJI_NO_RELAUNCH") != null);
         if (!skip_relaunch) maybeRelaunchWithNoDeElevate();
     }
 
@@ -229,7 +236,10 @@ fn getCurrentPid() i32 {
 ///
 /// CI (Windows Server 2022 runneradmin) 환경에선 발현 안 함 → 그쪽은 우회 코드
 /// 가 no-op (이미 정상 path). 로컬 user 세션에서 발현됨.
-fn maybeRelaunchWithNoDeElevate() void {
+// noinline — 8KB `new_cmdline` 로컬을 main() 프레임으로 인라인시키지 않는다.
+// main() 프레임은 작게 유지돼야 한다(렌더러 서브프로세스가 그 위에서 V8 을 돌림 —
+// #60). executeSubprocess 이전에 호출되는 헬퍼는 큰 로컬을 main 으로 끌어올리면 안 됨.
+noinline fn maybeRelaunchWithNoDeElevate() void {
     if (comptime builtin.os.tag != .windows) return;
 
     const w = std.os.windows;
