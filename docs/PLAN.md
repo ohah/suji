@@ -449,23 +449,78 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   > Electron/Tauri도 동일하게 코어 API로 제공. `plugins/` 디렉토리는 `state`,
   > `sqlite`, `log`, `store`, `http`, `notification-rich` 같은 cross-cutting 사용자 코드 전용.
   >
-  > **각 기능 코드 위치** (현재 — 모두 `src/platform/cef.zig` 내부):
+  > **각 기능 코드 위치** (현재 — `cef_<domain>.zig` 분리 반영):
   > | 기능 | cef.zig section | ObjC .m 파일 | main.zig handler |
   > |---|---|---|---|
-  > | clipboard | `clipboardReadText/WriteText/Clear` | — | `clipboard_read_text` 등 |
-  > | shell | `shellOpenExternal/ShowItemInFolder/Beep` | — | `shell_*` |
-  > | dialog | `showMessageBox/OpenDialog/SaveDialog/ErrorBox` | `src/platform/dialog.m` (macOS sheet modal), `src/platform/dialog_linux.c` (GTK varargs wrapper; Linux/Windows main path는 cef.zig) | `handleDialog*` |
-  > | tray | `createTray/setTrayMenu/destroyTray` | — (macOS Cocoa / Linux GTK StatusIcon / Windows Win32 직접) | `tray_*` |
-  > | notification | `notificationShow/Close/RequestPermission` | `src/platform/notification.m` (macOS; Linux/Windows path는 cef.zig) | `notification_*` |
-  > | menu | `setApplicationMenu/resetApplicationMenu/menu_popup` | — (macOS Cocoa / Linux GTK 직접) | `handleMenu*` |
+  > | clipboard | `src/platform/cef_clipboard.zig` + `cef_clipboard_{types,linux,windows}.zig` (`cef.zig` re-export; public routing + macOS, GTK/Win32 backends) | — | `clipboard_*` |
+  > | shell | `src/platform/cef_shell.zig` + `cef_shell_{linux,windows}.zig` (`cef.zig` re-export; public routing + macOS, GIO/Win32 backends) | — | `shell_*` |
+  > | dialog | `src/platform/cef_dialog.zig` (`cef.zig` re-export; public routing + macOS) + `cef_dialog_{types,response,linux_{message,file},windows_{message,messagebox,task_dialog,file,folder}}.zig` | `src/platform/dialog.m` (macOS sheet modal), `src/platform/dialog_linux.c` (GTK varargs wrapper) | `handleDialog*` |
+  > | screen | `src/platform/cef_screen.zig` + `cef_screen_{linux,windows}.zig` (`cef.zig` re-export; public routing + macOS, X11/Win32 backends) | — | `screen_*` |
+  > | safeStorage | `src/platform/cef_safe_storage.zig` (`cef.zig` re-export) + `src/platform/safe_storage.zig` helper | — | `safe_storage_*` |
+  > | dock | `src/platform/cef_dock.zig` (`cef.zig` re-export) | — | `dock_*`, `app_*_badge_count` |
+  > | powerSaveBlocker | `src/platform/cef_power_save_blocker.zig` (`cef.zig` re-export) | — | `power_save_blocker_*` |
+  > | desktopCapturer | `src/platform/cef_desktop_capturer.zig` (`cef.zig` re-export) + `src/platform/desktop_capturer.zig` parser | — | `desktop_capturer_*` |
+  > | sessionCookies | `src/platform/cef_session_cookies.zig` (`cef.zig` re-export) | — | `session_*` |
+  > | securityScopedBookmark | `src/platform/cef_security_scoped_bookmark.zig` (`cef.zig` re-export) | — | `security_scoped_*` |
+  > | requestUserAttention | `src/platform/cef_request_user_attention.zig` (`cef.zig` re-export) | — | `app_attention_*` |
+  > | menu | `src/platform/cef_menu.zig` + `cef_menu_{types,linux}.zig` (`cef.zig` re-export; public routing + macOS, GTK popup backend) | — | `handleMenu*` |
+  > | tray | `src/platform/cef_tray.zig` (`cef.zig` re-export; public routing + macOS) + `cef_tray_{types,state,windows,linux}.zig` (`win_pump` 공유) | — (macOS Cocoa / Linux GTK StatusIcon / Windows Win32 직접) | `tray_*` |
+  > | notification | `src/platform/cef_notification.zig` + `cef_notification_{state,linux,windows}.zig` (`cef.zig` re-export; Windows `win_pump` 공유) | `src/platform/notification.m` (macOS) | `notification_*` |
+  > | powerMonitor | `src/platform/cef_power_monitor.zig` (`cef.zig` re-export) | `src/platform/power_monitor.m`, `src/platform/power_monitor_linux.c`, `src/platform/power_monitor_win.c` | `powerMonitor*` |
+  > | nativeTheme | `src/platform/cef_native_theme.zig` (`cef.zig` re-export; Windows `win_pump` 공유) | `src/platform/nativetheme.m` (macOS KVO) | `nativeTheme*` |
+  > | nativeImage | `src/platform/cef_native_image.zig` (`cef.zig` re-export) | — | `native_image_*` |
+  > | app progress | `src/platform/cef_app_progress.zig` (`cef.zig` re-export) | — | `app_set_progress_bar` |
+  > | app path/meta | `src/platform/cef_app.zig` (`cef.zig` re-export; CEF cache path 공유) | — | `app_get_path`, `app_get_locale`, `app_is_packaged`, `app_focus`, `app_hide` |
+  > | crashReporter CEF bridge | `src/platform/cef_crash_reporter.zig` (`cef.zig` re-export) | — | `crash_reporter_*` |
+  > | webRequest | `src/platform/cef_web_request.zig` (`cef.zig` re-export; CEF resource callback 위임) | — | `web_request_*`, `webRequest:*` |
+  > | dragHandler | `src/platform/cef_drag_handler.zig` (CEF drag callback + macOS native drag hit-test) | — | `-webkit-app-region` |
+  > | windowDisplayHandlers | `src/platform/cef_window_display.zig` (`cef.zig` public wrapper 유지; display/load/find/print callback 위임) | — | `ready-to-show`, `page-title-updated`, `find-result`, `print_to_pdf` |
+  > | requestHandler | `src/platform/cef_request_handler.zig` (CEF request handler glue; resource callback은 `cef_web_request.zig`로 위임) | — | `session.webRequest`, CEF debug navigation/crash diag |
+  > | keyboardHandler | `src/platform/cef_keyboard_handler.zig` (CEF keyboard callback; DevTools/reload/window-close shortcuts) | — | F12/Cmd+R/Cmd+W/Cmd+Q/zoom/back-forward |
+  > | devTools | `src/platform/cef_devtools.zig` (`cef.zig` re-export; inspectee map + open/close/toggle + quit/shutdown cleanup) | — | DevTools |
+  > | lifeSpanHandler | `src/platform/cef_life_span_handler.zig` (CEF browser create/close callbacks; WM close routing + pending cleanup) | — | window:close, all-closed |
+  > | schemeHandler | `src/platform/cef_scheme.zig` + `cef_scheme_resource.zig` + `cef_scheme_security.zig` (`suji://app` factory, resource handler, CSP/security headers; `cef.zig` re-export) | — | suji://, CSP |
+  > | renderHandler | `src/platform/cef_render_handler.zig` + `cef_render_ipc.zig` + `cef_render_bootstrap.zig` (renderer V8 bridge/vtable + IPC delivery + `window.__suji__` JS bootstrap) | — | `window.__suji__`, renderer IPC |
+  > | viewsDelegate | `src/platform/cef_views_delegate.zig` + `cef_views_browser_delegate.zig` + `cef_views_window_delegate.zig` + `cef_views_window_delegate_state.zig` (CEF Views delegate facade + BrowserView/Window delegate callbacks/state helpers) | — | CEF Views windows/WebContentsView |
+  > | browserIpc | `src/platform/cef_browser_ipc.zig` (browser-process invoke/emit dispatch + deferred Promise response slots) | — | renderer↔browser IPC, `__window` injection |
+  > | appHandler | `src/platform/cef_app_handler.zig` (CEF App vtable + command-line switches + CEF debug/ABI diagnostics) | — | CEF app init, renderer handler registration |
+  > | runtime | `src/platform/cef_runtime.zig` (`cef.zig` re-export; CEF process config/subprocess/initialize) | — | `executeSubprocess`, `initialize`, CEF cache path |
+  > | browserState | `src/platform/cef_browser_state.zig` (`cef.zig` re-export; main browser + shared DevTools client state) | — | `currentBrowser`, `devtoolsClient`, global handler bootstrap |
+  > | messageLoop | `src/platform/cef_message_loop.zig` (`cef.zig` re-export; CEF run/shutdown/quit lifecycle) | — | `run`, `shutdown`, `quit`, `quitAfterNextResponse` |
+  > | nativeWindowHandles | `src/platform/cef_native_window_handles.zig` (`cef.zig` re-export; Win32 HWND/NSWindow lookup helpers) | — | `windowsEntryHwnd`, `collectTopLevelNativeWindowHandles`, `nsWindowForBrowserHandle` |
+  > | nativeRegistry | `src/platform/cef_native_registry.zig` (`cef.zig` re-export; process-wide CefNative singleton registry) | — | `globalNative`, `nativeAllocator`, register/unregister |
+  > | browserControl | `src/platform/cef_browser_control.zig` (`cef.zig` re-export; browser navigation/eval/zoom helpers) | — | `navigate`, `evalJs`, `zoomChange`, `zoomSet` |
+  > | nativeRefs | `src/platform/cef_native_refs.zig` (CefNative-owned CEF ref-counted release helpers) | — | DevTools registration + CEF Views refs |
+  > | nativeEntry | `src/platform/cef_native_entry.zig` (`cef.CefNative.BrowserEntry` type alias source) | — | BrowserEntry, URL cache state, Views refs |
+  > | nativeVtable | `src/platform/cef_native_vtable.zig` (`cef.CefNative.asNative` vtable source) | — | WindowManager Native vtable mapping |
+  > | native | `src/platform/cef_native.zig` (`cef.CefNative` type alias source) | — | CefNative lifecycle shell, browser table ownership |
+  > | cImport | `src/platform/cef_c.zig` (`cef.c` re-export source) | — | CEF C API import + platform cimport defines |
+  > | coreFoundation | `src/platform/cef_core_foundation.zig` (`cef.CF*` re-export source) | — | shared CFData/CFRelease declarations |
+  > | macAppMenu | `src/platform/cef_mac_app_menu.zig` (macOS NSApplication bootstrap + default menu + Cmd+Q quit target) | — | default App/Edit/View/Window menu, SujiQuitTarget |
+  > | macWindow | `src/platform/cef_mac_window.zig` (macOS NSWindow creation/geometry/options helpers + shared AppKit geometry types) | — | `initWindowInfo`, NSWindow attach/order/frame/background/title/bounds helpers |
+  > | objc | `src/platform/cef_objc.zig` (`cef.zig` re-export; ObjC runtime bridge + NSString/menu helpers) | — | shared macOS ObjC helpers |
+  > | util | `src/platform/cef_util.zig` (`cef.zig` re-export; CEF pointer/string/ref-counted base helpers) | — | shared CEF helpers |
+  > | clientHandler | `src/platform/cef_client_handler.zig` (CEF client vtable glue to lifespan/keyboard/display/request/browser IPC handlers) | — | CEF browser-process client callbacks |
+  > | pageOutput | `src/platform/cef_page_output.zig` (WindowManager vtable glue + printToPDF callback + capturePage CDP observer/pending slots) | — | `print_to_pdf`, `capture_page`, deferred output events |
+  > | pageOutputConstants | `src/platform/cef_page_output_constants.zig` (`cef.PDF_PATH_STACK_BUF`/page output event re-export source) | — | shared PDF/capture output constants |
+  > | pendingCleanup | `src/platform/cef_pending_cleanup.zig` (`cef.purgePendingResponsesForBrowser` re-export source) | — | browser close pending IPC/capture slot cleanup |
+  > | publicApi | `src/platform/cef_public_api.zig` (`cef.zig` public facade re-export source) | — | native/core public API alias 집계 |
+  > | initialLoad | `src/platform/cef_initial_load.zig` (CEF Views startup URL fallback + delayed initial-load retries) | — | startup URL race guard |
+  > | webContents | `src/platform/cef_web_contents.zig` (WindowManager webContents vtable glue: navigation/JS/DevTools/UA/zoom/audio/edit/find) | — | `load_url`, `execute_javascript`, DevTools, zoom/audio, edit/find |
+  > | webContentsView | `src/platform/cef_web_contents_view.zig` + `cef_web_contents_view_child_window.zig` + `cef_web_contents_view_overlay.zig` (CEF Views child-window/overlay WebContentsView glue) | — | `create_view`, `destroy_view`, view bounds/visibility/z-order |
+  > | windowState | `src/platform/cef_window_state.zig` (WindowManager window state vtable glue: minimize/restore/maximize/fullscreen + state queries) | — | `minimize`, `maximize`, `set_fullscreen`, state getters |
+  > | windowVisuals | `src/platform/cef_window_visuals.zig` (WindowManager window visual vtable glue: opacity/background/shadow + Windows layered/DWM helpers) | — | `set_opacity`, `get_opacity`, `set_background_color`, `set_has_shadow`, `has_shadow` |
+  > | windowRuntime | `src/platform/cef_window_runtime.zig` (WindowManager runtime window vtable glue: destroy/show-hide/focus/title/bounds) | — | `destroy_window`, `set_visible`, `focus`, `set_title`, `set_bounds` |
+  > | windowCreation | `src/platform/cef_window_creation.zig` (WindowManager create_window vtable glue: CEF Views/browser creation + parent resolution) | — | `create_window`, CEF Views top-level creation, parent lookup |
   > | fs | `fsSandboxCheck` etc | — | `handleFs*` (`src/main.zig`) |
-  > | globalShortcut | `globalShortcutRegister` 등 | `src/platform/global_shortcut.m` (macOS Carbon/media keys; Linux X11/Windows RegisterHotKey path는 cef.zig) | `handleGlobalShortcut*` |
-  > | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
+  > | globalShortcut | `src/platform/cef_global_shortcut.zig` + `cef_global_shortcut_{types,state,linux,linux_parse}.zig` (`cef.zig` re-export; Windows `win_pump` 공유) | `src/platform/global_shortcut.m` (macOS Carbon/media keys) | `handleGlobalShortcut*` |
+  > | winPump | `src/platform/cef_win_pump.zig` (`cef.zig` re-export; Windows message-only window pump) | — | `WM_HOTKEY`, `WM_TRAY`, `WM_COMMAND`, `WM_SETTINGCHANGE` |
+  > | window lifecycle | `src/platform/cef_window_lifecycle.zig` (`cef.zig` re-export) | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
   > | windows (멀티) | `createWindow/destroyWindow/setBounds/...` | — | `src/core/window_ipc.zig` |
   >
-  > **진행 중 refactor**: 각 native API를 `src/platform/cef_<domain>.zig`로 분리(동작
-  > 무변경, 한 도메인=한 PR). cef.zig는 코어(browser/IPC/V8/lifecycle/scheme/handler)만 남김.
-  > clipboard 완료(PR #65, cef.zig 13362→12832줄). 절차·재사용 기반·남은 도메인·주의사항은
+  > **cef.zig refactor**: 각 native API를 `src/platform/cef_<domain>.zig`로 분리(동작
+  > 무변경, 한 도메인=한 PR). clipboard/shell/dialog/screen/safeStorage/dock/powerSaveBlocker/desktopCapturer/sessionCookies/securityScopedBookmark/requestUserAttention/menu/tray/notification/globalShortcut/winPump/windowLifecycleEvents/nativeImage/appProgress/powerMonitor/nativeTheme/appPathMeta/crashReporter/webRequest/dragHandler/windowDisplayHandlers/requestHandler/keyboardHandler/devTools/lifeSpanHandler/schemeHandler/renderHandler/viewsDelegate/browserIpc/appHandler/macAppMenu/macWindow/objc/util/clientHandler/pageOutput/pageOutputConstants/pendingCleanup/publicApi/initialLoad/webContents/webContentsView/windowState/windowVisuals/windowRuntime/windowCreation/runtime/browserState/messageLoop/nativeWindowHandles/nativeRegistry/browserControl/nativeRefs/nativeEntry/nativeVtable/native/cImport/coreFoundation 완료(cef.zig 13362→326줄).
+  > 추가 분리는 `cef.zig` re-export hub 경계를 별도로 정의한 뒤 진행한다. 절차·재사용 기반·주의사항은
   > [docs/CEF_REFACTOR.md](./CEF_REFACTOR.md) 참조.
 - [~] window — 멀티 윈도우 + BrowserWindow API (`docs/WINDOW_API.md`)
   - [x] Phase 1: 설계 확정 + PoC (`__core__:create_window`, `cef.zig:createNewWindow`, Electron 방식 동등성, name 중복 싱글턴)
@@ -474,7 +529,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] SujiEvent + EventSink (`window:created`/`close`/`closed`, preventDefault)
     - [x] 동시성 안전성 (`std.Io.Mutex` + 이벤트 발화는 lock 밖)
     - [x] TDD 단위 테스트 49개 (동시성·OOM·재진입·에러 경로·이벤트 누출 금지)
-    - [x] Step A: CefNative 스켈레톤 — `window.Native` vtable을 CEF로 구현 (`src/platform/cef.zig`)
+    - [x] Step A: CefNative 스켈레톤 — `window.Native` vtable을 CEF로 구현 (`src/platform/cef_native.zig`, `cef.zig` re-export)
     - [x] Step B.1: EventBusSink 어댑터 — WM.EventSink → EventBus + cancelable 리스너 레지스트리
     - [x] Step B.2: `main.zig` 배선 — WindowStack으로 WM + CefNative + Sink 통합, 첫 윈도우 `wm.create` 경유
     - [x] Step B.3+B.4: CEF life_span 통합 — `DoClose` 취소 가능 이벤트 라우팅 + `OnBeforeClose` 테이블 정리 + WM 통지. `tryClose`/`markClosedExternal`/`findByNativeHandle` 추가. `destroyLocked` reorder (destroyed 마킹을 native 호출 전에 — DoClose 재진입 시 중복 이벤트 방지)

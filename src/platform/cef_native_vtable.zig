@@ -1,0 +1,63 @@
+//! WindowManager Native vtable wiring for CefNative.
+
+const window_mod = @import("window");
+const cef_page_output = @import("cef_page_output.zig");
+const cef_web_contents = @import("cef_web_contents.zig");
+const cef_web_contents_view = @import("cef_web_contents_view.zig");
+const cef_window_creation = @import("cef_window_creation.zig");
+const cef_window_runtime = @import("cef_window_runtime.zig");
+const cef_window_state = @import("cef_window_state.zig");
+const cef_window_visuals = @import("cef_window_visuals.zig");
+
+pub const vtable: window_mod.Native.VTable = .{
+    .create_window = cef_window_creation.createWindow,
+    .destroy_window = cef_window_runtime.destroyWindow,
+    .set_title = cef_window_runtime.setTitle,
+    .set_bounds = cef_window_runtime.setBounds,
+    .set_visible = cef_window_runtime.setVisible,
+    .focus = cef_window_runtime.focus,
+    .load_url = cef_web_contents.loadUrl,
+    .reload = cef_web_contents.reload,
+    .execute_javascript = cef_web_contents.executeJavascript,
+    .get_url = cef_web_contents.getUrl,
+    .is_loading = cef_web_contents.isLoading,
+    .open_dev_tools = cef_web_contents.openDevToolsImpl,
+    .close_dev_tools = cef_web_contents.closeDevToolsImpl,
+    .is_dev_tools_opened = cef_web_contents.isDevToolsOpenedImpl,
+    .toggle_dev_tools = cef_web_contents.toggleDevToolsImpl,
+    .set_user_agent = cef_web_contents.setUserAgentImpl,
+    .get_user_agent = cef_web_contents.getUserAgentImpl,
+    .set_zoom_level = cef_web_contents.setZoomLevelImpl,
+    .get_zoom_level = cef_web_contents.getZoomLevelImpl,
+    .set_audio_muted = cef_web_contents.setAudioMutedImpl,
+    .is_audio_muted = cef_web_contents.isAudioMutedImpl,
+    .set_opacity = cef_window_visuals.setOpacityImpl,
+    .get_opacity = cef_window_visuals.getOpacityImpl,
+    .set_background_color = cef_window_visuals.setBackgroundColorImpl,
+    .set_has_shadow = cef_window_visuals.setHasShadowImpl,
+    .has_shadow = cef_window_visuals.hasShadowImpl,
+    .undo = cef_web_contents.makeFrameEditFn("undo"),
+    .redo = cef_web_contents.makeFrameEditFn("redo"),
+    .cut = cef_web_contents.makeFrameEditFn("cut"),
+    .copy = cef_web_contents.makeFrameEditFn("copy"),
+    .paste = cef_web_contents.makeFrameEditFn("paste"),
+    .select_all = cef_web_contents.makeFrameEditFn("select_all"),
+    .find_in_page = cef_web_contents.findInPageImpl,
+    .stop_find_in_page = cef_web_contents.stopFindInPageImpl,
+    .print_to_pdf = cef_page_output.printToPDFImpl,
+    .capture_page = cef_page_output.capturePageImpl,
+    // Phase 17-B: WebContentsView via CEF Views-managed child CefWindow.
+    .create_view = cef_web_contents_view.createView,
+    .destroy_view = cef_web_contents_view.destroyView,
+    .set_view_bounds = cef_web_contents_view.setViewBounds,
+    .set_view_visible = cef_web_contents_view.setViewVisible,
+    .reorder_view = cef_web_contents_view.reorderView,
+    .minimize = cef_window_state.minimizeImpl,
+    .restore_window = cef_window_state.restoreWindowImpl,
+    .maximize = cef_window_state.maximizeImpl,
+    .unmaximize = cef_window_state.unmaximizeImpl,
+    .set_fullscreen = cef_window_state.setFullscreenImpl,
+    .is_minimized = cef_window_state.isMinimizedImpl,
+    .is_maximized = cef_window_state.isMaximizedImpl,
+    .is_fullscreen = cef_window_state.isFullscreenImpl,
+};

@@ -7,12 +7,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const util = @import("util");
-const clipboard_cf_html = @import("clipboard_cf_html.zig");
 const cef = @import("cef.zig");
+const clip_types = @import("cef_clipboard_types.zig");
+const cef_clipboard_linux = @import("cef_clipboard_linux.zig");
+const cef_clipboard_windows = @import("cef_clipboard_windows.zig");
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
-const is_windows = builtin.os.tag == .windows;
 
 // 공유 ObjC 브리징(cef.zig) alias — 호출부 무변경용.
 const objc = cef.objc;
@@ -41,309 +42,18 @@ fn nsStringFromClipboardText(text: []const u8) ?*anyopaque {
 //   UTI ↔ CF format 매핑은 cfFormatFor*.
 // 기타: no-op (readText는 빈 문자열, write/clear는 false 반환).
 
-const PASTEBOARD_TYPE_STRING: [*:0]const u8 = "public.utf8-plain-text";
-
-/// 클립보드 텍스트 최대 길이 (null terminator 포함). main.zig IPC handler가 동일 cap을
-/// 사용하므로 여기 한도를 넘는 입력은 caller 단에서 이미 잘려 있음.
-const CLIPBOARD_MAX_TEXT: usize = 16384;
-
-const linux_clip = if (is_linux) struct {
-    const GDK_SELECTION_CLIPBOARD: usize = 69;
-    const TARGET_HTML: [*:0]const u8 = "text/html";
-    const GtkTargetEntry = extern struct {
-        target: [*:0]const u8,
-        flags: u32,
-        info: u32,
-    };
-
-    extern "c" fn gtk_clipboard_get(selection: ?*anyopaque) callconv(.c) ?*anyopaque;
-    extern "c" fn gtk_clipboard_set_text(clipboard: ?*anyopaque, text: [*]const u8, len: c_int) callconv(.c) void;
-    extern "c" fn gtk_clipboard_set_with_data(clipboard: ?*anyopaque, targets: [*]const GtkTargetEntry, n_targets: u32, get_func: *const fn (?*anyopaque, ?*anyopaque, u32, ?*anyopaque) callconv(.c) void, clear_func: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void, user_data: ?*anyopaque) callconv(.c) c_int;
-    extern "c" fn gtk_clipboard_wait_for_text(clipboard: ?*anyopaque) callconv(.c) ?[*:0]u8;
-    extern "c" fn gtk_clipboard_wait_for_contents(clipboard: ?*anyopaque, target: ?*anyopaque) callconv(.c) ?*anyopaque;
-    extern "c" fn gtk_clipboard_clear(clipboard: ?*anyopaque) callconv(.c) void;
-    extern "c" fn gtk_clipboard_store(clipboard: ?*anyopaque) callconv(.c) void;
-    extern "c" fn gtk_clipboard_wait_is_text_available(clipboard: ?*anyopaque) callconv(.c) c_int;
-    extern "c" fn gtk_selection_data_set(selection_data: ?*anyopaque, type_: ?*anyopaque, format: c_int, data: [*]const u8, length: c_int) callconv(.c) void;
-    extern "c" fn gtk_selection_data_get_data(selection_data: ?*anyopaque) callconv(.c) ?[*]const u8;
-    extern "c" fn gtk_selection_data_get_length(selection_data: ?*anyopaque) callconv(.c) c_int;
-    extern "c" fn gtk_selection_data_free(selection_data: ?*anyopaque) callconv(.c) void;
-    extern "c" fn gdk_atom_intern(atom_name: [*:0]const u8, only_if_exists: c_int) callconv(.c) ?*anyopaque;
-    extern "c" fn g_free(mem: ?*anyopaque) callconv(.c) void;
-
-    var html_storage: [CLIPBOARD_MAX_TEXT]u8 = undefined;
-    var html_len: usize = 0;
-
-    fn selectionAtom() ?*anyopaque {
-        return @as(?*anyopaque, @ptrFromInt(GDK_SELECTION_CLIPBOARD));
-    }
-
-    fn clipboard() ?*anyopaque {
-        return gtk_clipboard_get(selectionAtom());
-    }
-
-    fn isTextType(type_cstr: [*:0]const u8) bool {
-        return std.mem.eql(u8, std.mem.span(type_cstr), "public.utf8-plain-text");
-    }
-
-    fn isHtmlType(type_cstr: [*:0]const u8) bool {
-        const t = std.mem.span(type_cstr);
-        return std.mem.eql(u8, t, "public.html") or std.mem.eql(u8, t, "text/html");
-    }
-
-    fn supportsType(type_cstr: [*:0]const u8) bool {
-        return isTextType(type_cstr) or isHtmlType(type_cstr);
-    }
-
-    fn htmlAtom() ?*anyopaque {
-        return gdk_atom_intern(TARGET_HTML, 0);
-    }
-
-    fn readText(buf: []u8) []const u8 {
-        const cb = clipboard() orelse return buf[0..0];
-        const raw = gtk_clipboard_wait_for_text(cb) orelse return buf[0..0];
-        defer g_free(@ptrCast(raw));
-        const text = std.mem.span(raw);
-        const n = @min(text.len, buf.len);
-        @memcpy(buf[0..n], text[0..n]);
-        return buf[0..n];
-    }
-
-    fn writeText(text: []const u8) bool {
-        if (text.len > std.math.maxInt(c_int)) return false;
-        const cb = clipboard() orelse return false;
-        gtk_clipboard_set_text(cb, text.ptr, @intCast(text.len));
-        gtk_clipboard_store(cb);
-        return true;
-    }
-
-    fn htmlGet(_: ?*anyopaque, selection_data: ?*anyopaque, _: u32, _: ?*anyopaque) callconv(.c) void {
-        if (html_len == 0) return;
-        const atom = htmlAtom() orelse return;
-        gtk_selection_data_set(selection_data, atom, 8, html_storage[0..html_len].ptr, @intCast(html_len));
-    }
-
-    fn htmlClear(_: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
-        html_len = 0;
-    }
-
-    fn writeHtml(html: []const u8) bool {
-        if (html.len == 0 or html.len > html_storage.len or html.len > std.math.maxInt(c_int)) return false;
-        const cb = clipboard() orelse return false;
-        @memcpy(html_storage[0..html.len], html);
-        html_len = html.len;
-        const targets = [_]GtkTargetEntry{.{ .target = TARGET_HTML, .flags = 0, .info = 0 }};
-        if (gtk_clipboard_set_with_data(cb, &targets, targets.len, &htmlGet, &htmlClear, null) == 0) {
-            html_len = 0;
-            return false;
-        }
-        gtk_clipboard_store(cb);
-        return true;
-    }
-
-    fn readHtml(buf: []u8) []const u8 {
-        const cb = clipboard() orelse return buf[0..0];
-        const atom = htmlAtom() orelse return buf[0..0];
-        const selection = gtk_clipboard_wait_for_contents(cb, atom) orelse return buf[0..0];
-        defer gtk_selection_data_free(selection);
-        const len = gtk_selection_data_get_length(selection);
-        if (len <= 0) return buf[0..0];
-        const data = gtk_selection_data_get_data(selection) orelse return buf[0..0];
-        const n = @min(@as(usize, @intCast(len)), buf.len);
-        @memcpy(buf[0..n], data[0..n]);
-        return buf[0..n];
-    }
-
-    fn clear() void {
-        const cb = clipboard() orelse return;
-        gtk_clipboard_clear(cb);
-        gtk_clipboard_store(cb);
-        html_len = 0;
-    }
-
-    fn hasText() bool {
-        const cb = clipboard() orelse return false;
-        return gtk_clipboard_wait_is_text_available(cb) != 0;
-    }
-
-    fn hasHtml() bool {
-        var tmp: [1]u8 = undefined;
-        return readHtml(&tmp).len > 0;
-    }
-} else struct {};
-
-// ============================================
-// Win32 Clipboard FFI (Windows only)
-// ============================================
-const win_clip = if (builtin.os.tag == .windows) struct {
-    const CF_UNICODETEXT: u32 = 13;
-    const GMEM_MOVEABLE: u32 = 0x0002;
-    const CF_HTML_NAME_W = std.unicode.utf8ToUtf16LeStringLiteral(clipboard_cf_html.format_name);
-
-    extern "user32" fn OpenClipboard(hWndNewOwner: ?*anyopaque) callconv(.winapi) i32;
-    extern "kernel32" fn Sleep(dwMilliseconds: u32) callconv(.winapi) void;
-
-    /// Win32 OpenClipboard 는 single-owner. 동시 호출 contention 시 false 반환.
-    /// e2e stress (Promise.all 50회) 같은 케이스에서 짧은 backoff 로 최대 ~50ms 재시도.
-    fn openClipboardRetry() bool {
-        var attempt: u32 = 0;
-        while (attempt < 10) : (attempt += 1) {
-            if (OpenClipboard(null) != 0) return true;
-            Sleep(5);
-        }
-        return false;
-    }
-    extern "user32" fn CloseClipboard() callconv(.winapi) i32;
-    extern "user32" fn EmptyClipboard() callconv(.winapi) i32;
-    extern "user32" fn SetClipboardData(uFormat: u32, hMem: ?*anyopaque) callconv(.winapi) ?*anyopaque;
-    extern "user32" fn GetClipboardData(uFormat: u32) callconv(.winapi) ?*anyopaque;
-    extern "user32" fn IsClipboardFormatAvailable(format: u32) callconv(.winapi) i32;
-    extern "user32" fn RegisterClipboardFormatW(lpszFormat: [*:0]const u16) callconv(.winapi) u32;
-    extern "kernel32" fn GlobalAlloc(uFlags: u32, dwBytes: usize) callconv(.winapi) ?*anyopaque;
-    extern "kernel32" fn GlobalFree(hMem: ?*anyopaque) callconv(.winapi) ?*anyopaque;
-    extern "kernel32" fn GlobalLock(hMem: ?*anyopaque) callconv(.winapi) ?*anyopaque;
-    extern "kernel32" fn GlobalUnlock(hMem: ?*anyopaque) callconv(.winapi) i32;
-    extern "kernel32" fn GlobalSize(hMem: ?*anyopaque) callconv(.winapi) usize;
-
-    fn isTextType(type_cstr: [*:0]const u8) bool {
-        return std.mem.eql(u8, std.mem.span(type_cstr), "public.utf8-plain-text");
-    }
-
-    fn isHtmlType(type_cstr: [*:0]const u8) bool {
-        const t = std.mem.span(type_cstr);
-        return std.mem.eql(u8, t, "public.html") or std.mem.eql(u8, t, "text/html");
-    }
-
-    fn htmlFormat() u32 {
-        return RegisterClipboardFormatW(CF_HTML_NAME_W.ptr);
-    }
-
-    /// UTI → Win32 CF format. 다른 UTI 는 0 반환 (caller skip).
-    fn cfFormatForUti(type_cstr: [*:0]const u8) u32 {
-        if (isTextType(type_cstr)) return CF_UNICODETEXT;
-        if (isHtmlType(type_cstr)) return htmlFormat();
-        return 0;
-    }
-
-    /// UTF-16LE clipboard 읽어 buf 에 UTF-8 로 복사. 빈 slice = missing/empty/too-large.
-    fn readUnicodeText(buf: []u8) []const u8 {
-        if (!openClipboardRetry()) return buf[0..0];
-        defer _ = CloseClipboard();
-        const handle = GetClipboardData(CF_UNICODETEXT) orelse return buf[0..0];
-        const locked = GlobalLock(handle) orelse return buf[0..0];
-        defer _ = GlobalUnlock(handle);
-        // null-terminated UTF-16. 길이는 nul 까지.
-        const wide_ptr: [*:0]const u16 = @ptrCast(@alignCast(locked));
-        const wide_slice = std.mem.span(wide_ptr);
-        const n = std.unicode.utf16LeToUtf8(buf, wide_slice) catch return buf[0..0];
-        return buf[0..n];
-    }
-
-    /// UTF-8 을 UTF-16LE 로 변환 후 CF_UNICODETEXT 로 쓴다. true = 성공.
-    fn writeUnicodeText(text: []const u8) bool {
-        // utf-16 길이 계산 + null terminator
-        const wide_len = std.unicode.calcUtf16LeLen(text) catch return false;
-        const bytes = (wide_len + 1) * @sizeOf(u16);
-        const hmem = GlobalAlloc(GMEM_MOVEABLE, bytes) orelse return false;
-        const locked = GlobalLock(hmem) orelse {
-            _ = GlobalFree(hmem);
-            return false;
-        };
-        const wide_ptr: [*]u16 = @ptrCast(@alignCast(locked));
-        const written = std.unicode.utf8ToUtf16Le(wide_ptr[0..wide_len], text) catch {
-            _ = GlobalUnlock(hmem);
-            _ = GlobalFree(hmem);
-            return false;
-        };
-        wide_ptr[written] = 0; // null terminator
-        _ = GlobalUnlock(hmem);
-
-        if (!openClipboardRetry()) {
-            _ = GlobalFree(hmem);
-            return false;
-        }
-        defer _ = CloseClipboard();
-        _ = EmptyClipboard();
-        const set_ok = SetClipboardData(CF_UNICODETEXT, hmem);
-        if (set_ok == null) {
-            _ = GlobalFree(hmem);
-            return false;
-        }
-        // 성공 시 ownership 은 system. GlobalFree 호출 안 함.
-        return true;
-    }
-
-    fn readHtml(buf: []u8) []const u8 {
-        const format = htmlFormat();
-        if (format == 0) return buf[0..0];
-        if (!openClipboardRetry()) return buf[0..0];
-        defer _ = CloseClipboard();
-        const handle = GetClipboardData(format) orelse return buf[0..0];
-        const size = GlobalSize(handle);
-        if (size == 0) return buf[0..0];
-        const locked = GlobalLock(handle) orelse return buf[0..0];
-        defer _ = GlobalUnlock(handle);
-        const bytes: [*]const u8 = @ptrCast(locked);
-        const fragment = clipboard_cf_html.readFragment(bytes[0..size]) orelse return buf[0..0];
-        const n = @min(fragment.len, buf.len);
-        @memcpy(buf[0..n], fragment[0..n]);
-        return buf[0..n];
-    }
-
-    fn writeHtml(html: []const u8) bool {
-        if (html.len == 0) return false;
-        var doc_buf: [CLIPBOARD_MAX_TEXT + clipboard_cf_html.max_overhead]u8 = undefined;
-        const doc = clipboard_cf_html.writeDocument(&doc_buf, html) orelse return false;
-        const format = htmlFormat();
-        if (format == 0) return false;
-        const hmem = GlobalAlloc(GMEM_MOVEABLE, doc.len + 1) orelse return false;
-        const locked = GlobalLock(hmem) orelse {
-            _ = GlobalFree(hmem);
-            return false;
-        };
-        const dst: [*]u8 = @ptrCast(locked);
-        @memcpy(dst[0..doc.len], doc);
-        dst[doc.len] = 0;
-        _ = GlobalUnlock(hmem);
-
-        if (!openClipboardRetry()) {
-            _ = GlobalFree(hmem);
-            return false;
-        }
-        defer _ = CloseClipboard();
-        _ = EmptyClipboard();
-        const set_ok = SetClipboardData(format, hmem);
-        if (set_ok == null) {
-            _ = GlobalFree(hmem);
-            return false;
-        }
-        return true;
-    }
-
-    fn emptyClipboard() void {
-        if (!openClipboardRetry()) return;
-        defer _ = CloseClipboard();
-        _ = EmptyClipboard();
-    }
-
-    fn hasFormat(type_cstr: [*:0]const u8) bool {
-        const cf = cfFormatForUti(type_cstr);
-        if (cf == 0) return false;
-        return IsClipboardFormatAvailable(cf) != 0;
-    }
-} else struct {};
+const CLIPBOARD_MAX_TEXT = clip_types.CLIPBOARD_MAX_TEXT;
+const PASTEBOARD_TYPE_STRING = clip_types.PASTEBOARD_TYPE_STRING;
+const PASTEBOARD_TYPE_HTML = clip_types.PASTEBOARD_TYPE_HTML;
+const PASTEBOARD_TYPE_RTF = clip_types.PASTEBOARD_TYPE_RTF;
 
 /// generalPasteboard에서 주어진 type의 string 추출 — 빈 slice면 missing/non-string.
 fn clipboardReadType(buf: []u8, type_cstr: [*:0]const u8) []const u8 {
     if (comptime builtin.os.tag == .windows) {
-        if (win_clip.isHtmlType(type_cstr)) return win_clip.readHtml(buf);
-        if (!win_clip.isTextType(type_cstr)) return buf[0..0];
-        return win_clip.readUnicodeText(buf);
+        return cef_clipboard_windows.readType(buf, type_cstr);
     }
     if (comptime is_linux) {
-        if (linux_clip.isHtmlType(type_cstr)) return linux_clip.readHtml(buf);
-        if (!linux_clip.isTextType(type_cstr)) return buf[0..0];
-        return linux_clip.readText(buf);
+        return cef_clipboard_linux.readType(buf, type_cstr);
     }
     if (!comptime is_macos) return buf[0..0];
     const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
@@ -358,14 +68,10 @@ fn clipboardReadType(buf: []u8, type_cstr: [*:0]const u8) []const u8 {
 /// generalPasteboard에 주어진 type으로 text 쓰기 — clearContents 호출 (다른 type 함께 제거).
 fn clipboardWriteType(text: []const u8, type_cstr: [*:0]const u8) bool {
     if (comptime builtin.os.tag == .windows) {
-        if (win_clip.isHtmlType(type_cstr)) return win_clip.writeHtml(text);
-        if (!win_clip.isTextType(type_cstr)) return false;
-        return win_clip.writeUnicodeText(text);
+        return cef_clipboard_windows.writeType(text, type_cstr);
     }
     if (comptime is_linux) {
-        if (linux_clip.isHtmlType(type_cstr)) return linux_clip.writeHtml(text);
-        if (!linux_clip.isTextType(type_cstr)) return false;
-        return linux_clip.writeText(text);
+        return cef_clipboard_linux.writeType(text, type_cstr);
     }
     if (!comptime is_macos) return false;
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
@@ -393,11 +99,11 @@ pub fn clipboardWriteText(text: []const u8) bool {
 /// 시스템 클립보드 비우기 (clearContents).
 pub fn clipboardClear() void {
     if (comptime builtin.os.tag == .windows) {
-        win_clip.emptyClipboard();
+        cef_clipboard_windows.clear();
         return;
     }
     if (comptime is_linux) {
-        linux_clip.clear();
+        cef_clipboard_linux.clear();
         return;
     }
     if (!comptime is_macos) return;
@@ -431,11 +137,8 @@ pub fn clipboardReadTiff(out_buf: []u8) []const u8 {
 /// 클립보드에 주어진 type이 있는지 (Electron `clipboard.has(format)`).
 /// type_cstr는 NSPasteboard UTI ("public.utf8-plain-text" / "public.html" 등).
 pub fn clipboardHas(type_cstr: [*:0]const u8) bool {
-    if (comptime builtin.os.tag == .windows) return win_clip.hasFormat(type_cstr);
-    if (comptime is_linux) {
-        if (linux_clip.isHtmlType(type_cstr)) return linux_clip.hasHtml();
-        return linux_clip.isTextType(type_cstr) and linux_clip.hasText();
-    }
+    if (comptime builtin.os.tag == .windows) return cef_clipboard_windows.has(type_cstr);
+    if (comptime is_linux) return cef_clipboard_linux.has(type_cstr);
     if (!comptime is_macos) return false;
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
@@ -448,37 +151,8 @@ pub fn clipboardHas(type_cstr: [*:0]const u8) bool {
 /// 클립보드에 등록된 모든 type을 JSON 배열로 빌드 (Electron `clipboard.availableFormats`).
 /// macOS는 UTI 이름을 그대로 반환 (e.g. "public.utf8-plain-text", "public.html").
 pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
-    if (comptime is_linux) {
-        var w: std.Io.Writer = .fixed(out_buf);
-        w.writeByte('[') catch return w.buffered();
-        var wrote = false;
-        if (linux_clip.hasText()) {
-            w.writeAll("\"public.utf8-plain-text\"") catch return w.buffered();
-            wrote = true;
-        }
-        if (linux_clip.hasHtml()) {
-            if (wrote) w.writeByte(',') catch return w.buffered();
-            w.writeAll("\"public.html\"") catch return w.buffered();
-        }
-        w.writeByte(']') catch return w.buffered();
-        return w.buffered();
-    }
-    if (comptime builtin.os.tag == .windows) {
-        var w: std.Io.Writer = .fixed(out_buf);
-        w.writeByte('[') catch return w.buffered();
-        var wrote = false;
-        if (win_clip.IsClipboardFormatAvailable(win_clip.CF_UNICODETEXT) != 0) {
-            w.writeAll("\"public.utf8-plain-text\"") catch return w.buffered();
-            wrote = true;
-        }
-        const html_format = win_clip.htmlFormat();
-        if (html_format != 0 and win_clip.IsClipboardFormatAvailable(html_format) != 0) {
-            if (wrote) w.writeByte(',') catch return w.buffered();
-            w.writeAll("\"public.html\"") catch return w.buffered();
-        }
-        w.writeByte(']') catch return w.buffered();
-        return w.buffered();
-    }
+    if (comptime is_linux) return cef_clipboard_linux.availableFormats(out_buf);
+    if (comptime builtin.os.tag == .windows) return cef_clipboard_windows.availableFormats(out_buf);
     if (!comptime is_macos) {
         const empty = "[]";
         const n = @min(empty.len, out_buf.len);
@@ -519,8 +193,6 @@ pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
     return w.buffered();
 }
 
-const PASTEBOARD_TYPE_HTML: [*:0]const u8 = "public.html";
-
 /// 클립보드 HTML 읽기 (Electron `clipboard.readHTML`). 동일 cap (CLIPBOARD_MAX_TEXT).
 pub fn clipboardReadHtml(buf: []u8) []const u8 {
     return clipboardReadType(buf, PASTEBOARD_TYPE_HTML);
@@ -530,8 +202,6 @@ pub fn clipboardReadHtml(buf: []u8) []const u8 {
 pub fn clipboardWriteHtml(html: []const u8) bool {
     return clipboardWriteType(html, PASTEBOARD_TYPE_HTML);
 }
-
-const PASTEBOARD_TYPE_RTF: [*:0]const u8 = "public.rtf";
 
 /// 클립보드 RTF 읽기 (Electron `clipboard.readRTF`). NSString 기반 — non-RTF면 빈 slice.
 pub fn clipboardReadRtf(buf: []u8) []const u8 {

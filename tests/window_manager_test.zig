@@ -16,6 +16,180 @@ fn newManager(native: *TestNative) WindowManager {
     return WindowManager.init(std.testing.allocator, std.testing.io, native.asNative());
 }
 
+fn readCefPlatformSource() ![]u8 {
+    // cef.zig와 분리된 CEF handler 모듈을 합쳐 정적 회귀 테스트가 refactor와 무관하게
+    // 실제 CEF 플랫폼 소스를 대상으로 동작하게 한다.
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
+        "src/platform/cef.zig",
+        "src/platform/cef_public_api.zig",
+        "src/platform/cef_c.zig",
+        "src/platform/cef_core_foundation.zig",
+        "src/platform/cef_util.zig",
+        "src/platform/cef_objc.zig",
+        "src/platform/cef_runtime.zig",
+        "src/platform/cef_browser_state.zig",
+        "src/platform/cef_message_loop.zig",
+        "src/platform/cef_native_window_handles.zig",
+        "src/platform/cef_native_registry.zig",
+        "src/platform/cef_browser_control.zig",
+        "src/platform/cef_native.zig",
+        "src/platform/cef_native_refs.zig",
+        "src/platform/cef_native_entry.zig",
+        "src/platform/cef_native_vtable.zig",
+        "src/platform/cef_app.zig",
+        "src/platform/cef_browser_ipc.zig",
+        "src/platform/cef_app_handler.zig",
+        "src/platform/cef_mac_app_menu.zig",
+        "src/platform/cef_mac_window.zig",
+        "src/platform/cef_client_handler.zig",
+        "src/platform/cef_page_output.zig",
+        "src/platform/cef_page_output_constants.zig",
+        "src/platform/cef_pending_cleanup.zig",
+        "src/platform/cef_initial_load.zig",
+        "src/platform/cef_web_contents.zig",
+        "src/platform/cef_web_contents_view_child_window.zig",
+        "src/platform/cef_web_contents_view_overlay.zig",
+        "src/platform/cef_web_contents_view.zig",
+        "src/platform/cef_window_state.zig",
+        "src/platform/cef_window_visuals.zig",
+        "src/platform/cef_window_runtime.zig",
+        "src/platform/cef_window_creation.zig",
+        "src/platform/cef_win_pump.zig",
+        "src/platform/cef_views_delegate.zig",
+        "src/platform/cef_views_browser_delegate.zig",
+        "src/platform/cef_views_window_delegate_state.zig",
+        "src/platform/cef_views_window_delegate.zig",
+        "src/platform/cef_render_ipc.zig",
+        "src/platform/cef_render_handler.zig",
+        "src/platform/cef_render_bootstrap.zig",
+        "src/platform/cef_scheme.zig",
+        "src/platform/cef_scheme_resource.zig",
+        "src/platform/cef_scheme_security.zig",
+        "src/platform/cef_life_span_handler.zig",
+        "src/platform/cef_devtools.zig",
+        "src/platform/cef_keyboard_handler.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, a, .limited(2 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
+}
+
+fn readCefDialogSource() ![]u8 {
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
+        "src/platform/cef_dialog.zig",
+        "src/platform/cef_dialog_types.zig",
+        "src/platform/cef_dialog_response.zig",
+        "src/platform/cef_dialog_linux.zig",
+        "src/platform/cef_dialog_linux_message.zig",
+        "src/platform/cef_dialog_linux_file.zig",
+        "src/platform/cef_dialog_windows_message.zig",
+        "src/platform/cef_dialog_windows_messagebox.zig",
+        "src/platform/cef_dialog_windows_task_dialog.zig",
+        "src/platform/cef_dialog_windows_file.zig",
+        "src/platform/cef_dialog_windows_folder.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, a, .limited(2 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
+}
+
+fn readCefTraySource() ![]u8 {
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
+        "src/platform/cef.zig",
+        "src/platform/cef_tray.zig",
+        "src/platform/cef_tray_types.zig",
+        "src/platform/cef_tray_state.zig",
+        "src/platform/cef_tray_windows.zig",
+        "src/platform/cef_tray_linux.zig",
+        "src/platform/cef_objc.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, a, .limited(2 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
+}
+
+fn readCefClipboardSource() ![]u8 {
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
+        "src/platform/cef.zig",
+        "src/platform/cef_clipboard.zig",
+        "src/platform/cef_clipboard_types.zig",
+        "src/platform/cef_clipboard_linux.zig",
+        "src/platform/cef_clipboard_windows.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, a, .limited(2 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
+}
+
+fn readCefGlobalShortcutSource() ![]u8 {
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
+        "src/platform/cef.zig",
+        "src/platform/cef_global_shortcut.zig",
+        "src/platform/cef_global_shortcut_types.zig",
+        "src/platform/cef_global_shortcut_state.zig",
+        "src/platform/cef_global_shortcut_linux_parse.zig",
+        "src/platform/cef_global_shortcut_linux.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, a, .limited(2 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
+}
+
+fn readCefNotificationSource() ![]u8 {
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
+        "src/platform/cef.zig",
+        "src/platform/cef_notification.zig",
+        "src/platform/cef_notification_state.zig",
+        "src/platform/cef_notification_linux.zig",
+        "src/platform/cef_notification_windows.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, p, a, .limited(2 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
+}
+
 // ============================================
 // init / deinit
 // ============================================
@@ -2270,12 +2444,7 @@ test "DevTools 메서드: 알 수 없는 id에 호출 시 WindowNotFound" {
 test "회귀: DevTools reload sync — F5/Cmd+R가 reloadInspecteeOrSelf 경유 + 매핑 lookup" {
     // OnPreKeyEvent의 reload 분기가 br.reload()를 직접 호출하면 DevTools 안에서
     // self-reload만 됨. reloadInspecteeOrSelf가 매핑 조회로 inspectee를 reload.
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     // 멀티 매핑 기반 — HashMap + lookup 헬퍼.
@@ -2298,12 +2467,7 @@ test "회귀: DevTools reload sync — F5/Cmd+R가 reloadInspecteeOrSelf 경유 
 }
 
 test "회귀: openDevTools가 pending_devtools_inspectee 세팅 후 show_dev_tools (멀티 매핑 hand-off)" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     const fn_marker = "fn openDevTools(browser: *c.cef_browser_t)";
@@ -2318,42 +2482,44 @@ test "회귀: openDevTools가 pending_devtools_inspectee 세팅 후 show_dev_too
 }
 
 test "회귀: onAfterCreated가 pending hand-off로 DevTools 매핑 + onBeforeClose가 매핑 정리" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
-    // onAfterCreated body에 pending hand-off 로직
+    // onAfterCreated callback은 DevTools 모듈 helper로 위임.
     const ac_marker = "fn onAfterCreated(";
     const ac_start = std.mem.indexOf(u8, source, ac_marker) orelse return error.OnAfterCreatedNotFound;
     const ac_end = std.mem.indexOfPos(u8, source, ac_start + ac_marker.len, "\nfn ") orelse source.len;
     const ac_body = source[ac_start..ac_end];
-    try std.testing.expect(std.mem.indexOf(u8, ac_body, "pending_devtools_inspectee") != null);
-    try std.testing.expect(std.mem.indexOf(u8, ac_body, "devtools_to_inspectee.put") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ac_body, "cef_devtools.handleAfterCreated(id)") != null);
 
-    // onBeforeClose body에 map.remove
+    const ac_helper_marker = "pub fn handleAfterCreated(devtools_id: u64) bool {";
+    const ac_helper_start = std.mem.indexOf(u8, source, ac_helper_marker) orelse return error.HandleAfterCreatedNotFound;
+    const ac_helper_end = std.mem.indexOfPos(u8, source, ac_helper_start + ac_helper_marker.len, "\npub fn handleBeforeClose") orelse source.len;
+    const ac_helper_body = source[ac_helper_start..ac_helper_end];
+    try std.testing.expect(std.mem.indexOf(u8, ac_helper_body, "pending_devtools_inspectee") != null);
+    try std.testing.expect(std.mem.indexOf(u8, ac_helper_body, "devtools_to_inspectee.put") != null);
+
+    // onBeforeClose callback은 DevTools 모듈 helper로 위임하고 helper가 map.remove 수행.
     const bc_marker = "fn onBeforeClose(";
     const bc_start = std.mem.indexOf(u8, source, bc_marker) orelse return error.OnBeforeCloseNotFound;
     const bc_end = std.mem.indexOfPos(u8, source, bc_start + bc_marker.len, "\nfn ") orelse source.len;
     const bc_body = source[bc_start..bc_end];
-    try std.testing.expect(std.mem.indexOf(u8, bc_body, "devtools_to_inspectee.remove") != null);
+    try std.testing.expect(std.mem.indexOf(u8, bc_body, "cef_devtools.handleBeforeClose(handle)") != null);
+
+    const bc_helper_marker = "pub fn handleBeforeClose(handle: u64) void {";
+    const bc_helper_start = std.mem.indexOf(u8, source, bc_helper_marker) orelse return error.HandleBeforeCloseNotFound;
+    const bc_helper_end = std.mem.indexOfPos(u8, source, bc_helper_start + bc_helper_marker.len, "\npub fn closeMappedDevToolsBeforeQuit") orelse source.len;
+    const bc_helper_body = source[bc_helper_start..bc_helper_end];
+    try std.testing.expect(std.mem.indexOf(u8, bc_helper_body, "devtools_to_inspectee.remove") != null);
 }
 
 test "회귀: onBeforeClose가 inspectee NSWindow를 makeKeyAndOrderFront — DevTools 닫힐 때 부모 창 키 포커스 복귀" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
-    const bc_marker = "fn onBeforeClose(";
+    const bc_marker = "pub fn handleBeforeClose(handle: u64) void {";
     const bc_start = std.mem.indexOf(u8, source, bc_marker) orelse return error.OnBeforeCloseNotFound;
-    const bc_end = std.mem.indexOfPos(u8, source, bc_start + bc_marker.len, "\nfn ") orelse source.len;
+    const bc_end = std.mem.indexOfPos(u8, source, bc_start + bc_marker.len, "\npub fn closeMappedDevToolsBeforeQuit") orelse source.len;
     const bc_body = source[bc_start..bc_end];
 
     // onBeforeClose에서 매핑 lookup → inspectee NSWindow에 makeKey 지연 호출.
@@ -2368,12 +2534,7 @@ test "회귀: onBeforeClose가 inspectee NSWindow를 makeKeyAndOrderFront — De
 }
 
 test "회귀: cef.quit()은 cef_quit_message_loop 전에 모든 DevTools/browser를 close — DevTools 떠 있어도 quit 동작" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     const fn_marker = "pub fn quit() void {";
@@ -2381,9 +2542,14 @@ test "회귀: cef.quit()은 cef_quit_message_loop 전에 모든 DevTools/browser
     const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\n}") orelse source.len;
     const body = source[fn_start..body_end];
 
-    // DevTools 매핑 iterate + close_dev_tools.
-    try std.testing.expect(std.mem.indexOf(u8, body, "devtools_to_inspectee.iterator") != null);
-    try std.testing.expect(std.mem.indexOf(u8, body, "close_dev_tools") != null);
+    // DevTools 매핑 iterate + close_dev_tools는 cef_devtools helper가 담당.
+    try std.testing.expect(std.mem.indexOf(u8, body, "cef_devtools.closeMappedDevToolsBeforeQuit()") != null);
+    const helper_marker = "pub fn closeMappedDevToolsBeforeQuit() void {";
+    const helper_start = std.mem.indexOf(u8, source, helper_marker) orelse return error.CloseMappedDevToolsBeforeQuitNotFound;
+    const helper_end = std.mem.indexOfPos(u8, source, helper_start + helper_marker.len, "\npub fn deinitAfterShutdown") orelse source.len;
+    const helper_body = source[helper_start..helper_end];
+    try std.testing.expect(std.mem.indexOf(u8, helper_body, "devtools_to_inspectee.iterator") != null);
+    try std.testing.expect(std.mem.indexOf(u8, helper_body, "close_dev_tools") != null);
     // 모든 사용자 browser에 close_browser(force=1).
     try std.testing.expect(std.mem.indexOf(u8, body, "browsers.iterator") != null);
     try std.testing.expect(std.mem.indexOf(u8, body, "close_browser") != null);
@@ -2394,12 +2560,7 @@ test "회귀: cef.quit()은 cef_quit_message_loop 전에 모든 DevTools/browser
 }
 
 test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     const fn_marker = "fn onPreKeyEvent(";
@@ -2418,12 +2579,7 @@ test "회귀: F12 핸들러는 sender browser(br)을 toggleDevTools에 전달" {
 }
 
 test "회귀: Cmd+Q는 NSApp.terminate: 우회 — SujiQuitTarget.sujiQuit: → cef.quit()" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     // [NSApp terminate:]은 NSApplicationWillTerminate 옵저버에서 CEF SIGTRAP. 절대 사용 금지.
@@ -2471,12 +2627,7 @@ test "회귀: Cmd+Q는 NSApp.terminate: 우회 — SujiQuitTarget.sujiQuit: → 
 }
 
 test "회귀: cef.shutdown — c.cef_shutdown 후 devtools_to_inspectee.deinit + pending 리셋" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     const fn_marker = "pub fn shutdown() void {";
@@ -2484,23 +2635,28 @@ test "회귀: cef.shutdown — c.cef_shutdown 후 devtools_to_inspectee.deinit +
     const body_end = std.mem.indexOfPos(u8, source, fn_start + fn_marker.len, "\n}") orelse source.len;
     const body = source[fn_start..body_end];
 
-    // c.cef_shutdown이 deinit보다 먼저 — drain 중 callback이 map에 안전 access.
+    // c.cef_shutdown이 DevTools cleanup보다 먼저 — drain 중 callback이 map에 안전 access.
     const cef_shutdown_pos = std.mem.indexOf(u8, body, "c.cef_shutdown()") orelse return error.CefShutdownMissing;
-    const deinit_pos = std.mem.indexOf(u8, body, "devtools_to_inspectee.deinit()") orelse return error.DeinitMissing;
-    try std.testing.expect(cef_shutdown_pos < deinit_pos);
+    const cleanup_pos = std.mem.indexOf(u8, body, "cef_devtools.deinitAfterShutdown()") orelse return error.DevToolsCleanupMissing;
+    try std.testing.expect(cef_shutdown_pos < cleanup_pos);
+
+    const helper_marker = "pub fn deinitAfterShutdown() void {";
+    const helper_start = std.mem.indexOf(u8, source, helper_marker) orelse return error.DeinitAfterShutdownNotFound;
+    const helper_body = source[helper_start..];
+    const deinit_pos = std.mem.indexOf(u8, helper_body, "devtools_to_inspectee.deinit()") orelse return error.DeinitMissing;
 
     // flag 리셋이 deinit 앞에 와야 freed-map + flag-true 윈도우 차단.
-    const flag_pos = std.mem.indexOf(u8, body, "devtools_map_initialized = false") orelse return error.FlagResetMissing;
+    const flag_pos = std.mem.indexOf(u8, helper_body, "devtools_map_initialized = false") orelse return error.FlagResetMissing;
     try std.testing.expect(flag_pos < deinit_pos);
 
     // pending도 null로 리셋 — 대칭 정리.
-    try std.testing.expect(std.mem.indexOf(u8, body, "pending_devtools_inspectee = null") != null);
+    try std.testing.expect(std.mem.indexOf(u8, helper_body, "pending_devtools_inspectee = null") != null);
 }
 
 test "회귀: SujiKeyableWindow subclass — borderless 창도 키 이벤트 받도록 canBecomeKeyWindow 오버라이드" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_mac_window.zig",
         std.testing.allocator,
         .limited(2 * 1024 * 1024),
     );
@@ -2523,9 +2679,9 @@ test "회귀: SujiKeyableWindow subclass — borderless 창도 키 이벤트 받
 test "회귀: g_devtools_client는 life_span_handler 필수 — 없으면 DevTools 매핑 등록 X" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_browser_state.zig",
         std.testing.allocator,
-        .limited(2 * 1024 * 1024),
+        .limited(256 * 1024),
     );
     defer std.testing.allocator.free(source);
 
@@ -2540,12 +2696,7 @@ test "회귀: g_devtools_client는 life_span_handler 필수 — 없으면 DevToo
 }
 
 test "회귀: onPreKeyEvent에서 sender가 DevTools면 closeDevTools(inspectee) — recursive open 차단" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     const fn_marker = "fn onPreKeyEvent(";
@@ -2570,43 +2721,46 @@ test "회귀: onPreKeyEvent에서 sender가 DevTools면 closeDevTools(inspectee)
     try std.testing.expect(close_pos < toggle_pos);
 }
 
-test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + native dialog backends" {
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
-    defer std.testing.allocator.free(cef_src);
+test "회귀: Dialog API — cef_dialog.zig pub fn + cef.zig re-export + main.zig 라우팅 + native dialog backends" {
+    const dialog_src = try readCefDialogSource();
+    defer std.testing.allocator.free(dialog_src);
 
     // 4개 pub fn (showMessageBox / showErrorBox / showOpenDialog / showSaveDialog).
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showMessageBox(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showErrorBox(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showOpenDialog(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn showSaveDialog(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "pub fn showMessageBox(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "pub fn showErrorBox(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "pub fn showOpenDialog(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "pub fn showSaveDialog(") != null);
 
     // ObjC 클래스 사용.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSAlert") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSOpenPanel") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSSavePanel") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "NSAlert") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "NSOpenPanel") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "NSSavePanel") != null);
     // Linux GTK backend.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "const linux_dlg") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_file_chooser_get_filenames") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "const linux_message") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "const linux_file") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "gtk_file_chooser_get_filenames") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE") != null);
     // Windows Win32 backend.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "const win_dlg") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "GetOpenFileNameW") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "const messagebox") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "const task_dialog") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "const win_dlg") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "GetOpenFileNameW") != null);
     // runModal 동기 호출 패턴.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"runModal\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "\"runModal\"") != null);
     // setMessageText/setInformativeText/addButtonWithTitle.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setMessageText:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "addButtonWithTitle:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "setMessageText:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "addButtonWithTitle:") != null);
     // suppression button (checkbox).
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setShowsSuppressionButton:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "setShowsSuppressionButton:") != null);
     // 응답 형식 — Electron 매칭 ("canceled" + "filePaths"/"filePath").
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"canceled\":") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "filePaths") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "filePath") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "\"canceled\":") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "filePaths") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "filePath") != null);
+
+    const cef_src = try readCefPlatformSource();
+    defer std.testing.allocator.free(cef_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub const showMessageBox = cef_dialog.showMessageBox;") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub const showOpenDialog = cef_dialog.showOpenDialog;") != null);
 
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -2630,8 +2784,8 @@ test "회귀: Dialog API — cef.zig pub fn + main.zig 라우팅 + native dialog
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"multiSelections\"") != null);
 
     // showsTagField — Electron API 매칭.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setShowsTagField:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "shows_tag_field") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "setShowsTagField:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "shows_tag_field") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "showsTagField") != null);
 }
 
@@ -2779,13 +2933,8 @@ test "회귀: Notification API (Phase 5-C) — UNUserNotificationCenter + .m 파
     try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/notification.m") != null);
     try std.testing.expect(std.mem.indexOf(u8, build_src, "linkFramework(\"UserNotifications\"") != null);
 
-    // cef.zig: extern decl + pub fn 4개 + emit handler.
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    // cef.zig + cef_notification*.zig: extern decl + pub fn 4개 + emit handler.
+    const cef_src = try readCefNotificationSource();
     defer std.testing.allocator.free(cef_src);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "extern \"c\" fn suji_notification_show(") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn notificationIsSupported(") != null);
@@ -2859,12 +3008,7 @@ test "회귀: Notification API (Phase 5-C) — UNUserNotificationCenter + .m 파
 }
 
 test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click 라우팅 + 5 진입점" {
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const cef_src = try readCefTraySource();
     defer std.testing.allocator.free(cef_src);
 
     // 5개 pub fn 노출.
@@ -2973,23 +3117,63 @@ test "회귀: Tray API (Phase 5-B) — NSStatusItem/GTK/Win32 + 메뉴 + click �
 }
 
 test "회귀: Menu API (Phase 5-D) — NSMenu 커스터마이즈 + click 라우팅 + 4 SDK" {
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+    const cef_core = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/platform/cef.zig",
         std.testing.allocator,
         .limited(2 * 1024 * 1024),
     );
-    defer std.testing.allocator.free(cef_src);
+    defer std.testing.allocator.free(cef_core);
+    const cef_menu_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_menu.zig",
+        std.testing.allocator,
+        .limited(512 * 1024),
+    );
+    defer std.testing.allocator.free(cef_menu_src);
+    const cef_menu_types_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_menu_types.zig",
+        std.testing.allocator,
+        .limited(64 * 1024),
+    );
+    defer std.testing.allocator.free(cef_menu_types_src);
+    const cef_menu_linux_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_menu_linux.zig",
+        std.testing.allocator,
+        .limited(512 * 1024),
+    );
+    defer std.testing.allocator.free(cef_menu_linux_src);
+    const cef_objc_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_objc.zig",
+        std.testing.allocator,
+        .limited(256 * 1024),
+    );
+    defer std.testing.allocator.free(cef_objc_src);
+    var cef_src = std.ArrayList(u8).empty;
+    defer cef_src.deinit(std.testing.allocator);
+    try cef_src.appendSlice(std.testing.allocator, cef_core);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_menu_src);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_menu_types_src);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_menu_linux_src);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_objc_src);
 
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn setApplicationMenu(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn resetApplicationMenu(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "const linux_context_menu = if (is_linux)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_check_menu_item_new_with_label") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "gtk_menu_item_set_submenu") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"SujiAppMenuTarget\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "appMenuClick:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setState:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "setRepresentedObject:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "pub fn setApplicationMenu(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "pub fn resetApplicationMenu(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "@import(\"cef_menu_linux.zig\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "pub const ApplicationMenuItem = union(enum)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "gtk_check_menu_item_new_with_label") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "gtk_menu_item_set_submenu") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "\"SujiAppMenuTarget\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "appMenuClick:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "setState:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "setRepresentedObject:") != null);
 
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -3240,12 +3424,7 @@ test "회귀: Phase 7 IPC 유효성 검사 + CSP default 헤더" {
     // iframe allowed origins → buildDefaultCsp로 frame-src 합성.
     try std.testing.expect(std.mem.indexOf(u8, main_src, "buildDefaultCsp") != null);
 
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const cef_src = try readCefPlatformSource();
     defer std.testing.allocator.free(cef_src);
     // suji:// 응답에 CSP + X-Content-Type-Options + X-Frame-Options.
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "Content-Security-Policy") != null);
@@ -3440,8 +3619,15 @@ test "회귀: 딥링크 Info.plist URL Types 자동화 — config→BundleOption
 
 test "회귀: security-scoped bookmarks — 전 계층 배선 + sandbox bookmark entitlement" {
     // 네이티브: cef.zig 3종 함수 + 풀 + SecurityScope 상수.
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/platform/cef.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
-    defer std.testing.allocator.free(cef_src);
+    const cef_core = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/platform/cef.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
+    defer std.testing.allocator.free(cef_core);
+    const cef_security = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/platform/cef_security_scoped_bookmark.zig", std.testing.allocator, .limited(128 * 1024));
+    defer std.testing.allocator.free(cef_security);
+    var cef_src = std.ArrayList(u8).empty;
+    defer cef_src.deinit(std.testing.allocator);
+    try cef_src.appendSlice(std.testing.allocator, cef_core);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_security);
     for ([_][]const u8{
         "pub fn securityScopedBookmarkCreate",
         "pub fn securityScopedAccessStart",
@@ -3453,7 +3639,7 @@ test "회귀: security-scoped bookmarks — 전 계층 배선 + sandbox bookmark
         "stopAccessingSecurityScopedResource",
         "bookmarkDataWithOptions:includingResourceValuesForKeys:relativeToURL:error:",
         "URLByResolvingBookmarkData:options:relativeToURL:bookmarkDataIsStale:error:",
-    }) |needle| try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }) |needle| try std.testing.expect(std.mem.indexOf(u8, cef_src.items, needle) != null);
 
     // IPC dispatch: main.zig 3 cmd arm.
     const main_src = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(2 * 1024 * 1024));
@@ -3483,12 +3669,7 @@ test "회귀: security-scoped bookmarks — 전 계층 배선 + sandbox bookmark
 }
 
 test "회귀: app별 cache 격리 — CefConfig.app_name + buildAppCachePath OS 분기" {
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const cef_src = try readCefPlatformSource();
     defer std.testing.allocator.free(cef_src);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "app_name") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "buildAppCachePath") != null);
@@ -3513,12 +3694,7 @@ test "회귀: Global Shortcut API (Phase 5-E) — Carbon/X11/RegisterHotKey + 5 
     try std.testing.expect(std.mem.indexOf(u8, main_src, "globalShortcutEmitHandler") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "setGlobalShortcutEmitHandler") != null);
 
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const cef_src = try readCefGlobalShortcutSource();
     defer std.testing.allocator.free(cef_src);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "globalShortcutRegister") != null);
     try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_global_shortcut_register") != null);
@@ -3601,17 +3777,38 @@ test "회귀: Window lifecycle (Phase 5) — NSWindowDelegate + 4 events" {
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:focus\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"window:blur\"") != null);
 
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+    const cef_core_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
         "src/platform/cef.zig",
         std.testing.allocator,
         .limited(2 * 1024 * 1024),
     );
-    defer std.testing.allocator.free(cef_src);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_set_callbacks") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "suji_window_lifecycle_attach") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "attachWindowLifecycle(ns_window, handle)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "detachWindowLifecycle") != null);
+    defer std.testing.allocator.free(cef_core_src);
+    const cef_window_lifecycle_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_window_lifecycle.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_window_lifecycle_src);
+    const cef_window_creation_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_window_creation.zig",
+        std.testing.allocator,
+        .limited(1024 * 1024),
+    );
+    defer std.testing.allocator.free(cef_window_creation_src);
+    var cef_src = std.ArrayList(u8).empty;
+    defer cef_src.deinit(std.testing.allocator);
+    try cef_src.appendSlice(std.testing.allocator, cef_core_src);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_window_lifecycle_src);
+    try cef_src.append(std.testing.allocator, '\n');
+    try cef_src.appendSlice(std.testing.allocator, cef_window_creation_src);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "suji_window_lifecycle_set_callbacks") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "suji_window_lifecycle_attach") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "cef_window_lifecycle.attachWindowLifecycle(ns_window, handle)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cef_src.items, "detachWindowLifecycle") != null);
 
     const m_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -3769,20 +3966,23 @@ test "회귀: Sheet modal — .m 파일 + extern decl + parent_window 옵션 + w
     // ARC 필수 — __bridge 캐스트 + completion handler block 자동 autorelease.
     try std.testing.expect(std.mem.indexOf(u8, build_src, "-fobjc-arc") != null);
 
-    // 3. cef.zig에 extern decl + parent_window 옵션 + nsWindowForBrowserHandle.
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+    // 3. cef_dialog 계열에 extern decl + parent_window 옵션, native handle lookup.
+    const dialog_src = try readCefDialogSource();
+    defer std.testing.allocator.free(dialog_src);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "extern \"c\" fn suji_run_sheet_alert(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "extern \"c\" fn suji_run_sheet_save_panel(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "parent_window: ?*anyopaque") != null);
+    // sheet vs free-floating 분기 — opts.parent_window |parent| 체크.
+    try std.testing.expect(std.mem.indexOf(u8, dialog_src, "opts.parent_window") != null);
+
+    const native_handles_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_native_window_handles.zig",
         std.testing.allocator,
         .limited(2 * 1024 * 1024),
     );
-    defer std.testing.allocator.free(cef_src);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "extern \"c\" fn suji_run_sheet_alert(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "extern \"c\" fn suji_run_sheet_save_panel(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "parent_window: ?*anyopaque") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn nsWindowForBrowserHandle(") != null);
-    // sheet vs free-floating 분기 — opts.parent_window |parent| 체크.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "opts.parent_window") != null);
+    defer std.testing.allocator.free(native_handles_src);
+    try std.testing.expect(std.mem.indexOf(u8, native_handles_src, "pub fn nsWindowForBrowserHandle(") != null);
 
     // 4. main.zig에 windowId JSON 필드 + dialogParentNSWindow 헬퍼.
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
@@ -3827,33 +4027,57 @@ test "회귀: Dialog Sync 변종 — JS API의 showMessageBoxSync/showOpenDialog
     try std.testing.expect(std.mem.indexOf(u8, ts_src, "Promise<string | undefined>") != null);
 }
 
-test "회귀: Shell API — cef.zig pub fn + main.zig 라우팅 + NSWorkspace/NSBeep 사용" {
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
+test "회귀: Shell API — cef_shell.zig routing + platform backend + main.zig 라우팅" {
+    // shell 구현은 cef_shell.zig(public routing + macOS)와 platform backend 로 분리됨.
+    const shell_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_shell.zig",
         std.testing.allocator,
         .limited(2 * 1024 * 1024),
     );
-    defer std.testing.allocator.free(cef_src);
+    defer std.testing.allocator.free(shell_src);
+    const linux_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_shell_linux.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(linux_src);
+    const windows_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/platform/cef_shell_windows.zig",
+        std.testing.allocator,
+        .limited(2 * 1024 * 1024),
+    );
+    defer std.testing.allocator.free(windows_src);
 
-    // 3개 pub fn 노출.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn shellOpenExternal(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn shellShowItemInFolder(") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub fn shellBeep() void") != null);
+    // public routing 함수 노출.
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "pub fn shellOpenExternal(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "pub fn shellShowItemInFolder(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "pub fn shellBeep() void") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "pub fn shellOpenPath(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "pub fn shellTrashItem(") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "@import(\"cef_shell_linux.zig\")") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "@import(\"cef_shell_windows.zig\")") != null);
     // NSWorkspace + NSURL 사용. modern API (activateFileViewerSelectingURLs:) 채택,
     // deprecated selectFile:inFileViewerRootedAtPath: 사용 금지.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "NSWorkspace") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "URLWithString:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "activateFileViewerSelectingURLs:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "NSWorkspace") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "URLWithString:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "activateFileViewerSelectingURLs:") != null);
     // deprecated selector를 sel_registerName 인자로 등록하면 안 됨 (doc comment에서의
     // 언급은 허용 — 왜 안 쓰는지 설명).
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "sel_registerName(\"selectFile:") == null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "sel_registerName(\"selectFile:") == null);
     // 사전 검증 — scheme 검사(openExternal) + fileExistsAtPath:(showItemInFolder)로
     // LaunchServices에 invalid 입력 보내 -50 OS dialog 띄우지 않도록 차단.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "fileExistsAtPath:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "\"scheme\"") != null);
-    // NSBeep extern.
-    try std.testing.expect(std.mem.indexOf(u8, cef_src, "pub extern \"c\" fn NSBeep") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "nsFileUrlIfExists") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "\"scheme\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, shell_src, "objc.NSBeep") != null);
+    try std.testing.expect(std.mem.indexOf(u8, linux_src, "g_app_info_launch_default_for_uri") != null);
+    try std.testing.expect(std.mem.indexOf(u8, linux_src, "g_dbus_connection_call_sync") != null);
+    try std.testing.expect(std.mem.indexOf(u8, linux_src, "g_file_trash") != null);
+    try std.testing.expect(std.mem.indexOf(u8, windows_src, "ShellExecuteW") != null);
+    try std.testing.expect(std.mem.indexOf(u8, windows_src, "SHFileOperationW") != null);
+    try std.testing.expect(std.mem.indexOf(u8, windows_src, "MessageBeep") != null);
 
     const main_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
@@ -3867,16 +4091,13 @@ test "회귀: Shell API — cef.zig pub fn + main.zig 라우팅 + NSWorkspace/NS
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_open_external\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_show_item_in_folder\"") != null);
     try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_beep\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_open_path\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, main_src, "\"shell_trash_item\"") != null);
 }
 
 test "회귀: Clipboard API — cef.zig pub fn + main.zig 라우팅 + JSON escape 사용" {
-    // clipboard 구현은 cef_clipboard.zig 로 분리됨(cef.zig 가 re-export). 동작 무변경.
-    const cef_src = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef_clipboard.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    // clipboard 구현은 cef_clipboard.zig + platform backend 로 분리됨(cef.zig 가 re-export).
+    const cef_src = try readCefClipboardSource();
     defer std.testing.allocator.free(cef_src);
 
     // 3개 pub fn 노출.
@@ -3912,9 +4133,9 @@ test "회귀: Clipboard API — cef.zig pub fn + main.zig 라우팅 + JSON escap
 test "회귀: deferMakeKeyAndOrderFront — performSelector:afterDelay:0으로 다음 런루프 틱 예약" {
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_objc.zig",
         std.testing.allocator,
-        .limited(2 * 1024 * 1024),
+        .limited(256 * 1024),
     );
     defer std.testing.allocator.free(source);
 
@@ -4162,15 +4383,10 @@ test "capturePage: native에 path 전달 + destroyed/unknown 가드" {
     try std.testing.expectError(window.Error.WindowNotFound, wm.capturePage(999, "/tmp/x.png", null));
 }
 
-test "회귀: cef.zig가 EVENT_PDF_PRINT_FINISHED const 사용 (이벤트 이름 하드코드 차단)" {
-    // cef.zig에서 onPdfPrintFinished가 const를 거치지 않고 string literal 직접 쓰면
+test "회귀: CEF page output이 EVENT_PDF_PRINT_FINISHED const 사용 (이벤트 이름 하드코드 차단)" {
+    // page output에서 onPdfPrintFinished가 const를 거치지 않고 string literal 직접 쓰면
     // 5 SDK + 문서와 sync 깨질 위험. 한 곳에 const + 사용처에서 const 참조 보장.
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     // const 정의 존재
@@ -4199,15 +4415,10 @@ test "printToPDF: destroyed/unknown 가드" {
     try std.testing.expectEqual(@as(usize, 0), native.print_to_pdf_calls);
 }
 
-test "회귀: 4-C cef.zig openDevTools/closeDevTools/toggleDevTools가 인자 browser 사용" {
+test "회귀: 4-C CEF DevTools helpers가 인자 browser 사용" {
     // 헬퍼 분해 후 sender browser(매개변수)를 사용함을 정적 검증 — 만약 실수로
     // g_browser/g_main_browser 같은 글로벌로 바꾸면 멀티 윈도우 회귀.
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(2 * 1024 * 1024),
-    );
+    const source = try readCefPlatformSource();
     defer std.testing.allocator.free(source);
 
     inline for (.{
@@ -5086,8 +5297,8 @@ test "회귀: cef.zig가 Phase 5-2 public API 유지" {
     defer std.testing.allocator.free(source);
 
     inline for (.{
-        "pub fn setWindowDisplayHandlers(handlers: WindowDisplayHandlers)",
-        "pub const WindowDisplayHandlers = struct",
+        "pub const setWindowDisplayHandlers = cef_public_api.setWindowDisplayHandlers",
+        "pub const WindowDisplayHandlers = cef_public_api.WindowDisplayHandlers",
         "pub const MAX_TITLE_BYTES",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);

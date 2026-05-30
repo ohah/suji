@@ -506,9 +506,9 @@ test "회귀: cef.quit이 idempotent guard (g_quit_called)" {
     // 이어야 race-free. 명시적 flag 가드 존재 검증.
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_message_loop.zig",
         std.testing.allocator,
-        .limited(2 * 1024 * 1024),
+        .limited(256 * 1024),
     );
     defer std.testing.allocator.free(source);
 
