@@ -549,7 +549,8 @@ suji/
 │   │   ├── init.zig          # suji init 스캐폴딩
 │   │   └── util.zig          # nullTerminate, 버퍼 상수
 │   ├── platform/
-│   │   ├── cef.zig           # CEF 통합 (창, IPC, 렌더러, 커스텀 프로토콜)
+│   │   ├── cef.zig           # CEF 통합 re-export hub (창, IPC, 렌더러, 커스텀 프로토콜)
+│   │   ├── cef_*.zig         # 도메인 분리 모듈 (clipboard/shell/dialog/... — docs/CEF_REFACTOR.md)
 │   │   ├── node.zig          # Node.js 런타임 (libnode 임베딩)
 │   │   ├── node/bridge.cc    # Node.js C++ 브릿지 (V8 IPC, thread pool)
 │   │   └── watcher.zig       # 파일 감시 (백엔드 핫 리로드)
@@ -780,7 +781,7 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
   bos-check inline override 로 재정의. Zig 0.16 translate-c 가 그 fortified
   wrapper struct(`extern_local_wcscat_s`)를 `_ = &` discard 없이 생성 →
   ReleaseSafe(C 를 `__OPTIMIZE__>0` 로 번역) 의미분석에서 unused-local 실패.
-  Debug(-O0)는 `__OPTIMIZE__` 미정의라 override 미생성→통과. `cef.zig`
+  Debug(-O0)는 `__OPTIMIZE__` 미정의라 override 미생성→통과. `cef_c.zig`
   `@cImport` 에 Windows-only `@cDefine("_FORTIFY_SOURCE","0")` 로 게이트를 닫아
   근본 해결(fortify 는 CEF 바인딩 무관 — prebuilt lib + 헤더 번역만). release.yml
   Windows=Debug 워크어라운드 제거 → 전 플랫폼 ReleaseSafe.

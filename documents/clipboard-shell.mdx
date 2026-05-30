@@ -6,7 +6,8 @@ description: 시스템 클립보드 + 외부 핸들러 (Electron clipboard.* / s
 # Clipboard & Shell
 
 Electron `clipboard.*` / `shell.*` 호환 API. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK
-모두 노출 — 모든 호출은 `__core__` 채널로 라우팅되어 cef.zig 핸들러로 도달.
+모두 노출 — 모든 호출은 `__core__` 채널로 라우팅되어 `cef_clipboard.zig` / `cef_shell.zig`
+핸들러(+ 플랫폼별 `_{linux,windows}` sibling)로 도달.
 
 ## 플랫폼 지원
 

@@ -135,7 +135,7 @@ on('menu:click', ({ click }) => {
 ## 동작 정밀
 
 - `main.zig`가 `menu_set_application_menu` JSON을 재귀 파싱해 `cef.ApplicationMenuItem` 배열로 변환.
-- macOS `cef.zig`는 `NSMenu` / `NSMenuItem`을 구성하고 `NSApplication.setMainMenu:`로 교체.
+- macOS `cef_menu.zig`는 `NSMenu` / `NSMenuItem`을 구성하고 `NSApplication.setMainMenu:`로 교체.
 - macOS 각 clickable item은 `representedObject = NSString(click)`을 보유.
 - `SujiAppMenuTarget.appMenuClick:` selector가 click 값을 추출하고
   `menu:click {"click":"..."}` EventBus 이벤트를 발화.

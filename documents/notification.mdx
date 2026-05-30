@@ -138,7 +138,7 @@ await notification.close(notificationId);
 ### Click 라우팅
 1. 사용자 알림 클릭 → macOS가 `didReceiveNotificationResponse:` 호출
 2. delegate가 `g_notification_click_callback` C 함수 포인터 호출 (notificationId C string 전달)
-3. cef.zig의 `notificationClickC`가 `g_notification_emit_handler?` 호출
+3. `cef_notification.zig`의 `notificationClickC`가 `g_notification_emit_handler?` 호출
 4. main.zig의 `notificationEmitHandler`가 `notification:click {notificationId}` EventBus emit
 5. JS/SDK 리스너 수신
 

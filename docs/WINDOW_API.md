@@ -977,7 +977,7 @@ await suji.invoke("dialog:open", { filters: [...] })
 {"cmd":"dialog:open","filters":[...],"__window":3}
 ```
 
-구현 위치: `cef.zig`의 invoke 메시지 수신 지점에서 `cef_browser.get_identifier()`로
+구현 위치: `cef_browser_ipc.zig`의 invoke 메시지 수신 지점에서 `cef_browser.get_identifier()`로
 id를 뽑아 request body에 merge 후 `BackendRegistry.invoke` 호출.
 
 #### API: 핸들러 `(req, event)` 2-arity
@@ -1688,7 +1688,9 @@ src/
 │   ├── window.zig              # WindowManager + Native vtable
 │   └── window_ipc.zig          # windows.* cmd JSON 핸들러
 ├── platform/
-│   └── cef.zig                 # createBrowser를 멀티 윈도우 지원으로 확장
+│   ├── cef.zig                 # re-export hub
+│   ├── cef_window_creation.zig # createBrowser를 멀티 윈도우 지원으로 확장
+│   └── cef_*.zig               # 도메인 분리 모듈 (docs/CEF_REFACTOR.md)
 ├── backends/
 │   └── loader.zig              # SujiCore.get_window_api 추가
 ```
