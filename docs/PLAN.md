@@ -523,9 +523,9 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - [x] 생명주기 이벤트 payload `{windowId, name?}` 표준화 — created/close/closed 모두 일관.
           name은 destroy 전 캡처해서 closed에도 포함 → 플러그인이 wm 조회 없이 분기.
   - [x] Phase 3: 외형/속성 (프레임리스, 투명, 부모-자식, 추가 외형 옵션)
-    - [x] `windows[].frame: false` — macOS는 NSWindowStyleMaskBorderless, Linux는 CEF Views
-          `CefWindowDelegate.is_frameless` 경로로 완료(`run-frameless-drag-region.sh` E2E).
-          Windows는 후속.
+    - [x] `windows[].frame: false` — macOS는 NSWindowStyleMaskBorderless, Linux/Windows는
+          CEF Views `CefWindowDelegate.is_frameless` 공유 경로로 완료
+          (`run-frameless-drag-region.sh` E2E — macOS/Linux/Windows 3-OS CI 커버).
     - [x] `windows[].transparent: true` — macOS NSWindow.opaque=NO + clearColor + hasShadow=NO, Linux CEF Views window/browser view background_color=0.
     - [x] `windows[].parent: "<name>"` — macOS NSWindow.addChildWindow:ordered:NSWindowAbove, Linux CEF Views `get_parent_window`로 시각 관계만 (PLAN 재귀 close X).
           parent name lookup은 main.zig의 wm.fromName으로 처리 — 따라서 부모는 windows[] 배열 순서상 더 앞에 와야.
@@ -539,8 +539,8 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - 런타임 변경 API (set_frame/set_transparent/setParent)는 미지원 — 시작 시점 결정만.
       `SujiCore.get_window_api` v1은 기존 window cmd dispatcher라, 이 3개는 별도 cmd가
       추가될 때까지 여전히 범위 밖.
-    - **플랫폼 한계**: macOS/Linux는 frameless의 `-webkit-app-region: drag` 라우팅 완료.
-      Windows는 아직 별도 native 검증 전이라 후속 플랫폼 작업 필요.
+    - **플랫폼**: macOS/Linux/Windows 모두 frameless 의 `-webkit-app-region: drag`
+      라우팅 완료 — CEF Views `set_draggable_regions` 공유 경로, 3-OS e2e 커버.
   - [~] Phase 4: webContents (네비, JS 실행, 줌, 프린트/캡처)
     - [x] **Phase 4-A 네비/JS** — `load_url`, `reload`(`ignoreCache`), `execute_javascript`,
           `get_url`(캐시), `is_loading` 6개. WM 메서드 + IPC 핸들러 + Frontend SDK
@@ -586,8 +586,11 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
           `transparent`/`parent`/alwaysOnTop/resizable/min·max/fullscreen/backgroundColor를
           native delegate/API로 배선. `parent`는 `get_parent_window` + non-modal로
           부모 컨트롤을 비활성화하지 않는다.
-    - [ ] (backlog) **Windows frameless native window** —
-          Windows `frame:false`/drag region은 아직 실 런타임 검증 전.
+    - [x] **Windows frameless native window** — `frame:false` + `-webkit-app-region: drag`
+          drag region 이 CEF Views 공유 경로(`viewsWindowIsFrameless` +
+          `set_draggable_regions`)로 Windows 에서도 동작. 실 Windows 런타임 검증 완료
+          (`run-frameless-drag-region.sh` 1 pass, `applied_to_cef_views=true`) + Windows
+          CI 매트릭스(`webcontentsview-cross-platform`)에 e2e 스텝 추가.
     - [x] **`capture_page`** — 구현 완료(상위 Phase 4-D 항목 참조): CDP
           `Page.captureScreenshot` + dev_tools observer → file-path 방식.
     - [x] **DevTools "Reload" 버튼 → inspectee 창 reload** (Electron 동작 호환). 완료.
@@ -661,7 +664,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
         command 직후 lag되는 문제는 delegate-side 상태 cache로 보정했다. 4 skip은 e2e 환경 한계 — `docs/WINDOW_API.md#
         phase-5-라이프사이클--e2e-미커버-케이스`로 단위 테스트 cover 매핑 documented.
         will-move는 macOS NSWindowDelegate에 sync cancel API 부재로 미구현 (Electron도 macOS
-        미발화). frameless drag 라우팅은 macOS/Linux 완료 — Windows는 후속.
+        미발화). frameless drag 라우팅은 macOS/Linux/Windows 3-OS 완료(CEF Views 공유 경로).
   - [x] **Phase 5-B: Tray** — macOS NSStatusItem + Linux GTK StatusIcon + Windows Shell_NotifyIconW + 메뉴 + click 이벤트 라우팅. 5 진입점 모두
         (Frontend `@suji/api` + Zig/Rust/Go/Node SDK). `tray.create/setTitle/setTooltip/setMenu/destroy`,
         `tray:menu-click {trayId, click}` 이벤트. SujiTrayTarget ObjC subclass + NSMenuItem.tag/
