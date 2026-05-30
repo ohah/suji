@@ -85,7 +85,10 @@ describe("deferred-response criticals", () => {
     leftover.push(path);
 
     // print 을 발사하되 await 하지 않고(deferred 진행 중) 곧바로 창 destroy.
-    void core({ cmd: "print_to_pdf", windowId: created.windowId, path });
+    // This request is intentionally abandoned while the target window closes.
+    // Consume its eventual rejection so Puppeteer disconnect does not turn the
+    // survival check into an unrelated unhandled-promise failure.
+    void core({ cmd: "print_to_pdf", windowId: created.windowId, path }).catch(() => {});
     await core({ cmd: "destroy_window", windowId: created.windowId });
 
     // 앱 생존 확인 — 메인 창에서 후속 IPC 가 정상 응답하면 크래시 없음.
