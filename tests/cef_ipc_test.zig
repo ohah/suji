@@ -771,12 +771,23 @@ fn readMainSource() ![]u8 {
 }
 
 fn readCefSource() ![]u8 {
-    return std.Io.Dir.cwd().readFileAlloc(
-        std_io,
+    // cef.zig + 분리된 도메인 모듈(cef_clipboard.zig 등)을 합쳐 반환 — native API 를
+    // 도메인별 cef_*.zig 로 분리하는 리팩터와 무관하게 introspection 테스트가 동작.
+    // 도메인을 더 분리하면 이 목록에 파일을 추가한다.
+    const a = std.testing.allocator;
+    const parts = [_][]const u8{
         "src/platform/cef.zig",
-        std.testing.allocator,
-        .limited(4 * 1024 * 1024),
-    );
+        "src/platform/cef_clipboard.zig",
+    };
+    var combined = std.ArrayList(u8).empty;
+    errdefer combined.deinit(a);
+    for (parts) |p| {
+        const buf = try std.Io.Dir.cwd().readFileAlloc(std_io, p, a, .limited(4 * 1024 * 1024));
+        defer a.free(buf);
+        try combined.appendSlice(a, buf);
+        try combined.append(a, '\n');
+    }
+    return combined.toOwnedSlice(a);
 }
 
 fn readProjectFile(path: []const u8, limit: usize) ![]u8 {
