@@ -782,6 +782,24 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
   `@cImport` 에 Windows-only `@cDefine("_FORTIFY_SOURCE","0")` 로 게이트를 닫아
   근본 해결(fortify 는 CEF 바인딩 무관 — prebuilt lib + 헤더 번역만). release.yml
   Windows=Debug 워크어라운드 제거 → 전 플랫폼 ReleaseSafe.
+- ~~Windows ReleaseSafe/ReleaseFast 패키지 빈 화면 (렌더러 크래시)~~ **해결됨**
+  ([#60](https://github.com/ohah/suji/issues/60) part 2). Windows 최적화 빌드에서
+  렌더러 서브프로세스가 첫 V8 컨텍스트 부트스트랩(`Genesis::CompileExtension`) 중
+  `Isolate::StackOverflow` → 부트스트랩 중 throw 불가 → `ud2`(0xC000001D) 크래시 →
+  `onContextCreated` 미발화 → `window.__suji__` 미바인딩 → 빈 화면. **루트커즈**:
+  ReleaseSafe/Fast 가 호스트 로직(logger/config/runDev — 큰 스택 로컬)을 `main()`
+  으로 적극 인라인해 `main()` 프레임이 수 MB 로 비대해지고, 렌더러는 절대 반환하지
+  않는 `cef_execute_process` 를 그 거대 프레임 "위에서" 실행한다. V8 은 스택 예산을
+  `stack_start`(스택 base) 기준 ~1MB 로 측정하므로, base 아래 ~6.3MB 가 이미 소비된
+  채 부트스트랩이 돌면 즉시 오버플로우(실제 64MB reserve 무관 — base 기준 측정).
+  Debug 는 인라인이 없어 프레임이 작아 통과. **수정**: `src/main.zig` 에서
+  `cef.executeSubprocess()` 이후 호스트 로직을 `runHost` 로 분리하고
+  `@call(.never_inline, runHost, .{init})` 로 호출 → `main()` 프레임이 작아져 렌더러가
+  얕은 스택에서 V8 예산을 온전히 확보. CEF private 심볼(공식 `_release_symbols`
+  패키지) + cdb 로 규명. **디버그 모드**: `SUJI_CEF_DEBUG=1` 환경변수로 Chromium
+  verbose 로깅 + 렌더러 crash/navigation 진단 핸들러 + `[cef-debug]` 마커 + ABI 덤프 +
+  패닉 stderr 직출력 활성(미설정 시 프로덕션 클린). `SUJI_NO_RELAUNCH` = de-elevation
+  self-relaunch 우회(렌더러 경로 격리 디버깅용).
 - ~~Windows 네이티브 API 격차 (tray click/menu, globalShortcut trigger,
   nativeTheme event, opacity/shadow non-Views, OS-initiated window state,
   directory picker, custom dialog buttons, notification click)~~ **해결됨**

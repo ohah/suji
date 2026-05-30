@@ -15,6 +15,37 @@ const logger = @import("logger");
 const auto_updater = @import("auto_updater");
 
 const log = logger.module("main");
+
+// CEF 디버그 모드(SUJI_CEF_DEBUG)에서 렌더러(샌드박스) 서브프로세스 패닉 사유를
+// stderr 핸들로 직출력 — buffered stderr 로 유실되는 케이스 대비(이슈 #60 진단).
+pub const panic = std.debug.FullPanic(sujiDiagPanic);
+
+fn sujiDiagPanic(msg: []const u8, first_trace_addr: ?usize) noreturn {
+    // CEF 디버그 모드에서만 stderr 직출력 — 렌더러(샌드박스) 패닉이 buffered
+    // stderr 로 유실되는 경우 대비. 평상시엔 표준 패닉 경로만.
+    if (builtin.os.tag == .windows and cef.cefDebug()) diagWritePanic(msg);
+    std.debug.defaultPanic(msg, first_trace_addr);
+}
+
+fn diagWritePanic(msg: []const u8) void {
+    const w = std.os.windows;
+    const k32 = struct {
+        extern "kernel32" fn GetStdHandle(nStdHandle: w.DWORD) callconv(.winapi) w.HANDLE;
+        extern "kernel32" fn WriteFile(hFile: w.HANDLE, lpBuffer: [*]const u8, nNumberOfBytesToWrite: w.DWORD, lpNumberOfBytesWritten: ?*w.DWORD, lpOverlapped: ?*anyopaque) callconv(.winapi) w.BOOL;
+        extern "kernel32" fn GetCurrentProcessId() callconv(.winapi) w.DWORD;
+    };
+    // 렌더러는 샌드박스 — 파일 쓰기 차단. stderr 는 inherited handle 이라 허용.
+    const STD_ERROR_HANDLE: w.DWORD = @bitCast(@as(i32, -12));
+    const h = k32.GetStdHandle(STD_ERROR_HANDLE);
+    if (h == w.INVALID_HANDLE_VALUE) return;
+    var hdr_buf: [80]u8 = undefined;
+    const pid = k32.GetCurrentProcessId();
+    const hdr = std.fmt.bufPrint(&hdr_buf, "\n[ZIGPANIC pid={d}] ", .{pid}) catch "[ZIGPANIC] ";
+    var wrote: w.DWORD = 0;
+    _ = k32.WriteFile(h, hdr.ptr, @intCast(hdr.len), &wrote, null);
+    _ = k32.WriteFile(h, msg.ptr, @intCast(msg.len), &wrote, null);
+    _ = k32.WriteFile(h, "\n", 1, &wrote, null);
+}
 const Watcher = @import("platform/watcher.zig").Watcher;
 const node_mod = @import("platform/node.zig");
 const NodeRuntime = node_mod.NodeRuntime;
@@ -45,12 +76,37 @@ pub fn main(init: std.process.Init) !void {
     // 진입 시 자동 self-relaunch. (CI 의 Server 2022 runneradmin 환경에선
     // 발현 안 함 — 정직 한계: 어떤 integrity 조합에서 발현되는지 미상.)
     if (comptime builtin.os.tag == .windows) {
-        maybeRelaunchWithNoDeElevate();
+        // CEF 디버그 모드 — main() 진입 프로세스 타입 마커 + CEF 구조체 ABI 레이아웃.
+        if (cef.cefDebug()) {
+            const cl = std.os.windows.peb().ProcessParameters.CommandLine.slice();
+            const is_renderer = util.utf16ContainsAscii(cl, "--type=renderer");
+            const is_sub = util.utf16ContainsAscii(cl, "--type=");
+            std.debug.print("[cef-debug] main entry: sub={} renderer={}\n", .{ is_sub, is_renderer });
+            cef.diagPrintCefAbi();
+        }
+        // SUJI_NO_RELAUNCH — de-elevation self-relaunch 디버그 우회(렌더러 서브프로세스
+        // 경로 격리용). 설정 시 일부 integrity 환경에서 CefInitFailed 가능(정직 한계).
+        const skip_relaunch = (runtime.env("SUJI_NO_RELAUNCH") != null);
+        if (!skip_relaunch) maybeRelaunchWithNoDeElevate();
     }
 
     // CEF 서브프로세스 처리 (렌더러/GPU 등 — 메인이면 통과)
     cef.executeSubprocess();
 
+    // 서브프로세스(렌더러/GPU/...)는 위에서 cef_execute_process 로 진입해 반환하지
+    // 않는다 → 렌더러는 main() 프레임 "위에서" Chromium/V8 을 돌린다. ReleaseSafe/
+    // ReleaseFast 는 호스트 로직(logger/config/runDev — 큰 스택 로컬)을 main 으로
+    // 적극 인라인해 main() 프레임이 수 MB 로 비대해지고, 그만큼 stack_start(스택
+    // base) 아래가 소비된 채 V8 컨텍스트 부트스트랩이 실행된다. V8 은 예산을
+    // stack_start 기준 ~1MB 로 측정하므로 base 아래 수 MB 소비 시 곧바로
+    // Isolate::StackOverflow → 부트스트랩 중 throw 불가 → ud2 크래시(렌더러 사망,
+    // 빈 화면). Debug 는 인라인이 없어 호스트 프레임이 작아 통과. 따라서 호스트
+    // 로직을 never_inline 경계로 분리해 서브프로세스가 얕은 main() 프레임 위에서
+    // 돌게 한다. (이슈 #60 part 2 — Windows ReleaseSafe/Fast 렌더러 크래시 루트커즈.)
+    return @call(.never_inline, runHost, .{init});
+}
+
+fn runHost(init: std.process.Init) !void {
     const allocator = init.gpa;
 
     // 로거 초기화 — 서브프로세스는 logger.global=null로 두어 stderr만 사용.

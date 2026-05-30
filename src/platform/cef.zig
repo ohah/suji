@@ -10489,6 +10489,12 @@ fn onBeforeCommandLineProcessing(
             appendCefSwitch(cmd, sw.name);
         }
     }
+
+    // CEF 디버그 모드 — Chromium verbose 로깅(stderr)으로 렌더러 crash/IPC 추적.
+    if (cefDebug()) {
+        appendCefSwitchWithValue(cmd, "enable-logging", "stderr");
+        appendCefSwitchWithValue(cmd, "v", "1");
+    }
 }
 
 fn appendCefSwitch(cmd: *c._cef_command_line_t, name: []const u8) void {
@@ -10505,8 +10511,40 @@ fn appendCefSwitchWithValue(cmd: *c._cef_command_line_t, name: []const u8, value
     cmd.append_switch_with_value.?(cmd, &key, &val);
 }
 
+/// CEF 디버그 모드 — `SUJI_CEF_DEBUG` 환경변수가 있으면 on. 서브프로세스(렌더러/
+/// GPU/network)도 부모 env 를 상속하므로 동일하게 동작. on 일 때 Chromium verbose
+/// 로깅 + 렌더러 crash/navigation 진단 핸들러 + DIAG 마커 + 패닉 stderr 직출력.
+/// 데스크톱 CEF 멀티프로세스 IPC/crash 디버깅용(issue #60). 기본 off = 프로덕션 클린.
+var g_cef_debug_cached: ?bool = null;
+pub fn cefDebug() bool {
+    if (g_cef_debug_cached) |v| return v;
+    const v = runtime.env("SUJI_CEF_DEBUG") != null;
+    g_cef_debug_cached = v;
+    return v;
+}
+
 fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_process_handler_t {
+    if (cefDebug()) std.debug.print("[cef-debug] getRenderProcessHandler called oncreate_set={} init={}\n", .{ g_render_handler.on_context_created != null, g_render_handler_initialized });
     return &g_render_handler;
+}
+
+/// CEF 디버그 모드 — CEF 구조체 레이아웃/상수 덤프(@sizeOf/@offsetOf/API_VERSION).
+/// Debug vs Release 의 translate-c ABI 일치 확인용(이슈 #60 진단에서 동형 검증).
+pub fn diagPrintCefAbi() void {
+    std.debug.print(
+        "[cef-abi] API_VER={d} base={d} app={d} rph={d} v8ctx_ptrsz=8 msg={d} browser={d} oncreate_off={d} onmsg_off={d} setting={d}\n",
+        .{
+            c.CEF_API_VERSION,
+            @sizeOf(c.cef_base_ref_counted_t),
+            @sizeOf(c.cef_app_t),
+            @sizeOf(c.cef_render_process_handler_t),
+            @sizeOf(c.cef_process_message_t),
+            @sizeOf(c.cef_browser_t),
+            @offsetOf(c.cef_render_process_handler_t, "on_context_created"),
+            @offsetOf(c.cef_render_process_handler_t, "on_process_message_received"),
+            @sizeOf(c.cef_settings_t),
+        },
+    );
 }
 
 // ============================================
@@ -10620,7 +10658,25 @@ fn ensureLoadHandler() void {
     zeroCefStruct(c.cef_load_handler_t, &g_load_handler);
     initBaseRefCounted(&g_load_handler.base);
     g_load_handler.on_load_end = &onLoadEnd;
+    if (cefDebug()) {
+        // CEF 디버그 모드 — 렌더러 crash/navigation 추적용 load 콜백.
+        g_load_handler.on_load_start = &onLoadStartDiag;
+        g_load_handler.on_load_error = &onLoadErrorDiag;
+        g_load_handler.on_loading_state_change = &onLoadingStateDiag;
+    }
     g_load_handler_initialized = true;
+}
+
+fn onLoadStartDiag(_: ?*c._cef_load_handler_t, _: ?*c._cef_browser_t, _: ?*c._cef_frame_t, _: c.cef_transition_type_t) callconv(.c) void {
+    std.debug.print("[cef-debug] BROWSER onLoadStart\n", .{});
+}
+
+fn onLoadErrorDiag(_: ?*c._cef_load_handler_t, _: ?*c._cef_browser_t, _: ?*c._cef_frame_t, errorCode: c.cef_errorcode_t, _: [*c]const c.cef_string_t, _: [*c]const c.cef_string_t) callconv(.c) void {
+    std.debug.print("[cef-debug] BROWSER onLoadError code={d}\n", .{errorCode});
+}
+
+fn onLoadingStateDiag(_: ?*c._cef_load_handler_t, _: ?*c._cef_browser_t, isLoading: c_int, _: c_int, _: c_int) callconv(.c) void {
+    std.debug.print("[cef-debug] BROWSER onLoadingStateChange isLoading={d}\n", .{isLoading});
 }
 
 fn getLoadHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_load_handler_t {
@@ -10918,7 +10974,27 @@ fn ensureRequestHandler() void {
     zeroCefStruct(c.cef_request_handler_t, &g_request_handler);
     initBaseRefCounted(&g_request_handler.base);
     g_request_handler.get_resource_request_handler = &getResourceRequestHandler;
+    if (cefDebug()) {
+        // CEF 디버그 모드 — 렌더러 crash(on_render_process_terminated)/navigation 추적.
+        g_request_handler.on_render_process_terminated = &onRenderProcessTerminatedDiag;
+        g_request_handler.on_before_browse = &onBeforeBrowseDiag;
+    }
     g_request_handler_initialized = true;
+}
+
+fn onRenderProcessTerminatedDiag(_: ?*c._cef_request_handler_t, _: ?*c._cef_browser_t, status: c.cef_termination_status_t, error_code: c_int, _: [*c]const c.cef_string_t) callconv(.c) void {
+    std.debug.print("[cef-debug] RENDER PROCESS TERMINATED status={d} error_code={d}\n", .{ @as(i32, @intCast(status)), error_code });
+}
+
+fn onBeforeBrowseDiag(_: ?*c._cef_request_handler_t, _: ?*c._cef_browser_t, _: ?*c._cef_frame_t, request: ?*c._cef_request_t, _: c_int, _: c_int) callconv(.c) c_int {
+    if (request) |req| {
+        if (req.get_url) |get_url| {
+            var url_buf: [512]u8 = undefined;
+            const url = cefUserfreeToUtf8(get_url(req), &url_buf);
+            std.debug.print("[cef-debug] onBeforeBrowse url={s}\n", .{url});
+        }
+    }
+    return 0; // allow
 }
 
 fn getRequestHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_request_handler_t {
@@ -11714,6 +11790,7 @@ fn onContextCreated(
     _: ?*c._cef_frame_t,
     context: ?*c._cef_v8_context_t,
 ) callconv(.c) void {
+    if (cefDebug()) std.debug.print("[cef-debug] onContextCreated ENTRY ctx_null={}\n", .{context == null});
     const ctx = context orelse return;
     g_renderer_context = ctx; // 이벤트 디스패치용 컨텍스트 저장
     const global = asPtr(c.cef_v8_value_t, ctx.get_global.?(ctx)) orelse return;
