@@ -463,9 +463,10 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
   > | window lifecycle | `setWindowLifecycleHandlers` | `src/platform/window_lifecycle.m` (NSWindowDelegate) | `windowResized/Moved/Focus/BlurHandler` |
   > | windows (멀티) | `createWindow/destroyWindow/setBounds/...` | — | `src/core/window_ipc.zig` |
   >
-  > **후속 refactor 후보** (별도 PR): 각 native API를 `src/platform/{clipboard,shell,...}.zig`로 분리
-  > → cef.zig는 코어 (browser, IPC, V8, lifecycle)만 남김. 분량 큼 (cef.zig 5000+줄
-  > 분해, glue/global state 정리), risk 중. 현재 우선순위는 낮음.
+  > **진행 중 refactor**: 각 native API를 `src/platform/cef_<domain>.zig`로 분리(동작
+  > 무변경, 한 도메인=한 PR). cef.zig는 코어(browser/IPC/V8/lifecycle/scheme/handler)만 남김.
+  > clipboard 완료(PR #65, cef.zig 13362→12832줄). 절차·재사용 기반·남은 도메인·주의사항은
+  > [docs/CEF_REFACTOR.md](./CEF_REFACTOR.md) 참조.
 - [~] window — 멀티 윈도우 + BrowserWindow API (`docs/WINDOW_API.md`)
   - [x] Phase 1: 설계 확정 + PoC (`__core__:create_window`, `cef.zig:createNewWindow`, Electron 방식 동등성, name 중복 싱글턴)
   - [~] Phase 2: 이벤트 시그니처 변경 (SujiEvent) + 윈도우 제어 (크기/위치/상태) + IPC `__window` 자동 태깅 + `windows[]` 배열 파싱
