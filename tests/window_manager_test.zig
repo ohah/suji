@@ -3870,9 +3870,10 @@ test "회귀: Shell API — cef.zig pub fn + main.zig 라우팅 + NSWorkspace/NS
 }
 
 test "회귀: Clipboard API — cef.zig pub fn + main.zig 라우팅 + JSON escape 사용" {
+    // clipboard 구현은 cef_clipboard.zig 로 분리됨(cef.zig 가 re-export). 동작 무변경.
     const cef_src = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/platform/cef.zig",
+        "src/platform/cef_clipboard.zig",
         std.testing.allocator,
         .limited(2 * 1024 * 1024),
     );
