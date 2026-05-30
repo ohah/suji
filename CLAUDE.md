@@ -61,6 +61,7 @@ bash tests/e2e/run-system-integration.sh # screen/desktopCapturer/crashReporter/
 bash tests/e2e/run-capture-page.sh      # capture_page → 실 PNG 파일(매직바이트)
 bash tests/e2e/run-deferred-response.sh # deferred-response criticals — cross-kind 라우팅/close-during-defer 무crash/path 라운드트립
 bash tests/e2e/run-gpu-accel.sh         # GPU 가속 회귀 가드 (#12) — WebGL ANGLE/D3D11/SwiftShader fallback
+bash tests/e2e/run-releasesafe-renderer-boot.sh # #60 part2 회귀 가드 — ReleaseSafe 빌드해 렌더러 V8 부트스트랩(window.__suji__ 바인딩) 검증(Windows CI). 디버깅: SUJI_CEF_DEBUG=1
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
 bash tests/e2e/run-plugin-wrappers.sh   # 공식 플러그인 (state/sqlite/log/store/http/notification-rich) × {JS, Node} wrapper wire-contract (mock bridge)
