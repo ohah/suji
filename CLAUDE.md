@@ -6,6 +6,7 @@ Electron 스타일 API (handle/invoke/on/send).
 ## 문서
 
 - [구현 계획서](./docs/PLAN.md) — 아키텍처, 구현 단계, 기술 결정 사항
+- [cef.zig 도메인 분리 리팩터](./docs/CEF_REFACTOR.md) — native API를 `cef_<domain>.zig`로 분리하는 진행 중 리팩터(절차/현황/주의)
 
 ## 빌드 & 실행
 
