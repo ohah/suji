@@ -22,7 +22,7 @@ PLAN.md 의 "후속 refactor 후보" 노트가 이 문서를 가리킨다.
 | sessionCookies | ✅ 완료 | `cef_session_cookies.zig` (~323줄) |
 | securityScopedBookmark | ✅ 완료 | `cef_security_scoped_bookmark.zig` (~136줄) |
 | requestUserAttention | ✅ 완료 | `cef_request_user_attention.zig` (~44줄) |
-| menu | ✅ 완료 | `cef_menu.zig` (~160줄; public routing + macOS) + `cef_menu_{types,linux}.zig` |
+| menu | ✅ 완료 | `cef_menu.zig` (~152줄; public routing + macOS) + `cef_menu_{types,linux}.zig` |
 | tray | ✅ 완료 | `cef_tray.zig` (~257줄; public routing + macOS) + `cef_tray_{types,state,windows,linux}.zig` |
 | notification | ✅ 완료 | `cef_notification.zig` (~90줄; public routing + macOS) + `cef_notification_{state,linux,windows}.zig` |
 | globalShortcut | ✅ 완료 | `cef_global_shortcut.zig` (~255줄; public routing + macOS/Windows) + `cef_global_shortcut_{types,state,linux,linux_parse}.zig` |
@@ -35,17 +35,17 @@ PLAN.md 의 "후속 refactor 후보" 노트가 이 문서를 가리킨다.
 | appPathMeta | ✅ 완료 | `cef_app.zig` (~208줄) |
 | crashReporter | ✅ 완료 | `cef_crash_reporter.zig` (~27줄) |
 | webRequest | ✅ 완료 | `cef_web_request.zig` (~287줄) |
-| dragHandler | ✅ 완료 | `cef_drag_handler.zig` (~147줄) |
-| windowDisplayHandlers | ✅ 완료 | `cef_window_display.zig` (~238줄) |
+| dragHandler | ✅ 완료 | `cef_drag_handler.zig` (~147줄) + `cef_drag_region.zig` (~59줄; shared DragRegion type) |
+| windowDisplayHandlers | ✅ 완료 | `cef_window_display.zig` (~238줄) + `cef_pdf_print.zig` (~33줄; CEF Linux PDF paper-size helper) |
 | requestHandler | ✅ 완료 | `cef_request_handler.zig` (~46줄) |
 | keyboardHandler | ✅ 완료 | `cef_keyboard_handler.zig` (~195줄) |
 | devTools | ✅ 완료 | `cef_devtools.zig` (~119줄) |
 | lifeSpanHandler | ✅ 완료 | `cef_life_span_handler.zig` (~106줄) |
 | schemeHandler | ✅ 완료 | `cef_scheme.zig` (~131줄; factory/dist path) + `cef_scheme_resource.zig` (~173줄; per-request resource handler) + `cef_scheme_security.zig` (~129줄; CSP/security headers) |
 | renderHandler | ✅ 완료 | `cef_render_handler.zig` (~267줄; V8 handler/vtable) + `cef_render_ipc.zig` (~198줄; renderer IPC state + response/event delivery) + `cef_render_bootstrap.zig` (~130줄; `window.__suji__` JS bootstrap) |
-| viewsDelegate | ✅ 완료 | `cef_views_delegate.zig` (~23줄; facade) + `cef_views_browser_delegate.zig` (~89줄) + `cef_views_window_delegate.zig` (~391줄; Window delegate callbacks/create) + `cef_views_window_delegate_state.zig` (~147줄; delegate state/ref/color helpers) |
+| viewsDelegate | ✅ 완료 | `cef_views_delegate.zig` (~23줄; facade) + `cef_views_browser_delegate.zig` (~89줄) + `cef_views_window_delegate.zig` (~391줄; Window delegate callbacks/create) + `cef_views_window_delegate_state.zig` (~147줄; delegate state/ref/color helpers) + `cef_window_options.zig` (~36줄; frame/transparent → frameless policy) |
 | browserIpc | ✅ 완료 | `cef_browser_ipc.zig` (~309줄) |
-| appHandler | ✅ 완료 | `cef_app_handler.zig` (~96줄) |
+| appHandler | ✅ 완료 | `cef_app_handler.zig` (~96줄) + `cef_command_line_policy.zig` (~142줄; CEF command-line switch policy) |
 | macAppMenu | ✅ 완료 | `cef_mac_app_menu.zig` (~249줄) |
 | macWindow | ✅ 완료 | `cef_mac_window.zig` (~387줄) |
 | objc | ✅ 완료 | `cef_objc.zig` (~238줄) |
@@ -57,7 +57,7 @@ PLAN.md 의 "후속 refactor 후보" 노트가 이 문서를 가리킨다.
 | publicApi | ✅ 완료 | `cef_public_api.zig` (~331줄; public facade) |
 | initialLoad | ✅ 완료 | `cef_initial_load.zig` (~132줄) |
 | webContents | ✅ 완료 | `cef_web_contents.zig` (~226줄) |
-| webContentsView | ✅ 완료 | `cef_web_contents_view.zig` (~170줄; public vtable glue) + `cef_web_contents_view_child_window.zig` (~185줄; macOS child-window path) + `cef_web_contents_view_overlay.zig` (~133줄; CEF Views overlay path) |
+| webContentsView | ✅ 완료 | `cef_web_contents_view.zig` (~154줄; public vtable glue) + `cef_web_contents_view_child_window.zig` (~191줄; macOS child-window path) + `cef_web_contents_view_overlay.zig` (~133줄; CEF Views overlay path) + `cef_views_policy.zig` (~73줄; child view path policy) |
 | windowState | ✅ 완료 | `cef_window_state.zig` (~192줄) |
 | windowVisuals | ✅ 완료 | `cef_window_visuals.zig` (~162줄) |
 | windowRuntime | ✅ 완료 | `cef_window_runtime.zig` (~114줄) |
