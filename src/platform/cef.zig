@@ -10532,12 +10532,13 @@ fn getRenderProcessHandler(_: ?*c._cef_app_t) callconv(.c) ?*c._cef_render_proce
 /// Debug vs Release 의 translate-c ABI 일치 확인용(이슈 #60 진단에서 동형 검증).
 pub fn diagPrintCefAbi() void {
     std.debug.print(
-        "[cef-abi] API_VER={d} base={d} app={d} rph={d} v8ctx_ptrsz=8 msg={d} browser={d} oncreate_off={d} onmsg_off={d} setting={d}\n",
+        "[cef-abi] API_VER={d} base={d} app={d} rph={d} v8ctx={d} msg={d} browser={d} oncreate_off={d} onmsg_off={d} setting={d}\n",
         .{
             c.CEF_API_VERSION,
             @sizeOf(c.cef_base_ref_counted_t),
             @sizeOf(c.cef_app_t),
             @sizeOf(c.cef_render_process_handler_t),
+            @sizeOf(c.cef_v8_context_t),
             @sizeOf(c.cef_process_message_t),
             @sizeOf(c.cef_browser_t),
             @offsetOf(c.cef_render_process_handler_t, "on_context_created"),
@@ -10989,7 +10990,7 @@ fn onRenderProcessTerminatedDiag(_: ?*c._cef_request_handler_t, _: ?*c._cef_brow
 fn onBeforeBrowseDiag(_: ?*c._cef_request_handler_t, _: ?*c._cef_browser_t, _: ?*c._cef_frame_t, request: ?*c._cef_request_t, _: c_int, _: c_int) callconv(.c) c_int {
     if (request) |req| {
         if (req.get_url) |get_url| {
-            var url_buf: [512]u8 = undefined;
+            var url_buf: [2048]u8 = undefined; // 다른 URL 버퍼와 동일 — 진단 truncation 회피
             const url = cefUserfreeToUtf8(get_url(req), &url_buf);
             std.debug.print("[cef-debug] onBeforeBrowse url={s}\n", .{url});
         }
