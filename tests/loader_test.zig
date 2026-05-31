@@ -680,18 +680,21 @@ test "plugin permission policy gates backend core.invoke calls" {
 }
 
 test "main.zig: plugin object source and permission hooks are wired" {
+    // Plugin loader moved to src/core/plugin_loader.zig after the main.zig
+    // domain split (function names were trimmed: getPluginDirForSpec →
+    // dirForSpec etc.). Read both so the guard tracks the actual code.
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/main.zig",
+        "src/core/plugin_loader.zig",
         std.testing.allocator,
         .limited(1024 * 1024),
     );
     defer std.testing.allocator.free(source);
 
     inline for (.{
-        "fn getPluginDirForSpec(",
-        "fn getPluginSourceDir(",
-        "fn pluginGitCloneUrl(",
+        "pub fn dirForSpec(",
+        "pub fn sourceDir(",
+        "pub fn gitCloneUrl(",
         "\"git\", \"clone\", \"--depth=1\"",
         "registry.setPluginPermissions(plugin.name, perms)",
         "plugin.permissions",
