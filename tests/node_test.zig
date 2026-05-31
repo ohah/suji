@@ -196,11 +196,12 @@ test "NodeRuntime.shutdown on non-owned (literal) skips free safely" {
 // 정적 검증한다.
 
 test "startNodeBackend: NodeRuntime.setCore precedes rt.start()" {
+    // Body moved to src/core/backend_lifecycle.zig (renamed startNode).
     // `zig build test`는 프로젝트 루트에서 실행되므로 상대경로로 접근 가능.
-    const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/main.zig", std.testing.allocator, .limited(1024 * 1024));
+    const source = try std.Io.Dir.cwd().readFileAlloc(std.testing.io, "src/core/backend_lifecycle.zig", std.testing.allocator, .limited(1024 * 1024));
     defer std.testing.allocator.free(source);
 
-    const marker = "fn startNodeBackend(";
+    const marker = "pub fn startNode(";
     const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.StartNodeBackendNotFound;
     // 함수 body 끝: 다음 top-level `\nfn ` 또는 파일 끝
     const search_from = fn_start + marker.len;

@@ -31,19 +31,38 @@ test "LuaRuntime shutdown frees owned paths without leak" {
 }
 
 test "main.zig wires Lua backend load, routes, CEF fallback, and teardown" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
+    // Lua backend load/start/route registration moved to
+    // src/core/backend_lifecycle.zig; the CEF __core__ dispatch fallback +
+    // teardown still live in main.zig. Read both so the wiring guard tracks
+    // the split.
+    const a = std.testing.allocator;
+    const lifecycle = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/main.zig",
-        std.testing.allocator,
+        "src/core/backend_lifecycle.zig",
+        a,
         .limited(2 * 1024 * 1024),
     );
-    defer std.testing.allocator.free(source);
+    defer a.free(lifecycle);
+    const main_src = try std.Io.Dir.cwd().readFileAlloc(
+        std.testing.io,
+        "src/main.zig",
+        a,
+        .limited(2 * 1024 * 1024),
+    );
+    defer a.free(main_src);
+
+    var combined = std.ArrayList(u8).empty;
+    defer combined.deinit(a);
+    try combined.appendSlice(a, lifecycle);
+    try combined.append(a, '\n');
+    try combined.appendSlice(a, main_src);
+    const source = combined.items;
 
     inline for (.{
-        "const lua_mod = @import(\"platform/lua.zig\");",
-        "var g_lua_runtime: ?*LuaRuntime = null;",
-        "fn startLuaBackend(",
-        "fn registerLuaRoute(",
+        "@import(\"../platform/lua.zig\")",
+        "pub var g_lua_runtime: ?*LuaRuntime = null;",
+        "pub fn startLua(",
+        "pub fn registerLuaRoute(",
         "std.mem.eql(u8, be.lang, \"lua\")",
         "suji.BackendRegistry.registerEmbedRuntime(owned_name",
         "rt.invoke(lua_channel, data)",
