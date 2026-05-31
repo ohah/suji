@@ -324,20 +324,23 @@ test "onFileChanged: shouldIgnore covers npm/os-metadata feedback files" {
 }
 
 test "node backend install runs from entry cwd instead of npm prefix" {
+    // buildBackendByLang lives in src/core/backend_build.zig after the main.zig
+    // domain split, but historically was inline in main.zig — read both so this
+    // introspection guard stays stable across the refactor.
     const source = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,
-        "src/main.zig",
+        "src/core/backend_build.zig",
         std.testing.allocator,
         .limited(1024 * 1024),
     );
     defer std.testing.allocator.free(source);
 
-    const marker = "fn buildBackendByLang(";
+    const marker = "pub fn buildByLang(";
     const fn_start = std.mem.indexOf(u8, source, marker) orelse return error.BuildBackendFnNotFound;
     const body_end = std.mem.indexOfPos(u8, source, fn_start + marker.len, "\nfn ") orelse source.len;
     const body = source[fn_start..body_end];
 
-    if (std.mem.indexOf(u8, body, "runCmdInDir(npm_cmd, abs_entry)") == null) return error.NodeNpmCwdMissing;
+    if (std.mem.indexOf(u8, body, "runArgvInDir(npm_cmd, abs_entry)") == null) return error.NodeNpmCwdMissing;
     if (std.mem.indexOf(u8, body, "\"--prefix\"") != null) return error.NodeNpmPrefixStillUsed;
 }
 
