@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { configToJson, loadConfig } from "../lib/config-loader.js";
+import { configToJson, loadConfig, runHook } from "../lib/config-loader.js";
 
 function parseArgs(argv) {
   const options = {};
@@ -40,6 +40,11 @@ function parseArgs(argv) {
       options.mode = mode;
       continue;
     }
+    const hook = readValue("--hook");
+    if (hook !== null) {
+      options.hook = hook;
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${arg}`);
   }
@@ -49,7 +54,12 @@ function parseArgs(argv) {
 try {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
-    process.stdout.write("Usage: suji-config [--cwd <dir>] [--config <file>] [--command <cmd>] [--mode <mode>]\n");
+    process.stdout.write("Usage: suji-config [--cwd <dir>] [--config <file>] [--command <cmd>] [--mode <mode>] [--hook <name>]\n");
+    process.exit(0);
+  }
+  if (options.hook) {
+    // Build lifecycle hook mode: run config.build.<hook>(env). No stdout config emit.
+    await runHook(options);
     process.exit(0);
   }
   const config = await loadConfig(options);

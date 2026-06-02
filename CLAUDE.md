@@ -433,6 +433,21 @@ suji.platform                                                // "macos" | "linux
 
 `suji.config.ts`가 생성 프로젝트의 source config이고, `suji.json`은 materialized JSON입니다. 네이티브 로더는 `suji.config.ts`/`.mts`/`.cts`/`.js`/`.mjs`/`.cjs`를 먼저 찾고, `@suji/cli`의 JS/TS config loader로 실제 코드를 평가한 뒤 JSON만 Zig 파서에 넘깁니다. 로더가 없는 직접 native 실행 환경에서는 JSON-compatible `defineConfig({ ... })` 정적 fallback만 사용합니다. config 파일은 신뢰한 프로젝트 코드로 실행됩니다. JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
 
+**프로그래밍 기능 (vite/rspack식 — 정적 JSON 미표현):** 함수형 config `defineConfig(({mode,command})=>({...}))`, **빌드 라이프사이클 훅** `build.beforeBuild`/`afterBuild`/`beforeDev`, **플랫폼별 빌드 오버라이드** `build.{mac,win,linux}`(현재 OS로 fold), **dev.env**(dev 서버 spawn 시 주입), `window` 단축(→`windows[]`)·`dev.devUrl`(→`frontend.dev_url`). loader가 평가 시 현재 플랫폼 build를 fold + 훅 함수를 `build._hooks` 마커로 strip(함수 직렬화 불가)해 JSON으로 emit하고, CLI(`config.zig`가 `--command/--mode` 전달)가 라이프사이클 지점에서 `node load-config.js --hook <name>` 로 훅을 재실행한다. 서명 우선순위: CLI 플래그 > env > `config.build.*` > adhoc. 회귀: `tests/config-loader/run.sh`(loader normalize/hook) + `tests/config_test.zig`(Zig build/dev 파싱).
+
+```ts
+// suji.config.ts
+import { defineConfig } from "@suji/cli";
+export default defineConfig(({ mode }) => ({
+  app: { name: "My App", version: "1.0.0" },
+  build: {
+    async beforeBuild() { /* … */ },
+    mac: { sign: "identity", notarize: mode === "production" },
+  },
+  dev: { devUrl: "http://localhost:12300", env: { VITE_API: "http://localhost:8787" } },
+}));
+```
+
 ```json
 {
   "$schema": "./suji.schema.json",
