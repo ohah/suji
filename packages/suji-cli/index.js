@@ -4,4 +4,5 @@ export {
   defineConfig,
   findConfigFile,
   loadConfig,
+  runHook,
 } from "./lib/config-loader.js";

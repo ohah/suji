@@ -41,8 +41,88 @@ export async function loadConfig(options = {}) {
       cwd,
     });
 
-  assertConfigObject(value);
-  return value;
+  // Normalize ergonomic/programmatic keys into the canonical shape the Zig core
+  // consumes (window→windows, dev.devUrl→frontend.dev_url, per-platform build fold,
+  // build hooks stripped to a `_hooks` marker). Strips functions so assertConfigObject
+  // (JSON-only) passes — hooks are re-loaded with functions intact via runHook().
+  const normalized = normalizeConfig(value, configPath);
+  assertConfigObject(normalized);
+  return normalized;
+}
+
+/**
+ * Run a build lifecycle hook (build.beforeBuild / afterBuild / beforeDev). Loads the
+ * config with functions intact (no normalize/strip) and invokes the named hook.
+ */
+export async function runHook(options = {}) {
+  const cwd = resolve(options.cwd ?? process.cwd());
+  const configPath = resolveConfigPath(cwd, options.config);
+  if (!configPath) throw new Error(`Suji config not found in ${cwd}`);
+  if (basename(configPath) === "suji.json") return; // JSON config has no hooks
+  const context = {
+    command: options.command ?? "dev",
+    mode: options.mode ?? process.env.NODE_ENV ?? "development",
+    cwd,
+    configPath,
+  };
+  const config = await loadCodeConfig(configPath, context);
+  const hook = config && config.build && config.build[options.hook];
+  if (typeof hook === "function") await hook(context);
+}
+
+function currentPlatformKey() {
+  if (process.platform === "darwin") return "mac";
+  if (process.platform === "win32") return "win";
+  return "linux";
+}
+
+function isPlainObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+/** Canonicalize config.ts ergonomics + strip non-serializable build hooks. */
+function normalizeConfig(config, configPath) {
+  if (!isPlainObject(config)) return config;
+  const out = { ...config };
+
+  // window (singular shorthand) → windows: [window]
+  if (isPlainObject(out.window) && out.windows === undefined) {
+    out.windows = [out.window];
+  }
+  delete out.window;
+
+  // dev.devUrl → frontend.dev_url (config.ts ergonomic; only fills a gap)
+  if (isPlainObject(out.dev) && out.dev.devUrl) {
+    out.frontend = { ...(out.frontend || {}) };
+    if (out.frontend.dev_url === undefined) out.frontend.dev_url = out.dev.devUrl;
+  }
+  // keep only serializable dev.env for the CLI dev-server spawn
+  if (isPlainObject(out.dev)) {
+    out.dev = { env: isPlainObject(out.dev.env) ? out.dev.env : {} };
+  }
+
+  // build: fold current-platform overrides over top-level fields; strip hook functions.
+  if (isPlainObject(out.build)) {
+    const b = out.build;
+    const platOverride = isPlainObject(b[currentPlatformKey()]) ? b[currentPlatformKey()] : {};
+    const flat = {};
+    for (const k of ["sign", "identity", "notarize", "dmg", "sandbox", "entitlements"]) {
+      const v = platOverride[k] !== undefined ? platOverride[k] : b[k];
+      if (v !== undefined) flat[k] = v;
+    }
+    flat._hooks = {
+      beforeBuild: typeof b.beforeBuild === "function",
+      afterBuild: typeof b.afterBuild === "function",
+      beforeDev: typeof b.beforeDev === "function",
+    };
+    flat._configFile = configPath;
+    out.build = flat;
+    if (flat.entitlements && (!out.app || out.app.entitlements === undefined)) {
+      out.app = { ...(out.app || {}), entitlements: flat.entitlements };
+    }
+  }
+
+  return out;
 }
 
 export function configToJson(config) {

@@ -540,3 +540,58 @@ test "회귀: main.zig가 config.app.quit_on_all_windows_closed 분기 + listene
         try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
     }
 }
+
+// ============================================
+// suji.config.ts build/dev (loader 가 normalize 해서 emit 하는 키)
+// ============================================
+
+test "Config.loadFromJsonBytes parses build object (sign/notarize/_hooks/_configFile)" {
+    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{
+        \\  "app": { "name": "x" },
+        \\  "build": {
+        \\    "sign": "identity", "identity": "Developer ID: Acme",
+        \\    "notarize": true, "dmg": true, "sandbox": false,
+        \\    "_configFile": "/abs/suji.config.ts",
+        \\    "_hooks": { "beforeBuild": true, "afterBuild": false, "beforeDev": true }
+        \\  }
+        \\}
+    );
+    defer cfg.deinit();
+    try std.testing.expectEqualStrings("identity", cfg.build.sign.?);
+    try std.testing.expectEqualStrings("Developer ID: Acme", cfg.build.identity.?);
+    try std.testing.expect(cfg.build.notarize);
+    try std.testing.expect(cfg.build.dmg);
+    try std.testing.expect(!cfg.build.sandbox);
+    try std.testing.expectEqualStrings("/abs/suji.config.ts", cfg.build.config_file.?);
+    try std.testing.expect(cfg.build.has_before_build);
+    try std.testing.expect(!cfg.build.has_after_build);
+    try std.testing.expect(cfg.build.has_before_dev);
+}
+
+test "Config.loadFromJsonBytes: build 부재 시 기본값" {
+    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator, "{ \"app\": { \"name\": \"x\" } }");
+    defer cfg.deinit();
+    try std.testing.expect(cfg.build.sign == null);
+    try std.testing.expect(cfg.build.config_file == null);
+    try std.testing.expect(!cfg.build.has_before_build);
+    try std.testing.expectEqual(@as(usize, 0), cfg.dev.env.len);
+}
+
+test "Config.loadFromJsonBytes parses dev.env (순서 보존)" {
+    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{ "app": { "name": "x" }, "dev": { "env": { "FOO": "bar", "BAZ": "qux" } } }
+    );
+    defer cfg.deinit();
+    try std.testing.expectEqual(@as(usize, 2), cfg.dev.env.len);
+    try std.testing.expectEqualStrings("FOO", cfg.dev.env[0].name);
+    try std.testing.expectEqualStrings("bar", cfg.dev.env[0].value);
+    try std.testing.expectEqualStrings("BAZ", cfg.dev.env[1].name);
+}
+
+test "Config.Command modeStr/commandStr 매핑" {
+    try std.testing.expectEqualStrings("production", config.Config.Command.build.modeStr());
+    try std.testing.expectEqualStrings("build", config.Config.Command.build.commandStr());
+    try std.testing.expectEqualStrings("development", config.Config.Command.dev.modeStr());
+    try std.testing.expectEqualStrings("dev", config.Config.Command.types.commandStr());
+}
