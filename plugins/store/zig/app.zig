@@ -27,6 +27,8 @@ pub const app = suji.app()
     .handle("store:delete", storeDelete)
     .handle("store:clear", storeClear)
     .handle("store:keys", storeKeys)
+    .handle("store:values", storeValues)
+    .handle("store:entries", storeEntries)
     .handle("store:size", storeSize)
     .handle("store:get_path", storeGetPath);
 
@@ -183,6 +185,46 @@ const Store = struct {
         self.mutex.lockUncancelable(pluginIo());
         defer self.mutex.unlock(pluginIo());
         return self.map.count();
+    }
+
+    /// 값 배열 (Tauri `store.values()`). 값은 이미 raw JSON 텍스트.
+    fn values(self: *Store, arena: std.mem.Allocator) ?[]const u8 {
+        self.mutex.lockUncancelable(pluginIo());
+        defer self.mutex.unlock(pluginIo());
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(arena);
+        out.appendSlice(arena, "{\"values\":[") catch return null;
+        var iter = self.map.iterator();
+        var first = true;
+        while (iter.next()) |entry| {
+            if (!first) out.appendSlice(arena, ",") catch return null;
+            out.appendSlice(arena, entry.value_ptr.*) catch return null;
+            first = false;
+        }
+        out.appendSlice(arena, "]}") catch return null;
+        return out.toOwnedSlice(arena) catch null;
+    }
+
+    /// [키,값] 쌍 배열 (Tauri `store.entries()`). 키는 escape, 값은 raw JSON.
+    fn entries(self: *Store, arena: std.mem.Allocator) ?[]const u8 {
+        self.mutex.lockUncancelable(pluginIo());
+        defer self.mutex.unlock(pluginIo());
+        var out: std.ArrayList(u8) = .empty;
+        defer out.deinit(arena);
+        out.appendSlice(arena, "{\"entries\":[") catch return null;
+        var iter = self.map.iterator();
+        var first = true;
+        while (iter.next()) |entry| {
+            if (!first) out.appendSlice(arena, ",") catch return null;
+            out.appendSlice(arena, "[\"") catch return null;
+            appendJsonEscaped(arena, &out, entry.key_ptr.*) catch return null;
+            out.appendSlice(arena, "\",") catch return null;
+            out.appendSlice(arena, entry.value_ptr.*) catch return null;
+            out.appendSlice(arena, "]") catch return null;
+            first = false;
+        }
+        out.appendSlice(arena, "]}") catch return null;
+        return out.toOwnedSlice(arena) catch null;
     }
 
     fn persistUnlocked(self: *Store) void {
@@ -376,6 +418,18 @@ fn storeKeys(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const name = resolveStoreName(req);
     const store = getStore(name) orelse return req.err("invalid name");
     const result = store.keys(req.arena) orelse return req.err("alloc");
+    return req.okRaw(result);
+}
+fn storeValues(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    const name = resolveStoreName(req);
+    const store = getStore(name) orelse return req.err("invalid name");
+    const result = store.values(req.arena) orelse return req.err("alloc");
+    return req.okRaw(result);
+}
+fn storeEntries(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    const name = resolveStoreName(req);
+    const store = getStore(name) orelse return req.err("invalid name");
+    const result = store.entries(req.arena) orelse return req.err("alloc");
     return req.okRaw(result);
 }
 
