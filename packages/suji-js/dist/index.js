@@ -85,6 +85,19 @@ async function coreCall(request) {
     const raw = await getBridge().core(JSON.stringify(request));
     return (typeof raw === "string" ? JSON.parse(raw) : raw);
 }
+/** deferred-response(`printToPDF`/`capturePage`) 전용 타임아웃 가드. 코어 TTL(30s)
+ *  보다 여유를 둔 35s 후 `{success:false}` 로 resolve — 코어가 끝내 응답을 못 보내는
+ *  극단(렌더러/GPU 크래시) 에서도 Promise hang 방지. 코어가 늦게 응답해도 race 승자가
+ *  이미 정해져 무해. getCookies 의 setTimeout 패턴과 동형. */
+function withDeferTimeout(p, timeoutMs) {
+    const ms = timeoutMs ?? 35000;
+    let timer;
+    const timeout = new Promise((resolve) => {
+        timer = setTimeout(() => resolve({ success: false }), ms);
+    });
+    // race 승자 결정 후 clearTimeout — 호출당 dangling 35s 타이머 누수 방지.
+    return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
 export const windows = {
     /**
      * 새 창 생성. Phase 3 옵션 풀 지원 — suji.json `windows[]` 항목과 동일한 키.
@@ -192,6 +205,40 @@ export const windows = {
     hasShadow(windowId) {
         return coreCall({ cmd: "has_shadow", windowId });
     },
+    // ── 창 생명주기 (Electron `BrowserWindow` 패리티 — Zig 백엔드 기존 구현 노출) ──
+    minimize(windowId) {
+        return coreCall({ cmd: "minimize", windowId });
+    },
+    maximize(windowId) {
+        return coreCall({ cmd: "maximize", windowId });
+    },
+    unmaximize(windowId) {
+        return coreCall({ cmd: "unmaximize", windowId });
+    },
+    restore(windowId) {
+        return coreCall({ cmd: "restore_window", windowId });
+    },
+    show(windowId) {
+        return coreCall({ cmd: "set_visible", windowId, visible: true });
+    },
+    hide(windowId) {
+        return coreCall({ cmd: "set_visible", windowId, visible: false });
+    },
+    close(windowId) {
+        return coreCall({ cmd: "destroy_window", windowId });
+    },
+    setFullScreen(windowId, flag) {
+        return coreCall({ cmd: "set_fullscreen", windowId, flag });
+    },
+    isMinimized(windowId) {
+        return coreCall({ cmd: "is_minimized", windowId });
+    },
+    isMaximized(windowId) {
+        return coreCall({ cmd: "is_maximized", windowId });
+    },
+    isFullScreen(windowId) {
+        return coreCall({ cmd: "is_fullscreen", windowId });
+    },
     // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
     undo(windowId) {
         return coreCall({ cmd: "undo", windowId });
@@ -228,20 +275,24 @@ export const windows = {
     },
     /** PDF로 인쇄 (Electron `webContents.printToPDF`). 코어가 CDP 완료까지 응답
      *  보류 → 단일 await 로 결과(`{success}`) 받음. EventBus `window:pdf-print-
-     *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지. */
-    async printToPDF(windowId, path) {
-        const r = await coreCall({ cmd: "print_to_pdf", windowId, path });
+     *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지.
+     *
+     *  defense-in-depth: 코어가 CDP 콜백 미발화(렌더러/GPU 크래시 등)로 응답을
+     *  영영 안 보내는 극단 경우, SDK 타임아웃(기본 35s)이 `{success:false}`로
+     *  settle 해 Promise 영구 hang 방지. 코어가 늦게 응답해도 무해(이미 settled). */
+    async printToPDF(windowId, path, opts) {
+        const r = await withDeferTimeout(coreCall({ cmd: "print_to_pdf", windowId, path }), opts?.timeoutMs);
         return { success: r?.success === true };
     },
     /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage` — CDP
      *  Page.captureScreenshot). 코어 deferred response 로 단일 await.
      *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
-     *  rect 지정 시 부분 영역만; 미지정=전체. */
-    async capturePage(windowId, path, rect) {
-        const r = await coreCall({
+     *  rect 지정 시 부분 영역만; 미지정=전체. defense-in-depth 타임아웃은 printToPDF 동일. */
+    async capturePage(windowId, path, rect, opts) {
+        const r = await withDeferTimeout(coreCall({
             cmd: "capture_page", windowId, path,
             ...(rect ? { clipX: rect.x, clipY: rect.y, clipWidth: rect.width, clipHeight: rect.height } : {}),
-        });
+        }), opts?.timeoutMs);
         return { success: r?.success === true };
     },
     // ── Phase 17-A: WebContentsView ──
@@ -393,6 +444,40 @@ export class BrowserWindow {
     }
     hasShadow() {
         return windows.hasShadow(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    // ── 창 생명주기 (Electron BrowserWindow 패리티) ──
+    minimize() {
+        return windows.minimize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    maximize() {
+        return windows.maximize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    unmaximize() {
+        return windows.unmaximize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    restore() {
+        return windows.restore(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    show() {
+        return windows.show(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    hide() {
+        return windows.hide(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    close() {
+        return windows.close(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setFullScreen(flag) {
+        return windows.setFullScreen(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), flag);
+    }
+    isMinimized() {
+        return windows.isMinimized(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isMaximized() {
+        return windows.isMaximized(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isFullScreen() {
+        return windows.isFullScreen(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     undo() {
         return windows.undo(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));

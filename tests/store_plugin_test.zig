@@ -237,3 +237,37 @@ test "store plugin: get_path returns non-empty default" {
     try std.testing.expect(std.mem.indexOf(u8, r.?, "\"path\":\"\"") == null);
     try std.testing.expect(std.mem.indexOf(u8, r.?, name) != null);
 }
+
+test "store plugin: values/entries return raw JSON values + escaped keys" {
+    var reg = loader.BackendRegistry.init(std.heap.page_allocator, std.testing.io);
+    defer reg.deinit();
+    reg.setGlobal();
+    try loadStore(&reg);
+
+    var name_buf: [64]u8 = undefined;
+    const name = try uniqueName(&name_buf);
+    var b: [256]u8 = undefined;
+
+    freeResp(&reg, invokePlugin(&reg, try std.fmt.bufPrint(&b, "{{\"cmd\":\"store:clear\",\"name\":\"{s}\"}}", .{name})));
+    freeResp(&reg, invokePlugin(&reg, try std.fmt.bufPrint(&b, "{{\"cmd\":\"store:set\",\"name\":\"{s}\",\"key\":\"n\",\"value\":42}}", .{name})));
+    freeResp(&reg, invokePlugin(&reg, try std.fmt.bufPrint(&b, "{{\"cmd\":\"store:set\",\"name\":\"{s}\",\"key\":\"o\",\"value\":{{\"x\":1}}}}", .{name})));
+
+    // values: raw JSON 값 (42, {"x":1}) 보존
+    {
+        const r = invokePlugin(&reg, try std.fmt.bufPrint(&b, "{{\"cmd\":\"store:values\",\"name\":\"{s}\"}}", .{name}));
+        defer freeResp(&reg, r);
+        try std.testing.expect(r != null);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"values\":[") != null);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "42") != null);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "{\"x\":1}") != null);
+    }
+    // entries: [["n",42],["o",{"x":1}]]
+    {
+        const r = invokePlugin(&reg, try std.fmt.bufPrint(&b, "{{\"cmd\":\"store:entries\",\"name\":\"{s}\"}}", .{name}));
+        defer freeResp(&reg, r);
+        try std.testing.expect(r != null);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "\"entries\":[") != null);
+        try std.testing.expect(std.mem.indexOf(u8, r.?, "[\"n\",42]") != null);
+    }
+    freeResp(&reg, invokePlugin(&reg, try std.fmt.bufPrint(&b, "{{\"cmd\":\"store:clear\",\"name\":\"{s}\"}}", .{name})));
+}

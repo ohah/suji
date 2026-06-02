@@ -174,6 +174,18 @@ export interface HasShadowResponse extends WindowOpResponse {
     cmd: "has_shadow";
     hasShadow: boolean;
 }
+export interface IsMinimizedResponse extends WindowOpResponse {
+    cmd: "is_minimized";
+    minimized: boolean;
+}
+export interface IsMaximizedResponse extends WindowOpResponse {
+    cmd: "is_maximized";
+    maximized: boolean;
+}
+export interface IsFullScreenResponse extends WindowOpResponse {
+    cmd: "is_fullscreen";
+    fullscreen: boolean;
+}
 export interface ViewOptions {
     /** view를 합성할 host 창 id. live & .window이어야 함 */
     hostId: number;
@@ -261,6 +273,17 @@ export declare const windows: {
     setHasShadow(windowId: number, hasShadow: boolean): Promise<WindowOpResponse>;
     /** 그림자 상태 읽기. Electron `BrowserWindow.hasShadow`. */
     hasShadow(windowId: number): Promise<HasShadowResponse>;
+    minimize(windowId: number): Promise<WindowOpResponse>;
+    maximize(windowId: number): Promise<WindowOpResponse>;
+    unmaximize(windowId: number): Promise<WindowOpResponse>;
+    restore(windowId: number): Promise<WindowOpResponse>;
+    show(windowId: number): Promise<WindowOpResponse>;
+    hide(windowId: number): Promise<WindowOpResponse>;
+    close(windowId: number): Promise<WindowOpResponse>;
+    setFullScreen(windowId: number, flag: boolean): Promise<WindowOpResponse>;
+    isMinimized(windowId: number): Promise<IsMinimizedResponse>;
+    isMaximized(windowId: number): Promise<IsMaximizedResponse>;
+    isFullScreen(windowId: number): Promise<IsFullScreenResponse>;
     undo(windowId: number): Promise<WindowOpResponse>;
     redo(windowId: number): Promise<WindowOpResponse>;
     cut(windowId: number): Promise<WindowOpResponse>;
@@ -277,19 +300,27 @@ export declare const windows: {
     stopFindInPage(windowId: number, clearSelection?: boolean): Promise<WindowOpResponse>;
     /** PDF로 인쇄 (Electron `webContents.printToPDF`). 코어가 CDP 완료까지 응답
      *  보류 → 단일 await 로 결과(`{success}`) 받음. EventBus `window:pdf-print-
-     *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지. */
-    printToPDF(windowId: number, path: string): Promise<{
+     *  finished` emit 은 다른 구독자(다른 백엔드/창) 호환 유지.
+     *
+     *  defense-in-depth: 코어가 CDP 콜백 미발화(렌더러/GPU 크래시 등)로 응답을
+     *  영영 안 보내는 극단 경우, SDK 타임아웃(기본 35s)이 `{success:false}`로
+     *  settle 해 Promise 영구 hang 방지. 코어가 늦게 응답해도 무해(이미 settled). */
+    printToPDF(windowId: number, path: string, opts?: {
+        timeoutMs?: number;
+    }): Promise<{
         success: boolean;
     }>;
     /** 페이지 스크린샷 PNG 저장 (Electron `webContents.capturePage` — CDP
      *  Page.captureScreenshot). 코어 deferred response 로 단일 await.
      *  base64 가 IPC 한도(64KB) 초과 가능해 path 파일 방식.
-     *  rect 지정 시 부분 영역만; 미지정=전체. */
+     *  rect 지정 시 부분 영역만; 미지정=전체. defense-in-depth 타임아웃은 printToPDF 동일. */
     capturePage(windowId: number, path: string, rect?: {
         x: number;
         y: number;
         width: number;
         height: number;
+    }, opts?: {
+        timeoutMs?: number;
     }): Promise<{
         success: boolean;
     }>;
@@ -354,6 +385,17 @@ export declare class BrowserWindow {
     setBackgroundColor(color: string): Promise<WindowOpResponse>;
     setHasShadow(hasShadow: boolean): Promise<WindowOpResponse>;
     hasShadow(): Promise<HasShadowResponse>;
+    minimize(): Promise<WindowOpResponse>;
+    maximize(): Promise<WindowOpResponse>;
+    unmaximize(): Promise<WindowOpResponse>;
+    restore(): Promise<WindowOpResponse>;
+    show(): Promise<WindowOpResponse>;
+    hide(): Promise<WindowOpResponse>;
+    close(): Promise<WindowOpResponse>;
+    setFullScreen(flag: boolean): Promise<WindowOpResponse>;
+    isMinimized(): Promise<IsMinimizedResponse>;
+    isMaximized(): Promise<IsMaximizedResponse>;
+    isFullScreen(): Promise<IsFullScreenResponse>;
     undo(): Promise<WindowOpResponse>;
     redo(): Promise<WindowOpResponse>;
     cut(): Promise<WindowOpResponse>;

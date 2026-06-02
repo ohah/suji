@@ -19,8 +19,9 @@ zig build run      # CLI 도움말
 zig build test-state    # state 플러그인 (KV 스토어)
 zig build test-sqlite   # sqlite 플러그인 (벤더 SQLite 3.51, sql:open/execute/query/close)
 zig build test-log      # log 플러그인 (rotating file logger, level filter, JSON Lines)
-zig build test-store    # store 플러그인 (file-backed config store, named instances, atomic persist)
+zig build test-store    # store 플러그인 (file-backed config store, named instances, atomic persist; +values/entries)
 zig build test-http     # http 플러그인 (renderer-safe fetch with URL allowlist, deny-by-default)
+zig build test-os-autostart # os-info + autostart 플러그인 (시스템 정보 / 로그인 자동실행)
 zig build test-notification-rich # notification-rich 플러그인 (WinRT/UNUserNotificationCenter/Freedesktop actions)
 
 # 임베드 코어 라이브러리 (CEF 무관 — 모바일/임베드용)
@@ -366,6 +367,9 @@ suji.platform                                                // "macos" | "linux
 // await windows.setZoomFactor(id, 1.2) / setZoomLevel(id, 1.5)  (Phase 4-B)
 // await windows.openDevTools(id) / toggleDevTools(id) / isDevToolsOpened(id)  (Phase 4-C)
 // await windows.undo(id) / copy(id) / paste(id) / findInPage(id, "x", {})  (Phase 4-E)
+// await windows.minimize(id) / maximize(id) / unmaximize(id) / restore(id) / show(id) / hide(id)
+//   / close(id) / setFullScreen(id, true) / isMinimized(id) / isMaximized(id) / isFullScreen(id)
+//   — Electron BrowserWindow 생명주기 (Zig 백엔드 기존 구현을 SDK 노출, 전수조사 후속). BrowserWindow 클래스 동형
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
 // await windows.createView({hostId, url, bounds}) → {viewId}              (Phase 17-B WebContentsView)
 // await windows.addChildView(host, view, index?) / setTopView / removeChildView

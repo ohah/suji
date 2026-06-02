@@ -245,6 +245,18 @@ export interface HasShadowResponse extends WindowOpResponse {
   cmd: "has_shadow";
   hasShadow: boolean;
 }
+export interface IsMinimizedResponse extends WindowOpResponse {
+  cmd: "is_minimized";
+  minimized: boolean;
+}
+export interface IsMaximizedResponse extends WindowOpResponse {
+  cmd: "is_maximized";
+  maximized: boolean;
+}
+export interface IsFullScreenResponse extends WindowOpResponse {
+  cmd: "is_fullscreen";
+  fullscreen: boolean;
+}
 
 // ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
 // viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
@@ -435,6 +447,41 @@ export const windows = {
   /** 그림자 상태 읽기. Electron `BrowserWindow.hasShadow`. */
   hasShadow(windowId: number): Promise<HasShadowResponse> {
     return coreCall<HasShadowResponse>({ cmd: "has_shadow", windowId });
+  },
+
+  // ── 창 생명주기 (Electron `BrowserWindow` 패리티 — Zig 백엔드 기존 구현 노출) ──
+  minimize(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "minimize", windowId });
+  },
+  maximize(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "maximize", windowId });
+  },
+  unmaximize(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "unmaximize", windowId });
+  },
+  restore(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "restore_window", windowId });
+  },
+  show(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_visible", windowId, visible: true });
+  },
+  hide(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_visible", windowId, visible: false });
+  },
+  close(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "destroy_window", windowId });
+  },
+  setFullScreen(windowId: number, flag: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_fullscreen", windowId, flag });
+  },
+  isMinimized(windowId: number): Promise<IsMinimizedResponse> {
+    return coreCall<IsMinimizedResponse>({ cmd: "is_minimized", windowId });
+  },
+  isMaximized(windowId: number): Promise<IsMaximizedResponse> {
+    return coreCall<IsMaximizedResponse>({ cmd: "is_maximized", windowId });
+  },
+  isFullScreen(windowId: number): Promise<IsFullScreenResponse> {
+    return coreCall<IsFullScreenResponse>({ cmd: "is_fullscreen", windowId });
   },
 
   // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
@@ -673,6 +720,40 @@ export class BrowserWindow {
   }
   hasShadow() {
     return windows.hasShadow(this.#id);
+  }
+  // ── 창 생명주기 (Electron BrowserWindow 패리티) ──
+  minimize() {
+    return windows.minimize(this.#id);
+  }
+  maximize() {
+    return windows.maximize(this.#id);
+  }
+  unmaximize() {
+    return windows.unmaximize(this.#id);
+  }
+  restore() {
+    return windows.restore(this.#id);
+  }
+  show() {
+    return windows.show(this.#id);
+  }
+  hide() {
+    return windows.hide(this.#id);
+  }
+  close() {
+    return windows.close(this.#id);
+  }
+  setFullScreen(flag: boolean) {
+    return windows.setFullScreen(this.#id, flag);
+  }
+  isMinimized() {
+    return windows.isMinimized(this.#id);
+  }
+  isMaximized() {
+    return windows.isMaximized(this.#id);
+  }
+  isFullScreen() {
+    return windows.isFullScreen(this.#id);
   }
   undo() {
     return windows.undo(this.#id);

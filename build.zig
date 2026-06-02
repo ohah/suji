@@ -1061,6 +1061,28 @@ pub fn build(b: *std.Build) void {
     const http_test_step = b.step("test-http", "Run http plugin tests (requires built dylib)");
     http_test_step.dependOn(&http_test_run.step);
 
+    // os-info + autostart plugin tests (net-new; state/store 와 동형)
+    const osauto_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/os_autostart_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const osauto_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    osauto_loader.addImport("events", events_module);
+    osauto_loader.addImport("runtime", runtime_module);
+    osauto_loader.addImport("util", util_module);
+    osauto_test_mod.addImport("loader", osauto_loader);
+    const osauto_test = b.addTest(.{ .root_module = osauto_test_mod });
+    const osauto_test_run = b.addRunArtifact(osauto_test);
+    osauto_test_run.setCwd(b.path("."));
+    const osauto_test_step = b.step("test-os-autostart", "Run os-info + autostart plugin tests (requires built dylibs)");
+    osauto_test_step.dependOn(&osauto_test_run.step);
+
     // notification-rich plugin tests (Windows WinRT toast, macOS/Linux rich action path)
     const nrich_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/notification_rich_plugin_test.zig"),

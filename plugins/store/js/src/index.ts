@@ -39,6 +39,8 @@ export interface Store {
   delete(key: string): Promise<void>;
   clear(): Promise<void>;
   keys(): Promise<string[]>;
+  values<T = unknown>(): Promise<T[]>;
+  entries<T = unknown>(): Promise<[string, T][]>;
   size(): Promise<number>;
   getPath(): Promise<string>;
 }
@@ -66,6 +68,14 @@ export function createStore(name: string = "config"): Store {
     async keys(): Promise<string[]> {
       const r = await call("store:keys", { name });
       return (r?.keys ?? []) as string[];
+    },
+    async values<T = unknown>(): Promise<T[]> {
+      const r = await call("store:values", { name });
+      return (r?.values ?? []) as T[];
+    },
+    async entries<T = unknown>(): Promise<[string, T][]> {
+      const r = await call("store:entries", { name });
+      return (r?.entries ?? []) as [string, T][];
     },
     async size(): Promise<number> {
       const r = await call("store:size", { name });
