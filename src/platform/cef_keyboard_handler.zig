@@ -1,12 +1,9 @@
 //! CEF keyboard handler — cef.zig 에서 분리(동작 무변경).
 //! Electron 호환 단축키를 sender browser 기준으로 처리한다.
 const std = @import("std");
-const window_mod = @import("window");
-const logger = @import("logger");
 const cef = @import("cef.zig");
 
 const c = cef.c;
-const log = logger.module("cef");
 const zeroCefStruct = cef.zeroCefStruct;
 const initBaseRefCounted = cef.initBaseRefCounted;
 
@@ -94,29 +91,11 @@ fn onPreKeyEvent(
         return 1;
     }
 
-    // Cmd+W — 창 닫기. WM 경유 → window:close 취소 가능 이벤트 발화 후 파괴.
-    // WM 미등록이면 CEF 직접 close (폴백, 이벤트 없음).
-    if (key == 'W' and !shift) {
-        const handle: u64 = @intCast(br.get_identifier.?(br));
-        log.debug("cmd+w pressed browser_id={d}", .{handle});
-        if (window_mod.WindowManager.global) |wm| {
-            if (wm.findByNativeHandle(handle)) |id| {
-                log.debug("cmd+w → wm.close id={d}", .{id});
-                const ok = wm.close(id) catch |e| {
-                    log.err("cmd+w wm.close failed: {s}", .{@errorName(e)});
-                    return 1;
-                };
-                log.debug("cmd+w wm.close returned destroyed={}", .{ok});
-                return 1;
-            }
-            log.warn("cmd+w: handle={d} not found in WM (fallback to direct close)", .{handle});
-        } else {
-            log.warn("cmd+w: WM.global is null (fallback to direct close)", .{});
-        }
-        const host = cef.devtoolsHost(br);
-        if (host) |h| h.close_browser.?(h, 0);
-        return 1;
-    }
+    // Cmd+W — 네이티브로 창을 닫지 않고 DOM 으로 양보한다. 탭 기반 앱은 cmd+W 를 "탭 닫기"로
+    // 쓰고 싶어 하는데, 여기서 창을 닫아 버리면 앱 단축키를 가린다. cmd+D 등과 동일하게 아래
+    // 기본 처리(is_keyboard_shortcut 마킹 후 return 0)로 흘려보내 renderer(DOM)가 받게 한다.
+    // 창을 닫고 싶은 앱은 DOM 에서 처리하지 않거나 명시적으로 window close API 를 호출하면 된다.
+    // (cmd+Shift+W 는 애초에 여기서 처리하지 않아 이미 DOM 으로 전달된다.)
 
     // Cmd+Q — 앱 종료. 일반적으로는 NSApp 메뉴 key equivalent가 먼저 매치되어
     // SujiQuitTarget.sujiQuit:이 발화 → 여긴 도달 X. 폴백으로 동일 quit() 호출.
@@ -143,19 +122,23 @@ fn onPreKeyEvent(
         return 1;
     }
 
-    // Cmd+[ — 뒤로
-    if (key == 219) { // VK_OEM_4 = [
+    // Cmd+[ — 뒤로. 단 히스토리가 있을 때만 소비한다. 히스토리가 없는 앱(예: 단일 화면
+    // SPA)에서는 가로채지 않고 아래 기본 처리로 흘려보낸다 → cmd+D 등 다른 Cmd 단축키와
+    // 똑같은 경로(is_keyboard_shortcut 마킹 후 return 0)로 renderer(DOM)에 전달되어 앱이
+    // 자체 단축키로 쓸 수 있다(앱 포커스 중에만 — onPreKeyEvent 스코프).
+    if (key == 219 and br.can_go_back.?(br) != 0) { // VK_OEM_4 = [
         br.go_back.?(br);
         return 1;
     }
 
-    // Cmd+] — 앞으로
-    if (key == 221) { // VK_OEM_6 = ]
+    // Cmd+] — 앞으로. 동일하게 히스토리가 있을 때만 소비하고, 없으면 DOM 으로 양보한다.
+    if (key == 221 and br.can_go_forward.?(br) != 0) { // VK_OEM_6 = ]
         br.go_forward.?(br);
         return 1;
     }
 
-    // 나머지 Cmd 단축키는 macOS Edit 메뉴에서 처리 (C/V/X/A/Z)
+    // 나머지 Cmd 단축키(히스토리 없는 cmd+[/], 그리고 C/V/X/A/Z)는 기본 처리로:
+    // is_keyboard_shortcut 마킹 후 return 0 → macOS Edit 메뉴 / DOM 으로 전달.
     if (is_keyboard_shortcut) |ks| ks.* = 1;
     return 0;
 }
