@@ -558,18 +558,12 @@ fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
 /// 하고 성공 시 ticket 을 stapler 로 부착(오프라인 Gatekeeper 통과).
 /// identity 서명(hardened runtime) 된 번들이어야 통과 — 호출자 책임.
 /// creds: keychain_profile 우선, 없으면 apple_id+team_id+password 필수.
-pub fn notarizeBundle(allocator: std.mem.Allocator, name: []const u8, creds: NotarizeCreds) !void {
-    const app = try std.fmt.allocPrint(allocator, "{s}.app", .{name});
-    defer allocator.free(app);
-    const zip = try std.fmt.allocPrint(allocator, "{s}.notarize.zip", .{name});
-    defer allocator.free(zip);
-
-    std.debug.print("[suji] notarize: zipping {s}...\n", .{app});
-    try runCmd(allocator, &.{ "ditto", "-c", "-k", "--keepParent", app, zip });
-
+/// `xcrun notarytool submit <path> --wait` — creds: keychain_profile 우선,
+/// 없으면 apple_id+team_id+password 필수. app(zip)·dmg 양쪽이 공유한다.
+fn notarytoolSubmit(allocator: std.mem.Allocator, path: []const u8, creds: NotarizeCreds) !void {
     var argv: std.ArrayList([]const u8) = .empty;
     defer argv.deinit(allocator);
-    try argv.appendSlice(allocator, &.{ "xcrun", "notarytool", "submit", zip, "--wait" });
+    try argv.appendSlice(allocator, &.{ "xcrun", "notarytool", "submit", path, "--wait" });
     if (creds.keychain_profile) |p| {
         try argv.appendSlice(allocator, &.{ "--keychain-profile", p });
     } else {
@@ -578,12 +572,38 @@ pub fn notarizeBundle(allocator: std.mem.Allocator, name: []const u8, creds: Not
         const pw = creds.password orelse return error.MissingNotarizeCredentials;
         try argv.appendSlice(allocator, &.{ "--apple-id", id, "--team-id", team, "--password", pw });
     }
-    std.debug.print("[suji] notarize: submitting (this may take minutes)...\n", .{});
+    std.debug.print("[suji] notarize: submitting {s} (this may take minutes)...\n", .{path});
     try runCmd(allocator, argv.items);
+}
+
+pub fn notarizeBundle(allocator: std.mem.Allocator, name: []const u8, creds: NotarizeCreds) !void {
+    const app = try std.fmt.allocPrint(allocator, "{s}.app", .{name});
+    defer allocator.free(app);
+    const zip = try std.fmt.allocPrint(allocator, "{s}.notarize.zip", .{name});
+    defer allocator.free(zip);
+
+    std.debug.print("[suji] notarize: zipping {s}...\n", .{app});
+    try runCmd(allocator, &.{ "ditto", "-c", "-k", "--keepParent", app, zip });
+    try notarytoolSubmit(allocator, zip, creds);
 
     std.debug.print("[suji] notarize: stapling ticket...\n", .{});
     try runCmd(allocator, &.{ "xcrun", "stapler", "staple", app });
     std.debug.print("[suji] notarized: {s}\n", .{app});
+}
+
+/// .dmg 공증 — 배포 컨테이너(dmg) 자체를 Developer ID 로 서명 → notarytool 제출(--wait)
+/// → staple. 앱만 공증하고 dmg 를 빠뜨리면 다른 맥에서 dmg 를 열 때 "확인되지 않은 개발자"
+/// 경고가 뜬다(앱은 정상이어도 컨테이너가 미공증이라). sign_identity 가 null(adhoc) 이면
+/// 서명 생략 — adhoc 은 공증 자체가 불가하므로 호출자가 identity 모드에서만 부른다.
+pub fn notarizeDmg(allocator: std.mem.Allocator, dmg: []const u8, sign_identity: ?[]const u8, creds: NotarizeCreds) !void {
+    if (sign_identity) |id| {
+        std.debug.print("[suji] notarize: signing dmg {s}...\n", .{dmg});
+        try runCmd(allocator, &.{ "codesign", "--force", "--sign", id, "--timestamp", dmg });
+    }
+    try notarytoolSubmit(allocator, dmg, creds);
+    std.debug.print("[suji] notarize: stapling dmg ticket...\n", .{});
+    try runCmd(allocator, &.{ "xcrun", "stapler", "staple", dmg });
+    std.debug.print("[suji] notarized: {s}\n", .{dmg});
 }
 
 /// 배포용 .dmg 생성 (압축 UDZO). 반환 경로는 caller 가 free.

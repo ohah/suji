@@ -505,13 +505,14 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                 backends_list.items,
                 plugins_list.items,
             );
+            const ncreds = bundle_macos.NotarizeCreds{
+                .apple_id = runtime.env("SUJI_NOTARIZE_APPLE_ID"),
+                .team_id = runtime.env("SUJI_NOTARIZE_TEAM_ID"),
+                .password = runtime.env("SUJI_NOTARIZE_PASSWORD"),
+                .keychain_profile = runtime.env("SUJI_NOTARIZE_KEYCHAIN_PROFILE"),
+            };
             if (want_notarize) {
-                bundle_macos.notarizeBundle(allocator, config.app.name, .{
-                    .apple_id = runtime.env("SUJI_NOTARIZE_APPLE_ID"),
-                    .team_id = runtime.env("SUJI_NOTARIZE_TEAM_ID"),
-                    .password = runtime.env("SUJI_NOTARIZE_PASSWORD"),
-                    .keychain_profile = runtime.env("SUJI_NOTARIZE_KEYCHAIN_PROFILE"),
-                }) catch |err| {
+                bundle_macos.notarizeBundle(allocator, config.app.name, ncreds) catch |err| {
                     std.debug.print("[suji] notarize failed: {s}\n", .{@errorName(err)});
                     return err;
                 };
@@ -521,7 +522,17 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     std.debug.print("[suji] dmg failed: {s}\n", .{@errorName(err)});
                     return err;
                 };
-                allocator.free(dmg);
+                defer allocator.free(dmg);
+                // dmg 도 공증·staple — 배포 컨테이너가 미공증이면 다른 맥에서 dmg 열 때
+                // Gatekeeper 경고가 뜬다(앱은 정상이어도). createDmg 가 notarize 뒤라 안의
+                // 앱은 이미 stapled 상태.
+                if (want_notarize) {
+                    const sign_id: ?[]const u8 = if (signing == .identity) identity else null;
+                    bundle_macos.notarizeDmg(allocator, dmg, sign_id, ncreds) catch |err| {
+                        std.debug.print("[suji] dmg notarize failed: {s}\n", .{@errorName(err)});
+                        return err;
+                    };
+                }
             }
         },
         .linux => {
