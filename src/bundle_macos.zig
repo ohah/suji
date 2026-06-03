@@ -403,6 +403,13 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
         break :blk exe_dir;
     };
 
+    // 0. CEF 프레임워크 내부 중첩 dylib(Libraries/*.dylib: libEGL/libGLESv2/libcef_sandbox/
+    //    libvk_swiftshader) 을 프레임워크 본체보다 먼저 서명한다 — codesign 은 inside-out 이라
+    //    바깥(프레임워크)부터 서명하면 안쪽 dylib 은 원래 CEF 서명이 남는다. 이걸 빠뜨리면
+    //    로컬 실행/adhoc 은 통과하지만 공증(notarization)이 "valid Developer ID 아님 + secure
+    //    timestamp 없음" 으로 reject 한다.
+    try codesignDylibsFlat(allocator, app_name, "Contents/Frameworks/Chromium Embedded Framework.framework/Libraries", opts);
+
     // 1. CEF 프레임워크 — entitlements 없이 (receiver process가 inherit).
     const fw = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/Chromium Embedded Framework.framework", .{app_name});
     defer allocator.free(fw);
@@ -456,6 +463,24 @@ fn codesignDylibsIn(allocator: std.mem.Allocator, app_name: []const u8, sub_path
             defer allocator.free(path);
             try codesignNoEntitlements(allocator, path, opts);
         }
+    }
+}
+
+/// `<app_name>/<sub_path>/*.dylib` 를 각각 서명(non-recursive, dylib 만). CEF 프레임워크의
+/// Libraries/ 처럼 한 디렉토리에 평평히 놓인 중첩 dylib 묶음을 inside-out 서명하기 위함.
+/// .json 등 비-Mach-O 는 .dylib 필터로 건너뛴다. 디렉토리 부재면 silent skip.
+fn codesignDylibsFlat(allocator: std.mem.Allocator, app_name: []const u8, sub_path: []const u8, opts: BundleOptions) !void {
+    const root = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ app_name, sub_path });
+    defer allocator.free(root);
+    var dir = Dir.cwd().openDir(runtime.io, root, .{ .iterate = true }) catch return;
+    defer dir.close(runtime.io);
+    var it = dir.iterate();
+    while (try it.next(runtime.io)) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".dylib")) continue;
+        const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, entry.name });
+        defer allocator.free(path);
+        try codesignNoEntitlements(allocator, path, opts);
     }
 }
 
