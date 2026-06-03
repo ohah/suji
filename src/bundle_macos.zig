@@ -235,6 +235,8 @@ pub fn buildInfoPlist(
         \\  <string>APPL</string>
         \\  <key>CFBundleInfoDictionaryVersion</key>
         \\  <string>6.0</string>
+        \\  <key>LSMinimumSystemVersion</key>
+        \\  <string>12.0</string>
         \\  <key>NSHighResolutionCapable</key>
         \\  <true/>
         \\  <key>NSSupportsAutomaticGraphicsSwitching</key>
