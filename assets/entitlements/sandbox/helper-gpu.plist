@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!--
-  GPU Helper — Metal/ANGLE 그래픽 + JIT shader compile. unsigned-executable-memory
-  + library-validation 비활성 필요 (Chromium GPU 모듈 dynamically loaded).
--->
 <plist version="1.0">
 <dict>
     <key>com.apple.security.app-sandbox</key>
