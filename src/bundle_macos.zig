@@ -96,8 +96,18 @@ pub fn createBundle(
     // 1. Info.plist 생성
     try writeInfoPlist(allocator, app_name, name, version, identifier, opts.deep_link_schemes);
 
-    // 2. 메인 바이너리 복사
-    try copyFile(allocator, exe_path, try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name }));
+    // 2. 메인 바이너리 복사 + 최소 macOS 배포 타겟 고정(vtool).
+    // Zig 는 네이티브 빌드 시 호스트 OS 버전을 minos(LC_BUILD_VERSION) 로 박아, 빌드 머신보다
+    // 낮은 macOS 에서 dyld 가 실행을 거부한다(예: 26.4 빌드 → 26.3 실행 불가). vtool 로 minos 를
+    // 12.0(CEF 프레임워크 floor)으로 낮춘다. 헬퍼는 이 바이너리의 hardlink 라(아래 4단계)
+    // 자동 반영되고, 서명(8단계)은 그 뒤라 서명도 깨지지 않는다.
+    const main_bin = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
+    defer allocator.free(main_bin);
+    // copyFile 은 dst 를 내부에서 free 하므로 dupe 를 넘기고, main_bin 은 vtool 용으로 보존.
+    try copyFile(allocator, exe_path, try allocator.dupe(u8, main_bin));
+    setMinMacosVersion(allocator, main_bin) catch |err| {
+        std.debug.print("[suji] warn: vtool min-os 설정 실패({s}) — minos 가 빌드 호스트 버전으로 남는다\n", .{@errorName(err)});
+    };
 
     // 3. CEF 프레임워크 복사 (옵션: locale 필터링 + binary strip)
     try copyCefFramework(allocator, app_name, opts);
@@ -540,6 +550,13 @@ fn copyFile(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !voi
     defer allocator.free(dst);
     try runCmd(allocator, &.{ "cp", src, dst });
     try runCmd(allocator, &.{ "chmod", "+x", dst });
+}
+
+/// vtool 로 Mach-O 의 LC_BUILD_VERSION minos 를 12.0 으로 재기록. Zig 네이티브 빌드가 호스트
+/// OS 버전을 minos 로 박는 걸 보정 — 빌드 머신보다 낮은 macOS 에서도 실행되게 한다. 반드시
+/// 코드서명 전에 호출해야 한다(서명 후면 서명이 무효화된다).
+fn setMinMacosVersion(allocator: std.mem.Allocator, path: []const u8) !void {
+    try runCmd(allocator, &.{ "xcrun", "vtool", "-set-build-version", "macos", "12.0", "12.0", "-replace", "-output", path, path });
 }
 
 fn copyDir(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !void {

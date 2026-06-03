@@ -91,6 +91,11 @@ pub fn buildByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []cons
             try runArgvWithEnv(allocator, argv, &.{
                 .{ "CC", "/usr/bin/clang" },
                 .{ "CGO_ENABLED", "1" },
+                // macOS dylib 최소 배포 타겟 floor 요청 — 안 정하면 빌드 호스트 영향이 생길 수
+                // 있다. Go 는 자체 최소 배포 타겟(현재 darwin/arm64 = 14.0)으로 clamp 하므로
+                // 그 이상으로는 못 내려가지만, Go floor 가 낮아지면 자동 반영된다.
+                // (darwin 전용 변수라 Linux 빌드에선 무시됨.)
+                .{ "MACOSX_DEPLOYMENT_TARGET", "12.0" },
             });
         }
     } else if (std.mem.eql(u8, lang, "node")) {
