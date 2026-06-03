@@ -297,8 +297,15 @@ pub fn build(b: *std.Build) void {
         root_module.linkSystemLibrary("ole32", .{});
     }
 
-    // libnode (Node.js 임베딩) — 선택적. OS별 dynamic lib 확장자가 달라
+    // libnode (Node.js 임베딩) — 선택적(weak-link). OS별 dynamic lib 확장자가 달라
     // (macOS: .dylib, Linux: .so, Windows: .dll) 각각 검사.
+    //
+    // 중요: libnode 는 weak 으로 링크한다(아래 linkSystemLibrary("node", .{ .weak = true })).
+    // suji 바이너리는 모든 앱이 공유하는데, 빌드 머신에 libnode 가 있다는 이유로 hard-link 하면
+    // node 를 안 쓰는 앱(예: Go 백엔드)도 @rpath/libnode.*.dylib 에 hard 의존하게 되어, 그 lib
+    // 가 없는 다른 맥에서 dyld 가 launch 시 크래시한다("Library not loaded: @rpath/libnode").
+    // weak-link 면 libnode 부재 시 심볼이 null 이 되고 launch 는 정상 — node 백엔드를 실제로
+    // 쓸 때만(그 코드 경로 호출 시) libnode 가 필요하다. 즉 "실제 쓰는 백엔드"만 hard 의존.
     //
     // Windows 는 mingw-w64 ABI libnode (MSYS2 mingw-w64-x86_64-nodejs 패키지)
     // 필요 — 공식 Node.js Windows 빌드는 MSVC ABI 라 zig clang(mingw/Itanium)
@@ -422,7 +429,7 @@ pub fn build(b: *std.Build) void {
 
             root_module.addObjectFile(.{ .cwd_relative = bridge_obj });
             root_module.addLibraryPath(.{ .cwd_relative = node_path });
-            root_module.linkSystemLibrary("node", .{});
+            root_module.linkSystemLibrary("node", .{ .weak = true });
             // `linkSystemLibrary("stdc++")` is treated by Zig as the target
             // C++ runtime and becomes libc++. Pass the actual GNU libstdc++
             // soname file instead of a library name so Zig does not rewrite it.
@@ -460,7 +467,7 @@ pub fn build(b: *std.Build) void {
                 .flags = &.{"-std=c++20"},
             });
             root_module.addLibraryPath(.{ .cwd_relative = node_path });
-            root_module.linkSystemLibrary("node", .{});
+            root_module.linkSystemLibrary("node", .{ .weak = true });
         }
     }
 
