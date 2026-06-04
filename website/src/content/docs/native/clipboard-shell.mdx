@@ -4,8 +4,7 @@ description: 시스템 클립보드 + 외부 핸들러 (Electron clipboard.* / s
 ---
 
 Electron `clipboard.*` / `shell.*` 호환 API. Frontend JS + Zig/Rust/Go/Node 백엔드 SDK
-모두 노출 — 모든 호출은 `__core__` 채널로 라우팅되어 `cef_clipboard.zig` / `cef_shell.zig`
-핸들러(+ 플랫폼별 `_{linux,windows}` sibling)로 도달.
+모두 노출된다.
 
 ## 플랫폼 지원
 
@@ -176,34 +175,7 @@ control char `\u00XX`. 백슬래시/따옴표 round-trip 정확. UTF-8 멀티바
 ## 한계
 
 - **텍스트/HTML 클립보드 플랫폼** — macOS(NSPasteboard), Linux(GTK clipboard text/html),
-  Windows(CF_UNICODETEXT + CF_HTML)는 native 동작. RTF/image/buffer 확장은 아직 macOS 중심.
-- **Clipboard 텍스트 16KB 한도** — `CLIPBOARD_MAX_TEXT` 상수 + `MAX_RESPONSE`. 더 긴 텍스트는 `false` 반환.
-- **URL/path 4KB 한도** — `SHELL_MAX_PATH` (NSString stack alloc 안전).
-- **Linux 확장 format 잔여** — Electron의 `clipboard.readImage` / `writeBuffer` 동등 Linux backend는 향후 작업.
-- **Linux shell beep 검증 경계** — GDK 호출 경로와 IPC 안정성은 E2E로 검증하지만,
-  실제 청각 출력은 runner 오디오 장치 상태에 따라 자동 검증하지 않는다.
-- **Windows shell visual/audio 검증 경계** — ShellExecute/explorer/MessageBeep 호출 경로는
-  unit/runtime smoke로 고정하지만, 실제 브라우저 창/Explorer 선택/청각 출력은 runner UI 상태에
-  따라 자동 검증하지 않는다.
-
-## E2E 검증
-
-- **Clipboard**: `tests/e2e/clipboard.test.ts` — 37 케이스 (write/read/clear, 길이 한도, JSON wire, Unicode/RTL/이모지/ZWJ, 200회 stress, Promise.all 동시, 인터리브, 다중 창)
-- **Linux/Windows Clipboard text/HTML**: `tests/e2e/clipboard-text-runtime.test.ts` — Linux Xvfb/GTK + Windows Win32 clipboard text/HTML write/read/has/formats/clear round-trip
-- **Linux Shell trashItem**: `tests/e2e/shell-trash-runtime.test.ts` — Xvfb/dbus에서 GIO trashItem file disappearance + missing path 검증
-- **Linux Shell openExternal**: `tests/e2e/shell-open-external-runtime.test.ts` — Xvfb/dbus에서 임시 `x-scheme-handler` 등록 후 GIO launch + marker file round-trip 검증
-- **Linux Shell openPath**: `tests/e2e/shell-open-path-runtime.test.ts` — Xvfb/dbus에서 임시 MIME type/default app 등록 후 GIO launch + handler가 받은 path 또는 `file://` URI marker round-trip 검증
-- **Linux Shell showItemInFolder**: `tests/e2e/shell-show-item-runtime.test.ts` — Xvfb/dbus에서 fake FileManager1 서비스 등록 후 `ShowItems(file://...)` round-trip 검증
-- **Linux Shell beep**: `tests/e2e/shell-beep-runtime.test.ts` — Xvfb에서 GDK beep IPC 반복 호출 안정성 검증
-- **Shell**: `tests/e2e/shell.test.ts` — 32 케이스 (invalid input, valid path/URL RUN_DESTRUCTIVE, scheme 사전 차단, fixtures with spaces/한글/symlink/hidden, 100회 stress)
-
-```bash
-bash tests/e2e/run-clipboard.sh
-bash tests/e2e/run-clipboard-text-runtime.sh
-bash tests/e2e/run-shell-trash-runtime.sh
-bash tests/e2e/run-shell-open-external-runtime.sh
-bash tests/e2e/run-shell-open-path-runtime.sh
-bash tests/e2e/run-shell-show-item-runtime.sh
-bash tests/e2e/run-shell-beep-runtime.sh
-RUN_DESTRUCTIVE=1 bash tests/e2e/run-shell.sh   # 브라우저 탭 + Finder 윈도우 + beep 발생
-```
+  Windows(CF_UNICODETEXT + CF_HTML)는 native 동작. RTF/image/buffer 확장은 아직 macOS 중심이며, 미지원 format은 `false`를 반환한다.
+- **Clipboard 텍스트 16KB 한도** — 텍스트가 16KB를 초과하면 `false`를 반환한다.
+- **URL/path 4KB 한도** — URL 및 path는 4KB를 초과할 수 없다.
+- **Linux 확장 format** — `clipboard.readImage` / `writeBuffer` 동등 기능은 향후 지원 예정이다.

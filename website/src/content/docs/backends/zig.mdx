@@ -66,7 +66,7 @@ pub const Response = struct {
 
 `req.ok(.{...})` / `req.err(...)`로만 생성. 직접 구성할 일 없음.
 
-### `InvokeEvent` (Phase 2.5)
+### `InvokeEvent`
 
 ```zig
 pub const InvokeEvent = struct {
@@ -86,7 +86,7 @@ fn h1(req: Request) Response { ... }                    // 기본
 fn h2(req: Request, event: InvokeEvent) Response { ... } // 창 식별 필요 시
 ```
 
-1-arity는 comptime wrapper로 2-arity에 adapt되어 내부 저장은 단일 타입. 호환성 유지.
+1-arity와 2-arity 모두 허용되며 호환성이 유지된다.
 
 ### `Event` (Window listener용)
 
@@ -129,9 +129,9 @@ suji.send("theme-changed", "{\"color\":\"dark\"}");
 
 모든 창의 `__suji__.on("theme-changed", ...)` 리스너에 JSON 파싱되어 전달.
 
-## `windows` — 창 조작 (Phase 4-A)
+## `windows` — 창 조작
 
-Frontend `@suji/api`의 `windows.*`와 같은 cmd JSON을 코어로 보낸다 (dlopen 환경 호환을 위해 in-process WindowManager 직접 접근 X — IPC 경유). 응답은 `?[]const u8` JSON 문자열.
+Frontend `@suji/api`의 `windows.*`와 같은 cmd JSON을 코어로 보낸다. 응답은 `?[]const u8` JSON 문자열.
 
 ```zig
 // 새 창 (단축)
@@ -151,32 +151,32 @@ _ = suji.windows.setBounds(2, .{ .x = 100, .y = 100, .width = 1200, .height = 80
 _ = suji.windows.getURL(2);     // {ok, url} 또는 {ok:false, url:null}
 _ = suji.windows.isLoading(2);  // {ok, loading}
 
-// Phase 4-B 줌
+// 줌
 _ = suji.windows.setZoomLevel(2, 1.5);   // logarithmic
 _ = suji.windows.setZoomFactor(2, 1.2);  // linear (factor=pow(1.2, level))
 _ = suji.windows.getZoomLevel(2);
 _ = suji.windows.getZoomFactor(2);
 
-// Phase 4-C DevTools
+// DevTools
 _ = suji.windows.openDevTools(2);
 _ = suji.windows.toggleDevTools(2);
 _ = suji.windows.isDevToolsOpened(2);
 
-// Phase 4-E 편집/검색
+// 편집/검색
 _ = suji.windows.undo(2);
 _ = suji.windows.copy(2);
 _ = suji.windows.findInPage(2, "hello", .{ .forward = true, .match_case = false, .find_next = false });
 _ = suji.windows.stopFindInPage(2, /* clear_selection */ true);
 
-// Phase 4-D PDF 인쇄 (콜백 async — 결과는 `window:pdf-print-finished` 이벤트)
+// PDF 인쇄 (콜백 async — 결과는 `window:pdf-print-finished` 이벤트)
 _ = suji.windows.printToPDF(2, "/tmp/report.pdf");
 ```
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape (`"` `\\` 이스케이프 + control char drop).
 
-## `fs` — 파일 시스템 (Phase 5-F)
+## `fs` — 파일 시스템
 
-코어 `std.fs` wrapper를 `__core__` IPC로 호출한다. 응답은 `?[]const u8` JSON 문자열.
+응답은 `?[]const u8` JSON 문자열.
 
 ```zig
 _ = suji.fs.mkdir("/tmp/suji", true);
@@ -186,4 +186,4 @@ _ = suji.fs.stat("/tmp/suji/hello.txt");
 _ = suji.fs.readdir("/tmp/suji");
 ```
 
-현재 텍스트 파일 중심 API이며 대용량/바이너리 스트리밍은 후속 범위다.
+현재 텍스트 파일 중심 API이며 대용량/바이너리 스트리밍은 지원하지 않는다.

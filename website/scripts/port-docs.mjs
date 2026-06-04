@@ -1,8 +1,11 @@
-// documents/*.mdx -> website/src/content/docs/<group>/<slug>.mdx 재생성기.
+// documents/*.mdx -> website/src/content/docs/<group>/<slug>.mdx 1회성 임포터.
 //
-// 저장소 documents/ 의 상세 API 문서를 Starlight 사이트 IA 로 포팅한다.
-// 단일 출처는 documents/ — 본문 수정은 거기서 하고 `bun run port-docs` 로
-// 재생성한다(이 디렉터리의 생성 페이지는 직접 편집하지 말 것).
+// ⚠️ 주의: 이 스크립트는 저장소 documents/ 의 상세 API 문서를 사이트 IA 로
+// 옮긴 *초기 임포트* 도구다. 임포트 이후 사이트 페이지는 사용자 관점으로
+// 직접 다듬어졌으므로(내부 Phase/커밋/테스트 메타 제거 등) website 가
+// 공개 문서의 정식 출처다. 이 스크립트를 다시 실행하면 그 편집이 전부
+// 덮어쓰여지므로 재실행하지 말 것(documents/ 는 내부 엔지니어링 참조용).
+// build 의 prebuild 에서도 제거됨 — gen-llms 만 자동 실행된다.
 //
 // 변환:
 //   1) 중복 H1 제거 (Starlight 가 frontmatter title 을 H1 으로 렌더)

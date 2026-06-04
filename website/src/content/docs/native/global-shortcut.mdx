@@ -1,5 +1,5 @@
 ---
-title: Global Shortcut (Phase 5-E)
+title: Global Shortcut
 description: 시스템 전역 단축키 — macOS Carbon Hot Key + Linux X11 XGrabKey + Windows RegisterHotKey, accelerator 문자열 → trigger 이벤트
 ---
 
@@ -135,7 +135,7 @@ suji.On("globalShortcut:trigger", func(data string) { ... })
 
 ## 한계
 
-- Linux는 X11/XWayland 경로만 지원한다. compositor별 Wayland global shortcut portal은 후속 범위다.
+- Linux는 X11/XWayland 경로만 지원한다. 순수 Wayland compositor의 global shortcut portal은 아직 지원하지 않는다.
 - 동시 등록 한도 64개 (`SUJI_HOTKEY_MAX`).
 - accelerator/click 문자열 한도 각 128 byte.
 - 동일 accelerator는 한 번만 등록 가능 — 두 번째 register는 `error:"already_registered"`.

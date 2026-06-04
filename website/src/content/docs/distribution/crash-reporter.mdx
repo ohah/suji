@@ -1,11 +1,12 @@
 ---
 title: crashReporter
-description: CEF Crashpad/Breakpad 기반 크래시 리포터 API
+description: Crashpad/Breakpad 기반 크래시 리포터 API
 ---
 
-Electron `crashReporter`에 대응하는 1차 API. 런타임 API는 `extra` parameter와
-업로드 플래그 상태를 제공하고, CEF Crashpad/Breakpad가 실제로 첫 프로세스부터 켜지려면
-`suji.json`의 `app.crashReporter` 설정으로 시작 전에 `crash_reporter.cfg`를 생성해야 한다.
+Electron `crashReporter`에 대응하는 API. 런타임 API는 `extra` parameter와
+업로드 플래그 상태를 제공한다. 크래시 리포터가 첫 프로세스부터 활성화되려면
+`suji.json`의 `app.crashReporter` 설정이 필요하다 — 이 설정이 앱 시작 전에
+`crash_reporter.cfg`를 생성한다.
 
 ## suji.json
 
@@ -53,13 +54,12 @@ await crashReporter.removeExtraParameter("mode");
 | `getUploadedReports()` | 로컬 Crashpad DB의 `completed/*.dmp` report 목록 |
 | `getLastCrashReport()` | 로컬 Crashpad DB의 최신 completed/pending report 또는 `null` |
 
-## 정직 경계
+## 참고 사항
 
-- Crashpad DB 조회는 `root_cache_path/Crashpad` 기준으로 로컬 dump 파일을 읽는다.
-  macOS/Linux는 CEF `root_cache_path`, Windows는 CEF `AppName` 규칙에 따라
-  `%LOCALAPPDATA%/<AppName>/User Data/Crashpad`를 사용한다.
-- CI는 fake `.dmp` 파일로 DB 조회 경로를 검증한다. 실제 crash 유발과 upload 서버
-  round-trip은 아직 자동화하지 않는다. 대신 `submitURL_required`, invalid crash key,
-  oversized value 같은 런타임 validation은 E2E로 고정한다.
-- `extra` 값은 CEF crash reporter가 켜져 있을 때 `cef_set_crash_key_value`로도 전달된다.
-- crash key 선언은 시작 전 cfg의 `[CrashKeys]`에 있어야 CEF가 dump에 안정적으로 포함한다.
+- Crashpad DB 조회는 로컬 dump 파일을 읽는다.
+  macOS/Linux는 앱 캐시 경로 아래 `Crashpad/`, Windows는
+  `%LOCALAPPDATA%/&lt;AppName&gt;/User Data/Crashpad`를 사용한다.
+- 실제 크래시 유발과 업로드 서버 round-trip은 자동으로 검증되지 않는다.
+  `submitURL_required`, 잘못된 crash key, 초과 크기 value 같은 런타임 validation은 동작한다.
+- `extra` 값은 crash reporter가 활성화된 상태에서 crash key로도 전달된다.
+- crash key 선언은 시작 전 cfg의 `[CrashKeys]`에 있어야 dump에 안정적으로 포함된다.

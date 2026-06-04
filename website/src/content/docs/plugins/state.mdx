@@ -3,13 +3,12 @@ title: state 플러그인
 description: KV 스토어 + 디스크 영속성 + scope (global / window / session)
 ---
 
-JSON 파일 영속성을 가진 KV 스토어. 첫 Suji 플러그인 사례 — Phase 2.5의 `InvokeEvent`/
-`sendTo` 데이터 인프라가 어떤 식으로 활용되는지 보여줌.
+JSON 파일 영속성을 가진 KV 스토어. scope 별로 키 공간이 격리되며, 변경 사항을
+`watch`로 실시간 구독할 수 있다.
 
 ## 설치
 
-multi-backend 또는 zig-backend 예제에서 자동으로 로드됨.
-직접 사용 시 `suji.json`에 등록:
+`suji.json`에 등록:
 
 ```json
 {
@@ -138,7 +137,7 @@ keys := state.KeysIn("window:1")
 }
 ```
 
-저장 위치 (앱별로 분리되지 않음 — V1 한계, app name config 통합 후 분리 예정):
+저장 위치:
 
 | OS | 경로 |
 |---|---|

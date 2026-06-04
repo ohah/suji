@@ -1,5 +1,5 @@
 ---
-title: Notification (Phase 5-C)
+title: Notification
 description: 시스템 알림 (Electron Notification) — macOS UNUserNotificationCenter + Linux D-Bus + Windows Shell_NotifyIcon balloon, 5 진입점 노출
 ---
 
@@ -33,16 +33,16 @@ OS가 balloon을 toast UI처럼 렌더링하지만 action button/reply/custom im
 **dev 모드에서**:
 - `isSupported()` → false
 - `show()` → `success: false` (notification 안 뜸)
-- E2E는 IPC wiring + 응답 형식만 검증. 실제 알림은 `.app` 번들 manual 검증.
+- 실제 알림 표시는 `.app` 번들로 빌드한 후 확인한다.
 
 ## v1 한계
 
 | 미지원 | 비고 |
 |---|---|
-| **Actions / 버튼** | 코어 `notification` v1에는 없음. 공식 `notification-rich` plugin은 macOS/Linux action click 라우팅을 지원하고, Windows click callback은 WinRT activator 등록 후속. |
-| **Reply input** | macOS/Windows native reply는 v2 |
-| **커스텀 icon** | macOS는 앱 아이콘만 자동, Windows는 backing tray icon 기본값. attachment/iconPath는 v2 |
-| **커스텀 sound** | macOS default/silent. Linux `silent`는 `suppress-sound` hint, Windows는 `NIIF_NOSOUND` |
+| **Actions / 버튼** | 코어 `notification`에는 없음. 공식 `notification-rich` 플러그인은 macOS/Linux action click 라우팅을 지원한다. Windows에서는 action 버튼 클릭 콜백이 아직 지원되지 않는다. |
+| **Reply input** | macOS/Windows native reply input은 지원하지 않는다. |
+| **커스텀 icon** | macOS는 앱 아이콘만 자동 표시되고, iconPath/attachment는 지원하지 않는다. |
+| **커스텀 sound** | `silent: true`로 소리를 끌 수 있다. 커스텀 사운드 파일은 지원하지 않는다. |
 
 ## API
 
@@ -120,57 +120,18 @@ await notification.close(notificationId);
 
 ## 동작 정밀
 
-### notification.m (block completion handler 인프라 재사용)
-- `dialog.m`처럼 nested NSApp event loop 패턴으로 `requestAuthorizationWithOptions:completionHandler:`
-  와 `addNotificationRequest:withCompletionHandler:`를 동기화.
-- `SujiNotificationDelegate` ObjC 클래스 — `UNUserNotificationCenterDelegate` 구현:
-  - `willPresentNotification:` — foreground 상태에서도 banner 표시. `silent: true`면 sound option을 요청하지 않음
-  - `didReceiveNotificationResponse:` — 클릭 시 NSString identifier → C 콜백 → Zig → EventBus emit
-- Bundle ID 검사 (`mainBundle.bundleIdentifier`)로 dev 모드에서 안전한 stub 동작.
+### macOS
 
-### notificationId 전략
-- main.zig가 단조증가 카운터로 `suji-notif-{N}` 식별자 발급 (캐릭터 안전)
-- caller가 `close(notificationId)`로 명시 제거 가능
-- pending(미발화) + delivered(이미 표시) 둘 다 제거
+`UNUserNotificationCenter`를 사용한다. `silent: true`면 소리 없이 표시된다. foreground 상태에서도 banner를 표시한다. Bundle ID가 없으면(dev 모드) `isSupported()`가 false를 반환하고 알림이 뜨지 않는다. `close()`는 pending 및 delivered 알림 모두 제거한다.
 
-### Click 라우팅
-1. 사용자 알림 클릭 → macOS가 `didReceiveNotificationResponse:` 호출
-2. delegate가 `g_notification_click_callback` C 함수 포인터 호출 (notificationId C string 전달)
-3. `cef_notification.zig`의 `notificationClickC`가 `g_notification_emit_handler?` 호출
-4. main.zig의 `notificationEmitHandler`가 `notification:click {notificationId}` EventBus emit
-5. JS/SDK 리스너 수신
+### Linux
 
-### Linux D-Bus backend
+`org.freedesktop.Notifications` D-Bus 서비스가 있을 때 `Notify` 호출로 알림을 표시한다. freedesktop spec에는 권한 프롬프트가 없어 `requestPermission()`은 서비스 도달 가능 여부를 반환한다. `silent: true`면 `suppress-sound` hint를 전달한다. action button이 필요하면 공식 `notification-rich` 플러그인을 사용한다.
 
-- `isSupported()` / `requestPermission()`은 `org.freedesktop.Notifications.GetServerInformation`
-  호출 성공 여부를 반환. freedesktop notification spec에는 권한 프롬프트가 없다.
-- `show()`는 `Notify("Suji", 0, "", title, body, [], hints, -1)` 호출 후 반환된 D-Bus
-  `uint32` id를 Suji `notificationId`와 매핑한다. `silent:true`면
-  `hints["suppress-sound"] = true`를 전달한다.
-- `close()`는 Suji `notificationId`로 저장된 D-Bus id를 찾아 `CloseNotification(uint32)` 호출.
-- Linux click/action signal 라우팅, custom icon, reply, action button은 코어 v1 범위 밖.
-  action button이 필요하면 공식 `notification-rich` plugin의 Freedesktop
-  Notifications D-Bus action 경로를 사용한다.
+### Windows
 
-### Windows Shell_NotifyIcon backend
+Shell_NotifyIcon balloon 경로를 사용한다. Windows 10+에서는 OS가 balloon을 toast UI처럼 렌더링한다. `silent: true`면 소리 없이 표시된다. 사용자가 balloon을 클릭하면 `notification:click` 이벤트가 발화된다. action button/reply/custom image는 지원하지 않는다.
 
-- `isSupported()` / `requestPermission()`은 true를 반환한다. 별도 권한 프롬프트가 없다.
-- `show()`는 notification 전용 tray icon을 만들고 `Shell_NotifyIconW(NIM_MODIFY)` +
-  `NIF_INFO`로 title/body balloon을 표시한다. `silent:true`면 `NIIF_NOSOUND`를 사용한다.
-- Suji `notificationId` ↔ backing tray id를 매핑한다. `close()`는 해당 tray icon을
-  `NIM_DELETE`로 제거한다.
-- 사용자가 balloon을 클릭하면 Windows pump thread가 `NIN_BALLOONUSERCLICK`을 받고
-  `notification:click {notificationId}`를 emit한다.
-- WinRT toast XML, AppUserModelID activator, action button, reply input은 아직 v1 범위 밖이다.
+## 알림
 
-## E2E 한계
-
-macOS OS 알림 표시 자체는 puppeteer로 검증 불가 (UNUserNotificationCenter는 process 외부).
-자동화 범위:
-1. **회귀 가드** (`tests/cef_ipc_test.zig`) — 정적 ObjC selector / D-Bus method / cmd / SDK 노출.
-2. **응답 형식 검증** (`tests/e2e/notification.test.ts`) — IPC 응답 shape (notificationId, success, granted, supported).
-3. **Linux D-Bus runtime E2E** (`tests/e2e/notification-linux-runtime.test.ts`) —
-   fake `org.freedesktop.Notifications` daemon으로 `Notify`/`CloseNotification` 왕복 검증.
-4. **Windows runtime 경로** — Win32 Shell_NotifyIcon source/command wiring과 Windows 빌드로
-   regression을 고정한다. 실제 toast/balloon 표시와 클릭은 runner UI 한계로 수동 검증 영역이다.
-5. **macOS 수동 검증 필수** — `.app` 번들 후 권한 grant 후 알림 시각/사운드 확인.
+macOS에서 알림의 실제 표시와 클릭 동작은 `.app` 번들로 빌드한 뒤 권한을 허용한 상태에서만 확인할 수 있다.

@@ -3,7 +3,7 @@ title: Rust 백엔드 SDK
 description: suji::handle 매크로 + invoke / send / on
 ---
 
-`suji` crate (crates/suji-rs). cdylib으로 빌드되어 main suji 프로세스에 `dlopen` 됨.
+`suji` crate. cdylib으로 빌드되어 main suji 프로세스에 `dlopen` 됨.
 
 ## Cargo.toml
 
@@ -71,10 +71,9 @@ suji::PLATFORM_LINUX
 suji::PLATFORM_WINDOWS
 ```
 
-## InvokeEvent (Phase 2.5)
+## InvokeEvent
 
-`#[suji::handle]` 매크로가 파라미터 타입이 `InvokeEvent`인 걸 감지하면 wire의
-`__window`/`__window_name`에서 자동 파생해서 주입. 일반 필드는 기존처럼 이름으로 JSON 추출.
+`#[suji::handle]` 매크로가 파라미터 타입이 `InvokeEvent`인 걸 감지하면 자동 파생해서 주입. 일반 필드는 기존처럼 이름으로 JSON 추출.
 
 ```rust
 use suji::prelude::*;
@@ -121,7 +120,7 @@ let dts = SujiHandlers::new()
 `.d.ts` 파일이다. `export_for("@suji/node")`를 쓰면 Node SDK module augmentation도
 같은 방식으로 만들 수 있다.
 
-## `send_to` — 특정 창에만 이벤트 전달 (Phase 2.5)
+## `send_to` — 특정 창에만 이벤트 전달
 
 ```rust
 suji::send_to(event.window.id, "saved", &json!({ "ok": true }).to_string());
@@ -129,9 +128,9 @@ suji::send_to(event.window.id, "saved", &json!({ "ok": true }).to_string());
 
 Electron `webContents.send` 대응. 대상 창이 닫혔거나 core 주입 전이면 silent no-op.
 
-## `windows` — 창 조작 (Phase 4-A)
+## `windows` — 창 조작
 
-Frontend `@suji/api`의 `windows.*` 와 같은 cmd JSON을 코어로 보낸다 (IPC 경유, dlopen 호환). 응답은 `Option<String>` JSON.
+Frontend `@suji/api`의 `windows.*`와 같은 cmd JSON을 코어로 보낸다. 응답은 `Option<String>` JSON.
 
 ```rust
 use suji::windows;
@@ -153,27 +152,27 @@ let _ = windows::set_bounds(2, windows::SetBoundsArgs {
 let _ = windows::get_url(2);     // {ok, url} 또는 {ok:false, url:null}
 let _ = windows::is_loading(2);  // {ok, loading}
 
-// Phase 4-B 줌
+// 줌
 let _ = windows::set_zoom_level(2, 1.5);
 let _ = windows::set_zoom_factor(2, 1.2);
 let _ = windows::get_zoom_level(2);
 let _ = windows::get_zoom_factor(2);
 
-// Phase 4-C DevTools
+// DevTools
 let _ = windows::open_dev_tools(2);
 let _ = windows::toggle_dev_tools(2);
 let _ = windows::is_dev_tools_opened(2);
 
-// Phase 4-E 편집/검색
+// 편집/검색
 let _ = windows::undo(2);
 let _ = windows::copy(2);
 let _ = windows::find_in_page(2, "hello", windows::FindOptions { forward: true, match_case: false, find_next: false });
 let _ = windows::stop_find_in_page(2, /* clear_selection */ true);
 
-// Phase 4-D PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
+// PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
 let _ = windows::print_to_pdf(2, "/tmp/report.pdf");
 
-// Phase 17-B WebContentsView
+// WebContentsView
 let host_id = 2;
 let view = windows::create_view(windows::CreateViewOptions {
     host_id,
@@ -191,7 +190,7 @@ let _ = windows::destroy_view(3);
 
 `title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.
 
-## `fs` — 파일 시스템 (Phase 5-F)
+## `fs` — 파일 시스템
 
 ```rust
 use suji::fs;
@@ -203,4 +202,4 @@ let _ = fs::stat("/tmp/suji/hello.txt");
 let _ = fs::readdir("/tmp/suji");
 ```
 
-모든 함수는 `invoke("__core__", ...)` 경유 raw JSON `Option<String>`을 반환한다.
+모든 함수는 raw JSON `Option<String>`을 반환한다.

@@ -5,7 +5,6 @@ description: libnode 임베딩 + @suji/node 패키지
 
 `@suji/node` npm 패키지. libnode를 suji 프로세스에 **임베딩**해서 실행 —
 별도 프로세스 없음. `~/.suji/node/24.14.1/libnode.dylib` 필요.
-직접 실행 CLI(`suji run main.js`)는 현재 macOS libnode 경로에서 CI 검증한다.
 
 ## suji.json
 
@@ -140,10 +139,9 @@ suji run backends/node
 headless-safe API는 동작한다. 창/렌더러가 필요한 API는 일반 `suji dev`/`suji run`
 앱 모드에서 사용한다.
 
-## InvokeEvent (Phase 2.5)
+## InvokeEvent
 
-handler가 2-arity `(data, event) => ...`이면 wire의 `__window`/`__window_name`에서
-파생된 `InvokeEvent`를 두 번째 인자로 받는다. 1-arity는 기존처럼 동작 — 선택적 확장.
+handler가 2-arity `(data, event) => ...`이면 `InvokeEvent`를 두 번째 인자로 받는다. 1-arity는 기존처럼 동작 — 선택적 확장.
 
 ```js
 const { handle } = require('@suji/node');
@@ -169,7 +167,7 @@ handle('save', (data: { text: string }, event: InvokeEvent) => ({
 
 분기 기준은 `handler.length` — arrow/함수 선언 양쪽 모두 인자 수가 JS runtime에 노출되므로 자동 적용.
 
-## `sendTo` — 특정 창에만 이벤트 전달 (Phase 2.5)
+## `sendTo` — 특정 창에만 이벤트 전달
 
 ```js
 const { sendTo } = require('@suji/node');
@@ -182,9 +180,9 @@ handle('save', (data, event) => {
 
 Electron `webContents.send` 대응. 대상이 닫혔거나 bridge가 구버전이면 silent no-op.
 
-## `windows` — 창 조작 (Phase 4-A)
+## `windows` — 창 조작
 
-Frontend `@suji/api`의 `windows.*`와 동일한 cmd JSON을 코어로 보낸다 (IPC 경유). **유일하게 typed response** (Zig/Rust/Go는 raw JSON 문자열).
+Frontend `@suji/api`의 `windows.*`와 동일한 cmd JSON을 코어로 보낸다. **유일하게 typed response** (Zig/Rust/Go는 raw JSON 문자열).
 
 ```js
 const { windows } = require('@suji/node');
@@ -209,27 +207,27 @@ await windows.setBounds(2, { x: 100, y: 100, width: 1200, height: 800 });
 const u = await windows.getURL(2);     // { ok, url } 또는 { ok:false, url:null }
 const l = await windows.isLoading(2);  // { ok, loading }
 
-// Phase 4-B 줌
+// 줌
 await windows.setZoomLevel(2, 1.5);
 await windows.setZoomFactor(2, 1.2);
 await windows.getZoomLevel(2);   // { ok, level }
 await windows.getZoomFactor(2);  // { ok, factor }
 
-// Phase 4-C DevTools
+// DevTools
 await windows.openDevTools(2);
 await windows.toggleDevTools(2);
 await windows.isDevToolsOpened(2);   // { ok, opened }
 
-// Phase 4-E 편집/검색
+// 편집/검색
 await windows.undo(2);
 await windows.copy(2);
 await windows.findInPage(2, 'hello', { forward: true, matchCase: false, findNext: false });
 await windows.stopFindInPage(2, /* clearSelection */ true);
 
-// Phase 4-D PDF 인쇄 — SDK가 `window:pdf-print-finished` 이벤트 path 매칭으로 Promise resolve
+// PDF 인쇄 (완료 시 `window:pdf-print-finished` 이벤트로 Promise resolve)
 const { success } = await windows.printToPDF(2, '/tmp/report.pdf');
 
-// Phase 17-B WebContentsView
+// WebContentsView
 const { viewId } = await windows.createView({
   hostId: 2,
   name: 'sidebar',
@@ -249,7 +247,7 @@ await windows.destroyView(viewId);
 
 핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).
 
-## `fs` — 파일 시스템 (Phase 5-F)
+## `fs` — 파일 시스템
 
 ```ts
 import { fs } from '@suji/node';

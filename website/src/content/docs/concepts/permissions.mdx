@@ -41,8 +41,6 @@ opt-in** — 키 부재 시 레거시 무제한(비파괴), 존재 시 enforce(`
 
 ## 모바일 (Tauri 패리티)
 
-게이트 로직은 Zig 코어(`util.*`) 단일 출처이며 C ABI(`suji_core_set_permissions`
-/`suji_core_permission_check`)로 노출 — iOS Swift / Android Kotlin·JNI 호스트가
-네이티브 액션 직전 호출(Swift/Kotlin 보안 로직 0줄). 모바일은 uniform opt-in,
-OS 앱 샌드박스 위 defense-in-depth. iOS 실 시뮬레이터 + Android 실 에뮬레이터
-기능 e2e 양쪽 검증 완료.
+모바일에서도 데스크톱과 같은 권한 게이트가 적용됩니다 — iOS·Android 호스트가
+네이티브 액션 직전에 정책을 확인합니다. 키가 없으면 허용, 있으면 enforce 하는
+uniform opt-in 방식으로, OS 앱 샌드박스 위에 더해지는 방어선입니다.

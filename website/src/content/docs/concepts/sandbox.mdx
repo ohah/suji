@@ -64,8 +64,8 @@ codesign --display --entitlements - "My App.app/Contents/Frameworks/My App Helpe
 # Apple 권장: Apple Configurator 또는 Xcode Console 로그.
 ```
 
-## CI 자동 빌드 (후속)
+## 프로덕션 배포 시 서명
 
-GitHub Actions에서 Apple Developer ID로 sign + notarize → DMG 패키징은 별도 워크플로
-([PLAN.md 우선순위 9 "앱 패키징"](https://github.com/ohah/suji/blob/main/docs/PLAN.md)). 현재 `suji build`는 ad-hoc 서명
-(`-`)만. 프로덕션 배포 시 `codesign --sign "Developer ID Application: ..."` 분기 필요.
+현재 `suji build`는 ad-hoc 서명(`-`)만 적용한다. Mac App Store 또는 Gatekeeper 통과를 위한
+프로덕션 배포 시에는 `codesign --sign "Developer ID Application: ..."` 으로 재서명하고
+notarize + DMG 패키징 단계를 별도로 수행해야 한다.

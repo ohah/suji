@@ -53,5 +53,5 @@ declare module '@suji/api' {
 동작: 백엔드 빌드 → dlopen → `backend_dump_schema`(comptime `typeToTs`).
 :::note
 Zig 백엔드만 자동 추출. Rust 는 `specta`(`#[derive(suji::Type)]`) 수동,
-Go·Node 는 수동 augment — 런타임 타입 메타가 없어 자동 추출 불가(정직한 한계).
+Go·Node 는 수동 augment — 런타임 타입 메타가 없어 자동 추출은 지원하지 않습니다.
 :::

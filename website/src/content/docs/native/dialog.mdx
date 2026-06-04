@@ -15,7 +15,7 @@ API와 호환되는 응답 형식.
 | `showOpenDialog` | ✓ NSOpenPanel | ✓ GTK FileChooserDialog | ✓ GetOpenFileNameW / IFileOpenDialog(folder) |
 | `showSaveDialog` | ✓ NSSavePanel | ✓ GTK FileChooserDialog | ✓ GetSaveFileNameW |
 
-Linux는 GTK3 `GtkMessageDialog` / `GtkFileChooserDialog` 경로를 사용한다.
+Linux는 GTK3 `GtkMessageDialog` / `GtkFileChooserDialog`를 사용한다.
 Windows는 Win32 native dialog를 사용한다. 단, parent window에 attach되는 sheet modal은
 macOS 전용이며 Linux/Windows dialog는 free-floating modal로 뜬다.
 
@@ -40,8 +40,7 @@ const r = await dialog.showMessageBox(windowId, {
 **다른 창 입력은 가능** — sheet은 attach된 부모 창만 차단. macOS HIG 표준 UX.
 Linux/Windows에서는 `windowId` 인자를 받아도 native sheet로 attach하지 않고 일반 dialog 경로를 사용한다.
 
-내부 구현: `src/platform/dialog.m`의 ObjC `^block` completion handler + nested
-NSApp event loop로 동기 대기. CEF 메시지 루프와 호환.
+macOS는 ObjC block completion handler와 nested NSApp event loop로 동기 대기해 창 입력을 차단하지 않는다.
 
 ### Free-floating
 
@@ -55,24 +54,22 @@ const r = await dialog.showMessageBox({ message: "..." });
 
 ## API
 
-모든 함수는 Electron 두-인자 오버로드 — 첫 인자 `windowId: number`면 macOS에서는
-sheet, Windows/Linux에서는 native 기본/free-floating 경로를 사용한다. 옵션 객체만 넘기면
-free-floating.
+모든 함수는 Electron 두-인자 오버로드를 지원한다. 첫 인자로 `windowId: number`를 넘기면 macOS에서는 sheet, Windows/Linux에서는 free-floating 경로를 사용한다. 옵션 객체만 넘기면 free-floating.
 
 ```ts
 import { dialog } from '@suji/api';
 
 // Async (권장)
 dialog.showMessageBox(options): Promise<{ response, checkboxChecked }>;
-dialog.showMessageBox(windowId, options): Promise<...>;            // macOS sheet, Windows free-floating
+dialog.showMessageBox(windowId, options): Promise<...>;            // macOS sheet
 
 dialog.showErrorBox(title: string, content: string): Promise<void>;
 
 dialog.showOpenDialog(options?): Promise<{ canceled, filePaths }>;
-dialog.showOpenDialog(windowId, options?): Promise<...>;           // macOS sheet, Windows free-floating
+dialog.showOpenDialog(windowId, options?): Promise<...>;           // macOS sheet
 
 dialog.showSaveDialog(options?): Promise<{ canceled, filePath }>;
-dialog.showSaveDialog(windowId, options?): Promise<...>;           // macOS sheet, Windows free-floating
+dialog.showSaveDialog(windowId, options?): Promise<...>;           // macOS sheet
 
 // Sync 변종 — 응답 shape만 다름 (raw 값 반환). 두-인자 오버로드 동일 지원.
 dialog.showMessageBoxSync(options): Promise<number>;
@@ -126,9 +123,7 @@ fallback path는 Win32 표준 버튼 조합(`OK`, `OK/Cancel`, `Yes/No`, `Yes/No
 
 Linux는 `GtkMessageDialog`를 사용한다. 버튼은 custom response id로 추가해
 Electron식 button index를 보존하고, `checkboxLabel`은 message area에 `GtkCheckButton`을
-붙여 `checkboxChecked`로 되돌린다. CI/헤드리스 자동화에서는
-`SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE=1`로 실제 dialog를 생성한 뒤 GTK timeout에서
-cancel response를 보내 nested main loop를 빠져나온다.
+붙여 `checkboxChecked`로 되돌린다.
 
 ## showErrorBox
 
@@ -269,8 +264,7 @@ graceful 응답:
 
 ## Backend SDK
 
-Zig/Rust/Go/Node 4개 백엔드에서 모두 typed wrapper 노출. 모두 `callBackend("__core__", ...)`
-경유 — frontend `@suji/api`와 동일 cmd JSON.
+Zig/Rust/Go/Node 4개 백엔드 SDK 모두 typed wrapper를 노출하며, frontend `@suji/api`와 동일한 응답 형식을 사용한다.
 
 ```zig
 // Zig
@@ -324,21 +318,21 @@ Electron 대비 아직 노출하지 않거나 플랫폼별 native backend에서 
 
 | 누락 항목 | Electron API | 현재 동작 | 비고 |
 |---|---|---|---|
-| ~~**Sheet modal**~~ | ~~free-floating only~~ | ✅ 구현됨 (windowId 첫 인자) | `src/platform/dialog.m` |
+| ~~**Sheet modal**~~ | ~~free-floating only~~ | ✅ 구현됨 (windowId 첫 인자) | — |
 | **`bookmarks` / `bookmark`** 반환 필드 | macOS sandbox security-scoped | 응답에서 누락 | `securityScopedBookmarks: true`일 때만 — 샌드박스 앱 한정 |
 | **`securityScopedBookmarks`** 옵션 | OpenDialog/SaveDialog | 무시 | 샌드박스 한정 |
-| **`icon: NativeImage`** | MessageBox 커스텀 아이콘 | NSAlert 기본 아이콘만 | NSImage 로딩 인프라 필요 |
-| **`textWidth: number`** | MessageBox 메시지 폭 | macOS 기본 | accessoryView 추가 작업 |
-| **`type: 'none'` 정확 매칭** | macOS는 아이콘 없음 | NSAlertStyleWarning(경고 아이콘) | NSAlert는 항상 app icon overlay — 완전 제거 까다로움 |
+| **`icon: NativeImage`** | MessageBox 커스텀 아이콘 | NSAlert 기본 아이콘만 | — |
+| **`textWidth: number`** | MessageBox 메시지 폭 | macOS 기본 | — |
+| **`type: 'none'` 정확 매칭** | macOS는 아이콘 없음 | NSAlertStyleWarning(경고 아이콘) | NSAlert는 항상 app icon overlay |
 | **`type: 'question'` 정확 매칭** | macOS는 question 아이콘 | NSAlertStyleWarning | macOS NSAlert에 question 스타일 없음 (Electron도 동일 매핑) |
-| **`showCertificateTrustDialog`** | 인증서 신뢰 dialog | 미구현 | 매우 niche |
-| **Windows 전용 옵션** (`promptToCreate` / `dontAddToRecent` / `noLink` / `normalizeAccessKeys`) | Windows 한정 | 일부 미반영 | Windows option 매핑은 후속 |
+| **`showCertificateTrustDialog`** | 인증서 신뢰 dialog | 미구현 | — |
+| **Windows 전용 옵션** (`promptToCreate` / `dontAddToRecent` / `noLink` / `normalizeAccessKeys`) | Windows 한정 | 일부 미반영 | — |
 
 ## 알려진 한계 (구현 제약)
 
 - **Sheet modal은 macOS 전용**: Linux/Windows는 parent window attach 없이 free-floating dialog를 사용한다.
 - **`buttons` 제한**: macOS NSAlert path는 16개, Windows TaskDialog path는 8개까지 커스텀 버튼을 보존한다.
-- **Dialog 텍스트 4KB 제한**: `nsStringFromSlice` 한도 — 그 이상 긴 메시지는 잘림.
+- **Dialog 텍스트 4KB 제한**: 메시지가 4KB를 초과하면 잘린다.
 - **filters `name` UI 미표시**: macOS Big Sur+에서 NSOpenPanel은 필터 그룹 dropdown
   미노출 — 모든 extensions가 통합 허용.
 - **Windows 파일 dialog 옵션 일부 제한**: `buttonLabel`, `message`, `showsTagField`,
@@ -346,15 +340,7 @@ Electron 대비 아직 노출하지 않거나 플랫폼별 native backend에서 
 - **Linux 파일 dialog 옵션 일부 제한**: `message`, `nameFieldLabel`, `showsTagField`,
   `treatPackageAsDirectory`, alias 처리 같은 macOS 전용 옵션은 GTK dialog에서 무시된다.
 
-## E2E 자동화 한계
+## 알림
 
-OS modal은 puppeteer로 직접 클릭 불가. macOS `osascript` + System Events 키 이벤트로
-ESC/Enter dismiss 자동화는 Accessibility 권한 + dialog focus 의존이라 일관 동작
-어려움. Linux GTK path는 `SUJI_E2E_LINUX_DIALOG_AUTO_CLOSE=1`에서 native dialog를
-생성한 뒤 timeout cancel로 nested loop를 빠져나오는 runtime E2E를 실행한다.
-자동 회귀는 다음 정도까지:
-
-- 잘못된 옵션 → graceful parse error 응답 (modal 미발생)
-- 정적 wiring 검증 (`tests/window_manager_test.zig`)
-- Linux GTK auto-cancel runtime (`tests/e2e/dialog.test.ts`)
-- 응답 형식 — `examples/dialogs-demo`로 수동 검증 권장
+잘못된 옵션을 넘겨도 crash 없이 graceful parse error 응답이 반환된다. 실제 dialog의
+시각적 동작 확인은 `examples/dialogs-demo`를 통한 수동 검증을 권장한다.

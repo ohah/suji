@@ -1,39 +1,35 @@
 ---
 title: 로드맵 & 패리티
-description: Electron/Tauri 패리티 현황과 정직한 경계
+description: Electron/Tauri 패리티 현황과 현재 한계
 ---
 
-전체 패리티표·구현 단계·기술 결정은 저장소
-[`docs/PLAN.md`](https://github.com/ohah/suji/blob/main/docs/PLAN.md) 가 단일
-출처입니다(커밋과 lockstep 갱신). 요약:
+Suji 가 현재 제공하는 기능과 한계를 정리합니다.
 
 ## 구현됨 (발췌)
 
 - 창/렌더러 제어, clipboard(text/html/rtf/png/**tiff**/buffer), dialog,
   shell, globalShortcut, tray, menu, notification, screen, powerMonitor,
   safeStorage(macOS/Windows), session(cookies/clearStorageData), webRequest
-  (blocklist + dynamic listener + **timeout fallback**), desktopCapturer
-  (sources + 썸네일 파일경로).
+  (blocklist + dynamic listener), desktopCapturer(sources + 썸네일 파일경로).
 - 멀티 백엔드(Zig·Rust·Go·Node) + 자동 라우팅, 공식 플러그인 state·sqlite
   (5언어 래퍼), `suji types` 타입 자동 생성(Zig).
 - 권한 모델: fs 샌드박스 + shell/dialog/캡처/nativeImage opt-in 게이트 +
-  모바일 권한 게이트(iOS/Android 실 시뮬·에뮬 e2e 검증).
+  모바일 권한 게이트(iOS/Android).
 - 임베드 코어 분리 + 모바일(iOS/Android, Rust·Go 백엔드, SQLite).
-- [autoUpdater](/suji/distribution/auto-updater/)(manifest→download→SHA-256→
-  quit-and-install) · [crashReporter](/suji/distribution/crash-reporter/)
-  (CEF Crashpad/Breakpad) 1차.
+- [autoUpdater](/suji/distribution/auto-updater/)(manifest → download →
+  SHA-256 → quit-and-install) · [crashReporter](/suji/distribution/crash-reporter/)
+  (CEF Crashpad/Breakpad).
 
-## 정직한 경계
+## 현재 한계
 
-- **`protocol.handle`**(임의 cross-origin 동적 핸들러): CEF IO-스레드 결함으로
-  보류 — same-origin 정적 서빙은 `protocol:"suji"` 가 충족.
-- **iOS 실 HTTPS/TLS**: std CA 번들 공백(시뮬·빌드 검증, 실기기 미해결).
-- **desktopCapturer 썸네일 인코딩**: Screen Recording TCC 권한 필요 —
-  헤드리스/CI 는 컴파일·링크·graceful-fail 만 검증(인코딩 경로 미실행).
-- `process.run`/`http.fetch`: **백엔드 only**(렌더러 미노출 — 의도된 보안 설계).
-- **autoUpdater / crashReporter**: 1차 구현됨이나 실 crash 유발·업로드 서버
-  검증, 전 플랫폼 install 경로는 정직한 후속 경계.
-- **Windows/Linux 앱 패키징**: macOS `.app` 번들·서명·공증·dmg 대비 미성숙(우선순위).
-
-테스트: `zig build test` 790개 단위 + e2e(puppeteer/bun) + 모바일 실
-시뮬/에뮬 기능 e2e + 호스트 하니스. 정직한 미검증 경계는 PLAN/커밋에 명시.
+- **`protocol.handle`**(임의 cross-origin 동적 핸들러): 아직 지원되지 않습니다.
+  같은 origin 정적 서빙은 `protocol: "suji"` 로 충족됩니다.
+- **iOS HTTPS/TLS**: 실기기에서는 아직 검증되지 않았습니다.
+- **desktopCapturer 썸네일 인코딩**: macOS Screen Recording 권한이 필요하며,
+  권한이 없으면 실패합니다.
+- `process.run` / `http.fetch`: **백엔드 전용**입니다(렌더러에는 노출하지 않는
+  의도된 보안 설계).
+- **autoUpdater / crashReporter**: 1차 구현. 실제 크래시 업로드 서버 검증과
+  전 플랫폼 install 경로는 아직 제공되지 않습니다.
+- **Windows/Linux 앱 패키징**: macOS `.app` 번들·서명·공증·dmg 대비 아직
+  성숙하지 않았습니다.

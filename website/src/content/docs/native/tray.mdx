@@ -1,11 +1,11 @@
 ---
-title: Tray (Phase 5-B)
+title: Tray
 description: 시스템 트레이 아이콘 + 컨텍스트 메뉴 (Electron Tray) — 5 진입점 노출
 ---
 
 Electron `Tray` 호환 API. macOS는 메뉴바 `NSStatusItem`, Linux는 GTK `StatusIcon`,
 Windows는 system tray `Shell_NotifyIconW` 경로를 쓴다. Frontend JS + Zig/Rust/Go/Node
-백엔드 SDK 모두 같은 `__core__` wire shape를 보낸다.
+백엔드 SDK 모두 노출된다.
 
 ## 플랫폼 지원
 
@@ -13,7 +13,7 @@ Windows는 system tray `Shell_NotifyIconW` 경로를 쓴다. Frontend JS + Zig/R
 |---|---|---|---|
 | `tray.create` | ✅ title/tooltip/iconPath | ✅ title/tooltip/iconPath | ✅ tooltip, 기본 icon |
 | `tray.setTitle/setTooltip` | ✅ title + tooltip | ✅ title + tooltip | ✅ tooltip update (`setTitle`도 tooltip으로 매핑) |
-| `tray.setMenu` | ✅ item/separator/checkbox/submenu/enabled | ✅ item/separator/checkbox/submenu/enabled | ✅ flat HMENU item/separator, checkbox 표시 best-effort |
+| `tray.setMenu` | ✅ item/separator/checkbox/submenu/enabled | ✅ item/separator/checkbox/submenu/enabled | ✅ flat HMENU item/separator, checkbox 표시 |
 | `tray.destroy` | ✅ | ✅ hide + unref | ✅ `NIM_DELETE` |
 | Click event | ✅ `tray:menu-click` for menu items | ✅ activate + menu item click | ✅ left click + menu item click |
 
@@ -26,7 +26,7 @@ Windows는 hidden message-only window가 tray callback과 popup menu command를 
 |---|---|
 | **Windows parity** | Windows는 아직 `iconPath`와 중첩 submenu를 완전 구현하지 않는다. 기본 app icon + flat HMENU 경로 유지. |
 | **별도 `tray:click` 이벤트** | 클릭을 `tray:menu-click` 채널로 통일한다. Windows/Linux icon activate는 빈 `click` 값으로 emit한다. macOS 메뉴 설정 시 클릭 → 자동 메뉴 표시라 메뉴 없는 click hook은 별도 작업. |
-| **radio item** | checkbox는 macOS/Linux에서 지원하지만 radio group semantics는 후속. |
+| **radio item** | checkbox는 macOS/Linux에서 지원하지만 radio group semantics는 아직 지원하지 않는다. |
 | **오른쪽 클릭 구분** | macOS NSStatusItem.button.action은 left/right 통합. Windows right click은 popup menu를 표시한다. |
 
 ## API
@@ -163,7 +163,7 @@ await tray.setMenu(trayId, [
 - `setTitle`/`setTooltip`은 `gtk_status_icon_set_title`/`gtk_status_icon_set_tooltip_text`로 반영한다.
 - `setMenu`는 `GtkMenu`를 재귀 빌드하고 `GtkMenuItem`/`GtkCheckMenuItem` activate signal에서 `tray:menu-click`을 emit한다.
 - icon activate는 Windows left click과 동일하게 `tray:menu-click {"trayId":N,"click":""}`를 emit한다.
-- GTK3 StatusIcon은 upstream deprecated API라, 향후 AppIndicator/StatusNotifierItem 구현으로 교체할 수 있다.
+- GTK3 StatusIcon은 deprecated API이며, 향후 AppIndicator/StatusNotifierItem로 교체될 수 있다.
 
 ### Windows 경로
 
@@ -173,11 +173,3 @@ await tray.setMenu(trayId, [
 - left click / double click은 `tray:menu-click {"trayId":N,"click":""}`를 emit한다.
 - menu item click은 command id를 `(trayId, click)`으로 매핑해 같은 이벤트 채널로 emit한다.
 
-## E2E 한계
-
-OS 메뉴바 `NSStatusItem`, Linux desktop tray host, Windows system tray popup은 Puppeteer로 직접
-클릭하기 어렵다. 자동화 범위는 IPC 응답 shape, 다중 tray, destroy graceful path,
-macOS/Linux `iconPath`/submenu/checkbox parse와 native set 성공까지다.
-
-`tray:menu-click` 실제 클릭 검증은 `osascript` System Events API로 가능하지만
-Accessibility 권한 의존이라 `RUN_DESTRUCTIVE=1` 게이트로 둔다.

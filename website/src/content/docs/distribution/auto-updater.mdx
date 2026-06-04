@@ -3,10 +3,10 @@ title: autoUpdater
 description: Manifest 기반 업데이트 확인, artifact 다운로드, SHA-256 검증, quit-and-install 적용
 ---
 
-Electron `autoUpdater` / Tauri `updater`에 대응하는 1차 API. 현재 범위는
+Electron `autoUpdater` / Tauri `updater`에 대응하는 API.
 업데이트 manifest를 확인해 새 버전 여부를 판단하고, artifact를 지정 경로로
 다운로드한 뒤 SHA-256을 검증하고, artifact 포맷을 설치 입력으로 준비한 다음
-앱 종료 후 target으로 교체하는 `quitAndInstall` 흐름이다.
+앱 종료 후 target으로 교체하는 `quitAndInstall` 흐름을 제공한다.
 
 ## Manifest
 
@@ -91,7 +91,7 @@ _ = suji.autoUpdater.prepareInstall("/tmp/my-app.zip", "", "", "zip", expected_s
 _ = suji.autoUpdater.quitAndInstall("/tmp/my-app.app", "", "", true);
 ```
 
-## `__core__` cmd
+## 내부 cmd 참조
 
 | cmd | 입력 | 응답 |
 |---|---|---|
@@ -104,7 +104,7 @@ _ = suji.autoUpdater.quitAndInstall("/tmp/my-app.app", "", "", true);
 버전 비교는 semver 계열 숫자 segment를 비교하고, `v` prefix와 build metadata
 (`+build`)는 허용한다. prerelease는 semver 규칙처럼 release보다 낮게 본다.
 
-## 정직 경계
+## 동작 세부
 
 - 다운로드는 임시 파일에 먼저 저장한 뒤 checksum이 맞을 때만 지정 경로로 승격한다.
 - `prepareInstall`의 `format`은 `"auto" | "app" | "zip" | "dmg" | "appimage" | "raw" | "deb"`이다.

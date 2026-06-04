@@ -16,29 +16,17 @@ bun run preview   # 빌드 결과 미리보기
 
 ## 콘텐츠 구성
 
-`src/content/docs/` 아래 페이지는 두 출처로 나뉜다.
+`src/content/docs/` 아래 모든 페이지가 **공개 문서의 정식 출처**다. 사용자 관점에
+맞게 직접 다듬으면 된다(사이드바 구조는 `astro.config.mjs` 의 `sidebar`).
 
-| 분류 | 출처 | 편집 위치 |
-|---|---|---|
-| **손작성 가이드** — `index`, `guides/{introduction,installation,quick-start,cli}`, `concepts/{backends,permissions}`, `reference/roadmap` | 사이트 전용 큐레이션 | 이 디렉터리에서 직접 편집 |
-| **포팅된 API 레퍼런스** — `ipc/*`, `backends/*`, `windows/*`, `native/*`, `distribution/*`, `plugins/*`, `concepts/{fs,sandbox,security,cache}`, `guides/electron-migration` | 저장소 `documents/*.mdx` (단일 출처) | `documents/` 에서 편집 후 재생성 |
+저장소 `documents/*.mdx` 는 **내부 엔지니어링 참조**다. 사이트 페이지는 그
+문서들을 `scripts/port-docs.mjs` 로 1회 임포트한 뒤, Phase 라벨·커밋/PR 참조·
+내부 소스 경로·테스트 메타 등 사용자에게 불필요한 내용을 걷어내 다듬은 것이라
+이미 갈라져 있다.
 
-### 포팅 페이지 재생성
-
-포팅된 레퍼런스 페이지는 `documents/*.mdx` 가 단일 출처다. 본문을 바꾸려면
-`documents/` 에서 고친 뒤 재생성한다(이 디렉터리의 생성 페이지를 직접 편집하면
-다음 재생성 때 덮어쓰여진다).
-
-```bash
-bun run port-docs   # scripts/port-docs.mjs — documents/*.mdx 를 사이트 IA 로 포팅
-```
-
-변환 내용: 중복 H1 제거, 코드영역 밖 `<>{}` HTML 엔티티화(MDX JSX/표현식 오해
-방지), 내부 링크(`./x.mdx`, `../docs/*.md`) 재작성. 사이드바 구조는
-`astro.config.mjs` 의 `sidebar` 에서 관리한다.
-
-`bun run build` 의 **prebuild** 가 `port-docs` + `gen-llms` 를 자동 실행하므로
-배포 산출물은 항상 `documents/` 와 동기화된다.
+> ⚠️ `scripts/port-docs.mjs` 는 초기 임포트 도구이며 **재실행하면 위 편집을
+> 전부 덮어쓴다**. 사이트 본문 수정은 `website/src/content/docs/` 에서 직접 한다.
+> (스타일은 `src/styles/custom.css`, 레이아웃 override 는 `src/overrides/`.)
 
 ## llms.txt
 

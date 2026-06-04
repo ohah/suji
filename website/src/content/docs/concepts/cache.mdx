@@ -40,11 +40,10 @@ rm -rf ~/.config/My\ App
 rmdir /s "%APPDATA%\My App"
 ```
 
-## CEF cache_path
+## 저장되는 데이터
 
-내부적으로 `cef_settings_t.root_cache_path`에 위 경로를 set. CEF가 그 아래에
-`Cookies`, `Local Storage/`, `IndexedDB/`, `Service Worker/`, `GPUCache/` 등 Chromium
-표준 하위 디렉토리를 자동 생성.
+위 경로 아래에 `Cookies`, `Local Storage/`, `IndexedDB/`, `Service Worker/`, `GPUCache/` 등
+Chromium 표준 하위 디렉토리가 자동 생성된다.
 
 ## 한계
 
