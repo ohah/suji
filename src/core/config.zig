@@ -342,21 +342,43 @@ pub const Config = struct {
     const DEFAULT_CONFIG_LOADER_PATH = "node_modules/@suji/cli/bin/load-config.js";
 
     fn loadConfigFile(allocator: std.mem.Allocator, cmd: Command) !Config {
-        const config_path = findConfigFilePath() orelse return error.ConfigNotFound;
+        var path_buf: [1200]u8 = undefined;
+        const config_path = findConfigFilePath(&path_buf) orelse return error.ConfigNotFound;
         if (isJsonConfigPath(config_path)) return loadJsonConfigFile(allocator, config_path);
         return loadCodeConfigFile(allocator, config_path, cmd);
     }
 
-    fn findConfigFilePath() ?[]const u8 {
+    /// config 파일 탐색. (1) CWD — 로컬 dev. (2) 패키지된 앱의 실행파일 기준 Resources —
+    /// 프로덕션. 더블클릭/LaunchServices 는 CWD=/ 로 띄우므로 (1) 이 실패한다. 번들엔 node 가
+    /// 없어 .ts 를 못 돌리므로 거기선 suji.json(정적 JSON)만 의미가 있다(빌드가 복사).
+    /// 반환 경로가 `buf` 에 기록될 수 있어 호출 직후 access/read 에 바로 써야 한다.
+    fn findConfigFilePath(buf: []u8) ?[]const u8 {
+        // 1. CWD (로컬 개발) — 상대경로 그대로 반환.
         for (CONFIG_FILE_PATHS) |path| {
             std.Io.Dir.cwd().access(runtime.io, path, .{}) catch continue;
             return path;
         }
+        // 2. 패키지된 앱: 실행파일 기준 Resources(절대경로).
+        //    macOS .app: <exe>/Contents/MacOS/<name> → Contents/Resources/suji.json
+        //    Windows/Linux packaged: <exe_dir>/resources/suji.json (소문자 r)
+        var exe_buf: [1024]u8 = undefined;
+        const exe_len = std.process.executablePath(runtime.io, &exe_buf) catch return null;
+        const exe_dir = std.fs.path.dirname(exe_buf[0..exe_len]) orelse return null;
+        for (CONFIG_FILE_PATHS) |path| {
+            if (std.fs.path.dirname(exe_dir)) |contents_dir| {
+                const mac = std.fmt.bufPrint(buf, "{s}/Resources/{s}", .{ contents_dir, path }) catch return null;
+                if (std.Io.Dir.cwd().access(runtime.io, mac, .{})) |_| return mac else |_| {}
+            }
+            const flat = std.fmt.bufPrint(buf, "{s}/resources/{s}", .{ exe_dir, path }) catch return null;
+            if (std.Io.Dir.cwd().access(runtime.io, flat, .{})) |_| return flat else |_| {}
+        }
         return null;
     }
 
+    /// 절대경로(번들 Resources)도 처리해야 하므로 basename 의 확장자로 판정한다
+    /// (이전 `eql(path,"suji.json")` 은 절대경로를 .ts 로 오판 → node 실행 시도 → 실패).
     fn isJsonConfigPath(path: []const u8) bool {
-        return std.mem.eql(u8, path, "suji.json");
+        return std.mem.endsWith(u8, path, ".json");
     }
 
     fn loadJsonConfigFile(allocator: std.mem.Allocator, path: []const u8) !Config {
