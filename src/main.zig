@@ -498,6 +498,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
                     .identity = identity,
                     .sandbox = want_sandbox,
                     .deep_link_schemes = deep_link_slice,
+                    .macos_min_version = config.app.macos_min_version,
                 },
                 backends_list.items,
                 plugins_list.items,

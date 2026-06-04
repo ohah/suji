@@ -32,6 +32,11 @@
           "default": true,
           "description": "CEF framework binary debug symbol strip (~30MB 절약)."
         },
+        "minimumSystemVersion": {
+          "type": "string",
+          "default": "12.0",
+          "description": "macOS 최소 배포 타겟. Info.plist LSMinimumSystemVersion + 메인 바이너리 minos(vtool) + Go 백엔드 MACOSX_DEPLOYMENT_TARGET 에 일관 적용. 번들 CEF 가 12.0 프리빌트라 그 아래는 12.0 으로 보정. macOS 빌드에서만 의미."
+        },
         "locales": {
           "type": "array",
           "items": { "type": "string" },

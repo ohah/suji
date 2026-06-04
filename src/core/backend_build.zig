@@ -10,6 +10,12 @@ const builtin = @import("builtin");
 const runtime = @import("runtime");
 const suji = @import("../root.zig");
 
+/// macOS Go 백엔드 dylib 의 최소 배포 타겟(MACOSX_DEPLOYMENT_TARGET). 번들 메인/Info.plist
+/// 의 minos 와 일치해야 실효 floor 가 한 값으로 모인다. buildAllFromConfig 가 release 빌드
+/// 직전 config.app.macos_min_version 으로 설정한다(이미 12.0 floor clamp 됨). dev/플러그인/
+/// types 등 config 없는 경로는 기본 "12.0".
+pub var macos_min_version: []const u8 = "12.0";
+
 fn runArgv(argv: []const []const u8) !void {
     var child = try std.process.spawn(runtime.io, .{ .argv = argv });
     switch (try child.wait(runtime.io)) {
@@ -49,6 +55,8 @@ fn runArgvWithEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pa
 }
 
 pub fn buildAllFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, release: bool) !void {
+    // Go dylib 의 macOS 최소 배포 타겟을 config 값으로 — 메인/Info.plist 와 같은 floor.
+    macos_min_version = config.app.macos_min_version;
     if (config.isMultiBackend()) {
         if (config.backends) |backends| {
             for (backends) |be| {
@@ -91,11 +99,11 @@ pub fn buildByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []cons
             try runArgvWithEnv(allocator, argv, &.{
                 .{ "CC", "/usr/bin/clang" },
                 .{ "CGO_ENABLED", "1" },
-                // macOS dylib 최소 배포 타겟 floor 요청 — 안 정하면 빌드 호스트 영향이 생길 수
-                // 있다. Go 는 자체 최소 배포 타겟(현재 darwin/arm64 = 14.0)으로 clamp 하므로
-                // 그 이상으로는 못 내려가지만, Go floor 가 낮아지면 자동 반영된다.
-                // (darwin 전용 변수라 Linux 빌드에선 무시됨.)
-                .{ "MACOSX_DEPLOYMENT_TARGET", "12.0" },
+                // macOS dylib 최소 배포 타겟 — config.app.minimumSystemVersion(기본 12.0, CEF
+                // floor clamp 적용)을 메인/Info.plist 와 동일하게 박는다. 안 정하면 빌드 호스트
+                // OS 영향이 생긴다. Go 가 자체 floor 로 더 올릴 수는 있으나(그 경우 실효 floor 가
+                // 그 값), 낮출 수는 없다. (darwin 전용 변수라 Linux 빌드에선 무시됨.)
+                .{ "MACOSX_DEPLOYMENT_TARGET", macos_min_version },
             });
         }
     } else if (std.mem.eql(u8, lang, "node")) {

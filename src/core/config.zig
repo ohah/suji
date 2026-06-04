@@ -39,6 +39,12 @@ pub const Config = struct {
         locales: []const [:0]const u8 = &.{},
         /// CEF framework binary strip — debug symbols 제거 (~30MB 절약). default true.
         strip_cef: bool = true,
+        /// macOS 최소 배포 타겟(`app.minimumSystemVersion`). Info.plist `LSMinimumSystemVersion`
+        /// + 메인 바이너리 `LC_BUILD_VERSION` minos(vtool) + Go 백엔드 `MACOSX_DEPLOYMENT_TARGET`
+        /// 에 일관 적용 → 실효 floor(번들 내 mach-o minos 최댓값)가 한 값으로 모인다. 기본 "12.0".
+        /// 번들 CEF 가 12.0 으로 프리빌트라 그 아래는 로드 불가 → 파싱 시 12.0 으로 clamp.
+        /// macOS 빌드에서만 의미(Win/Linux 무시).
+        macos_min_version: [:0]const u8 = "12.0",
         /// 마지막 창이 닫힐 때 (window:all-closed 발화 시점) 코어가 자동으로 cef.quit().
         /// default false — Electron canonical 패턴(`suji.on("window:all-closed", ...)`로 user
         /// 코드가 platform 분기 후 quit 호출). true로 설정 시 모든 플랫폼에서 자동 종료.
@@ -202,6 +208,19 @@ pub const Config = struct {
         return a.dupeZ(u8, s) catch @ptrCast(s);
     }
 
+    /// macOS 최소 배포 타겟을 CEF 프리빌트 floor(12.0) 이상으로 보정. 번들 CEF 프레임워크가
+    /// 12.0 으로 빌드돼 있어 그보다 낮게 선언하면 그 macOS 에선 CEF 로드 실패(Info.plist 만
+    /// 거짓으로 낮아짐). major < 12 이면 "12.0" 으로 올리고 경고. 12.x 이상은 그대로 둔다.
+    fn clampMacosVersion(a: std.mem.Allocator, raw: []const u8) [:0]const u8 {
+        var it = std.mem.splitScalar(u8, raw, '.');
+        const major = std.fmt.parseInt(u32, it.next() orelse "", 10) catch 0;
+        if (major < 12) {
+            std.debug.print("[suji] warn: app.minimumSystemVersion '{s}' < 12.0 (CEF floor) → 12.0 으로 보정\n", .{raw});
+            return dupeStr(a, "12.0");
+        }
+        return dupeStr(a, raw);
+    }
+
     /// `~` / `~/path` 만 확장. `~user/foo` 같은 POSIX 형태는 명시 거부 (보안 — 잘못된
     /// expand로 sandbox bypass 위험). "*" sentinel은 그대로 보존.
     fn expandHomeAtLoad(a: std.mem.Allocator, raw: []const u8) [:0]const u8 {
@@ -336,6 +355,7 @@ pub const Config = struct {
                 if (getStr(app, "version")) |s| config.app.version = dupeStr(a, s);
                 if (getStr(app, "entitlements")) |s| config.app.entitlements = dupeStr(a, s);
                 if (getBool(app, "stripCef")) |b| config.app.strip_cef = b;
+                if (getStr(app, "minimumSystemVersion")) |s| config.app.macos_min_version = clampMacosVersion(a, s);
                 if (getBool(app, "quitOnAllWindowsClosed")) |b| config.app.quit_on_all_windows_closed = b;
                 if (app.get("crashReporter")) |cr_val| {
                     if (cr_val == .object) {

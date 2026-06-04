@@ -61,6 +61,10 @@ pub const BundleOptions = struct {
     /// 딥링크 URL scheme — Info.plist `CFBundleURLTypes` 자동 주입.
     /// 비어있으면 미주입(기존 Info.plist 무변). `config.app.deep_link_schemes`.
     deep_link_schemes: []const []const u8 = &.{},
+    /// macOS 최소 배포 타겟 — Info.plist `LSMinimumSystemVersion` + 메인 바이너리 minos(vtool).
+    /// `config.app.macos_min_version`(기본 "12.0", CEF floor clamp 적용). Go dylib 의
+    /// MACOSX_DEPLOYMENT_TARGET 과 같은 값이라 실효 floor 가 한 값으로 모인다.
+    macos_min_version: []const u8 = "12.0",
 };
 
 pub fn createBundle(
@@ -101,7 +105,7 @@ pub fn createBundle(
     }
 
     // 1. Info.plist 생성
-    try writeInfoPlist(allocator, app_name, name, version, identifier, opts.deep_link_schemes);
+    try writeInfoPlist(allocator, app_name, name, version, identifier, opts.deep_link_schemes, opts.macos_min_version);
 
     // 2. 메인 바이너리 복사 + 최소 macOS 배포 타겟 고정(vtool).
     // Zig 는 네이티브 빌드 시 호스트 OS 버전을 minos(LC_BUILD_VERSION) 로 박아, 빌드 머신보다
@@ -112,7 +116,7 @@ pub fn createBundle(
     defer allocator.free(main_bin);
     // copyFile 은 dst 를 내부에서 free 하므로 dupe 를 넘기고, main_bin 은 vtool 용으로 보존.
     try copyFile(allocator, exe_path, try allocator.dupe(u8, main_bin));
-    setMinMacosVersion(allocator, main_bin) catch |err| {
+    setMinMacosVersion(allocator, main_bin, opts.macos_min_version) catch |err| {
         std.debug.print("[suji] warn: vtool min-os 설정 실패({s}) — minos 가 빌드 호스트 버전으로 남는다\n", .{@errorName(err)});
     };
 
@@ -182,10 +186,11 @@ fn writeInfoPlist(
     version: []const u8,
     identifier: []const u8,
     deep_link_schemes: []const []const u8,
+    min_version: []const u8,
 ) !void {
     const path = try std.fmt.allocPrint(allocator, "{s}/Contents/Info.plist", .{app_name});
     defer allocator.free(path);
-    const plist = try buildInfoPlist(allocator, name, version, identifier, deep_link_schemes);
+    const plist = try buildInfoPlist(allocator, name, version, identifier, deep_link_schemes, min_version);
     defer allocator.free(plist);
 
     const io = runtime.io;
@@ -206,6 +211,7 @@ pub fn buildInfoPlist(
     version: []const u8,
     identifier: []const u8,
     deep_link_schemes: []const []const u8,
+    min_version: []const u8,
 ) ![]u8 {
     // CFBundleURLTypes — scheme 당 dict 1개. 유효 scheme 만(isValidUrlScheme).
     // 빈 블록(스킴 없음/전부 무효)이면 Info.plist 무변(기존 동작).
@@ -258,14 +264,14 @@ pub fn buildInfoPlist(
         \\  <key>CFBundleInfoDictionaryVersion</key>
         \\  <string>6.0</string>
         \\  <key>LSMinimumSystemVersion</key>
-        \\  <string>12.0</string>
+        \\  <string>{s}</string>
         \\  <key>NSHighResolutionCapable</key>
         \\  <true/>
         \\  <key>NSSupportsAutomaticGraphicsSwitching</key>
         \\  <true/>{s}
         \\</dict>
         \\</plist>
-    , .{ name, name, identifier, version, version, url_block });
+    , .{ name, name, identifier, version, version, min_version, url_block });
     return plist;
 }
 
@@ -592,8 +598,10 @@ fn copyFile(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !voi
 /// vtool 로 Mach-O 의 LC_BUILD_VERSION minos 를 12.0 으로 재기록. Zig 네이티브 빌드가 호스트
 /// OS 버전을 minos 로 박는 걸 보정 — 빌드 머신보다 낮은 macOS 에서도 실행되게 한다. 반드시
 /// 코드서명 전에 호출해야 한다(서명 후면 서명이 무효화된다).
-fn setMinMacosVersion(allocator: std.mem.Allocator, path: []const u8) !void {
-    try runCmd(allocator, &.{ "xcrun", "vtool", "-set-build-version", "macos", "12.0", "12.0", "-replace", "-output", path, path });
+fn setMinMacosVersion(allocator: std.mem.Allocator, path: []const u8, min_version: []const u8) !void {
+    // minos 와 sdk 를 같은 값으로 — config.app.macos_min_version(기본 12.0, CEF floor clamp 적용).
+    // Info.plist LSMinimumSystemVersion / Go MACOSX_DEPLOYMENT_TARGET 과 동일 값.
+    try runCmd(allocator, &.{ "xcrun", "vtool", "-set-build-version", "macos", min_version, min_version, "-replace", "-output", path, path });
 }
 
 fn copyDir(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !void {

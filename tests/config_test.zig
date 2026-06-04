@@ -9,6 +9,7 @@ test "Config default values" {
     const cfg = config.Config{};
     try std.testing.expectEqualStrings("Suji App", cfg.app.name);
     try std.testing.expectEqualStrings("0.1.0", cfg.app.version);
+    try std.testing.expectEqualStrings("12.0", cfg.app.macos_min_version);
     try std.testing.expect(cfg.app.crash_reporter == null);
     // 기본 windows: 1개 항목 (Window 기본값)
     try std.testing.expectEqual(@as(usize, 1), cfg.windows.len);
@@ -73,6 +74,29 @@ test "Config.loadFromJsonBytes parses app.crashReporter startup config" {
     const opts = cr.toOptions(cfg.app.name, cfg.app.version);
     try std.testing.expectEqualStrings("Crashy", opts.app_name);
     try std.testing.expectEqualStrings("2.0.0", opts.product_version);
+}
+
+test "Config.loadFromJsonBytes parses app.minimumSystemVersion + CEF floor clamp" {
+    // 명시값(>= 12.0)은 그대로.
+    var cfg13 = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{ "app": { "name": "x", "minimumSystemVersion": "13.0" } }
+    );
+    defer cfg13.deinit();
+    try std.testing.expectEqualStrings("13.0", cfg13.app.macos_min_version);
+
+    // 12.0 미만은 CEF 프리빌트 floor 로 clamp.
+    var cfg10 = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{ "app": { "name": "x", "minimumSystemVersion": "10.13" } }
+    );
+    defer cfg10.deinit();
+    try std.testing.expectEqualStrings("12.0", cfg10.app.macos_min_version);
+
+    // 미지정이면 기본 12.0.
+    var cfgDef = try config.Config.loadFromJsonBytes(std.testing.allocator,
+        \\{ "app": { "name": "x" } }
+    );
+    defer cfgDef.deinit();
+    try std.testing.expectEqualStrings("12.0", cfgDef.app.macos_min_version);
 }
 
 test "Config protocol default is file" {
