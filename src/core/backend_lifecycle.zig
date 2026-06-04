@@ -236,6 +236,13 @@ pub fn startLua(allocator: std.mem.Allocator, backend_name: [:0]const u8, entry:
     rt.* = LuaRuntime.init(allocator, owned_name, entry_lua, &registerLuaRoute, true);
     errdefer rt.shutdown();
 
+    // 코어 함수 포인터 주입은 rt.start() 이전(node startNode 와 동일 이유):
+    // start()가 main.lua 를 즉시 실행하는데 top-level `suji.invoke/send/on` 호출
+    // 시점에 코어가 없으면 동작하지 않는다.
+    if (suji.BackendRegistry.global) |g| {
+        LuaRuntime.setCore(g.core_api.invoke, g.core_api.free, g.core_api.emit, g.core_api.on, g.core_api.off);
+    }
+
     try rt.start();
     g_lua_runtime = rt;
 

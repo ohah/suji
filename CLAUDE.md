@@ -12,7 +12,8 @@ Electron 스타일 API (handle/invoke/on/send).
 
 ```bash
 zig build          # 빌드
-zig build test     # 단위 테스트 (790개)
+zig build -Dlua    # + vendored Lua 5.4 backend (vendor/lua + cjson, 시스템 의존 0)
+zig build test     # 단위 테스트 (790개; vendored Lua 인라인 runtime test 상시 포함)
 zig build run      # CLI 도움말
 
 # 공식 플러그인 테스트 (dylib 선빌드 필요 — cd plugins/<p>/zig && zig build)
@@ -42,6 +43,7 @@ cd examples/zig-backend && suji dev     # Zig 단독
 cd examples/rust-backend && suji dev    # Rust 단독
 cd examples/go-backend && suji dev      # Go 단독
 cd examples/node-backend && suji dev    # Node.js 단독
+cd examples/lua-backend && suji dev     # Lua 단독 (vendored Lua 5.4 + cjson; suji 를 -Dlua 로 빌드)
 suji run backends/node/main.js          # CEF 없이 embedded Node.js 파일 직접 실행
 
 # E2E 테스트 (puppeteer + bun) — 대부분 fresh suji dev, CLI 테스트는 단독 실행
@@ -68,6 +70,7 @@ bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(nav
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
 bash tests/e2e/run-plugin-wrappers.sh   # 공식 플러그인 (state/sqlite/log/store/http/notification-rich) × {JS, Node} wrapper wire-contract (mock bridge)
 bash tests/e2e/run-plugin-state-integration.sh # state plugin DLL 라운드트립(__suji__ → DLL → 응답)
+bash tests/e2e/run-lua-e2e.sh           # Lua 백엔드 (vendored Lua 5.4 + cjson) invoke 왕복/cjson roundtrip/50 concurrent (-Dlua 자동 빌드)
 
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
 bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive)+Zig
@@ -853,29 +856,64 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
 BackendRegistry는 Node 등 임베드 런타임에 대한 폴백을 `embed_runtimes` 테이블로 관리
 (main이 `registerEmbedRuntime("node", ...)`로 주입).
 
-### Lua 임베드 런타임 (Phase 5.5 1차)
+### Lua 임베드 런타임 (vendored Lua 5.4 + cjson)
 
-`zig build -Dlua`에서 LuaJIT(`libluajit-5.1`) 기반 Lua backend가 활성화된다.
-기본 빌드는 런타임 의존성을 추가하지 않기 위해 `lua_enabled=false`이며,
-`lang:"lua"` backend는 실행 시 "rebuild with -Dlua" 메시지로 graceful skip.
+`zig build -Dlua`에서 **vendored PUC Lua 5.4** 기반 Lua backend가 활성화된다.
+`vendor/lua`(onelua.c amalgamation, `-DMAKE_LIB`)와 `vendor/cjson`(lua-cjson
+2.1.0)을 zig 가 직접 정적 컴파일하므로 **시스템 LuaJIT/Lua 의존이 0**이고
+macOS/Linux/Windows 동일 빌드(sqlite vendoring 패턴 동형, `build.zig`
+`buildLuaLibrary`). 기본 빌드는 컴파일 비용/바이너리 크기를 위해 opt-in
+(`lua_enabled=false`)이며, `lang:"lua"` backend는 실행 시 "rebuild with -Dlua"
+메시지로 graceful skip.
 
-현재 Lua ABI는 raw JSON string in/out:
+Lua ABI는 raw JSON string in/out. `require("cjson")`이 번들돼 수동 escape 없이
+JSON 파싱/직렬화. **다른 백엔드와 동등한 1급 시민** — `suji.handle`(인바운드) 외에
+`suji.invoke`(outbound cross-call) / `suji.send`(이벤트 발신) / `suji.on`(이벤트
+수신)을 노출(node 패턴 복제):
 
 ```lua
+local cjson = require("cjson")
 suji.handle("ping", function(request_json)
-  return '{"msg":"pong"}'
+  return cjson.encode({ msg = "pong" })
 end)
+-- outbound: 다른 백엔드 동기 호출(응답 JSON 문자열 반환)
+suji.handle("call-zig", function()
+  local resp = suji.invoke("zig", cjson.encode({ cmd = "add", a = 2, b = 3 }))
+  return cjson.encode({ zig_said = cjson.decode(resp) })
+end)
+suji.send("my-event", cjson.encode({ x = 1 }))     -- 이벤트 발신
+suji.on("ping-all", function(data) ... end)         -- 이벤트 수신(콜백 = registry ref)
 ```
 
-구현 범위: `src/platform/lua.zig`, `main.zig` load/route/teardown, schema
-`lang:"lua"`, `examples/lua-backend`. `cjson` 번들, 정적 liblua, 여러 Lua
-runtime 동시 map, LuaRocks/배포 번들링은 후속.
+outbound 코어 연결은 `startLua`가 `LuaRuntime.setCore(invoke/free/emit/on/off)`로
+주입(node `setCore`와 동일 — `rt.start()` 전). cross-call 체인(lua→zig→lua)이나
+invoke 중 send→on 콜백은 **같은 스레드 재진입**이라 `threadlocal lua_call_depth`로
+mutex 재획득을 건너뛴다(node `g_in_sync_invoke` 동형 — Lua는 V8 Locker 없어 단순).
+⚠️ **임베드 폴백 디스패치**(`main.zig cefInvokeHandler`)는 name 으로 구분: Lua 는
+name 정확 매칭 시만, Node 는 lua 가 아닌 미해결 채널의 catch-all. 가드 없이 무조건
+폴백하면 한 임베드 런타임이 다른 런타임의 target 호출을 가로챈다.
+
+구현 범위: `src/platform/lua.zig`(LuaJIT 5.1→PUC 5.4 전환 — 매크로가 된
+`luaL_loadfile`/`lua_pcall`은 함수형 `luaL_loadfilex`/`lua_pcallk`로, 반환값이
+생긴 `lua_rawgeti`/`lua_pushlstring`은 discard; `luaL_requiref`로 cjson 등록),
+`main.zig` load/route/teardown, schema `lang:"lua"`, `examples/lua-backend`(cjson
+handler) + `examples/multi-backend`(lua + zig↔lua cross-call/event). **백로그**:
+여러 Lua runtime 동시 map(Node 임베드도 단일 전역이라 불일관 + use-case 없음),
+LuaRocks 통합, native API(`suji.clipboard.*` 등 — invoke 로 플러그인은 이미 호출
+가능, 나머지 OS API 바인딩은 방대해 후속).
 
 검증:
-- 깊은 재귀 체인(node→zig→rust→go→node→... 최대 depth=40, 10사이클)
-- 다른 스레드 재진입 (`rust-thread-node` + `node-thread-deadlock`)
-- 응답 메모리 누수 회귀 (200회 체인 호출)
-모두 `tests/e2e/cef-ipc.test.ts` stress 섹션에서 E2E 검증.
+- `zig build test` — vendored Lua 인라인 runtime test(실제 cjson 예제 ping/echo
+  실행)를 시스템 의존 없이 상시 포함. CI matrix(macOS/Linux/Windows) `Build (Lua)`
+  step + test 로 Windows 포함 vendored Lua 빌드/실행 가드.
+- `bash tests/e2e/run-lua-e2e.sh` — 단독 lua-backend: frontend invoke ↔ Lua handler
+  왕복 + cjson(nested/unicode/float) + 50 concurrent + **suji.send/on(이벤트 양방향)**
+  (6 pass). CI 포함.
+- multi-backend cross-call/event: `zig build -Dlua` 후 `bash tests/e2e/run-cef-ipc.sh`
+  의 "lua backend" describe — zig↔lua 양방향 invoke + lua send→JS on + JS emit→lua on
+  (45 pass, lua 5 케이스 포함). cef-ipc 는 stress flaky 로 CI 미포함(로컬 실증).
+- 깊은 재귀 체인/스레드 재진입/메모리 누수 회귀도 `tests/e2e/cef-ipc.test.ts`
+  stress 섹션에서 검증.
 
 ## 배포 / 설치
 

@@ -1091,35 +1091,60 @@ app.on("ready", () => {
 - [ ] 예제 (`examples/python-backend`, `examples/multi-backend`에 Python 추가)
 - [ ] suji.json 설정: `{ "lang": "python", "entry": "backend/main.py" }`
 
-**Lua 임베드**:
+**Lua 임베드** (vendored Lua 5.4 + cjson — 마감 완료):
 
-- [~] Lua 런타임 빌드 — 1차는 **LuaJIT opt-in** (`zig build -Dlua`).
-      macOS/Homebrew·Linux dev 패키지의 `libluajit-5.1`을 링크한다. 기본
-      `zig build`/CI는 새 런타임 의존성을 만들지 않도록 비활성. 정적
-      `liblua.a`/배포 번들링은 후속.
-- [~] `src/platform/lua.zig` — `luaL_newstate`, `luaL_loadfile`,
-      `lua_pcall`, `lua_tolstring`, registry ref 기반 handler dispatch 완료.
-      1차 ABI는 raw JSON string in/out 이고, `cjson` 번들은 후속.
-- [~] state 격리 — `LuaRuntime`마다 별도 `lua_State`와 Mutex를 가진다.
-      현재 `main.zig` 런타임 참조는 단일 Lua backend 우선 path라, 여러 Lua
-      backend 동시 실행/이름별 runtime map은 후속.
-- [~] Lua 모듈 (`suji` global):
+- [x] Lua 런타임 빌드 — **vendored PUC Lua 5.4 정적 링크** (`zig build -Dlua`).
+      `vendor/lua`(onelua.c amalgamation, `-DMAKE_LIB` → 코어+표준 라이브러리만)를
+      zig 가 직접 컴파일 — 시스템 LuaJIT 의존 0, macOS/Linux/Windows 동일 빌드.
+      sqlite vendoring 패턴과 동형(`build.zig` `buildLuaLibrary`). 기본
+      `zig build`는 컴파일 비용/바이너리 크기를 위해 opt-in(Lua off) 유지.
+- [x] `src/platform/lua.zig` — `luaL_newstate`, `luaL_loadfilex`,
+      `lua_pcallk`, `lua_tolstring`, registry ref 기반 handler dispatch.
+      ABI 는 raw JSON string in/out. LuaJIT 5.1→PUC 5.4 전환으로 매크로가 된
+      `luaL_loadfile`/`lua_pcall` 은 함수형(`luaL_loadfilex`/`lua_pcallk`)으로,
+      값 반환이 생긴 `lua_rawgeti`/`lua_pushlstring` 은 discard 로 대응.
+- [x] cjson 번들 — `vendor/cjson`(lua-cjson 2.1.0, fpconv libc 경로) 정적 링크,
+      `luaL_requiref(L, "cjson", luaopen_cjson, 0)` 로 `require("cjson")` 노출.
+- [x] **1급 outbound API** — `suji.invoke`(cross-call) / `suji.send`(이벤트 발신) /
+      `suji.on`(이벤트 수신). `startLua` 가 `setCore(invoke/free/emit/on/off)` 로
+      코어 함수 포인터 주입(node `setCore` 패턴). cross-call 재진입(lua→zig→lua)은
+      `threadlocal lua_call_depth` 로 mutex 재획득 skip(node `g_in_sync_invoke` 동형).
+      `main.zig cefInvokeHandler` 임베드 폴백은 name 기반 분리(Lua 정확 매칭, Node
+      catch-all) — 없으면 한 런타임이 다른 런타임 target 을 가로챈다.
+- [~] state 격리 — `LuaRuntime`마다 별도 `lua_State`와 Mutex. (백로그) 여러 Lua
+      backend 동시 실행/이름별 runtime map 은 Node 임베드도 단일 전역이라
+      불일관 + 실제 use-case 없어 보류. LuaRocks 통합 / native API 바인딩도 백로그.
+- [x] Lua 모듈 (`suji` global) + cjson + outbound:
   ```lua
+  local cjson = require("cjson")
   suji.handle("ping", function(request_json)
-    return '{"msg":"pong"}'
+    return cjson.encode({ msg = "pong" })
   end)
+  suji.handle("call-zig", function()
+    return suji.invoke("zig", cjson.encode({ cmd = "add", a = 1, b = 2 }))
+  end)
+  suji.on("ping-all", function(data) suji.send("lua-heard", data) end)
   ```
-- [x] 예제 (`examples/lua-backend`) — raw JSON handler + minimal Vite frontend.
+- [x] 예제 (`examples/lua-backend` 단독 + `examples/multi-backend` zig↔lua
+      cross-call/event) — cjson decode/encode handler + Vite frontend.
 - [x] suji.json 설정 — schema가 `{ "lang": "lua", "entry":
       "backend/main.lua" }`와 entry directory(`backend`)를 허용. 패키징은
       Lua entry 파일이면 부모 디렉토리를 stage 해서 packaged runtime도
       `main.lua`를 찾는다.
 
-**검증 결과 (Lua 1차)**:
-- `zig build test --summary all` — 887/889 pass (2 skip)
-- `zig build -Dlua test --summary all` — 888/890 pass (2 skip, 실제
-  LuaJIT로 예제 `ping`/`echo` handler 호출)
-- `zig build -Dlua --summary all` — 실제 LuaJIT C boundary 포함 앱 빌드 성공
+**검증 결과 (Lua 마감)**:
+- `zig build test` — vendored Lua 인라인 runtime test(실제 cjson 예제 `ping`/
+  `echo` 실행)를 시스템 의존 없이 **상시** 포함해 pass. CI matrix(macOS/Linux/
+  Windows) 전부에서 vendored Lua C 경계를 검증.
+- `zig build -Dlua` — vendored Lua 5.4 + cjson C boundary 포함 앱 빌드 성공
+  (CI 의 3 OS 모두 `Build (Lua)` step 으로 가드 — Windows 포함).
+- `bash tests/e2e/run-lua-e2e.sh` — 단독 lua-backend: frontend invoke ↔ Lua
+  handler 왕복 + cjson encode/decode(nested/unicode/float) + 50 concurrent +
+  suji.send/on 이벤트 양방향, 6 pass(CI 포함).
+- `bash tests/e2e/run-cef-ipc.sh`("lua backend" describe) — multi-backend 에서
+  zig↔lua 양방향 cross-call(`call_lua`/`lua-call-zig`) + lua send→JS on +
+  JS emit→lua on, 45 pass(lua 5 케이스). cef-ipc 는 stress flaky 로 CI 미포함 —
+  로컬(`-Dlua` 빌드 + cargo/go 툴체인) 실증.
 
 **언어별 특성 요약**:
 

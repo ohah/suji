@@ -113,6 +113,15 @@ jobs:
         working-directory: examples/multi-backend/frontend
         run: bun install
 
+      - name: Install lua-backend frontend dependencies
+        working-directory: examples/lua-backend/frontend
+        run: bun install
+
+      - name: E2E — Lua backend invoke (vendored Lua 5.4 + cjson)
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-lua.log
+        run: bash tests/e2e/run-lua-e2e.sh
+
       - name: E2E — system integration
         env:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-system-integration.log

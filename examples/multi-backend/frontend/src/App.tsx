@@ -69,7 +69,7 @@ function App() {
         </div>
 
         <h1>Suji Multi-Backend</h1>
-        <p className="subtitle">Zig + Rust + Go + Node.js — Electron-style API</p>
+        <p className="subtitle">Zig + Rust + Go + Node.js + Lua — Electron-style API</p>
 
         <section>
           <h3>0. 멀티 윈도우 (DevTools 검증용)</h3>
@@ -133,6 +133,7 @@ function App() {
             <button className="rust" onClick={() => call(() => suji.invoke("ping", {}, { target: "rust" }), "rust")}>Rust</button>
             <button className="go" onClick={() => call(() => suji.invoke("ping", {}, { target: "go" }), "go")}>Go</button>
             <button className="node" onClick={() => call(() => suji.invoke("node-ping", {}, { target: "node" }), "node")}>Node.js</button>
+            <button className="lua" onClick={() => call(() => suji.invoke("lua-ping", {}, { target: "lua" }), "lua")}>Lua</button>
           </div>
         </section>
 
@@ -168,6 +169,8 @@ function App() {
             <button className="node" onClick={() => call(() => suji.invoke("node-call-rust"), "node→rust")}>Node→Rust</button>
             <button className="node" onClick={() => call(() => suji.invoke("node-call-go"), "node→go")}>Node→Go</button>
             <button className="node" onClick={() => call(() => suji.invoke("node-call-all"), "node→all")}>Node→All</button>
+            <button className="zig" onClick={() => call(() => suji.invoke("call_lua", {}, { target: "zig" }), "zig→lua")}>Zig→Lua</button>
+            <button className="lua" onClick={() => call(() => suji.invoke("lua-call-zig", {}, { target: "lua" }), "lua→zig")}>Lua→Zig</button>
           </div>
         </section>
 

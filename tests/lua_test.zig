@@ -86,7 +86,7 @@ test "build.zig keeps Lua opt-in and default tests stubbed" {
         "b.option(bool, \"lua\"",
         "lua_options.addOption(bool, \"lua_enabled\", lua_enabled)",
         "root_module.addImport(\"lua_config\"",
-        "root_module.linkSystemLibrary(\"luajit-5.1\"",
+        "root_module.linkLibrary(lua_lib)",
         "lua_test_opts.addOption(bool, \"lua_enabled\", false)",
         "src/platform/lua.zig",
         "tests/lua_test.zig",

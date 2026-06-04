@@ -35,17 +35,43 @@ fn firstExistingAbsolute(b: *std.Build, candidates: []const []const u8) []const 
     return candidates[0];
 }
 
-fn firstExistingAbsoluteOrNull(b: *std.Build, candidates: []const []const u8) ?[]const u8 {
-    for (candidates) |path| {
-        if (!absolutePathExists(b, path)) continue;
-        return path;
-    }
-    return null;
-}
-
 fn absolutePathExists(b: *std.Build, path: []const u8) bool {
     std.Io.Dir.accessAbsolute(b.graph.io, path, .{}) catch return false;
     return true;
+}
+
+/// Vendored PUC Lua 5.4 + lua-cjson 을 정적 라이브러리로 컴파일한다(vendor/lua,
+/// vendor/cjson). 시스템 LuaJIT 의존 없이 sqlite plugin 의 amalgamation 패턴과
+/// 동형으로 동작 — onelua.c 단일 translation unit. exe/테스트 모듈이 각자
+/// linkLibrary 로 재사용(동일 소스+flags 는 zig 캐시 hit).
+fn buildLuaLibrary(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) *std.Build.Step.Compile {
+    const lua_lib = b.addLibrary(.{
+        .name = "lua",
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        }),
+        .linkage = .static,
+    });
+    lua_lib.root_module.addIncludePath(b.path("vendor/lua"));
+    lua_lib.root_module.addIncludePath(b.path("vendor/cjson"));
+
+    // 플랫폼 feature 매크로는 luaconf.h 를 패치하지 않고 -D 로 주입(타깃 기준 —
+    // 크로스컴파일 안전). LUA_BUILD_AS_DLL 은 정의하지 않는다(정적 링크 →
+    // Windows __declspec(dllimport) 미해소 방지).
+    const flags: []const []const u8 = switch (target.result.os.tag) {
+        .macos => &.{ "-std=gnu99", "-DMAKE_LIB", "-DLUA_USE_MACOSX" },
+        .linux => &.{ "-std=gnu99", "-DMAKE_LIB", "-DLUA_USE_LINUX", "-DLUA_USE_READLINE=0" },
+        else => &.{ "-std=gnu99", "-DMAKE_LIB" }, // windows: luaconf.h 가 _WIN32 자동 감지
+    };
+    // Lua: onelua.c (-DMAKE_LIB → 코어 + 표준 라이브러리만, lua.c/luac.c 제외).
+    lua_lib.root_module.addCSourceFile(.{ .file = b.path("vendor/lua/onelua.c"), .flags = flags });
+    // lua-cjson: src/platform/lua.zig 가 luaL_requiref 로 require("cjson") 노출.
+    lua_lib.root_module.addCSourceFile(.{ .file = b.path("vendor/cjson/lua_cjson.c"), .flags = flags });
+    lua_lib.root_module.addCSourceFile(.{ .file = b.path("vendor/cjson/fpconv.c"), .flags = flags });
+    lua_lib.root_module.addCSourceFile(.{ .file = b.path("vendor/cjson/strbuf.c"), .flags = flags });
+    return lua_lib;
 }
 
 pub fn build(b: *std.Build) void {
@@ -471,43 +497,18 @@ pub fn build(b: *std.Build) void {
         }
     }
 
-    // LuaJIT 임베딩 — opt-in. 기본 빌드는 새 동적 의존성을 만들지 않는다.
-    // Phase 5.5 Lua 1차 슬라이스는 macOS/Linux 개발 환경에서 `zig build -Dlua`
-    // 로 켠다. Windows 런타임/패키징은 별도 후속이라 여기서는 명시적으로 제외.
-    const lua_requested = b.option(bool, "lua", "Enable embedded LuaJIT backend runtime") orelse false;
-    if (lua_requested and os_tag == .windows) {
-        @panic("-Dlua is not wired for Windows yet");
-    }
-    const lua_include_dir = if (lua_requested) firstExistingAbsoluteOrNull(b, &.{
-        "/opt/homebrew/include/luajit-2.1",
-        "/usr/local/include/luajit-2.1",
-        "/usr/include/luajit-2.1",
-        "/usr/include/lua5.1",
-    }) else null;
-    const lua_lib_path = if (lua_requested) firstExistingAbsoluteOrNull(b, &.{
-        "/opt/homebrew/lib/libluajit-5.1.dylib",
-        "/opt/homebrew/lib/libluajit-5.1.a",
-        "/usr/local/lib/libluajit-5.1.dylib",
-        "/usr/local/lib/libluajit-5.1.a",
-        "/usr/lib/x86_64-linux-gnu/libluajit-5.1.so",
-        "/usr/lib/x86_64-linux-gnu/libluajit-5.1.a",
-        "/usr/lib64/libluajit-5.1.so",
-        "/usr/lib64/libluajit-5.1.a",
-        "/usr/lib/libluajit-5.1.so",
-        "/usr/lib/libluajit-5.1.a",
-    }) else null;
-    const lua_lib_dir = if (lua_lib_path) |p| std.fs.path.dirname(p) else null;
-    if (lua_requested and (lua_include_dir == null or lua_lib_path == null or lua_lib_dir == null)) {
-        @panic("-Dlua requires LuaJIT headers and libluajit-5.1 (for example: brew install luajit or apt install libluajit-5.1-dev)");
-    }
-    const lua_enabled = lua_requested and lua_include_dir != null and lua_lib_dir != null;
+    // Vendored PUC Lua 5.4 + cjson 임베딩 — opt-in. 시스템 LuaJIT 의존을 제거해
+    // macOS/Linux/Windows 모두 동일하게 정적 링크(`zig build -Dlua`). 기본 빌드는
+    // 컴파일 비용/바이너리 크기를 위해 Lua 를 끈다. 소스/플래그는 buildLuaLibrary.
+    const lua_requested = b.option(bool, "lua", "Enable embedded Lua 5.4 backend runtime") orelse false;
+    const lua_enabled = lua_requested;
     const lua_options = b.addOptions();
     lua_options.addOption(bool, "lua_enabled", lua_enabled);
     root_module.addImport("lua_config", lua_options.createModule());
     if (lua_enabled) {
-        root_module.addIncludePath(.{ .cwd_relative = lua_include_dir.? });
-        root_module.addLibraryPath(.{ .cwd_relative = lua_lib_dir.? });
-        root_module.linkSystemLibrary("luajit-5.1", .{});
+        const lua_lib = buildLuaLibrary(b, target, optimize);
+        root_module.addIncludePath(b.path("vendor/lua"));
+        root_module.linkLibrary(lua_lib);
     }
 
     const exe = b.addExecutable(.{
@@ -1239,22 +1240,22 @@ pub fn build(b: *std.Build) void {
     const lua_test = b.addTest(.{ .root_module = lua_test_mod });
     dependOnTestWithProjectCwd(b, test_step, lua_test);
 
-    if (lua_enabled) {
-        const lua_runtime_test_opts = b.addOptions();
-        lua_runtime_test_opts.addOption(bool, "lua_enabled", true);
-        const lua_runtime_test_mod = b.createModule(.{
-            .root_source_file = b.path("src/platform/lua.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        lua_runtime_test_mod.addImport("lua_config", lua_runtime_test_opts.createModule());
-        lua_runtime_test_mod.addImport("runtime", runtime_module);
-        lua_runtime_test_mod.addIncludePath(.{ .cwd_relative = lua_include_dir.? });
-        lua_runtime_test_mod.addLibraryPath(.{ .cwd_relative = lua_lib_dir.? });
-        lua_runtime_test_mod.linkSystemLibrary("luajit-5.1", .{});
-        const lua_runtime_test = b.addTest(.{ .root_module = lua_runtime_test_mod });
-        dependOnTestWithProjectCwd(b, test_step, lua_runtime_test);
-    }
+    // src/platform/lua.zig 인라인 test(EnabledRuntime — 실제 C 경계, example
+    // main.lua 실행). vendored Lua 5.4 정적 링크라 시스템 의존이 없어 -Dlua
+    // 여부와 무관하게 항상 빌드/실행한다(CI 상시 회귀 가드).
+    const lua_runtime_test_opts = b.addOptions();
+    lua_runtime_test_opts.addOption(bool, "lua_enabled", true);
+    const lua_runtime_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/lua.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    lua_runtime_test_mod.addImport("lua_config", lua_runtime_test_opts.createModule());
+    lua_runtime_test_mod.addImport("runtime", runtime_module);
+    lua_runtime_test_mod.addIncludePath(b.path("vendor/lua"));
+    lua_runtime_test_mod.linkLibrary(buildLuaLibrary(b, target, optimize));
+    const lua_runtime_test = b.addTest(.{ .root_module = lua_runtime_test_mod });
+    dependOnTestWithProjectCwd(b, test_step, lua_runtime_test);
 
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{
