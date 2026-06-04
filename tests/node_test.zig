@@ -299,7 +299,7 @@ test "build.zig: Linux Node bridge uses g++ and libstdc++ ABI" {
         "\"-std=c++20\"",
         "b.path(\"src/platform/node/bridge.cc\").getPath(b)",
         "root_module.addObjectFile(.{ .cwd_relative = bridge_obj })",
-        "root_module.linkSystemLibrary(\"node\", .{})",
+        "root_module.linkSystemLibrary(\"node\", .{ .weak = true })",
         "\"/usr/lib/x86_64-linux-gnu/libstdc++.so.6\"",
         "root_module.addObjectFile(.{ .cwd_relative = libstdcxx_path })",
         "\"/lib/x86_64-linux-gnu/libgcc_s.so.1\"",
