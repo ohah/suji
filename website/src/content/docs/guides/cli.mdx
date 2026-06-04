@@ -5,11 +5,29 @@ description: suji 명령어 레퍼런스
 
 | 명령 | 설명 |
 |------|------|
-| `suji init <name> --backend=zig\|rust\|go\|multi --frontend=react\|vue\|svelte\|solid\|preact\|vanilla` | 새 프로젝트 스캐폴딩 (frontend 기본 react, 번들 Vite 템플릿 + invoke 데모) |
+| `suji init <name>` | 새 프로젝트 스캐폴딩 (아래 플래그 참고) |
 | `suji dev` | 개발 모드(백엔드 빌드 + CEF + 핫 리로드) |
 | `suji build` | 프로덕션 빌드 |
 | `suji run` | 프로덕션 빌드 실행 |
+| `suji run main.js` | CEF 없이 embedded Node.js 파일 직접 실행 |
 | `suji types [--out <path>]` | zig 백엔드 `.schema()` → `SujiHandlers` `.d.ts` 자동 생성 |
+
+## suji init
+
+```bash
+suji init my-app --backend=multi --frontend=react --toolchain=vite --pm=npm
+# 별칭: npx @suji/cli init my-app  ·  npx create-suji my-app
+```
+
+| 플래그 | 값 | 기본 |
+|--------|----|----|
+| `--backend` | `none` \| `zig` \| `rust` \| `go` \| `node` \| `lua` \| `multi` | `rust` |
+| `--frontend` | `react` \| `vue` \| `svelte` \| `solid` \| `preact` \| `vanilla` \| `next` | `react` |
+| `--toolchain` | `vite` \| `rsbuild` \| `next` | `vite` |
+| `--pm` | `npm` \| `pnpm` \| `bun` \| `vp` (VoidZero Vite+) | `npm` |
+
+네이티브 `suji init` 과 `@suji/cli`(`npx`) 는 동형으로 동작하며 정적 `suji.json`
+을 생성합니다.
 
 ## suji types
 

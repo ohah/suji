@@ -1,0 +1,206 @@
+---
+title: Rust 백엔드 SDK
+description: suji::handle 매크로 + invoke / send / on
+---
+
+`suji` crate (crates/suji-rs). cdylib으로 빌드되어 main suji 프로세스에 `dlopen` 됨.
+
+## Cargo.toml
+
+```toml
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+suji = { path = "../../crates/suji-rs" }
+serde_json = "1"
+```
+
+## 핸들러
+
+```rust
+use suji::prelude::*;
+use serde_json::{json, Value};
+
+#[suji::handle]
+fn ping() -> String {
+    "pong".into()
+}
+
+#[suji::handle]
+fn greet(req: Value) -> Value {
+    let name = req.get("name").and_then(|v| v.as_str()).unwrap_or("world");
+    json!({ "msg": format!("hello {}", name) })
+}
+
+suji::export_handlers!(ping, greet);
+```
+
+이벤트 리스너:
+
+```rust
+extern "C" fn on_window_all_closed(
+    _ch: *const c_char,
+    _data: *const c_char,
+    _arg: *mut std::os::raw::c_void,
+) {
+    if suji::platform() != suji::PLATFORM_MACOS {
+        suji::quit();
+    }
+}
+
+suji::export_handlers!(
+    ping, greet;
+    "window:all-closed" => on_window_all_closed
+);
+```
+
+## 유틸리티
+
+```rust
+suji::invoke(backend: &str, request: &str) -> Option<String>
+suji::send(channel: &str, data: &str)
+suji::on(channel: &str, callback: extern "C" fn(...), arg: *mut c_void) -> u64
+suji::off(listener_id: u64)
+suji::quit()
+suji::platform() -> &'static str       // "macos" | "linux" | "windows"
+
+// 상수
+suji::PLATFORM_MACOS
+suji::PLATFORM_LINUX
+suji::PLATFORM_WINDOWS
+```
+
+## InvokeEvent (Phase 2.5)
+
+`#[suji::handle]` 매크로가 파라미터 타입이 `InvokeEvent`인 걸 감지하면 wire의
+`__window`/`__window_name`에서 자동 파생해서 주입. 일반 필드는 기존처럼 이름으로 JSON 추출.
+
+```rust
+use suji::prelude::*;
+use serde_json::{json, Value};
+
+#[suji::handle]
+fn save(filename: String, event: InvokeEvent) -> Value {
+    let win_id = event.window.id;                 // u32
+    let win_name = event.window.name.as_deref();  // Option<&str>
+    if win_name == Some("settings") {
+        // settings 창 전용 분기
+    }
+    json!({ "ok": true, "filename": filename, "from_window": win_id })
+}
+```
+
+파싱 실패 / 누락 / 타입 불일치는 모두 `id=0, name=None` default로 안전 폴백.
+
+## TypeScript Handler 타입 생성
+
+Rust 백엔드는 런타임 자동 타입 추출 대신, 명시적으로 `#[derive(suji::Type)]`를 붙인
+req/res 타입을 `SujiHandlers` module augmentation으로 내보낸다.
+
+```rust
+use serde::{Deserialize, Serialize};
+use suji::prelude::*;
+
+#[derive(Type, Serialize, Deserialize)]
+struct GreetReq {
+    name: String,
+}
+
+#[derive(Type, Serialize, Deserialize)]
+struct GreetRes {
+    greeting: String,
+}
+
+let dts = SujiHandlers::new()
+    .handler::<GreetReq, GreetRes>("greet")
+    .export()?;
+```
+
+생성 결과는 frontend `@suji/api`의 `invoke("greet", ...)` 타입 추론에 바로 쓰는
+`.d.ts` 파일이다. `export_for("@suji/node")`를 쓰면 Node SDK module augmentation도
+같은 방식으로 만들 수 있다.
+
+## `send_to` — 특정 창에만 이벤트 전달 (Phase 2.5)
+
+```rust
+suji::send_to(event.window.id, "saved", &json!({ "ok": true }).to_string());
+```
+
+Electron `webContents.send` 대응. 대상 창이 닫혔거나 core 주입 전이면 silent no-op.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+Frontend `@suji/api`의 `windows.*` 와 같은 cmd JSON을 코어로 보낸다 (IPC 경유, dlopen 호환). 응답은 `Option<String>` JSON.
+
+```rust
+use suji::windows;
+
+// 새 창
+let _ = windows::create_simple("Settings", "http://localhost:12300/settings");
+let _ = windows::create(r#""name":"hud","frame":false,"transparent":true"#);
+
+// 페이지 조작
+let _ = windows::load_url(2, "https://example.com/");
+let _ = windows::reload(2, true);                      // ignoreCache
+let _ = windows::execute_javascript(2, "document.title='Hi'");
+let _ = windows::set_title(2, "New Title");
+let _ = windows::set_bounds(2, windows::SetBoundsArgs {
+    x: 100, y: 100, width: 1200, height: 800,
+});
+
+// 상태 조회
+let _ = windows::get_url(2);     // {ok, url} 또는 {ok:false, url:null}
+let _ = windows::is_loading(2);  // {ok, loading}
+
+// Phase 4-B 줌
+let _ = windows::set_zoom_level(2, 1.5);
+let _ = windows::set_zoom_factor(2, 1.2);
+let _ = windows::get_zoom_level(2);
+let _ = windows::get_zoom_factor(2);
+
+// Phase 4-C DevTools
+let _ = windows::open_dev_tools(2);
+let _ = windows::toggle_dev_tools(2);
+let _ = windows::is_dev_tools_opened(2);
+
+// Phase 4-E 편집/검색
+let _ = windows::undo(2);
+let _ = windows::copy(2);
+let _ = windows::find_in_page(2, "hello", windows::FindOptions { forward: true, match_case: false, find_next: false });
+let _ = windows::stop_find_in_page(2, /* clear_selection */ true);
+
+// Phase 4-D PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
+let _ = windows::print_to_pdf(2, "/tmp/report.pdf");
+
+// Phase 17-B WebContentsView
+let host_id = 2;
+let view = windows::create_view(windows::CreateViewOptions {
+    host_id,
+    name: Some("sidebar"),
+    url: Some("https://example.com/"),
+    bounds: windows::ViewBoundsArgs { x: 0, y: 80, width: 360, height: 600 },
+});
+let _ = windows::add_child_view(host_id, 3, None);
+let _ = windows::set_top_view(host_id, 3);
+let _ = windows::set_view_bounds(3, windows::ViewBoundsArgs { x: 0, y: 80, width: 420, height: 600 });
+let _ = windows::set_view_visible(3, false);
+let _ = windows::get_child_views(host_id);
+let _ = windows::destroy_view(3);
+```
+
+`title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+```rust
+use suji::fs;
+
+let _ = fs::mkdir("/tmp/suji", true);
+let _ = fs::write_file("/tmp/suji/hello.txt", "hello\nworld");
+let _ = fs::read_file("/tmp/suji/hello.txt");
+let _ = fs::stat("/tmp/suji/hello.txt");
+let _ = fs::readdir("/tmp/suji");
+```
+
+모든 함수는 `invoke("__core__", ...)` 경유 raw JSON `Option<String>`을 반환한다.

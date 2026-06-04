@@ -19,6 +19,9 @@ bun.lock
 # Astro docs site (website/) build artifacts
 website/dist/
 website/.astro/
+# llms.txt/llms-full.txt 는 prebuild(gen-llms) 가 생성 — 배포 시 자동(artifact)
+website/public/llms.txt
+website/public/llms-full.txt
 # but track website/bun.lock — CI(docs.yml)가 --frozen-lockfile 사용
 !website/bun.lock
 

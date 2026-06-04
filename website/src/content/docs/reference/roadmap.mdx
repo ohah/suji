@@ -19,6 +19,9 @@ description: Electron/Tauri 패리티 현황과 정직한 경계
 - 권한 모델: fs 샌드박스 + shell/dialog/캡처/nativeImage opt-in 게이트 +
   모바일 권한 게이트(iOS/Android 실 시뮬·에뮬 e2e 검증).
 - 임베드 코어 분리 + 모바일(iOS/Android, Rust·Go 백엔드, SQLite).
+- [autoUpdater](/suji/distribution/auto-updater/)(manifest→download→SHA-256→
+  quit-and-install) · [crashReporter](/suji/distribution/crash-reporter/)
+  (CEF Crashpad/Breakpad) 1차.
 
 ## 정직한 경계
 
@@ -28,7 +31,9 @@ description: Electron/Tauri 패리티 현황과 정직한 경계
 - **desktopCapturer 썸네일 인코딩**: Screen Recording TCC 권한 필요 —
   헤드리스/CI 는 컴파일·링크·graceful-fail 만 검증(인코딩 경로 미실행).
 - `process.run`/`http.fetch`: **백엔드 only**(렌더러 미노출 — 의도된 보안 설계).
-- Windows/Linux 패키징·자동 업데이트·크래시 리포터: 미구현(우선순위).
+- **autoUpdater / crashReporter**: 1차 구현됨이나 실 crash 유발·업로드 서버
+  검증, 전 플랫폼 install 경로는 정직한 후속 경계.
+- **Windows/Linux 앱 패키징**: macOS `.app` 번들·서명·공증·dmg 대비 미성숙(우선순위).
 
 테스트: `zig build test` 790개 단위 + e2e(puppeteer/bun) + 모바일 실
 시뮬/에뮬 기능 e2e + 호스트 하니스. 정직한 미검증 경계는 PLAN/커밋에 명시.

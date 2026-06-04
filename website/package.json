@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
+    "prebuild": "node scripts/port-docs.mjs && node scripts/gen-llms.mjs",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "port-docs": "node scripts/port-docs.mjs",
+    "gen-llms": "node scripts/gen-llms.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.38.4",

@@ -74,6 +74,14 @@ async function expectGeneratedWorkflow(projectDir: string) {
   return workflow;
 }
 
+async function expectAgentDocs(projectDir: string, backendNeedle: string) {
+  const agents = await readFile(path.join(projectDir, "AGENTS.md"), "utf8");
+  expect(agents).toContain(backendNeedle);
+  expect(agents).toContain("https://ohah.github.io/suji/llms.txt");
+  const claude = await readFile(path.join(projectDir, "CLAUDE.md"), "utf8");
+  expect(claude).toContain("@AGENTS.md");
+}
+
 async function buildFrontend(projectDir: string) {
   const install = await run("bun", ["install"], path.join(projectDir, "frontend"));
   expectClean(install, "bun install generated frontend");
@@ -102,6 +110,7 @@ test("suji init scaffolds 12300 npm-command config and buildable frontend", asyn
   expect(suji.frontend.build_command).toBe("npm run build");
   expect(suji.backend).toEqual({ lang: "zig", entry: "." });
   await expectGeneratedWorkflow(projectDir);
+  await expectAgentDocs(projectDir, "Zig");
   await buildFrontend(projectDir);
 });
 
@@ -130,6 +139,7 @@ test("@suji/cli scaffolds multi backend rsbuild project", async () => {
   expect(suji.frontend.build_command).toBe("pnpm run build");
   expect(suji.frontend.dist_dir).toBe("frontend/dist");
   expect(suji.backends.map((b: any) => b.lang)).toEqual(["zig", "rust", "go"]);
+  await expectAgentDocs(projectDir, "(multi)");
   await buildFrontend(projectDir);
 });
 

@@ -1,0 +1,142 @@
+---
+title: Global Shortcut (Phase 5-E)
+description: 시스템 전역 단축키 — macOS Carbon Hot Key + Linux X11 XGrabKey + Windows RegisterHotKey, accelerator 문자열 → trigger 이벤트
+---
+
+Electron `globalShortcut.*`에 대응하는 시스템 전역 단축키 API. macOS는 Carbon
+`RegisterEventHotKey`, Linux는 X11 `XGrabKey`, Windows는 Win32 `RegisterHotKey` +
+hidden message pump를 사용한다.
+
+macOS에서 일반 accelerator는 Carbon path라 Accessibility 권한 없이 동작한다.
+미디어키(`MediaPlayPause` 등)는 Carbon이 지원하지 않아 NSEvent system-defined monitor를
+사용하며, 실제 글로벌 수신은 macOS Accessibility(TCC) 신뢰가 필요할 수 있다.
+
+트리거가 발생하면 `globalShortcut:trigger` 채널로 EventBus에 emit:
+
+```json
+{ "accelerator": "Cmd+Shift+K", "click": "openSettings" }
+```
+
+## 플랫폼 지원
+
+| API | macOS | Linux | Windows |
+|---|---|---|---|
+| `globalShortcut.register` | ✅ Carbon Hot Key / media NSEvent | ✅ X11 `XGrabKey` | ✅ RegisterHotKey |
+| `globalShortcut.unregister` | ✅ | ✅ `XUngrabKey` | ✅ UnregisterHotKey |
+| `globalShortcut.unregisterAll` | ✅ | ✅ all registered slots | ✅ all registered slots |
+| `globalShortcut.isRegistered` | ✅ | ✅ local registry | ✅ local registry |
+| Trigger event | ✅ `globalShortcut:trigger` | ✅ `KeyPress` → `globalShortcut:trigger` | ✅ `WM_HOTKEY` → `globalShortcut:trigger` |
+
+## Accelerator 문법
+
+`+`로 연결된 modifier + 단일 키 (Electron 호환). 마지막 비-modifier 토큰이 메인 키.
+
+| Modifier | Aliases |
+|---|---|
+| Cmd | `Command`, `CmdOrCtrl`, `CommandOrControl`, `Meta`, `Super` |
+| Shift | `Shift` |
+| Alt | `Option` |
+| Ctrl | `Control` |
+
+macOS에서 Cmd 계열은 Command modifier다. Linux에서 `CmdOrCtrl`/`CommandOrControl`은
+Control, `Cmd`/`Command`/`Meta`/`Super`는 X11 `Mod4`로 매핑한다. Windows에서
+Cmd/CmdOrCtrl/Command/Meta/Super는 Control modifier로 매핑한다.
+
+| Key | 예시 |
+|---|---|
+| 알파벳/숫자 | `A`-`Z`, `0`-`9` |
+| Function | `F1`-`F24` |
+| Whitespace/Edit | `Space`, `Tab`, `Return` (or `Enter`), `Esc` (or `Escape`), `Delete` (or `Backspace`), `ForwardDelete` |
+| Navigation | `Up`, `Down`, `Left`, `Right`, `PageUp`, `PageDown`, `Home`, `End` |
+| Punctuation | `Plus`, `Minus`, `Comma`, `Period`, `Slash`, `Backslash` |
+| Media (macOS) | `MediaPlayPause`, `MediaNextTrack`, `MediaPreviousTrack`, `MediaStop` |
+
+예시: `"Cmd+Shift+K"`, `"CommandOrControl+P"`, `"Alt+F4"`, `"Cmd+Shift+Up"`.
+
+## API
+
+| API | cmd | 응답 |
+|---|---|---|
+| `globalShortcut.register(accel, click)` | `global_shortcut_register` | `{success:true}` |
+| `globalShortcut.unregister(accel)` | `global_shortcut_unregister` | `{success:true}` |
+| `globalShortcut.unregisterAll()` | `global_shortcut_unregister_all` | `{success:true}` |
+| `globalShortcut.isRegistered(accel)` | `global_shortcut_is_registered` | `{registered:bool}` |
+
+실패 응답은 `{success:false,error}`. 에러 코드: `accelerator` (빈 또는 unescape 실패),
+`click` (unescape 실패), `register` (이미 등록됨 / 키 매핑 실패 / OS 거부).
+
+## Frontend JS
+
+```ts
+import { globalShortcut, on } from '@suji/api';
+
+await globalShortcut.register('Cmd+Shift+K', 'openSettings');
+
+on('globalShortcut:trigger', ({ accelerator, click }) => {
+  console.log(`hot key: ${accelerator} → ${click}`);
+});
+
+await globalShortcut.unregister('Cmd+Shift+K');
+await globalShortcut.unregisterAll();
+```
+
+## Node 백엔드
+
+```js
+import { globalShortcut } from '@suji/node';
+
+await globalShortcut.register('CommandOrControl+Shift+I', 'devtools');
+await globalShortcut.isRegistered('CommandOrControl+Shift+I'); // true
+```
+
+## Zig 백엔드
+
+```zig
+_ = suji.globalShortcut.register("Cmd+Shift+K", "openSettings");
+suji.on("globalShortcut:trigger", onShortcut);
+
+fn onShortcut(event: suji.Event) void {
+    // event.data: {"accelerator":"...","click":"..."}
+}
+```
+
+## Rust 백엔드
+
+```rust
+use suji::global_shortcut;
+
+global_shortcut::register("Cmd+Shift+K", "openSettings");
+suji::on("globalShortcut:trigger", on_shortcut, std::ptr::null_mut());
+```
+
+## Go 백엔드
+
+```go
+import "github.com/ohah/suji-go/globalshortcut"
+
+globalshortcut.Register("Cmd+Shift+K", "openSettings")
+suji.On("globalShortcut:trigger", func(data string) { ... })
+```
+
+## Windows 동작 정밀
+
+- `win_pump` hidden message-only window가 별도 thread에서 `WM_HOTKEY`를 받는다.
+- `register`는 accelerator를 Win32 modifier/VK로 변환하고 `MOD_NOREPEAT`를 붙여
+  `RegisterHotKey(null, id, mods, vk)`를 호출한다.
+- 등록 슬롯은 64개이며, 같은 accelerator는 중복 등록하지 않는다.
+- `WM_HOTKEY` 수신 시 등록 당시의 `{accelerator, click}`을 `globalShortcut:trigger`로 emit한다.
+
+## Linux 동작 정밀
+
+- X11 세션(`DISPLAY`)에서 별도 Xlib connection을 열고 root window에 `XGrabKey`를 등록한다.
+- CapsLock/NumLock 상태와 무관하게 동작하도록 기본 modifier, Lock, Mod2, Lock+Mod2 조합을 함께 grab한다.
+- 전용 event thread가 `KeyPress`를 받고 등록 당시의 `{accelerator, click}`을 `globalShortcut:trigger`로 emit한다.
+- Wayland 순수 세션처럼 `DISPLAY`가 없거나 X11 키 매핑이 실패하면 register는 `os_reject` 또는 `parse_failed`로 실패한다.
+
+## 한계
+
+- Linux는 X11/XWayland 경로만 지원한다. compositor별 Wayland global shortcut portal은 후속 범위다.
+- 동시 등록 한도 64개 (`SUJI_HOTKEY_MAX`).
+- accelerator/click 문자열 한도 각 128 byte.
+- 동일 accelerator는 한 번만 등록 가능 — 두 번째 register는 `error:"already_registered"`.
+- 미디어키는 현재 macOS 전용 토큰이다. Linux/Windows parser는 일반 키/F1-F24/navigation/edit 키를 지원한다.

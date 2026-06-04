@@ -1,0 +1,144 @@
+---
+title: Electron 마이그레이션
+description: Electron 앱을 Suji로 옮길 때의 API 대응, 코드 변환 패턴, 미지원 항목
+---
+
+Suji는 Electron의 main/renderer IPC 모델을 유지하되, renderer에 Node.js를 노출하지 않고
+Zig/Rust/Go/Node 백엔드가 같은 JSON wire를 공유한다. 기존 Electron 앱은 IPC와
+BrowserWindow 주변부터 옮기는 방식이 가장 안정적이다.
+
+## 권장 순서
+
+1. Renderer의 `ipcRenderer.*` 호출을 `@suji/api` 또는 `window.__suji__` 호출로 치환한다.
+2. Electron main process의 `ipcMain.handle/on`을 Suji 백엔드 SDK의 `handle/on`으로 옮긴다.
+3. `BrowserWindow` 생성/조작은 `windows.*` 또는 SDK별 `BrowserWindow` wrapper로 옮긴다.
+4. 파일, shell, dialog, tray, menu, notification은 Suji native API 문서별로 치환한다.
+5. preload/contextBridge에 있던 얇은 API facade는 renderer 일반 모듈 또는 backend handler로 분리한다.
+
+## IPC 대응
+
+| Electron | Suji |
+|---|---|
+| `ipcRenderer.invoke(ch, ...args)` | `suji.invoke(ch, data)` |
+| `ipcRenderer.send(ch, data)` | `suji.emit(ch, data)` / `suji.send(ch, data)` |
+| `ipcRenderer.on(ch, fn)` | `suji.on(ch, fn)` |
+| `ipcMain.handle(ch, (event, ...args) => {})` | backend `handle(ch, (req, event) => {})` |
+| `ipcMain.on(ch, fn)` | backend `on(ch, fn)` |
+| `event.sender` | `event.window` (`id`, `name`, `url`, `is_main_frame`) |
+| `win.webContents.send(ch, data)` | backend `sendTo(winId, ch, data)` 또는 renderer `emit(..., {to})` |
+
+Electron의 variadic args는 Suji에서 단일 JSON 객체로 합친다.
+
+```js
+// Electron renderer
+const result = await ipcRenderer.invoke('save', filename, content, { overwrite: true });
+
+// Suji renderer
+const result = await suji.invoke('save', {
+  filename,
+  content,
+  overwrite: true,
+});
+```
+
+```js
+// Electron main
+ipcMain.handle('save', async (event, filename, content, options) => {
+  return saveFile(filename, content, options);
+});
+
+// Suji Node backend
+const { handle } = require('@suji/node');
+
+handle('save', (req, event) => {
+  return saveFile(req.filename, req.content, { overwrite: req.overwrite });
+});
+```
+
+## BrowserWindow
+
+| Electron | Suji |
+|---|---|
+| `new BrowserWindow(opts)` | `windows.create(opts)` 또는 `BrowserWindow.create(opts)` |
+| `win.loadURL(url)` | `windows.loadURL(id, url)` |
+| `win.webContents.executeJavaScript(code)` | `windows.executeJavaScript(id, code)` |
+| `win.webContents.openDevTools()` | `windows.openDevTools(id)` |
+| `win.webContents.send(ch, data)` | `sendTo(id, ch, data)` |
+| `BrowserWindow.getAllWindows()` | `windows.all()` 또는 `core_info` 기반 조회 |
+
+```js
+// Electron
+const win = new BrowserWindow({ width: 900, height: 640 });
+win.loadURL('https://example.com');
+
+// Suji Node backend
+const { windows } = require('@suji/node');
+
+const created = await windows.create({ width: 900, height: 640 });
+await windows.loadURL(created.windowId, 'https://example.com');
+```
+
+## 앱 라이프사이클
+
+Electron의 canonical all-closed 패턴은 Suji에서도 이벤트로 직접 작성한다.
+
+```js
+const { on, platform, quit, PLATFORM_MACOS } = require('@suji/node');
+
+on('window:all-closed', () => {
+  if (platform() !== PLATFORM_MACOS) quit();
+});
+```
+
+플랫폼 문자열은 Electron과 다르다.
+
+| Electron | Suji |
+|---|---|
+| `darwin` | `macos` |
+| `win32` | `windows` |
+| `linux` | `linux` |
+
+## Native API 치환
+
+| Electron API | Suji 문서 |
+|---|---|
+| `dialog.*` | [`dialog.mdx`](/suji/native/dialog/) |
+| `clipboard.*`, `shell.*` | [`clipboard-shell.mdx`](/suji/native/clipboard-shell/) |
+| `Tray` | [`tray.mdx`](/suji/native/tray/) |
+| `Menu` | [`menu.mdx`](/suji/native/menu/) |
+| `Notification` | [`notification.mdx`](/suji/native/notification/) |
+| `globalShortcut` | [`global-shortcut.mdx`](/suji/native/global-shortcut/) |
+| `session.cookies`, cache/storage | [`cache.mdx`](/suji/concepts/cache/) |
+| `autoUpdater` | [`auto-updater.mdx`](/suji/distribution/auto-updater/) |
+
+## Preload / ContextBridge
+
+Suji renderer에는 Node.js가 없으므로 Electron preload가 막던 Node API leak 자체가 없다.
+현재 `window.__suji__`는 메인 월드에 주입되고 `Object.freeze`와 슬롯 봉인으로 변조를 막는다.
+Electron `contextBridge`와 동일한 isolated-world 분리는 아직 제공하지 않는다.
+
+마이그레이션 방식:
+
+- preload의 단순 wrapper 함수는 renderer의 일반 TypeScript 모듈로 옮긴다.
+- 파일 시스템, shell, dialog처럼 권한 경계가 필요한 코드는 backend handler 또는 Suji native API로 옮긴다.
+- 외부 URL을 로드하는 창은 필요한 API만 backend handler로 좁혀 노출한다.
+
+## 미지원 / 다른 설계
+
+| Electron | Suji 상태 |
+|---|---|
+| `remote` | 미지원 |
+| `MessageChannelMain` / renderer 직접 통신 | 미지원, 코어 허브 경유 |
+| renderer Node integration | 미지원 |
+| arbitrary `protocol.handle` | 앱 정적 로딩용 `suji://app/` 제공, 동적 scheme handler는 보류 |
+| FreeBSD | 미지원 |
+
+## 체크리스트
+
+- IPC args를 단일 object로 바꿨는가
+- handler가 `(req, event)` 순서를 쓰는가
+- `process.platform` 비교를 `macos/windows/linux`로 바꿨는가
+- renderer에서 Node-only import를 제거했는가
+- preload에 있던 privileged 작업을 backend/native API로 옮겼는가
+- `webContents.send` 대상 창 id를 보존했는가
+- `window:all-closed` 종료 정책을 앱 코드에 작성했는가

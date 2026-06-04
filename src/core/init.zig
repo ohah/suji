@@ -253,6 +253,9 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
     try writeFileContent(project_dir, ".gitignore", @embedFile("../templates/gitignore"));
     try scaffoldGitHubActions(project_dir);
 
+    // AGENTS.md / CLAUDE.md (에이전트 가이드 + llms.txt 링크)
+    try writeAgentDocs(allocator, project_dir, name, opts.backend, opts.package_manager);
+
     std.debug.print("\n[suji] project '{s}' created!\n\n  cd {s}\n  {s}\n  {s}\n\n", .{ name, name, opts.package_manager.installCommand(), opts.package_manager.runCommand("dev") });
 }
 
@@ -331,6 +334,46 @@ fn backendEntry(backend: BackendLang) []const u8 {
         .lua => "backends/lua",
         else => ".",
     };
+}
+
+fn backendLabel(backend: BackendLang) []const u8 {
+    return switch (backend) {
+        .none => "없음 (frontend-only)",
+        .zig => "Zig",
+        .rust => "Rust",
+        .go => "Go",
+        .node => "Node.js",
+        .lua => "Lua",
+        .multi => "Zig · Rust · Go (multi)",
+    };
+}
+
+// AGENTS.md / CLAUDE.md 템플릿 토큰 치환 (packages/suji-cli/templates 와 byte-identical).
+fn renderAgentDoc(allocator: std.mem.Allocator, tmpl: []const u8, name: []const u8, backend: BackendLang, pm: PackageManager) ![]u8 {
+    const pairs = [_][2][]const u8{
+        .{ "__NAME__", name },
+        .{ "__BACKEND__", backendLabel(backend) },
+        .{ "__INSTALL__", pm.installCommand() },
+        .{ "__DEV__", pm.runCommand("dev") },
+        .{ "__BUILD__", pm.runCommand("build") },
+    };
+    var out = try allocator.dupe(u8, tmpl);
+    for (pairs) |p| {
+        const next = try std.mem.replaceOwned(u8, allocator, out, p[0], p[1]);
+        allocator.free(out);
+        out = next;
+    }
+    return out;
+}
+
+fn writeAgentDocs(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend: BackendLang, pm: PackageManager) !void {
+    const agents = try renderAgentDoc(allocator, @embedFile("../templates/AGENTS.md"), name, backend, pm);
+    defer allocator.free(agents);
+    try writeFileContent(dir, "AGENTS.md", agents);
+
+    const claude = try renderAgentDoc(allocator, @embedFile("../templates/CLAUDE.md"), name, backend, pm);
+    defer allocator.free(claude);
+    try writeFileContent(dir, "CLAUDE.md", claude);
 }
 
 fn scaffoldZig(dir: Dir) !void {

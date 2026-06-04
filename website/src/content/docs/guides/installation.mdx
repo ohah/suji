@@ -41,8 +41,12 @@ npx @suji/cli init my-app --backend=zig --frontend=react
 
 | 플래그 | 값 | 기본 |
 |--------|----|----|
-| `--backend` | `zig` \| `rust` \| `go` \| `multi` | `rust` |
-| `--frontend` | `react` \| `vue` \| `svelte` \| `solid` \| `preact` \| `vanilla` | `react` |
+| `--backend` | `none` \| `zig` \| `rust` \| `go` \| `node` \| `lua` \| `multi` | `rust` |
+| `--frontend` | `react` \| `vue` \| `svelte` \| `solid` \| `preact` \| `vanilla` \| `next` | `react` |
+| `--toolchain` | `vite` \| `rsbuild` \| `next` | `vite` |
+| `--pm` | `npm` \| `pnpm` \| `bun` \| `vp` | `npm` |
+
+전체 플래그·동작은 [CLI](/suji/guides/cli/) 참고.
 
 생성물:
 

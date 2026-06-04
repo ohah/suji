@@ -1,0 +1,264 @@
+---
+title: Node.js 백엔드 SDK
+description: libnode 임베딩 + @suji/node 패키지
+---
+
+`@suji/node` npm 패키지. libnode를 suji 프로세스에 **임베딩**해서 실행 —
+별도 프로세스 없음. `~/.suji/node/24.14.1/libnode.dylib` 필요.
+직접 실행 CLI(`suji run main.js`)는 현재 macOS libnode 경로에서 CI 검증한다.
+
+## suji.json
+
+```json
+{
+  "backend": {
+    "lang": "node",
+    "entry": "backends/node"
+  }
+}
+```
+
+## main.js
+
+```js
+const { handle, invoke, invokeSync, on, send, quit, platform, PLATFORM_MACOS } = require('@suji/node');
+
+// 기본 핸들러
+handle('ping', () => ({ msg: 'pong' }));
+handle('greet', (data) => ({ msg: `hello ${data.name || 'world'}` }));
+
+// 크로스 호출 — 동기 (핸들러 내부)
+handle('call-rust', () => {
+  const resp = invokeSync('rust', JSON.stringify({ cmd: 'ping' }));
+  return { rust_said: JSON.parse(resp) };
+});
+
+// 크로스 호출 — 비동기 (핸들러 외부, Promise)
+on('theme-change-request', async () => {
+  const resp = await invoke('zig', JSON.stringify({ cmd: 'get-theme' }));
+  send('theme-changed', resp);
+});
+
+// Electron 패턴
+on('window:all-closed', () => {
+  if (platform() !== PLATFORM_MACOS) quit();
+});
+```
+
+## API
+
+### `handle(channel, fn)`
+
+IPC 핸들러 등록. `fn`은 **동기** 함수 — 파싱된 request 객체 받고 응답 객체 반환.
+
+```ts
+type Handler = (data: any) => any;
+handle('ping', (data) => ({ msg: 'pong', echo: data }));
+```
+
+### `invoke(backend, request) → Promise<T>`
+
+비동기 크로스 호출. 핸들러 **외부**에서 사용 (event loop 블록 X).
+
+`request.cmd`가 `SujiHandlers`에 등록된 값이면 req/res 타입을 추론한다. 등록되지
+않은 요청은 기존처럼 `invoke<T>()` generic으로 사용할 수 있다.
+
+```ts
+import { invoke, call } from '@suji/node';
+
+declare module '@suji/node' {
+  interface SujiHandlers {
+    ping: { req: void; res: { msg: string } };
+    greet: { req: { name: string }; res: string };
+  }
+}
+
+const ping = await invoke('zig', { cmd: 'ping' });              // { msg: string }
+const greet = await invoke('zig', { cmd: 'greet', name: 'Suji' }); // string
+const same = await call('zig', 'greet', { name: 'Suji' });      // string
+const raw = await invoke<{ ok: boolean }>('zig', { cmd: 'custom' });
+```
+
+### `invokeSync(backend, request) → T`
+
+동기 크로스 호출. 핸들러 **내부** 전용. Node main thread가 block되는 동안
+재진입 가능 (deadlock 방지 메커니즘 내장). `invoke`와 동일하게 `SujiHandlers`
+기반 타입 추론을 지원하며, `callSync(backend, cmd, data?)` 편의 래퍼도 제공한다.
+
+### `send(channel, data)`
+
+이벤트 발신. JSON 문자열을 받음.
+
+```js
+send('progress', JSON.stringify({ percent: 50 }));
+```
+
+### `on(channel, callback)`
+
+이벤트 구독.
+
+```js
+on('data-updated', (data) => {
+  const payload = JSON.parse(data);
+  // ...
+});
+```
+
+### `quit()` / `platform()`
+
+- `quit()` — Electron `app.quit()` 대응
+- `platform()` — `"macos"` | `"linux"` | `"windows"` (Electron은 `"darwin"`)
+
+## 실행 환경
+
+libnode 임베딩이라 `node_modules` 그대로 사용 가능:
+
+```json
+// backends/node/package.json
+{
+  "dependencies": {
+    "lodash": "^4.17.21",
+    "axios": "^1.6.0"
+  }
+}
+```
+
+```bash
+cd backends/node && npm install
+suji dev  # main.js에서 require('lodash') 정상 동작
+```
+
+CEF 앱을 띄우지 않고 embedded Node.js 파일만 직접 실행할 수도 있다.
+`path`가 디렉터리면 `<path>/main.js`를 실행한다.
+
+```bash
+suji run backends/node/main.js
+suji run backends/node
+```
+
+이 경로도 `@suji/node` bridge를 주입하므로 `platform()`과 `quit()` 같은
+headless-safe API는 동작한다. 창/렌더러가 필요한 API는 일반 `suji dev`/`suji run`
+앱 모드에서 사용한다.
+
+## InvokeEvent (Phase 2.5)
+
+handler가 2-arity `(data, event) => ...`이면 wire의 `__window`/`__window_name`에서
+파생된 `InvokeEvent`를 두 번째 인자로 받는다. 1-arity는 기존처럼 동작 — 선택적 확장.
+
+```js
+const { handle } = require('@suji/node');
+
+handle('save', (data, event) => {
+  console.log(`save from window id=${event.window.id} name=${event.window.name}`);
+  if (event.window.name === 'settings') {
+    // settings 창 전용 분기
+  }
+  return { ok: true };
+});
+```
+
+TypeScript:
+```ts
+import { handle, type InvokeEvent } from '@suji/node';
+
+handle('save', (data: { text: string }, event: InvokeEvent) => ({
+  ok: true,
+  from_window: event.window.id,
+}));
+```
+
+분기 기준은 `handler.length` — arrow/함수 선언 양쪽 모두 인자 수가 JS runtime에 노출되므로 자동 적용.
+
+## `sendTo` — 특정 창에만 이벤트 전달 (Phase 2.5)
+
+```js
+const { sendTo } = require('@suji/node');
+
+handle('save', (data, event) => {
+  sendTo(event.window.id, 'saved', { ok: true });
+  return { ok: true };
+});
+```
+
+Electron `webContents.send` 대응. 대상이 닫혔거나 bridge가 구버전이면 silent no-op.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+Frontend `@suji/api`의 `windows.*`와 동일한 cmd JSON을 코어로 보낸다 (IPC 경유). **유일하게 typed response** (Zig/Rust/Go는 raw JSON 문자열).
+
+```js
+const { windows } = require('@suji/node');
+
+// 새 창
+const r = await windows.create({
+  name: 'hud',
+  frame: false,
+  transparent: true,
+  alwaysOnTop: true,
+});
+// r = { from: "zig-core", cmd: "create_window", windowId: 3 }
+
+// 페이지 조작
+await windows.loadURL(2, 'https://example.com/');
+await windows.reload(2, true);                         // ignoreCache
+await windows.executeJavaScript(2, "document.title='Hi'"); // fire-and-forget
+await windows.setTitle(2, 'New Title');
+await windows.setBounds(2, { x: 100, y: 100, width: 1200, height: 800 });
+
+// 상태 조회
+const u = await windows.getURL(2);     // { ok, url } 또는 { ok:false, url:null }
+const l = await windows.isLoading(2);  // { ok, loading }
+
+// Phase 4-B 줌
+await windows.setZoomLevel(2, 1.5);
+await windows.setZoomFactor(2, 1.2);
+await windows.getZoomLevel(2);   // { ok, level }
+await windows.getZoomFactor(2);  // { ok, factor }
+
+// Phase 4-C DevTools
+await windows.openDevTools(2);
+await windows.toggleDevTools(2);
+await windows.isDevToolsOpened(2);   // { ok, opened }
+
+// Phase 4-E 편집/검색
+await windows.undo(2);
+await windows.copy(2);
+await windows.findInPage(2, 'hello', { forward: true, matchCase: false, findNext: false });
+await windows.stopFindInPage(2, /* clearSelection */ true);
+
+// Phase 4-D PDF 인쇄 — SDK가 `window:pdf-print-finished` 이벤트 path 매칭으로 Promise resolve
+const { success } = await windows.printToPDF(2, '/tmp/report.pdf');
+
+// Phase 17-B WebContentsView
+const { viewId } = await windows.createView({
+  hostId: 2,
+  name: 'sidebar',
+  url: 'https://example.com/',
+  x: 0,
+  y: 80,
+  width: 360,
+  height: 600,
+});
+await windows.addChildView(2, viewId);
+await windows.setTopView(2, viewId);
+await windows.setViewBounds(viewId, { x: 0, y: 80, width: 420, height: 600 });
+await windows.setViewVisible(viewId, false);
+await windows.getChildViews(2);
+await windows.destroyView(viewId);
+```
+
+핸들러 안에서 동기 호출이 필요하면 `invokeSync('__core__', { cmd: 'load_url', windowId, url })` 직접 사용 — 다만 `windows.*` 메서드는 모두 async (event loop 비블록).
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+```ts
+import { fs } from '@suji/node';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
+const text = await fs.readFile('/tmp/suji/hello.txt');
+const stat = await fs.stat('/tmp/suji/hello.txt');
+const entries = await fs.readdir('/tmp/suji');
+```
+
+`readFile`/`readdir`는 `success:false` 응답이면 예외를 던진다.

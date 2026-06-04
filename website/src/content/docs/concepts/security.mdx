@@ -1,0 +1,138 @@
+---
+title: 보안 모델
+description: fs sandbox + cache 격리 + V8 binding surface + IPC 검증 — Electron 비교
+---
+
+Suji가 frontend(renderer)에서 backend로 향하는 모든 호출에 적용하는 보안 정책.
+Electron 모델과 동등한 곳, 다른 곳을 정확히 구분한다.
+
+## 노출 surface (V8 binding)
+
+`window.__suji__` 오브젝트에 노출되는 것:
+
+| 항목 | 종류 | 비고 |
+|------|------|------|
+| `invoke(backend, request)` | native (V8 binding) | backend cmd 호출, Promise&lt;JSON&gt; |
+| `emit(event, data)` | native (V8 binding) | EventBus 브로드캐스트 |
+| `core(request)` | JS helper | `invoke("__core__", ...)` shorthand |
+| `on(event, cb)` / `off(event, cb)` | JS helper | EventBus listener |
+| `platform` | string 상수 | `"macos" | "linux" | "windows"` |
+
+**Electron 비교**: Electron의 `contextIsolation: true`는 preload script만 main world에
+노출. Suji는 모든 surface를 main world의 `window.__suji__`에 직접 바인딩 (Electron의
+contextIsolation:false 동등). 노출 surface가 매우 작아 (`invoke` + `emit` 2개 native만)
+실제 위험은 cmd-level 정책에 의존한다.
+
+**Phase 7+ 검토**: Electron-style contextBridge isolated world 분리. 우선순위 낮음 —
+현재 surface가 작고 fs/cache 격리로 대부분의 위험은 차단됨.
+
+## fs sandbox
+
+frontend가 호출하는 `fs.*` cmd는 path 화이트리스트 + traversal 가드로 검증.
+[`fs.mdx`](/suji/concepts/fs/) 참고.
+
+```json
+{ "fs": { "allowedRoots": ["~/Documents/myapp"] } }
+```
+
+| 보호 | 동작 |
+|------|------|
+| Default safe | `allowedRoots` 미설정/빈 배열 → 모든 frontend `fs.*` 차단 |
+| Path traversal | `..` path component는 모든 mode에서 항상 차단 (`["*"]`도 우회 불가) |
+| Prefix-extension 차단 | `/foo/bar` 허용 시 `/foo/barX` 통과 X (separator boundary 가드) |
+| `~` 사전 expand | config load 시 1회 — hot path env lookup 0회 |
+| Backend 우회 | thread-local 마커 — backend SDK 호출은 무제한 (사용자 자체 코드 신뢰) |
+
+`fs.*` 외에도 renderer가 file path를 넘기는 native cmd는 같은 경계로 검사한다.
+
+| cmd | sink | 정책 |
+|---|---|---|
+| `print_to_pdf` / `capture_page` / `desktop_capturer_capture_thumbnail` | 파일 쓰기 | `fs.allowedRoots` 설정 시 enforce |
+| `native_image_get_size` / `native_image_to_png` / `native_image_to_jpeg` | 파일 읽기/인코딩 | `fs.allowedRoots` 설정 시 enforce |
+| `tray_create.iconPath` | 이미지 파일 로드 | `fs.allowedRoots` 설정 시 enforce |
+
+이 경로들은 기존 릴리즈에서 무제한이었기 때문에 `fs.allowedRoots`가 미설정/빈 배열이면 레거시
+동작을 유지한다. `fs.allowedRoots`를 설정한 앱에서는 `fs.*`와 동일한 traversal/boundary
+검사를 적용한다.
+
+## shell / dialog allowlist
+
+`shell.*`와 dialog open/save의 `defaultPath`는 opt-in allowlist를 제공한다. 키가 없으면
+기존 동작을 유지하고, 키가 있으면 빈 배열은 deny-all, `["*"]`는 allow-all, 나머지는
+path boundary 또는 URL glob 매치만 허용한다.
+
+```json
+{
+  "shell": {
+    "allowedPaths": ["~/Documents/myapp"],
+    "allowedExternalUrls": ["https://*.example.com/*"]
+  },
+  "dialog": {
+    "allowedPaths": ["~/Documents/myapp"]
+  }
+}
+```
+
+backend SDK 호출은 fs sandbox와 동일하게 우회한다.
+
+## 앱 데이터 / cache 격리
+
+`config.app.name` 키로 OS 표준 user-data 디렉토리 아래 자동 격리. 한 시스템에 여러
+Suji 앱이 있어도 cookie/localStorage/IndexedDB/Service Worker가 서로 영향 없음.
+[`cache.mdx`](/suji/concepts/cache/) 참고.
+
+## IPC 유효성 검사
+
+`__core__` channel을 통해 들어오는 모든 IPC 메시지가 통과:
+
+| 검증 | 거부 시 응답 |
+|------|---|
+| payload size ≤ 32KB | `error: "payload_too_large"` |
+| `cmd` 필드 존재 | `error: "missing_cmd"` |
+| `cmd` 영숫자/언더스코어만 | `error: "invalid_cmd"` (newline/quote 등 injection 차단) |
+| 알려진 cmd | unknown 시 `error: "unknown_cmd"` (typo / version mismatch 진단) |
+| cmd 정확 매치 | substring 매치 X (commit 350f9d6에서 제거됨) |
+
+## iframe sandbox / origin allowlist
+
+외부 untrusted 콘텐츠 (광고/위젯/임베드)를 iframe으로 띄울 때 origin 화이트리스트로 제한.
+production `suji://` 응답에 붙는 CSP `frame-src` directive로 Chromium이 차단한다.
+
+`suji.json`:
+```json
+{
+  "security": {
+    "iframeAllowedOrigins": ["https://trusted.com", "https://api.example.com"]
+  }
+}
+```
+
+| 설정 | 동작 |
+|---|---|
+| 미설정 / `[]` | **default block** — 모든 iframe 차단 (`frame-src 'none'`) |
+| `["https://trusted.com"]` | 해당 origin만 허용 (`frame-src 'self' https://trusted.com`) |
+| `["*"]` | 무제한 escape hatch (`frame-src *`) — 권장 X |
+
+사용자가 `security.csp`로 직접 CSP 명시 시 그것 우선 — iframe_allowed_origins은 무시.
+그 경우 사용자가 직접 `frame-src` 명시 책임.
+
+`security.csp`는 명시 문자열 override와 `"disabled"` escape hatch를 지원한다. 미설정이면
+Suji가 default CSP를 만들고 `iframeAllowedOrigins`를 `frame-src`에 반영한다.
+
+## macOS App Sandbox
+
+`suji build --sandbox` 또는 `SUJI_SANDBOX`로 App Sandbox entitlements를 자동 부착한다.
+main app과 CEF Helper(Browser/GPU/Renderer/Plugin)별 plist를 분리하고 helper에는 inherit
+entitlement를 적용한다. Security-scoped bookmarks API는 별도 [`sandbox.mdx`](/suji/concepts/sandbox/)에
+정리되어 있다.
+
+## 알려진 한계 / 후속
+
+- **진짜 isolated world**: `window.__suji__` surface는 freeze/hardening되어 있지만 Chromium
+  isolated world/contextBridge와 동일한 별도 V8 context는 아직 아니다.
+- **dev mode CSP**: `dev_url`로 Vite 등 외부 서버를 직접 로드하는 동안에는 Suji가 응답 헤더를
+  주입하지 않는다. dev 서버나 HTML meta CSP로 별도 검증해야 한다.
+- **network/webRequest**: `webRequest`는 선언적 blocklist API로 제공한다. renderer 일반 fetch
+  allowlist는 별도 HTTP plugin 정책으로 다룬다.
+- **App Sandbox 실효 검증**: 로컬 빌드와 entitlement 부착은 자동화되어 있지만, Mac App Store
+  심사 환경의 실제 sandbox escapement 검증은 별도 배포 검증이 필요하다.

@@ -238,6 +238,30 @@ export function write(projectName, relPath, content) {
   writeFileSync(join(projectName, relPath), content);
 }
 
+export function backendLabel(backend) {
+  return (
+    {
+      none: "없음 (frontend-only)",
+      zig: "Zig",
+      rust: "Rust",
+      go: "Go",
+      node: "Node.js",
+      lua: "Lua",
+      multi: "Zig · Rust · Go (multi)",
+    }[backend] ?? backend
+  );
+}
+
+// AGENTS.md / CLAUDE.md 템플릿 토큰 치환 (src/templates 와 byte-identical).
+export function renderAgentDoc(tplName, name, backend, pm) {
+  return tpl(tplName)
+    .replaceAll("__NAME__", name)
+    .replaceAll("__BACKEND__", backendLabel(backend))
+    .replaceAll("__INSTALL__", installCommand(pm))
+    .replaceAll("__DEV__", runCommand(pm, "dev"))
+    .replaceAll("__BUILD__", runCommand(pm, "build"));
+}
+
 export function rootPackageJson(name, pm) {
   return `${JSON.stringify({
     name,
@@ -356,6 +380,8 @@ export async function runInitCli(argv = process.argv.slice(2)) {
   write(opts.name, "suji.json", configJson);
   write(opts.name, ".gitignore", tpl("gitignore"));
   write(opts.name, ".github/workflows/suji.yml", tpl(".github/workflows/suji.yml"));
+  write(opts.name, "AGENTS.md", renderAgentDoc("AGENTS.md", opts.name, opts.backend, opts.pm));
+  write(opts.name, "CLAUDE.md", renderAgentDoc("CLAUDE.md", opts.name, opts.backend, opts.pm));
   scaffoldBackend(opts.name, opts.backend, opts.name);
   scaffoldFrontend(opts.name, template);
   if (opts.install) installFrontend(opts.name, opts.pm);

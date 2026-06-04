@@ -1,0 +1,137 @@
+---
+title: 멀티 webview / WebContentsView
+description: 한 창에 여러 web 콘텐츠 합성 — Electron WebContentsView · Tauri v2 Webview 비교 + Suji Phase 17-A/17-B 상태
+---
+
+한 OS 창 안에 여러 web 콘텐츠를 합성하는 패턴. 멀티탭 브라우저 / 사이드바 + 메인 (다른
+origin) / OAuth 인-라인 / 위젯 임베드 같은 use case에 사용된다.
+
+> **현 상태**: macOS/Linux/Windows 기본 경로는 Phase 17-B CEF Views 기반 `windows.createView`다.
+> 한 창 안에 child WebContentsView를 합성하고, viewId는 windowId와 같은 id 풀을 공유해
+> 기존 `windows.*` webContents API를 그대로 사용할 수 있다. host와 child WebContentsView는
+> 모두 CEF-managed `CefWindow + CefBrowserView` 기반으로 동작한다. macOS child는 host `NSWindow`에
+> attach되고, Linux/Windows child는 CEF overlay view로 붙는다. macOS는 `destroyView` 후 target
+> cleanup/host 생존/recreate가 E2E로 검증됐다. Linux/Windows overlay child path도 GitHub Actions
+> runtime E2E에서 `createView`/bounds/visibility/destroy가 검증됐다.
+
+## 다른 프레임워크는 어떻게 하나
+
+### Electron
+
+| API | 상태 |
+|---|---|
+| `<webview>` tag | 별도 OS process 격리 — 강력하지만 복잡, deprecation 검토 |
+| `BrowserView` | 한 BrowserWindow에 합성 (deprecated, WebContentsView로 이행) |
+| `WebContentsView` (Electron 30+) | 한 BrowserWindow에 여러 web content 합성, 현재 권장 |
+
+### Tauri v2
+
+v1까지는 `WebviewWindow` 한 묶음만 있었음 (별도 창만). v2부터 `Window`와 `Webview`가 분리:
+
+```rust
+let window = tauri::WindowBuilder::new(app, "main").build()?;
+
+let webview = tauri::WebviewBuilder::new("child", WebviewUrl::App("page.html".into()))
+    .build()?;
+window.add_child(
+    webview,
+    LogicalPosition::new(0, 100),    // 부모 창 안 절대 좌표
+    LogicalSize::new(800, 500),
+)?;
+```
+
+JS:
+
+```js
+import { Webview } from '@tauri-apps/api/webview';
+import { Window } from '@tauri-apps/api/window';
+
+const win = Window.getCurrent();
+const webview = new Webview(win, 'child', { url: 'page.html' });
+await webview.setSize({ width: 800, height: 500 });
+await webview.setPosition({ x: 0, y: 100 });
+```
+
+**격리**: WKWebView (macOS) / WebView2 (Windows) / WebKitGTK (Linux) — 각 webview가
+OS-level 별도 process. 각자 history/cookies/JS context 분리.
+
+**한계**: 절대 좌표 기반 (CSS layout 아님). 부모 창 resize 시 사용자가 좌표 갱신 필요.
+
+## Suji 구현 상태 (Phase 17-B)
+
+### API
+
+```ts
+import { windows } from '@suji/api';
+
+const { viewId } = await windows.createView({
+  hostId: parentWindowId,
+  url: 'page.html',
+  bounds: { x: 0, y: 100, width: 800, height: 500 },
+});
+
+await windows.setViewBounds(viewId, { x: 0, y: 100, width: 1024, height: 600 });
+await windows.setViewVisible(viewId, false);  // 탭 전환에 활용
+await windows.addChildView(parentWindowId, viewId);
+await windows.setTopView(parentWindowId, viewId);
+const { viewIds } = await windows.getChildViews(parentWindowId);
+await windows.loadURL(viewId, 'https://example.com');  // 기존 windows.* 동일
+await windows.executeJavaScript(viewId, "document.title");
+
+await windows.destroyView(viewId);  // child target 정리, host/남은 view 생존
+```
+
+### 구현 — CEF Views 기반 (17-B)
+
+현재 구현은 host와 child WebContentsView를 모두 CEF-managed `CefWindow + CefBrowserView`
+기반으로 만든다.
+
+| 단계 | 동작 |
+|---|---|
+| 1 | host 창은 `CefWindow + CefBrowserView`로 생성 |
+| 2 | macOS child view는 별도 `CefWindow + CefBrowserView`로 생성 후 host `NSWindow`에 attach |
+| 3 | Linux/Windows child view는 `CefWindow.add_overlay_view(..., CEF_DOCKING_MODE_CUSTOM)`로 attach |
+| 4 | viewId 발급 — windowId namespace에 통합 (`windows.*` 모든 webContents API가 windowId 또는 viewId 받음) |
+| 5 | `setViewBounds`는 child frame/bounds를 host content 좌표계 기준으로 변경 |
+| 6 | z-order는 `addChildView` / `setTopView` / `removeChildView`로 관리 |
+| 7 | `destroyView`는 대상 child window만 닫고, host 창 close 시 남은 child view 자동 정리 |
+
+### 알려진 한계
+
+- **17-A dynamic `destroyView` 불안정은 폐기됨**: 이전 NSView `parent_view` 합성은 view
+  CefBrowser render subprocess와 host main webContents까지 함께 강종되는 한계가 있어 제거됐다.
+- **17-B 기본 경로**: CEF Views API(`CefWindow` + `CefBrowserView`)로 architecture migration해
+  multi-WebContentsView lifecycle을 안정화했다. dynamic `destroyView` 후 child target 제거,
+  host 생존, 남은 view 생존, recreate를 macOS E2E로 검증했다. CEF overlay child path는
+  Linux/Windows 기본 경로이며, 실제 Linux/Windows runtime E2E에서도 검증됐다. macOS에서는
+  native input 차단 회귀 probing 용도로만 `SUJI_CEF_VIEWS_CHILD_OVERLAY=1` 뒤에 남겨두었다.
+  자세한 계획은
+  [`docs/plans/17-B-cef-views-architecture.md`](https://github.com/ohah/suji/blob/main/docs/plans/17-B-cef-views-architecture.md).
+
+### 격리 강도
+
+| | 격리 단위 | history/cookies | JS context |
+|---|---|---|---|
+| Electron BrowserView | webContents | 별도 (또는 공유 — `partition` 옵션) | 별도 |
+| Tauri v2 Webview | OS process (WKWebView/WV2) | 별도 | 별도 |
+| **Suji 17-B** | CEF browser / CefBrowserView | 별도 (each browser has own request context) | 별도 |
+
+CEF는 default가 single process로 multiple browser 운영. 격리는 webContents 단위 — Electron
+WebContentsView와 유사하다. Tauri의 OS process 격리보단 약간 약하지만 일반 데스크톱 앱에는 충분하다.
+
+## Use case 판단 기준
+
+| Use case | 권장 |
+|---|---|
+| 자체 frontend만 + multi-window UI | `windows.create({url})` 충분 (이미 됨) |
+| 한 창에 사이드바 + 메인 (같은 origin) | iframe (표준 HTML, 격리 약하지만 same-origin이라 OK) |
+| 한 창에 사이드바 + 메인 (다른 origin) | **`windows.createView` 필요** (또는 별도 창) |
+| 멀티탭 브라우저 앱 | **`windows.createView` 필요** (각 탭이 view) |
+| OAuth 인-라인 로그인 페이지 | 별도 창 OR `windows.createView` |
+| 광고/위젯 임베드 (격리 강함) | `windows.createView` |
+| 외부 untrusted iframe | iframe + `sandbox` 속성 (Phase 7+ origin allowlist도) |
+
+대부분의 데스크톱 앱은 multi-window로 충분하다. `windows.createView`는 Phase 17-B
+기본 경로에서 사용할 수 있고, macOS에서는 dynamic destroy가 필요한 멀티탭/브라우저형 앱도
+E2E로 검증된 범위 안에서 지원한다. Linux/Windows는 CEF overlay child view 경로가 기본이며,
+GitHub Actions의 Linux/Windows runner에서 같은 WebContentsView lifecycle E2E로 검증한다.

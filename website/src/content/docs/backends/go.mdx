@@ -1,0 +1,209 @@
+---
+title: Go 백엔드 SDK
+description: suji.Bind + cgo 브릿지
+---
+
+`github.com/ohah/suji-go` (sdks/suji-go). cgo + `-buildmode=c-shared`로 빌드되어
+main suji 프로세스에 `dlopen` 됨.
+
+## main.go
+
+```go
+package main
+
+import "C"
+
+import (
+    "fmt"
+    "os"
+    "github.com/ohah/suji-go"
+)
+
+type App struct{}
+
+func (a *App) Ping() string {
+    return "pong"
+}
+
+func (a *App) Greet(name string) string {
+    return fmt.Sprintf("hello %s", name)
+}
+
+func (a *App) Add(x, y int) int {
+    return x + y
+}
+
+var _ = suji.Bind(&App{})
+
+func init() {
+    suji.On("window:all-closed", onAllClosed)
+}
+
+func onAllClosed(_ string, _ string) {
+    if suji.Platform() != suji.PlatformMacOS {
+        fmt.Fprintln(os.Stderr, "non-macOS → quit")
+        suji.Quit()
+    }
+}
+
+func main() {}  // cgo 요구
+```
+
+## 유틸리티
+
+```go
+suji.Invoke(backend string, request string) string       // 크로스 호출
+suji.Send(channel string, data string)                   // 이벤트 발신
+suji.On(channel string, callback func(string, string))   // 이벤트 구독
+suji.Quit()                                              // 앱 종료
+suji.Platform() string                                   // "macos" | "linux" | "windows"
+
+// 상수
+suji.PlatformMacOS
+suji.PlatformLinux
+suji.PlatformWindows
+```
+
+## cgo 주의사항
+
+백엔드에서 `//export <Name>` 패턴과 preamble의 수동 `extern` 선언이 충돌하지 않도록:
+
+```c
+// cgo가 자동 생성하는 prototype은 const qualifier가 없음 → 수동 extern도 맞춰야.
+extern void go_on_window_all_closed(char* ch, char* data, void* arg);
+```
+
+Go 빌드는 `CGO_ENABLED=1` + `CC=/usr/bin/clang` 필요 (macOS Homebrew LLVM 충돌 회피 —
+suji CLI가 자동 설정).
+
+## InvokeEvent (Phase 2.5)
+
+메서드 파라미터 타입이 `*suji.InvokeEvent` 또는 `suji.InvokeEvent`이면 reflect 경로가
+wire의 `__window`/`__window_name`에서 자동 파생해서 주입. 나머지 파라미터는 기존처럼
+이름 규칙(`name` / `text` / `data` / ...)으로 매칭.
+
+```go
+type App struct{}
+
+func (a *App) Save(text string, event *suji.InvokeEvent) suji.M {
+    fmt.Printf("save from window id=%d name=%s\n",
+        event.Window.ID, event.Window.Name)
+    if event.Window.Name == "settings" {
+        // settings 창 전용 분기
+    }
+    return suji.M{"ok": true, "text": text, "from_window": event.Window.ID}
+}
+```
+
+필드 없음 / 타입 불일치는 `ID=0, Name=""` default.
+
+## TypeScript Handler 타입 생성
+
+Go 백엔드는 런타임 자동 타입 추출 대신, 명시적으로 등록한 req/res struct를
+`SujiHandlers` module augmentation으로 내보낸다. `json` tag와 `omitempty`를 반영한다.
+
+```go
+type GreetReq struct {
+    Name string `json:"name"`
+}
+
+type GreetRes struct {
+    Greeting string `json:"greeting"`
+}
+
+dts, err := suji.NewTSHandlers().
+    Handler("greet", GreetReq{}, GreetRes{}).
+    Export()
+```
+
+생성 결과는 frontend `@suji/api`의 `invoke("greet", ...)` 타입 추론에 바로 쓰는
+`.d.ts` 파일이다. `ExportFor("@suji/node")`를 쓰면 Node SDK module augmentation도
+같은 방식으로 만들 수 있다.
+
+## `SendTo` — 특정 창에만 이벤트 전달 (Phase 2.5)
+
+```go
+suji.SendTo(event.Window.ID, "saved", `{"ok":true}`)
+```
+
+Electron `webContents.send` 대응. 대상이 닫혔거나 core 주입 전이면 silent no-op.
+
+## `windows` — 창 조작 (Phase 4-A)
+
+별도 sub-package로 노출 — `import "github.com/ohah/suji-go/windows"`. 코어로 cmd JSON 전송 (IPC 경유, dlopen 호환). 응답은 raw JSON `string`.
+
+```go
+import (
+    "github.com/ohah/suji-go/windows"
+)
+
+// 새 창
+windows.CreateSimple("Settings", "http://localhost:12300/settings")
+windows.Create(`"name":"hud","frame":false,"transparent":true`)
+
+// 페이지 조작
+windows.LoadURL(2, "https://example.com/")
+windows.Reload(2, true)                   // ignoreCache
+windows.ExecuteJavaScript(2, "document.title='Hi'")  // fire-and-forget
+windows.SetTitle(2, "New Title")
+windows.SetBounds(2, windows.SetBoundsArgs{
+    X: 100, Y: 100, Width: 1200, Height: 800,
+})
+
+// 상태 조회
+windows.GetURL(2)     // {ok, url} 또는 {ok:false, url:null}
+windows.IsLoading(2)  // {ok, loading}
+
+// Phase 4-B 줌
+windows.SetZoomLevel(2, 1.5)
+windows.SetZoomFactor(2, 1.2)
+windows.GetZoomLevel(2)
+windows.GetZoomFactor(2)
+
+// Phase 4-C DevTools
+windows.OpenDevTools(2)
+windows.ToggleDevTools(2)
+windows.IsDevToolsOpened(2)
+
+// Phase 4-E 편집/검색
+windows.Undo(2)
+windows.Copy(2)
+windows.FindInPage(2, "hello", windows.FindOptions{Forward: true, MatchCase: false, FindNext: false})
+windows.StopFindInPage(2, /* clearSelection */ true)
+
+// Phase 4-D PDF 인쇄 (콜백 async — `window:pdf-print-finished` 이벤트)
+windows.PrintToPDF(2, "/tmp/report.pdf")
+
+// Phase 17-B WebContentsView
+hostID := uint32(2)
+windows.CreateView(windows.CreateViewArgs{
+    HostID: hostID,
+    Name: "sidebar",
+    URL: "https://example.com/",
+    Bounds: windows.SetBoundsArgs{X: 0, Y: 80, Width: 360, Height: 600},
+})
+windows.AddChildView(hostID, 3)
+windows.SetTopView(hostID, 3)
+windows.SetViewBounds(3, windows.SetBoundsArgs{X: 0, Y: 80, Width: 420, Height: 600})
+windows.SetViewVisible(3, false)
+windows.GetChildViews(hostID)
+windows.DestroyView(3)
+```
+
+`title`/`url`/`code`/`text` 등 문자열 필드는 SDK가 자동 escape.
+
+## `fs` — 파일 시스템 (Phase 5-F)
+
+별도 sub-package로 노출 — `import "github.com/ohah/suji-go/fs"`.
+
+```go
+import "github.com/ohah/suji-go/fs"
+
+fs.Mkdir("/tmp/suji", true)
+fs.WriteFile("/tmp/suji/hello.txt", "hello\nworld")
+fs.ReadFile("/tmp/suji/hello.txt")
+fs.Stat("/tmp/suji/hello.txt")
+fs.ReadDir("/tmp/suji")
+```
+
+응답은 core JSON 문자열이다.

@@ -10,8 +10,9 @@ import { Steps } from '@astrojs/starlight/components';
 1. **프로젝트 생성** — 의존성 0의 npx CLI(바이너리 불요):
 
    ```bash
-   npx @suji/cli init my-app --backend=zig   # zig | rust | go | multi
-   # --frontend=react|vue|svelte|solid|preact|vanilla (기본 react)
+   npx @suji/cli init my-app --backend=zig   # none|zig|rust|go|node|lua|multi
+   # --frontend=react|vue|svelte|solid|preact|vanilla|next (기본 react)
+   # --toolchain=vite|rsbuild|next  --pm=npm|pnpm|bun|vp
    cd my-app
    ```
 

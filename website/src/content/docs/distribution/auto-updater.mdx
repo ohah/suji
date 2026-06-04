@@ -1,0 +1,130 @@
+---
+title: autoUpdater
+description: Manifest 기반 업데이트 확인, artifact 다운로드, SHA-256 검증, quit-and-install 적용
+---
+
+Electron `autoUpdater` / Tauri `updater`에 대응하는 1차 API. 현재 범위는
+업데이트 manifest를 확인해 새 버전 여부를 판단하고, artifact를 지정 경로로
+다운로드한 뒤 SHA-256을 검증하고, artifact 포맷을 설치 입력으로 준비한 다음
+앱 종료 후 target으로 교체하는 `quitAndInstall` 흐름이다.
+
+## Manifest
+
+```json
+{
+  "version": "1.2.3",
+  "url": "https://releases.example.com/my-app-1.2.3.dmg",
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "notes": "Bug fixes",
+  "pubDate": "2026-05-25T00:00:00Z"
+}
+```
+
+`url`은 `https://`, `http://`, `file://`만 허용한다. 로컬 테스트에는 `file://`를
+쓸 수 있지만 배포 manifest는 HTTPS와 SHA-256을 함께 쓰는 것을 권장한다.
+프론트엔드에서 `downloadArtifact`/`verifyFile`을 호출할 때 대상 경로는 기존
+`fs.allowedRoots` sandbox를 따른다. `downloadArtifact`의 `file://` source도 같은
+sandbox를 통과해야 한다. `prepareInstall`은 artifact/stageDir/명시 target을,
+`quitAndInstall`은 staged source/helper path와 명시 target을 sandbox로 검사한다.
+target을 생략하면 현재 앱 경로를 사용한다. 백엔드 SDK 호출은 사용자 코드로 간주해
+sandbox를 적용하지 않는다.
+
+## Frontend
+
+```ts
+import { autoUpdater } from "@suji/api";
+
+const check = await autoUpdater.checkForUpdates("https://example.com/update.json");
+if (check.updateAvailable) {
+  const downloaded = await autoUpdater.downloadArtifact(check, "/tmp/my-app.dmg");
+  if (downloaded.success) {
+    const prepared = await autoUpdater.prepareInstall(downloaded, {
+      format: "dmg",
+      stageDir: "/tmp/my-app-update",
+    });
+    if (prepared.requiresQuitAndInstall) {
+      await autoUpdater.quitAndInstall(prepared, { relaunch: true });
+    }
+  }
+}
+```
+
+manifest 객체를 직접 넘길 수도 있다.
+
+```ts
+await autoUpdater.checkForUpdates({
+  version: "1.2.3",
+  url: "https://example.com/my-app.zip",
+  sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+}, { currentVersion: "1.0.0" });
+```
+
+## Node Backend
+
+```ts
+import { autoUpdater } from "@suji/node";
+
+const r = await autoUpdater.checkForUpdates({
+  version: "1.2.3",
+  url: "https://example.com/my-app.zip",
+});
+
+if (r.updateAvailable) {
+  const downloaded = await autoUpdater.downloadArtifact(r, "/tmp/my-app.zip");
+  const prepared = await autoUpdater.prepareInstall(downloaded, { format: "zip" });
+  await autoUpdater.quitAndInstall(prepared, { relaunch: true });
+}
+```
+
+## Zig Backend
+
+```zig
+_ = suji.autoUpdater.checkForUpdates(
+    "1.0.0",
+    "1.2.3",
+    "https://example.com/my-app.zip",
+    "",
+);
+_ = suji.autoUpdater.verifyFile("/tmp/my-app.zip", expected_sha256);
+_ = suji.autoUpdater.downloadArtifact("https://example.com/my-app.zip", "/tmp/my-app.zip", expected_sha256);
+_ = suji.autoUpdater.prepareInstall("/tmp/my-app.zip", "", "", "zip", expected_sha256);
+_ = suji.autoUpdater.quitAndInstall("/tmp/my-app.app", "", "", true);
+```
+
+## `__core__` cmd
+
+| cmd | 입력 | 응답 |
+|---|---|---|
+| `auto_updater_check_update` | `currentVersion`, `latestVersion` 또는 `version`, `url`, optional `sha256`, `notes`, `pubDate` | `{success:true, updateAvailable, currentVersion, version, url, sha256, notes, pubDate}` |
+| `auto_updater_verify_file` | `path`, `sha256` | `{success:boolean, actualSha256}`. 읽기 실패/invalid hash는 `{success:false,error}` |
+| `auto_updater_download_artifact` | `url`, `path` 또는 `destination`, optional `sha256` | `{success:boolean, path, sha256, size}`. checksum mismatch면 최종 경로로 승격하지 않고 `success:false` |
+| `auto_updater_prepare_install` | `path` 또는 `artifact`, optional `format`, `target`, `stageDir`, `sha256` | `{success:true,path,source,target,stageDir,format,action,requiresQuitAndInstall}`. macOS `.zip/.dmg`는 `.app`을 stageDir로 풀고, Windows `.zip`은 PowerShell `Expand-Archive`로 stageDir에 풀며, Linux `.AppImage`는 실행 권한을 보정한다. `.deb`는 system package handoff로 분기 |
+| `auto_updater_quit_and_install` | `path` 또는 `source`, optional `target`, `sha256`, `relaunch`, `helperPath` | `{success:true,path,target,helperPath,relaunch}`. helper script를 띄우고 응답 전송 직후 앱 종료 요청 |
+
+버전 비교는 semver 계열 숫자 segment를 비교하고, `v` prefix와 build metadata
+(`+build`)는 허용한다. prerelease는 semver 규칙처럼 release보다 낮게 본다.
+
+## 정직 경계
+
+- 다운로드는 임시 파일에 먼저 저장한 뒤 checksum이 맞을 때만 지정 경로로 승격한다.
+- `prepareInstall`의 `format`은 `"auto" | "app" | "zip" | "dmg" | "appimage" | "raw" | "deb"`이다.
+  `"auto"`는 확장자로 포맷을 감지한다.
+- macOS `.zip`은 `ditto -x -k`로 stageDir 아래에 풀고 단일 `.app` bundle을 찾아
+  `quitAndInstall` 입력으로 반환한다. `.dmg`는 `hdiutil attach -nobrowse -readonly`
+  후 `.app`을 stageDir로 복사하고 detach한다.
+- Windows `.zip`은 PowerShell `Expand-Archive`로 stageDir 아래에 풀고, 압축 안의 단일
+  앱 디렉토리를 `quitAndInstall` 입력으로 반환한다. helper는 `.quit-install.ps1`로
+  생성되며 현재 프로세스 종료를 기다린 뒤 기존 target을 교체하고 선택적으로 재실행한다.
+- Linux `.AppImage`는 staged artifact에 `chmod +x`를 적용하고 현재 AppImage 또는
+  실행 파일 target 교체 입력으로 반환한다. `raw`는 이미 준비된 파일/디렉토리를 그대로
+  교체 입력으로 반환한다.
+- Linux `.deb`는 앱 내부에서 권한 상승 설치를 수행하지 않는다. `prepareInstall`은
+  `{action:"systemPackage", requiresQuitAndInstall:false}`를 반환하며, 앱/배포 파이프라인이
+  OS 패키지 매니저(`apt`, `dpkg`, GUI installer 등)로 handoff해야 한다.
+- `quitAndInstall`은 macOS/Linux shell script와 Windows PowerShell helper를 지원한다.
+  helper script가 현재 프로세스 종료를
+  기다린 뒤 기존 target을 백업명으로 옮기고 source를 target으로 이동한다. 이동 실패 시
+  backup을 원복한다. `relaunch:false`면 교체만 하고 재실행하지 않는다.
+- `checkForUpdates(url)`의 manifest fetch는 JS/Node 런타임의 `fetch`를 사용한다.
+- checksum 검증은 로컬 파일 전체를 읽어 SHA-256을 계산한다. 대형 파일도 스트리밍으로
+  처리한다. 권한 상승 설치는 제공하지 않는다.

@@ -1,0 +1,131 @@
+---
+title: File System (Phase 5-F)
+description: 텍스트 파일 read/write + stat/mkdir/readdir — Zig std.fs 기반 core API
+---
+
+Electron `fs` 사용 흐름에 대응하는 Suji core 파일 시스템 API. Frontend JS와
+Zig/Rust/Go/Node 백엔드 SDK 모두 같은 `__core__` cmd를 사용한다.
+
+현재 범위는 UTF-8 텍스트 파일과 디렉토리 metadata/listing이다. 바이너리/스트리밍은 후속.
+
+## Sandbox (Electron `webPreferences.sandbox` 대응)
+
+Frontend(renderer)에서 호출되는 `fs.*`는 path 화이트리스트로 검증된다. Backend는 항상 무제한
+(사용자 자체 코드라 신뢰).
+
+`suji.json`:
+```json
+{
+  "fs": {
+    "allowedRoots": ["~/Documents/myapp", "/tmp/myapp"]
+  }
+}
+```
+
+| 설정 | Frontend 동작 |
+|---|---|
+| `allowedRoots` 미설정 / `[]` | 모든 frontend `fs.*` 차단 → `error: "forbidden"` |
+| `["~/Documents/myapp"]` | 해당 prefix 안 path만 허용 (`~`은 `$HOME`으로 확장) |
+| `["*"]` | escape hatch — 모든 path 허용 (`..` traversal은 여전히 차단) |
+
+**path traversal 가드**: `..` 토큰 포함 path는 모든 mode에서 항상 차단 (`["*"]`도 우회 불가).
+Backend SDK 호출은 sandbox 우회 (thread-local 마커).
+
+**렌더러-제어 경로 cmd**: path 를 받는 역사적-무제한 cmd 도 동일 `allowedRoots`
+경계로 게이트된다 — 쓰기: `print_to_pdf` / `capture_page` /
+`desktop_capturer_capture_thumbnail`, 읽기: `native_image_get_size` /
+`native_image_to_png|jpeg`(임의 파일을 base64 로 렌더러에 반환 = 파일내용
+유출). 단 **opt-in** — `allowedRoots` 미설정/`[]`이면 레거시 무제한(이 API들은
+그동안 무제한 출하라 비파괴), 설정 시 `fs.*`와 동일 경계로 enforce(설정한 fs
+통제가 이 경로 읽기/쓰기도 포함 → 신뢰불가 렌더러의 임의 파일 읽기/쓰기 차단).
+backend 우회 동일.
+
+## API
+
+| API | cmd | 응답 |
+|---|---|---|
+| `fs.readFile(path)` | `fs_read_file` | `{success:true,text}` |
+| `fs.writeFile(path, text)` | `fs_write_file` | `{success:true}` |
+| `fs.stat(path)` | `fs_stat` | `{success:true,type,size,mtime}` (mtime: ms since epoch) |
+| `fs.mkdir(path, {recursive})` | `fs_mkdir` | `{success:true}` |
+| `fs.readdir(path)` | `fs_readdir` | `{success:true,entries:[{name,type}]}` |
+| `fs.rm(path, {recursive,force})` | `fs_rm` | `{success:true}` (Node `fs.rm` 호환) |
+
+실패 응답은 `{success:false,error}` 형태다. `readFile/writeFile`은 8 KiB 한도 안에서 동작하며
+초과 시 `error:"too_large"`. 큰 파일은 아직 대상이 아니다.
+
+## Frontend JS
+
+```ts
+import { fs } from '@suji/api';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
+
+const text = await fs.readFile('/tmp/suji/hello.txt');
+const stat = await fs.stat('/tmp/suji/hello.txt');
+const entries = await fs.readdir('/tmp/suji');
+await fs.rm('/tmp/suji', { recursive: true, force: true });
+```
+
+## Backend SDK
+
+### Zig (`suji.fs.*`)
+
+```zig
+_ = suji.fs.mkdir("/tmp/suji", true);
+_ = suji.fs.writeFile("/tmp/suji/hello.txt", "hello\nworld");
+_ = suji.fs.readFile("/tmp/suji/hello.txt");
+_ = suji.fs.stat("/tmp/suji/hello.txt");
+_ = suji.fs.readdir("/tmp/suji");
+```
+
+### Rust (`suji::fs::*`)
+
+```rust
+use suji::fs;
+
+let _ = fs::mkdir("/tmp/suji", true);
+let _ = fs::write_file("/tmp/suji/hello.txt", "hello\nworld");
+let _ = fs::read_file("/tmp/suji/hello.txt");
+let _ = fs::stat("/tmp/suji/hello.txt");
+let _ = fs::readdir("/tmp/suji");
+```
+
+### Go (`github.com/ohah/suji-go/fs`)
+
+```go
+import "github.com/ohah/suji-go/fs"
+
+fs.Mkdir("/tmp/suji", true)
+fs.WriteFile("/tmp/suji/hello.txt", "hello\nworld")
+fs.ReadFile("/tmp/suji/hello.txt")
+fs.Stat("/tmp/suji/hello.txt")
+fs.ReadDir("/tmp/suji")
+```
+
+### Node (`@suji/node`)
+
+```ts
+import { fs } from '@suji/node';
+
+await fs.mkdir('/tmp/suji', { recursive: true });
+await fs.writeFile('/tmp/suji/hello.txt', 'hello\nworld');
+const entries = await fs.readdir('/tmp/suji');
+```
+
+## Type 값
+
+`stat.type`과 `readdir[].type`은 다음 문자열 중 하나다:
+
+`file`, `directory`, `symlink`, `blockDevice`, `characterDevice`, `fifo`, `socket`,
+`whiteout`, `door`, `eventPort`, `unknown`.
+
+## E2E
+
+```bash
+./tests/e2e/run-fs.sh
+```
+
+E2E는 임시 디렉토리에서 `mkdir/write/read/stat/readdir` round-trip, missing path 오류,
+empty path validation을 검증한다.
