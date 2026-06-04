@@ -27,7 +27,9 @@ if [ "$SUJI_E2E_WINDOWS" = "1" ]; then
 else
   SUJI_BIN="$ROOT/zig-out/bin/suji"
 fi
-EXAMPLE_DIR="$ROOT/examples/multi-backend"
+# 러너가 export 로 override 가능(예: run-lua-e2e.sh → examples/lua-backend).
+# 미설정 시 기존 동작(multi-backend) 유지 — 기존 러너 무영향.
+EXAMPLE_DIR="${EXAMPLE_DIR:-$ROOT/examples/multi-backend}"
 SUJI_PID=""
 
 e2e_cleanup() {

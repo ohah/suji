@@ -1145,28 +1145,35 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
         return response_buf[0..len];
     }
 
-    // Node.js 백엔드 폴백 (libnode 활성화된 경우만)
-    // target="node"일 때 channel="node"으로 오므로, data에서 cmd 추출
-    if (node_enabled and backend_lifecycle.g_node_runtime != null) {
+    // 임베드 런타임 폴백 — dlopen 백엔드가 아니라 registry.invoke 가 null 이다.
+    // Lua 는 name(target/route)이 정확히 매칭될 때만 시도하고, Node 는 lua 가 아닌
+    // 미해결 채널의 catch-all 폴백으로 둔다(node 가 유일 임베드였던 기존 동작 유지 —
+    // 예: route 미등록 "node-stress"). 이 분리가 없으면 Node 가 lua target 호출까지
+    // 가로채(핸들러 없음 응답) Lua 가 못 받는다.
+    var lua_name: []const u8 = "";
+    if (lua_enabled) {
+        if (backend_lifecycle.g_lua_runtime) |rt| {
+            lua_name = rt.backend_name;
+            if (std.mem.eql(u8, name, rt.backend_name)) {
+                const lua_channel = util.extractJsonString(data, "cmd") orelse channel;
+                if (rt.invoke(lua_channel, data)) |resp| {
+                    const body = std.mem.span(resp);
+                    const len = @min(body.len, response_buf.len);
+                    @memcpy(response_buf[0..len], body[0..len]);
+                    LuaRuntime.freeResponseC(resp);
+                    return response_buf[0..len];
+                }
+            }
+        }
+    }
+
+    if (node_enabled and backend_lifecycle.g_node_runtime != null and !std.mem.eql(u8, name, lua_name)) {
         const node_channel = util.extractJsonString(data, "cmd") orelse channel;
         if (NodeRuntime.invoke(node_channel, data)) |resp| {
             const len = @min(resp.len, response_buf.len);
             @memcpy(response_buf[0..len], resp[0..len]);
             NodeRuntime.freeResponse(resp);
             return response_buf[0..len];
-        }
-    }
-
-    if (lua_enabled) {
-        if (backend_lifecycle.g_lua_runtime) |rt| {
-            const lua_channel = util.extractJsonString(data, "cmd") orelse channel;
-            if (rt.invoke(lua_channel, data)) |resp| {
-                const body = std.mem.span(resp);
-                const len = @min(body.len, response_buf.len);
-                @memcpy(response_buf[0..len], body[0..len]);
-                LuaRuntime.freeResponseC(resp);
-                return response_buf[0..len];
-            }
         }
     }
 

@@ -19,7 +19,8 @@
     { "name": "zig", "lang": "zig", "entry": "backends/zig" },
     { "name": "rust", "lang": "rust", "entry": "backends/rust" },
     { "name": "go", "lang": "go", "entry": "backends/go" },
-    { "name": "node", "lang": "node", "entry": "backends/node" }
+    { "name": "node", "lang": "node", "entry": "backends/node" },
+    { "name": "lua", "lang": "lua", "entry": "backends/lua" }
   ],
   "frontend": {
     "dir": "frontend",

@@ -428,3 +428,59 @@ describe("stress: deep recursive cross-backend chain", () => {
     expect(success).toBe(200);
   }, 15000);
 });
+
+// ============================================
+// Lua backend — outbound invoke (cross-call) + send/on (이벤트)
+// vendored Lua 5.4. suji 를 -Dlua 로 빌드해야 lua 백엔드가 동작한다.
+// ============================================
+
+describe("lua backend", () => {
+  test("lua-ping (direct invoke)", async () => {
+    const r: any = await invoke("lua-ping", {}, { target: "lua" });
+    expect(r.from).toBe("lua");
+    expect(r.msg).toBe("pong");
+  });
+
+  test("zig → lua cross-call (call_lua)", async () => {
+    const r: any = await invoke("call_lua", {}, { target: "zig" });
+    expect(r.lua_said).toBeDefined();
+  });
+
+  test("lua → zig cross-call (lua-call-zig, outbound suji.invoke)", async () => {
+    const r: any = await invoke("lua-call-zig", {}, { target: "lua" });
+    expect(r.from).toBe("lua");
+    expect(r.zig_said).toBeDefined();
+  });
+
+  test("lua send → frontend on (lua-event)", async () => {
+    const result = await page.evaluate(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          const s = (window as any).__suji__;
+          const timer = setTimeout(() => reject(new Error("timeout")), 5000);
+          s.on("lua-event", (data: unknown) => {
+            clearTimeout(timer);
+            resolve(JSON.stringify(data));
+          });
+          s.invoke("lua-emit", {}, { target: "lua" }).catch(reject);
+        }),
+    );
+    expect(result).toContain("lua");
+  });
+
+  test("frontend emit → lua on → lua-heard (ping-all)", async () => {
+    const result = await page.evaluate(
+      () =>
+        new Promise<string>((resolve, reject) => {
+          const s = (window as any).__suji__;
+          const timer = setTimeout(() => reject(new Error("timeout")), 5000);
+          s.on("lua-heard", (data: unknown) => {
+            clearTimeout(timer);
+            resolve(JSON.stringify(data));
+          });
+          s.emit("ping-all", JSON.stringify({ ping: "all" }));
+        }),
+    );
+    expect(result).toContain("ping");
+  });
+});

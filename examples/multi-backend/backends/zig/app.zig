@@ -8,6 +8,7 @@ pub const my_app = suji.app()
     .handle("info", info)
     .handle("call_rust", callRust)
     .handle("call_go", callGo)
+    .handle("call_lua", callLua)
     .handle("collab", collab)
     .handle("chain_all", chainAll)
     .handle("emit_event", emitEvent)
@@ -83,6 +84,16 @@ fn callGo(req: suji.Request) suji.Response {
     return req.okMulti(&.{
         .{ "cmd", "\"call_go\"" },
         .{ "go_said", go_resp },
+    });
+}
+
+// Zig → Lua
+fn callLua(req: suji.Request) suji.Response {
+    const lua_resp = req.invoke("lua", "{\"cmd\":\"lua-ping\"}") orelse
+        return req.err("lua call failed");
+    return req.okMulti(&.{
+        .{ "cmd", "\"call_lua\"" },
+        .{ "lua_said", lua_resp },
     });
 }
 
