@@ -122,64 +122,10 @@ test "Config.loadFromJsonBytes parses frontend commands" {
     try std.testing.expectEqualStrings("ui/out", cfg.frontend.dist_dir);
 }
 
-test "Config.loadFromTsConfigBytes parses static defineConfig fallback" {
-    var cfg = try config.Config.loadFromTsConfigBytes(std.testing.allocator,
-        \\import { defineConfig } from "@suji/cli";
-        \\
-        \\export default defineConfig({
-        \\  "$schema": "./suji.schema.json",
-        \\  "app": { "name": "TS Config App", "version": "1.2.3" },
-        \\  "backend": { "lang": "node", "entry": "backends/node" },
-        \\  "frontend": {
-        \\    "dir": "frontend",
-        \\    "dev_url": "http://localhost:12300",
-        \\    "dev_command": "vp run dev",
-        \\    "build_command": "vp run build",
-        \\    "dist_dir": "frontend/out"
-        \\  }
-        \\});
-    );
-    defer cfg.deinit();
-
-    try std.testing.expectEqualStrings("TS Config App", cfg.app.name);
-    try std.testing.expectEqualStrings("1.2.3", cfg.app.version);
-    try std.testing.expectEqualStrings("node", cfg.backend.?.lang);
-    try std.testing.expectEqualStrings("backends/node", cfg.backend.?.entry);
-    try std.testing.expectEqualStrings("http://localhost:12300", cfg.frontend.dev_url);
-    try std.testing.expectEqualStrings("vp run dev", cfg.frontend.dev_command);
-    try std.testing.expectEqualStrings("vp run build", cfg.frontend.build_command);
-    try std.testing.expectEqualStrings("frontend/out", cfg.frontend.dist_dir);
-}
-
-test "Config config file priority prefers code config variants before suji.json" {
+test "Config uses suji.json as the only config source" {
     const paths = config.Config.CONFIG_FILE_PATHS;
-    try std.testing.expectEqualStrings("suji.config.ts", paths[0]);
-    try std.testing.expectEqualStrings("suji.config.mts", paths[1]);
-    try std.testing.expectEqualStrings("suji.config.cts", paths[2]);
-    try std.testing.expectEqualStrings("suji.config.js", paths[3]);
-    try std.testing.expectEqualStrings("suji.config.mjs", paths[4]);
-    try std.testing.expectEqualStrings("suji.config.cjs", paths[5]);
-    try std.testing.expectEqualStrings("suji.json", paths[6]);
-}
-
-test "Config code config path uses @suji/cli JS loader before fallback" {
-    const source = try std.Io.Dir.cwd().readFileAlloc(
-        std.testing.io,
-        "src/core/config.zig",
-        std.testing.allocator,
-        .limited(256 * 1024),
-    );
-    defer std.testing.allocator.free(source);
-
-    inline for (.{
-        "SUJI_CONFIG_LOADER",
-        "SUJI_NODE_BIN",
-        "node_modules/@suji/cli/bin/load-config.js",
-        "loadFromCodeConfigWithLoader",
-        "loadFromTsConfigBytes",
-    }) |needle| {
-        try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
-    }
+    try std.testing.expectEqual(@as(usize, 1), paths.len);
+    try std.testing.expectEqualStrings("suji.json", paths[0]);
 }
 
 // ============================================
@@ -539,59 +485,4 @@ test "회귀: main.zig가 config.app.quit_on_all_windows_closed 분기 + listene
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
     }
-}
-
-// ============================================
-// suji.config.ts build/dev (loader 가 normalize 해서 emit 하는 키)
-// ============================================
-
-test "Config.loadFromJsonBytes parses build object (sign/notarize/_hooks/_configFile)" {
-    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
-        \\{
-        \\  "app": { "name": "x" },
-        \\  "build": {
-        \\    "sign": "identity", "identity": "Developer ID: Acme",
-        \\    "notarize": true, "dmg": true, "sandbox": false,
-        \\    "_configFile": "/abs/suji.config.ts",
-        \\    "_hooks": { "beforeBuild": true, "afterBuild": false, "beforeDev": true }
-        \\  }
-        \\}
-    );
-    defer cfg.deinit();
-    try std.testing.expectEqualStrings("identity", cfg.build.sign.?);
-    try std.testing.expectEqualStrings("Developer ID: Acme", cfg.build.identity.?);
-    try std.testing.expect(cfg.build.notarize);
-    try std.testing.expect(cfg.build.dmg);
-    try std.testing.expect(!cfg.build.sandbox);
-    try std.testing.expectEqualStrings("/abs/suji.config.ts", cfg.build.config_file.?);
-    try std.testing.expect(cfg.build.has_before_build);
-    try std.testing.expect(!cfg.build.has_after_build);
-    try std.testing.expect(cfg.build.has_before_dev);
-}
-
-test "Config.loadFromJsonBytes: build 부재 시 기본값" {
-    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator, "{ \"app\": { \"name\": \"x\" } }");
-    defer cfg.deinit();
-    try std.testing.expect(cfg.build.sign == null);
-    try std.testing.expect(cfg.build.config_file == null);
-    try std.testing.expect(!cfg.build.has_before_build);
-    try std.testing.expectEqual(@as(usize, 0), cfg.dev.env.len);
-}
-
-test "Config.loadFromJsonBytes parses dev.env (순서 보존)" {
-    var cfg = try config.Config.loadFromJsonBytes(std.testing.allocator,
-        \\{ "app": { "name": "x" }, "dev": { "env": { "FOO": "bar", "BAZ": "qux" } } }
-    );
-    defer cfg.deinit();
-    try std.testing.expectEqual(@as(usize, 2), cfg.dev.env.len);
-    try std.testing.expectEqualStrings("FOO", cfg.dev.env[0].name);
-    try std.testing.expectEqualStrings("bar", cfg.dev.env[0].value);
-    try std.testing.expectEqualStrings("BAZ", cfg.dev.env[1].name);
-}
-
-test "Config.Command modeStr/commandStr 매핑" {
-    try std.testing.expectEqualStrings("production", config.Config.Command.build.modeStr());
-    try std.testing.expectEqualStrings("build", config.Config.Command.build.commandStr());
-    try std.testing.expectEqualStrings("development", config.Config.Command.dev.modeStr());
-    try std.testing.expectEqualStrings("dev", config.Config.Command.types.commandStr());
 }

@@ -5,7 +5,7 @@ const util = @import("util");
 const crash_reporter = @import("crash_reporter.zig");
 
 /// Suji 프로젝트 설정
-/// suji.config.ts 또는 suji.json에서 로드
+/// suji.json 에서 로드 (정적 JSON 단일 출처 — 모든 백엔드 언어가 node 없이 읽음).
 pub const Config = struct {
     app: App = .{},
     /// 시작 시 자동 생성할 창 목록. 첫 항목이 main 창 (CEF 초기화 시 사이즈/타이틀 사용).
@@ -20,11 +20,6 @@ pub const Config = struct {
     shell: Shell = .{},
     dialog: Dialog = .{},
     security: Security = .{},
-    /// 빌드 설정 + 라이프사이클 훅 메타 (`suji.config.ts` build 전용 — JSON 미표현).
-    /// loader `normalize` 가 현재 플랫폼 오버라이드를 fold + 훅을 _hooks 마커로 strip 한 결과.
-    build: Build = .{},
-    /// dev 서버 설정 (`suji.config.ts` dev 전용 — dev.env 주입).
-    dev: Dev = .{},
 
     // _arena는 포인터로 보관. 값으로 담으면 `Config { ._arena = arena }` 시점에 arena의
     // 내부 state(buffer 리스트 head)가 COPY되고, 이후 동일 arena를 거치는 할당(예:
@@ -185,64 +180,13 @@ pub const Config = struct {
         iframe_allowed_origins: []const [:0]const u8 = &.{},
     };
 
-    /// `suji.config.ts` `build` 의 resolved 결과 (loader 가 현재 플랫폼 mac/win/linux
-    /// 오버라이드를 이미 fold). CLI 플래그/env > 이 값 > adhoc default. 훅은 함수 직렬화
-    /// 불가라 존재 플래그만 (loader `--hook` 모드가 config 재로드·실행).
-    pub const Build = struct {
-        /// "adhoc" | "identity" | "none" (release_opts.parseSigningMode 입력).
-        sign: ?[:0]const u8 = null,
-        identity: ?[:0]const u8 = null,
-        notarize: bool = false,
-        dmg: bool = false,
-        sandbox: bool = false,
-        has_before_build: bool = false,
-        has_after_build: bool = false,
-        has_before_dev: bool = false,
-        /// suji.config.* 절대경로 (loader `_configFile`). null = json 출처(훅 불가).
-        config_file: ?[:0]const u8 = null,
-    };
-
-    /// dev 서버 spawn 시 주입할 env (`suji.config.ts` `dev.env`).
-    pub const Dev = struct {
-        env: []const EnvPair = &.{},
-        pub const EnvPair = struct { name: [:0]const u8, value: [:0]const u8 };
-    };
-
-    /// 어떤 CLI 명령에서 로드되는지 — JS 로더에 mode/command 전달 (함수형 config 분기용).
-    pub const Command = enum {
-        dev,
-        build,
-        run,
-        types,
-
-        pub fn modeStr(self: Command) []const u8 {
-            return switch (self) {
-                .dev, .types => "development",
-                .build, .run => "production",
-            };
-        }
-        pub fn commandStr(self: Command) []const u8 {
-            return switch (self) {
-                .dev => "dev",
-                .build => "build",
-                .run => "run",
-                .types => "dev",
-            };
-        }
-    };
-
     /// 시작 시 자동 생성할 창의 최대 개수.
     /// 사용자가 실수로 큰 배열을 넣어도 시작 hang/OOM 방지 (각 창은 NSWindow + GPU surface 생성).
     /// 런타임에 추가 창이 필요하면 wm.create / create_window IPC로 만들 수 있음.
     pub const MAX_STARTUP_WINDOWS: usize = 32;
 
     pub fn load(allocator: std.mem.Allocator) !Config {
-        return loadConfigFile(allocator, .dev);
-    }
-
-    /// 명시 명령으로 로드 — `suji.config.ts` 함수형 config 에 mode/command 를 전달.
-    pub fn loadCmd(allocator: std.mem.Allocator, cmd: Command) !Config {
-        return loadConfigFile(allocator, cmd);
+        return loadConfigFile(allocator);
     }
 
     pub fn deinit(self: *Config) void {
@@ -327,30 +271,19 @@ pub const Config = struct {
     // util.nonNegU32 직접 사용 (이 모듈 내부 alias 불필요).
 
     pub const CONFIG_FILE_PATHS = [_][]const u8{
-        "suji.config.ts",
-        "suji.config.mts",
-        "suji.config.cts",
-        "suji.config.js",
-        "suji.config.mjs",
-        "suji.config.cjs",
         "suji.json",
     };
 
-    const CONFIG_CODE_MAX_BYTES = 1024 * 256;
     const CONFIG_JSON_MAX_BYTES = 1024 * 256;
-    const CONFIG_LOADER_STDERR_MAX_BYTES = 1024 * 64;
-    const DEFAULT_CONFIG_LOADER_PATH = "node_modules/@suji/cli/bin/load-config.js";
 
-    fn loadConfigFile(allocator: std.mem.Allocator, cmd: Command) !Config {
+    fn loadConfigFile(allocator: std.mem.Allocator) !Config {
         var path_buf: [1200]u8 = undefined;
         const config_path = findConfigFilePath(&path_buf) orelse return error.ConfigNotFound;
-        if (isJsonConfigPath(config_path)) return loadJsonConfigFile(allocator, config_path);
-        return loadCodeConfigFile(allocator, config_path, cmd);
+        return loadJsonConfigFile(allocator, config_path);
     }
 
-    /// config 파일 탐색. (1) CWD — 로컬 dev. (2) 패키지된 앱의 실행파일 기준 Resources —
-    /// 프로덕션. 더블클릭/LaunchServices 는 CWD=/ 로 띄우므로 (1) 이 실패한다. 번들엔 node 가
-    /// 없어 .ts 를 못 돌리므로 거기선 suji.json(정적 JSON)만 의미가 있다(빌드가 복사).
+    /// suji.json 탐색. (1) CWD — 로컬 dev. (2) 패키지된 앱의 실행파일 기준 Resources —
+    /// 프로덕션. 더블클릭/LaunchServices 는 CWD=/ 로 띄우므로 (1) 이 실패한다(빌드가 복사).
     /// 반환 경로가 `buf` 에 기록될 수 있어 호출 직후 access/read 에 바로 써야 한다.
     fn findConfigFilePath(buf: []u8) ?[]const u8 {
         // 1. CWD (로컬 개발) — 상대경로 그대로 반환.
@@ -375,134 +308,10 @@ pub const Config = struct {
         return null;
     }
 
-    /// 절대경로(번들 Resources)도 처리해야 하므로 basename 의 확장자로 판정한다
-    /// (이전 `eql(path,"suji.json")` 은 절대경로를 .ts 로 오판 → node 실행 시도 → 실패).
-    fn isJsonConfigPath(path: []const u8) bool {
-        return std.mem.endsWith(u8, path, ".json");
-    }
-
     fn loadJsonConfigFile(allocator: std.mem.Allocator, path: []const u8) !Config {
         const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, allocator, .limited(CONFIG_JSON_MAX_BYTES)) catch return error.ConfigNotFound;
         defer allocator.free(content);
         return loadFromJsonBytes(allocator, content);
-    }
-
-    fn loadCodeConfigFile(allocator: std.mem.Allocator, path: []const u8, cmd: Command) !Config {
-        if (resolveConfigLoader()) |loader_path| {
-            return loadFromCodeConfigWithLoader(allocator, path, loader_path, cmd);
-        }
-
-        std.debug.print(
-            "[suji] warning: JS config loader not found; using static JSON-compatible fallback for {s}\n",
-            .{path},
-        );
-        const content = std.Io.Dir.cwd().readFileAlloc(runtime.io, path, allocator, .limited(CONFIG_CODE_MAX_BYTES)) catch return error.ConfigNotFound;
-        defer allocator.free(content);
-        return loadFromTsConfigBytes(allocator, content);
-    }
-
-    fn resolveConfigLoader() ?[]const u8 {
-        if (runtime.env("SUJI_CONFIG_LOADER")) |path| {
-            if (path.len > 0) return path;
-        }
-        std.Io.Dir.cwd().access(runtime.io, DEFAULT_CONFIG_LOADER_PATH, .{}) catch return null;
-        return DEFAULT_CONFIG_LOADER_PATH;
-    }
-
-    fn loadFromCodeConfigWithLoader(allocator: std.mem.Allocator, path: []const u8, loader_path: []const u8, cmd: Command) !Config {
-        const node_bin = runtime.env("SUJI_NODE_BIN") orelse "node";
-        const argv = [_][]const u8{
-            node_bin,
-            loader_path,
-            "--command",
-            cmd.commandStr(),
-            "--mode",
-            cmd.modeStr(),
-            "--cwd",
-            ".",
-            "--config",
-            path,
-        };
-
-        const result = std.process.run(allocator, runtime.io, .{
-            .argv = &argv,
-            .stdout_limit = .limited(CONFIG_JSON_MAX_BYTES),
-            .stderr_limit = .limited(CONFIG_LOADER_STDERR_MAX_BYTES),
-        }) catch |err| {
-            std.debug.print("[suji] failed to execute JS config loader ({s}): {}\n", .{ loader_path, err });
-            return error.InvalidConfig;
-        };
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-
-        switch (result.term) {
-            .exited => |code| {
-                if (code != 0) {
-                    if (result.stderr.len > 0) {
-                        std.debug.print("[suji] JS config loader failed:\n{s}\n", .{result.stderr});
-                    } else {
-                        std.debug.print("[suji] JS config loader exited with code {d}\n", .{code});
-                    }
-                    return error.InvalidConfig;
-                }
-            },
-            .signal => |sig| {
-                std.debug.print("[suji] JS config loader terminated by signal {}\n", .{sig});
-                return error.InvalidConfig;
-            },
-            .stopped => |sig| {
-                std.debug.print("[suji] JS config loader stopped by signal {}\n", .{sig});
-                return error.InvalidConfig;
-            },
-            .unknown => |code| {
-                std.debug.print("[suji] JS config loader terminated unexpectedly: {d}\n", .{code});
-                return error.InvalidConfig;
-            },
-        }
-
-        return loadFromJsonBytes(allocator, result.stdout);
-    }
-
-    /// Last-resort fallback for environments that run the native binary without
-    /// @suji/cli installed. It only accepts JSON-compatible defineConfig({...}).
-    pub fn loadFromTsConfigBytes(allocator: std.mem.Allocator, content: []const u8) !Config {
-        const json = extractDefineConfigJson(content) orelse return error.InvalidConfig;
-        return loadFromJsonBytes(allocator, json);
-    }
-
-    fn extractDefineConfigJson(content: []const u8) ?[]const u8 {
-        const marker = "defineConfig";
-        const marker_at = std.mem.indexOf(u8, content, marker) orelse return null;
-        const start = std.mem.indexOfScalarPos(u8, content, marker_at + marker.len, '{') orelse return null;
-
-        var depth: usize = 0;
-        var in_string = false;
-        var escaped = false;
-        var i = start;
-        while (i < content.len) : (i += 1) {
-            const c = content[i];
-            if (in_string) {
-                if (escaped) {
-                    escaped = false;
-                } else if (c == '\\') {
-                    escaped = true;
-                } else if (c == '"') {
-                    in_string = false;
-                }
-                continue;
-            }
-
-            if (c == '"') {
-                in_string = true;
-            } else if (c == '{') {
-                depth += 1;
-            } else if (c == '}') {
-                if (depth == 0) return null;
-                depth -= 1;
-                if (depth == 0) return content[start .. i + 1];
-            }
-        }
-        return null;
     }
 
     pub fn loadFromJsonBytes(allocator: std.mem.Allocator, content: []const u8) !Config {
@@ -724,78 +533,7 @@ pub const Config = struct {
             }
         }
 
-        // build — loader `normalize` 가 현재 플랫폼 오버라이드를 이미 fold 한 평탄 객체.
-        if (root.get("build")) |bv| {
-            if (bv == .object) {
-                const b = bv.object;
-                if (getStr(b, "sign")) |s| config.build.sign = dupeStr(a, s);
-                if (getStr(b, "identity")) |s| config.build.identity = dupeStr(a, s);
-                if (getBool(b, "notarize")) |x| config.build.notarize = x;
-                if (getBool(b, "dmg")) |x| config.build.dmg = x;
-                if (getBool(b, "sandbox")) |x| config.build.sandbox = x;
-                if (getStr(b, "_configFile")) |s| config.build.config_file = dupeStr(a, s);
-                if (b.get("_hooks")) |hv| {
-                    if (hv == .object) {
-                        const h = hv.object;
-                        if (getBool(h, "beforeBuild")) |x| config.build.has_before_build = x;
-                        if (getBool(h, "afterBuild")) |x| config.build.has_after_build = x;
-                        if (getBool(h, "beforeDev")) |x| config.build.has_before_dev = x;
-                    }
-                }
-            }
-        }
-
-        // dev.env — dev 서버 spawn 시 주입.
-        if (root.get("dev")) |dv| {
-            if (dv == .object) {
-                if (dv.object.get("env")) |ev| {
-                    if (ev == .object) {
-                        var list = std.ArrayList(Dev.EnvPair).empty;
-                        var it = ev.object.iterator();
-                        while (it.next()) |e| {
-                            if (e.value_ptr.* != .string) continue;
-                            list.append(a, .{
-                                .name = dupeStr(a, e.key_ptr.*),
-                                .value = dupeStr(a, e.value_ptr.*.string),
-                            }) catch continue;
-                        }
-                        config.dev.env = list.toOwnedSlice(a) catch &.{};
-                    }
-                }
-            }
-        }
-
         return config;
-    }
-
-    /// `suji.config.ts` build 훅 실행 (CLI 라이프사이클 지점에서 호출). 훅 부재/로더
-    /// 부재/오류는 graceful (빌드 자체는 진행). loader `--hook` 모드가 config 를 재로드·실행.
-    pub fn runBuildHook(self: *const Config, hook_name: []const u8, cmd: Command) void {
-        const config_file = self.build.config_file orelse return;
-        const loader_path = resolveConfigLoader() orelse {
-            std.debug.print("[suji] config: JS loader not found; skipping {s} hook\n", .{hook_name});
-            return;
-        };
-        const node_bin = runtime.env("SUJI_NODE_BIN") orelse "node";
-        std.debug.print("[suji] running {s} hook...\n", .{hook_name});
-        const argv = [_][]const u8{
-            node_bin,        loader_path,           "--command", cmd.commandStr(),
-            "--mode",        cmd.modeStr(),          "--cwd",     ".",
-            "--config",      config_file,           "--hook",    hook_name,
-        };
-        // stdio 상속 → 훅 출력이 그대로 보인다. exit code 만 검사.
-        var child = std.process.spawn(runtime.io, .{ .argv = &argv }) catch |e| {
-            std.debug.print("[suji] config: {s} hook spawn failed ({s})\n", .{ hook_name, @errorName(e) });
-            return;
-        };
-        const term = child.wait(runtime.io) catch |e| {
-            std.debug.print("[suji] config: {s} hook wait failed ({s})\n", .{ hook_name, @errorName(e) });
-            return;
-        };
-        switch (term) {
-            .exited => |code| if (code != 0) std.debug.print("[suji] config: {s} hook exited {d}\n", .{ hook_name, code }),
-            else => std.debug.print("[suji] config: {s} hook terminated abnormally\n", .{hook_name}),
-        }
     }
 
     pub fn isMultiBackend(self: *const Config) bool {

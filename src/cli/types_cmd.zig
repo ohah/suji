@@ -57,8 +57,8 @@ pub fn run(allocator: std.mem.Allocator, types_args: []const [:0]const u8) !void
         }
     }
 
-    var config = suji.Config.loadCmd(allocator, .types) catch {
-        std.debug.print("Error: suji.config.ts / suji.json not found (프로젝트 루트에서 실행).\n", .{});
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.json not found (프로젝트 루트에서 실행).\n", .{});
         return;
     };
     defer config.deinit();

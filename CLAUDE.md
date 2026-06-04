@@ -431,22 +431,9 @@ suji.platform                                                // "macos" | "linux
 
 ## Suji 설정
 
-`suji.config.ts`가 생성 프로젝트의 source config이고, `suji.json`은 materialized JSON입니다. 네이티브 로더는 `suji.config.ts`/`.mts`/`.cts`/`.js`/`.mjs`/`.cjs`를 먼저 찾고, `@suji/cli`의 JS/TS config loader로 실제 코드를 평가한 뒤 JSON만 Zig 파서에 넘깁니다. 로더가 없는 직접 native 실행 환경에서는 JSON-compatible `defineConfig({ ... })` 정적 fallback만 사용합니다. config 파일은 신뢰한 프로젝트 코드로 실행됩니다. JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
+설정은 **정적 `suji.json` 단일 출처**입니다. Zig 코어가 `suji.json`을 직접 파싱하므로 node 없이도 모든 백엔드 언어(zig/rust/go/node/lua)가 동일하게 읽습니다. `suji init`(네이티브·`@suji/cli` 동형)이 `suji.json`을 생성하고, 프로덕션 빌드는 이 파일을 `.app`/패키지 Resources 에 복사합니다. JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
 
-**프로그래밍 기능 (vite/rspack식 — 정적 JSON 미표현):** 함수형 config `defineConfig(({mode,command})=>({...}))`, **빌드 라이프사이클 훅** `build.beforeBuild`/`afterBuild`/`beforeDev`, **플랫폼별 빌드 오버라이드** `build.{mac,win,linux}`(현재 OS로 fold), **dev.env**(dev 서버 spawn 시 주입), `window` 단축(→`windows[]`)·`dev.devUrl`(→`frontend.dev_url`). loader가 평가 시 현재 플랫폼 build를 fold + 훅 함수를 `build._hooks` 마커로 strip(함수 직렬화 불가)해 JSON으로 emit하고, CLI(`config.zig`가 `--command/--mode` 전달)가 라이프사이클 지점에서 `node load-config.js --hook <name>` 로 훅을 재실행한다. 서명 우선순위: CLI 플래그 > env > `config.build.*` > adhoc. 회귀: `tests/config-loader/run.sh`(loader normalize/hook) + `tests/config_test.zig`(Zig build/dev 파싱).
-
-```ts
-// suji.config.ts
-import { defineConfig } from "@suji/cli";
-export default defineConfig(({ mode }) => ({
-  app: { name: "My App", version: "1.0.0" },
-  build: {
-    async beforeBuild() { /* … */ },
-    mac: { sign: "identity", notarize: mode === "production" },
-  },
-  dev: { devUrl: "http://localhost:12300", env: { VITE_API: "http://localhost:8787" } },
-}));
-```
+> ⚠️ `suji.config.ts`/`defineConfig`/JS·TS config loader/빌드 훅/`dev.env`/플랫폼별 빌드는 **제거됨** — node 런타임이 있어야 평가 가능해 node 없는 go/rust/zig 프로젝트가 쓸 수 없었다. 서명·공증·dmg·sandbox 등 빌드 옵션은 CLI 플래그(`--sign`/`--identity`/`--notarize`/`--dmg`/`--sandbox`) 또는 env(`SUJI_SIGN`/`SUJI_NOTARIZE`/…)로 지정한다. 회귀: `tests/config_test.zig`(suji.json 파싱).
 
 ```json
 {
@@ -898,7 +885,7 @@ runtime 동시 map, LuaRocks/배포 번들링은 후속.
 |------|--------|------|
 | GitHub Releases | 직접 다운로드 | ✅ `release.yml` (dry_run 검증 + v* 태그 릴리스) |
 | Homebrew | `brew install ohah/suji/suji` | ✅ `release.yml` homebrew job + Formula 생성/검증. 외부 tap push는 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 대기 |
-| npm/npx | `npx @suji/cli init my-app` / `npx create-suji my-app` | ✅ `packages/suji-cli`(스캐폴더 + `defineConfig`/JS·TS config loader + `suji` JS launcher, init.zig 동형, `suji.config.ts`/`suji.json`, 12300 기본 포트, backend none/zig/rust/go/node/lua/multi, frontend Vite/Rsbuild/Next, pm npm/pnpm/bun/VoidZero `vp`) — npm publish 토큰 대기 |
+| npm/npx | `npx @suji/cli init my-app` / `npx create-suji my-app` | ✅ `packages/suji-cli`(스캐폴더 + `suji` JS launcher, init.zig 동형, 정적 `suji.json`, 12300 기본 포트, backend none/zig/rust/go/node/lua/multi, frontend Vite/Rsbuild/Next, pm npm/pnpm/bun/VoidZero `vp`) — npm publish 토큰 대기 |
 | curl 스크립트 | `curl -fsSL https://github.com/ohah/suji/releases/latest/download/install.sh \| sh` | ✅ `scripts/install.sh` — 최신/특정 버전 릴리스 asset 다운로드 + `.sha256` 검증 + `~/.suji/bin` 설치. release asset 포함, 유닛/E2E 계약 고정 |
 
 ### SDK 배포

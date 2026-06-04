@@ -25,7 +25,7 @@ npx @suji/cli init my-app \
 생성물:
 
 - 루트 `package.json` (`dev/build/types` scripts, `@suji/cli` devDependency)
-- 실제 JS/TS로 평가되는 `suji.config.ts` source config + materialized `suji.json`
+- 정적 `suji.json` (Zig 코어가 node 없이 직접 파싱하는 단일 설정 출처)
 - `frontend.dev_url=http://localhost:12300`, `dev_command`, `build_command`
 - 백엔드 템플릿 (`zig`, `rust`, `go`, `node`, `lua`, `multi`)
 - `frontend/` 템플릿 (Vite, Rsbuild, Next static export)
@@ -46,29 +46,27 @@ vp install
 vp run dev
 ```
 
-## Config Loader
+## 설정 (suji.json)
 
-```ts
-import { defineConfig } from "@suji/cli";
+설정은 정적 `suji.json` 단일 출처입니다. `suji` JS launcher는 단순히
+플랫폼 native binary를 찾아 실행하며, native가 `suji.json`을 직접 파싱합니다
+(node 런타임 불요 — go/rust/zig 백엔드도 동일하게 동작). 서명·공증 등 빌드
+옵션은 CLI 플래그(`--sign`/`--notarize`/…) 또는 env로 지정합니다.
 
-const port = 12300;
-
-export default defineConfig(({ mode }) => ({
-  app: { name: mode === "production" ? "My App" : "My App Dev" },
-  frontend: {
-    dir: "frontend",
-    dev_url: `http://localhost:${port}`,
-    dev_command: "npm run dev",
-    build_command: "npm run build",
-    dist_dir: "frontend/dist",
-  },
-}));
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/ohah/suji/main/suji.schema.json",
+  "app": { "name": "My App", "version": "0.1.0" },
+  "windows": [{ "name": "main", "title": "My App", "width": 1024, "height": 768 }],
+  "frontend": {
+    "dir": "frontend",
+    "dev_url": "http://localhost:12300",
+    "dev_command": "npm run dev",
+    "build_command": "npm run build",
+    "dist_dir": "frontend/dist"
+  }
+}
 ```
-
-`suji` JS launcher는 native binary를 실행할 때 `SUJI_CONFIG_LOADER`와
-`SUJI_NODE_BIN`을 전달합니다. Native는 `suji.config.ts`/`.mts`/`.cts`/`.js`/
-`.mjs`/`.cjs`를 `@suji/cli` loader로 평가한 JSON을 읽고, 없으면 `suji.json`을
-읽습니다. Config 파일은 신뢰한 프로젝트 코드로 실행됩니다.
 
 `lib/init.js` 산출물은 `src/core/init.zig`(로컬 `suji init`)와 동형이고
 `templates/*`는 `src/templates/*`의 사본입니다. 변경 시 양쪽을 lockstep으로

@@ -300,28 +300,25 @@ fn flagOrEnv(args: []const [:0]const u8, flag: []const u8, env_name: []const u8)
 }
 
 fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
-    var config = suji.Config.loadCmd(allocator, .build) catch {
-        std.debug.print("Error: suji.config.ts / suji.json not found.\n", .{});
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.json not found.\n", .{});
         return;
     };
     defer config.deinit();
 
     std.debug.print("[suji] production build - {s}\n", .{config.app.name});
 
-    // suji.config.ts beforeBuild 훅 — 빌드 전 사용자 스크립트 (no-op if absent).
-    if (config.build.has_before_build) config.runBuildHook("beforeBuild", .build);
-
     // 서명/공증/패키징 옵션 (zero-native `--signing/--identity` 패리티).
-    // 우선순위: CLI 플래그 > env(CI secret) > suji.config.ts build.* > adhoc default.
-    const signing = release_opts.parseSigningMode(flagOrEnv(args, "--sign", "SUJI_SIGN") orelse config.build.sign);
-    const identity = flagOrEnv(args, "--identity", "SUJI_SIGN_IDENTITY") orelse config.build.identity;
-    const want_notarize = release_opts.hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null or config.build.notarize;
-    const want_dmg = release_opts.hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null or config.build.dmg;
+    // 플래그 > env(CI secret) 우선. 기본 adhoc(기존 동작 유지).
+    const signing = release_opts.parseSigningMode(flagOrEnv(args, "--sign", "SUJI_SIGN"));
+    const identity = flagOrEnv(args, "--identity", "SUJI_SIGN_IDENTITY");
+    const want_notarize = release_opts.hasFlag(args, "--notarize") or runtime.env("SUJI_NOTARIZE") != null;
+    const want_dmg = release_opts.hasFlag(args, "--dmg") or runtime.env("SUJI_DMG") != null;
     const want_deb = release_opts.hasFlag(args, "--deb") or runtime.env("SUJI_DEB") != null;
     const want_appimage = release_opts.hasFlag(args, "--appimage") or runtime.env("SUJI_APPIMAGE") != null;
     // App Sandbox(MAS) vs non-sandbox(Developer ID, 기본). 기본 false 라
     // 기존 Developer ID/notarize 배포 무회귀.
-    const want_sandbox = release_opts.hasFlag(args, "--sandbox") or runtime.env("SUJI_SANDBOX") != null or config.build.sandbox;
+    const want_sandbox = release_opts.hasFlag(args, "--sandbox") or runtime.env("SUJI_SANDBOX") != null;
     // Strict mode: 1 개 이상 backend/plugin dylib 가 packaging 에서 누락되면
     // process exit code 를 non-zero 로 만든다. 기본은 lenient + WARN (기존 동작
     // 무회귀). CI 가 silent miss 를 검출 못 하던 문제(`/code-review max PR#41`
@@ -564,9 +561,6 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
         else => std.debug.print("[suji] packaging unsupported on this OS\n", .{}),
     }
     _ = .{ signing, identity, want_notarize, want_dmg, want_deb, want_appimage, want_sandbox, want_strict }; // 비-Windows/macOS arm 미사용 해소
-
-    // suji.config.ts afterBuild 훅 — 번들 산출 후 사용자 스크립트 (no-op if absent).
-    if (config.build.has_after_build) config.runBuildHook("afterBuild", .build);
 }
 
 // ============================================
@@ -584,8 +578,6 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
 /// `resources/frontend/index.html` 만 probe 했는데, 개발자가 zig-out/bin 에
 /// stale 파일 남기면 dev 가 packaged 로 false-positive → 백엔드 로드 실패.
 /// 전용 sentinel 은 packaging 만 생성하므로 false-positive 봉쇄.
-
-
 fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) !void {
     _ = allocator;
     try proc.run(argv);
@@ -628,26 +620,21 @@ fn runCmdEnv(allocator: std.mem.Allocator, argv: []const []const u8, env_pairs: 
 // 프론트엔드
 // ============================================
 
-fn startFrontendDev(allocator: std.mem.Allocator, frontend: suji.Config.Frontend, dev_env: []const suji.Config.Dev.EnvPair) !std.process.Child {
-    if (dev_env.len == 0) return try spawnShellInDir(frontend.dev_command, frontend.dir, null);
-    // suji.config.ts dev.env — 부모 환경 clone 위에 주입. env_map 은 spawn 된 dev 서버가
-    // dev 세션 내내 살아있어야 하므로 heap 에 두고 의도적으로 유지(deinit X — 1회성 dev 스폰).
-    const env_map = try allocator.create(std.process.Environ.Map);
-    env_map.* = if (runtime.environ_map) |m| try m.clone(allocator) else std.process.Environ.Map.init(allocator);
-    for (dev_env) |pair| env_map.put(pair.name, pair.value) catch {};
-    return try spawnShellInDir(frontend.dev_command, frontend.dir, env_map);
+fn startFrontendDev(allocator: std.mem.Allocator, frontend: suji.Config.Frontend) !std.process.Child {
+    _ = allocator;
+    return try spawnShellInDir(frontend.dev_command, frontend.dir);
 }
 
-fn spawnShellInDir(command: []const u8, cwd_path: []const u8, env_map: ?*const std.process.Environ.Map) !std.process.Child {
+fn spawnShellInDir(command: []const u8, cwd_path: []const u8) !std.process.Child {
     const argv: []const []const u8 = if (builtin.os.tag == .windows)
         &.{ "cmd", "/C", command }
     else
         &.{ "sh", "-c", command };
-    return try std.process.spawn(runtime.io, .{ .argv = argv, .cwd = .{ .path = cwd_path }, .environ_map = env_map });
+    return try std.process.spawn(runtime.io, .{ .argv = argv, .cwd = .{ .path = cwd_path } });
 }
 
 fn runShellInDir(command: []const u8, cwd_path: []const u8) !void {
-    var child = try spawnShellInDir(command, cwd_path, null);
+    var child = try spawnShellInDir(command, cwd_path);
     const result = try child.wait(runtime.io);
     switch (result) {
         .exited => |code| if (code != 0) return error.CommandFailed,
@@ -665,15 +652,12 @@ fn buildFrontend(allocator: std.mem.Allocator, frontend: suji.Config.Frontend) !
 // ============================================
 
 fn runDev(allocator: std.mem.Allocator) !void {
-    var config = suji.Config.loadCmd(allocator, .dev) catch {
-        std.debug.print("Error: suji.config.ts / suji.json not found.\n", .{});
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.json not found.\n", .{});
         return;
     };
     defer config.deinit();
     setGlobalConfig(&config);
-
-    // suji.config.ts beforeDev 훅 — dev 서버/창 기동 전 사용자 스크립트 (no-op if absent).
-    if (config.build.has_before_dev) config.runBuildHook("beforeDev", .dev);
 
     var owned_csp: ?[]u8 = null;
     defer if (owned_csp) |csp| allocator.free(csp);
@@ -728,7 +712,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
 
     // 프론트엔드 dev 서버
     std.debug.print("[suji] starting frontend dev server...\n", .{});
-    var frontend_proc = startFrontendDev(allocator, config.frontend, config.dev.env) catch |err| {
+    var frontend_proc = startFrontendDev(allocator, config.frontend) catch |err| {
         std.debug.print("[suji] frontend dev server failed: {}, opening without frontend\n", .{err});
         try openWindow(allocator, &config, event_bus, .dev, main_url);
         return;
@@ -858,8 +842,8 @@ fn startBackendWatcher(allocator: std.mem.Allocator, config: *const suji.Config,
 }
 
 fn runProd(allocator: std.mem.Allocator) !void {
-    var config = suji.Config.loadCmd(allocator, .run) catch {
-        std.debug.print("Error: suji.config.ts / suji.json not found.\n", .{});
+    var config = suji.Config.load(allocator) catch {
+        std.debug.print("Error: suji.json not found.\n", .{});
         return;
     };
     defer config.deinit();

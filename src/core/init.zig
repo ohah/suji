@@ -323,7 +323,6 @@ fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend
         , .{ name, name, @tagName(backend), backendEntry(backend), frontend_json }),
     };
     try writeFileContent(dir, "suji.json", content);
-    try writeTsConfig(allocator, dir, content);
 }
 
 fn backendEntry(backend: BackendLang) []const u8 {
@@ -332,18 +331,6 @@ fn backendEntry(backend: BackendLang) []const u8 {
         .lua => "backends/lua",
         else => ".",
     };
-}
-
-fn writeTsConfig(allocator: std.mem.Allocator, dir: Dir, json_content: []const u8) !void {
-    const content = try std.fmt.allocPrint(allocator,
-        \\import {{ defineConfig }} from "@suji/cli";
-        \\
-        \\export default defineConfig(
-        \\{s});
-        \\
-    , .{json_content});
-    defer allocator.free(content);
-    try writeFileContent(dir, "suji.config.ts", content);
 }
 
 fn scaffoldZig(dir: Dir) !void {

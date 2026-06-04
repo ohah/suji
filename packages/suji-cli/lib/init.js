@@ -294,14 +294,6 @@ export function sujiJson(name, backend, template, pm) {
   }, null, 2)}\n`;
 }
 
-export function sujiConfigTs(json) {
-  return `import { defineConfig } from "@suji/cli";
-
-export default defineConfig(
-${json});
-`;
-}
-
 export function scaffoldBackend(projectName, backend, name) {
   const W = (relPath, content) => write(projectName, relPath, content);
   const scaffoldZig = (dir) => W(join(dir, "app.zig"), tpl("zig_app.zig"));
@@ -362,7 +354,6 @@ export async function runInitCli(argv = process.argv.slice(2)) {
   write(opts.name, "package.json", rootPackageJson(opts.name, opts.pm));
   const configJson = sujiJson(opts.name, opts.backend, template, opts.pm);
   write(opts.name, "suji.json", configJson);
-  write(opts.name, "suji.config.ts", sujiConfigTs(configJson));
   write(opts.name, ".gitignore", tpl("gitignore"));
   write(opts.name, ".github/workflows/suji.yml", tpl(".github/workflows/suji.yml"));
   scaffoldBackend(opts.name, opts.backend, opts.name);

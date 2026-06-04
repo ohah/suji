@@ -49,11 +49,7 @@ if (!binary) {
 
 const result = spawnSync(binary, process.argv.slice(2), {
   stdio: "inherit",
-  env: {
-    ...process.env,
-    SUJI_CONFIG_LOADER: process.env.SUJI_CONFIG_LOADER ?? join(packageRoot, "bin", "load-config.js"),
-    SUJI_NODE_BIN: process.env.SUJI_NODE_BIN ?? process.execPath,
-  },
+  env: process.env,
 });
 if (result.error) {
   console.error(result.error.message);

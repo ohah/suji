@@ -13,11 +13,7 @@
   "bin": {
     "suji": "bin/suji.js",
     "suji-cli": "bin/cli.js",
-    "create-suji": "bin/cli.js",
-    "suji-config": "bin/load-config.js"
-  },
-  "dependencies": {
-    "esbuild": "^0.28.0"
+    "create-suji": "bin/cli.js"
   },
   "files": [
     "bin",

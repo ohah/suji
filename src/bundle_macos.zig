@@ -134,8 +134,7 @@ pub fn createBundle(
     // 6.2. suji.json 을 번들 Resources 에 복사 — 프로덕션 .app 은 더블클릭/LaunchServices 로
     //   띄우면 CWD 가 / 라 CWD 기준 config 탐색이 실패한다(runProd 즉시 종료 → 무반응).
     //   config.zig findConfigFilePath 가 실행파일 기준 Contents/Resources/suji.json 을 찾으므로
-    //   여기 둔다. 번들엔 node 가 없어 suji.config.ts 는 못 돌리니 정적 JSON(suji.json)이 필수.
-    //   suji init 이 suji.json 을 항상 생성하므로 존재가 규약.
+    //   여기 둔다. suji init 이 suji.json 을 항상 생성하므로 존재가 규약.
     {
         const cfg_dst = try std.fmt.allocPrint(allocator, "{s}/Contents/Resources/suji.json", .{app_name});
         defer allocator.free(cfg_dst);
@@ -143,7 +142,7 @@ pub fn createBundle(
             runCmd(allocator, &.{ "cp", "suji.json", cfg_dst }) catch
                 std.debug.print("[suji] warn: suji.json 번들 복사 실패\n", .{});
         } else |_| {
-            std.debug.print("[suji] warn: suji.json 이 없어 번들에 config 미포함 — 프로덕션 .app 이 config 를 못 찾는다(suji.config.ts 만 존재). suji.json 을 두세요.\n", .{});
+            std.debug.print("[suji] warn: suji.json 이 없어 번들에 config 미포함 — 프로덕션 .app 이 config 를 못 찾는다. suji.json 을 두세요.\n", .{});
         }
     }
 
