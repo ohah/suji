@@ -41,9 +41,14 @@ pub fn onRegisterCustomSchemes(
     const reg = registrar orelse return;
     var scheme_name: c.cef_string_t = .{};
     setCefString(&scheme_name, "suji");
-    // STANDARD + LOCAL + SECURE + CORS_ENABLED + FETCH_ENABLED + CSP_BYPASSING
+    // STANDARD + SECURE + CORS_ENABLED + FETCH_ENABLED + CSP_BYPASSING.
+    // LOCAL 은 절대 넣지 않는다 — LOCAL 은 스킴에 file:// 동급 보안규칙을 적용해
+    // origin 을 opaque('null')로 만든다. 그러면 suji://app/index.html 이 같은 출처의
+    // /assets/*.js|css 를 불러올 때 origin 'null' → cross-origin 으로 취급돼 CORS 차단
+    // (No 'Access-Control-Allow-Origin') → 스크립트 실행 0 → 흰 화면. STANDARD 만으로는
+    // 부족하고, LOCAL 이 있으면 STANDARD 라도 file 취급된다. Electron/Tauri 의 앱 스킴도
+    // standard+secure+corsEnabled 만 쓰고 local 은 쓰지 않는 이유.
     const options = c.CEF_SCHEME_OPTION_STANDARD |
-        c.CEF_SCHEME_OPTION_LOCAL |
         c.CEF_SCHEME_OPTION_SECURE |
         c.CEF_SCHEME_OPTION_CORS_ENABLED |
         c.CEF_SCHEME_OPTION_FETCH_ENABLED |
