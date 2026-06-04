@@ -132,8 +132,8 @@ pub fn createBundle(
     @import("package_desktop.zig").writePackagedSentinel(allocator, resources_path);
     try @import("package_desktop.zig").stageBackendArtifacts(allocator, resources_path, backends, plugins);
 
-    // 7. 메인 바이너리 install_name_tool
-    try fixMainBinaryRpath(allocator, app_name, name);
+    // 7. 메인 + 헬퍼 바이너리 install_name_tool (CEF 절대경로 → 번들 상대경로)
+    try fixCefInstallNames(allocator, app_name, name);
 
     // 8. 코드서명 (sandbox 모드면 helper별 다른 entitlements)
     try codesignBundle(allocator, app_name, name, opts);
@@ -380,22 +380,32 @@ fn symlinkGpuLibs(allocator: std.mem.Allocator, app_name: []const u8) !void {
     }
 }
 
-fn fixMainBinaryRpath(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8) !void {
-    const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
-    defer allocator.free(exe);
-
+fn fixCefInstallNames(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8) !void {
     const home = runtime.env("HOME") orelse "/tmp";
     const old_path = try std.fmt.allocPrint(allocator, "{s}/.suji/cef/macos-arm64/Release/Chromium Embedded Framework.framework/Chromium Embedded Framework", .{home});
     defer allocator.free(old_path);
+    const cef = "Chromium Embedded Framework.framework/Chromium Embedded Framework";
 
-    runCmd(allocator, &.{
-        "install_name_tool", "-change",
-        old_path,
-        "@executable_path/../Frameworks/Chromium Embedded Framework.framework/Chromium Embedded Framework",
-        exe,
-    }) catch |err| {
-        std.debug.print("[suji] install_name_tool warning: {}\n", .{err});
-    };
+    // 메인 바이너리 (Contents/MacOS/<name>) — Frameworks 까지 한 단계.
+    {
+        const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
+        defer allocator.free(exe);
+        runCmd(allocator, &.{ "install_name_tool", "-change", old_path, "@executable_path/../Frameworks/" ++ cef, exe }) catch |err|
+            std.debug.print("[suji] install_name_tool(main) warning: {}\n", .{err});
+    }
+
+    // Helper 바이너리들 (Frameworks/<name> Helper{suffix}.app/Contents/MacOS/<name> Helper{suffix}) —
+    // Frameworks 까지 세 단계 깊어 메인과 다른 상대경로(../../../). createHelperApp 이 메인을 hardlink
+    // 하지만 install_name_tool/서명이 hardlink 를 깨면서 메인 수정이 전파되지 않으므로, 각 헬퍼의 CEF
+    // 참조를 개별로 고친다 — 안 그러면 빌드 머신 절대경로(~/.suji/cef/...)가 남아 다른 맥에서 CEF
+    // 헬퍼가 "Library not loaded" 로 dyld 크래시한다.
+    const helper_suffixes = [_][]const u8{ "", " (GPU)", " (Renderer)", " (Plugin)" };
+    for (helper_suffixes) |suffix| {
+        const helper = try std.fmt.allocPrint(allocator, "{s}/Contents/Frameworks/{s} Helper{s}.app/Contents/MacOS/{s} Helper{s}", .{ app_name, name, suffix, name, suffix });
+        defer allocator.free(helper);
+        runCmd(allocator, &.{ "install_name_tool", "-change", old_path, "@executable_path/../../../" ++ cef, helper }) catch |err|
+            std.debug.print("[suji] install_name_tool(helper) warning: {}\n", .{err});
+    }
 }
 
 fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []const u8, opts: BundleOptions) !void {

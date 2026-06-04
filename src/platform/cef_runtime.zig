@@ -93,11 +93,18 @@ pub fn initialize(config: CefConfig) !void {
         settings.remote_debugging_port = 9222;
     }
 
-    // Subprocess path (자기 자신)
+    // Subprocess path — exe 경로는 아래 번들 CEF 경로 계산에도 쓰므로 보관.
     var exe_buf: [1024]u8 = undefined;
-    if (std.process.executablePath(runtime.io, &exe_buf)) |exe_len| {
-        setCefString(&settings.browser_subprocess_path, exe_buf[0..exe_len]);
-    } else |_| {}
+    const exe_path: ?[]const u8 = if (std.process.executablePath(runtime.io, &exe_buf)) |exe_len| exe_buf[0..exe_len] else |_| null;
+    // 번들(.app) macOS 에선 browser_subprocess_path 를 비운다 → CEF 가
+    // Contents/Frameworks/<name> Helper*.app 을 자동으로 helper 로 쓴다(CEF 표준). self(메인
+    // exe)를 지정하면 macOS 가 메인 exe 를 helper 로 띄우려다 Hardened Runtime + 서명 검증
+    // (process_requirement)에서 -67030 으로 실패 → helper 미생성 → 렌더가 비어버린다.
+    // dev(헬퍼 번들 없음)에선 self 가 subprocess.
+    const is_bundled_macos = is_macos and (if (exe_path) |ep| std.mem.indexOf(u8, ep, "/Contents/MacOS/") != null else false);
+    if (exe_path) |ep| {
+        if (!is_bundled_macos) setCefString(&settings.browser_subprocess_path, ep);
+    }
 
     // CEF 경로 설정 (OS/arch별)
     const home: []const u8 = if (comptime builtin.os.tag == .windows)
@@ -115,8 +122,21 @@ pub fn initialize(config: CefConfig) !void {
     var user_data_buf: [1024]u8 = undefined;
     var cache_buf: [1024]u8 = undefined;
 
+    // 프로덕션 .app 번들 감지 — exe 가 <app>/Contents/MacOS/<name> 면 번들 내부 CEF 를 쓴다.
+    // dev 경로(~/.suji/cef)를 프로덕션 .app 에 남기면 그 경로가 없는 다른 맥에서 cef_initialize
+    // 가 프레임워크/리소스를 못 찾아 실패 → 앱이 즉시 종료한다. 번들이면 exe 기준으로 계산.
+    const bundle_fw: ?[]const u8 = if (is_macos) blk: {
+        const ep = exe_path orelse break :blk null;
+        const idx = std.mem.lastIndexOf(u8, ep, "/Contents/MacOS/") orelse break :blk null;
+        break :blk std.fmt.bufPrint(&fw_buf, "{s}/Contents/Frameworks/Chromium Embedded Framework.framework", .{ep[0..idx]}) catch return error.PathTooLong;
+    } else null;
+
     if (is_macos) {
-        setCefString(&settings.framework_dir_path, std.fmt.bufPrint(&fw_buf, "{s}/.suji/cef/{s}/Release/Chromium Embedded Framework.framework", .{ home, cef_platform }) catch return error.PathTooLong);
+        if (bundle_fw) |fw| {
+            setCefString(&settings.framework_dir_path, fw);
+        } else {
+            setCefString(&settings.framework_dir_path, std.fmt.bufPrint(&fw_buf, "{s}/.suji/cef/{s}/Release/Chromium Embedded Framework.framework", .{ home, cef_platform }) catch return error.PathTooLong);
+        }
     }
     // Windows: resources_dir_path / locales_dir_path 를 명시하면 (backslash
     // 든 mixed-slash 든) cef_initialize 가 0 반환 + log_file 미오픈 (원인 미상,
@@ -130,8 +150,15 @@ pub fn initialize(config: CefConfig) !void {
     if (comptime builtin.os.tag != .windows) {
         var res_buf: [1024]u8 = undefined;
         var loc_buf: [1024]u8 = undefined;
-        setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/{s}/Resources", .{ home, cef_platform }) catch return error.PathTooLong);
-        setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/{s}/Resources/locales", .{ home, cef_platform }) catch return error.PathTooLong);
+        if (bundle_fw) |fw| {
+            // 번들: .pak/icudtl.dat 는 framework/Resources/, 로케일은 그 안 <locale>.lproj/.
+            // (locales_dir_path 는 macOS 에서 무시되지만 유효 경로로 둔다.)
+            setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/Resources", .{fw}) catch return error.PathTooLong);
+            setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/Resources", .{fw}) catch return error.PathTooLong);
+        } else {
+            setCefString(&settings.resources_dir_path, std.fmt.bufPrint(&res_buf, "{s}/.suji/cef/{s}/Resources", .{ home, cef_platform }) catch return error.PathTooLong);
+            setCefString(&settings.locales_dir_path, std.fmt.bufPrint(&loc_buf, "{s}/.suji/cef/{s}/Resources/locales", .{ home, cef_platform }) catch return error.PathTooLong);
+        }
     }
     // OS 표준 앱별 user-data 디렉토리. Electron app.getPath('userData') 동등:
     //   macOS:   ~/Library/Application Support/<app_name>
