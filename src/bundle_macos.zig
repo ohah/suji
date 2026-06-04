@@ -79,6 +79,13 @@ pub fn createBundle(
 
     std.debug.print("[suji] creating bundle: {s}\n", .{app_name});
 
+    // 이전 빌드의 .app 을 통째로 제거 후 새로 만든다 — 번들은 직전 상태와 무관하게 항상
+    // 동일 결과여야 한다(idempotent). createDirPath 는 기존 디렉토리를 지우지 않으므로,
+    // 재빌드 시 cp 가 기존 디렉토리 *안으로* 복사돼 프레임워크/헬퍼가 중첩된다
+    // (예: Chromium Embedded Framework.framework/Chromium Embedded Framework.framework →
+    // 중첩본은 Developer ID 재서명/secure timestamp 가 없어 공증 Invalid). 매 빌드 clean.
+    runCmd(allocator, &.{ "rm", "-rf", app_name }) catch {};
+
     // 디렉토리 생성
     const dirs = [_][]const u8{
         "Contents",
@@ -255,6 +262,9 @@ fn copyCefFramework(allocator: std.mem.Allocator, app_name: []const u8, opts: Bu
     defer allocator.free(dst);
 
     std.debug.print("[suji] copying CEF framework...\n", .{});
+    // dst 가 남아있으면 cp 가 그 *안으로* 복사돼 CEF.framework/CEF.framework 로 중첩된다.
+    // createBundle 이 .app 을 비우지만, 이 함수 단독으로도 idempotent 하도록 dst 선제거.
+    runCmd(allocator, &.{ "rm", "-rf", dst }) catch {};
     // APFS clone (-c)으로 instant copy, fallback regular cp.
     runCmd(allocator, &.{ "cp", "-Rc", src, dst }) catch {
         try runCmd(allocator, &.{ "cp", "-R", src, dst });
