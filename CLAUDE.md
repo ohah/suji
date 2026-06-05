@@ -77,10 +77,15 @@ bash tests/e2e/run-python-e2e.sh        # Python 백엔드 (embedded CPython 3.1
 # 모바일 정적 백엔드 메커니즘 (CEF/iOS 무관, 호스트 검증)
 bash tests/mobile-backends/run.sh       # 코어+Rust(staticlib)+Go(c-archive)+Zig
                                         # +SQLite(build-lib) 정적 링크 →
-                                        # register_handler 왕복 65 케이스.
+                                        # register_handler 왕복 68 케이스.
                                         # zig:http=std.http→localhost 평문+HTTPS,
                                         # sql:*=실 sqlite3 CRUD(모바일 경로,
-                                        # 데스크탑 plugins/sqlite 바이트 동형)
+                                        # 데스크탑 plugins/sqlite 바이트 동형).
+                                        # python=backend_android.c 호스트 빌드+실
+                                        # 데스크탑 libpython 으로 ping/echo 왕복
+                                        # (libpython staged 시 — CI 가 stage-python.sh.
+                                        # 모바일 python 의 유일한 CI 자동 기능 커버리지;
+                                        # 미staging 이면 graceful skip)
 bash tests/mobile-backends/ios-sim-smoke.sh  # iOS 시뮬레이터 변형별 빌드+기동
                                         # 스모크(링크/TLS/심볼충돌 회귀; xcodegen+
                                         # 부팅 시뮬 필요; 기본 zig multi)

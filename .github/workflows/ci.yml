@@ -296,5 +296,10 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      # 데스크탑 libpython staging → run.sh 가 모바일 python 백엔드(backend_android.c)를
+      # 호스트로 빌드·링크해 ping/echo 왕복까지 자동 검증(미staging 이면 graceful skip).
+      - name: Stage embedded CPython
+        run: bash scripts/stage-python.sh
+
       - name: Run mobile-backends host harness
         run: bash tests/mobile-backends/run.sh

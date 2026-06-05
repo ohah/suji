@@ -124,10 +124,31 @@ zig build-lib -O ReleaseSmall -fPIC -lc \
   --name suji_zig_backend "$REPO/examples/ios/backends/zig/src/backend.zig"
 rm -f "$OUT/libsuji_zig_backend.a.o"
 
-echo "[5/6] sqlite backend (build-lib + vendored sqlite3.c, host)"
+echo "[5/7] sqlite backend (build-lib + vendored sqlite3.c, host)"
 bash "$REPO/examples/ios/backends/sqlite/build-lib.sh" host "$OUT" >/dev/null
 
-echo "[6/6] link + run"
+# Python(embedded CPython) — 데스크탑 libpython 이 staged 면 모바일 backend_android.c
+# 를 호스트 타깃으로 컴파일·링크해 CI 에서 ping/echo 왕복까지 자동 검증한다.
+# 미staging(로컬 fast path)은 graceful skip → 기존 5-백엔드 하니스 그대로 동작.
+echo "[6/7] python backend (embedded CPython, host — backend_android.c)"
+PY_HOME="$HOME/.suji/python/3.13.13"
+PY_INC="$PY_HOME/include/python3.13"
+case "$(uname -s)" in Darwin) PY_LIBF="$PY_HOME/lib/libpython3.13.dylib" ;; *) PY_LIBF="$PY_HOME/lib/libpython3.13.so" ;; esac
+PY_FLAGS=()
+if [ -f "$PY_LIBF" ] && [ -d "$PY_INC" ]; then
+  # backend_android.c 는 순수 C — real clang 이 bionic/pyatomic 무사(zig translate-c 한정 함정).
+  cc -c "$REPO/examples/ios/backends/python/src/backend_android.c" \
+     -I"$PY_INC" -I"$REPO/include" -fPIC -O2 -o "$OUT/backend_python.o"
+  ar rcs "$OUT/libsuji_python_backend.a" "$OUT/backend_python.o"
+  PY_FLAGS=(-DSUJI_HAVE_PYTHON "$OUT/libsuji_python_backend.a"
+            -L"$PY_HOME/lib" -lpython3.13 -Wl,-rpath,"$PY_HOME/lib")
+  export SUJI_PY_HOME="$PY_HOME" SUJI_PY_MAIN="$REPO/examples/ios/backends/python/main.py"
+  echo "  python staged → ping/echo 왕복 검증 활성"
+else
+  echo "  [SKIP] desktop libpython 미staging — python 케이스 제외 (bash scripts/stage-python.sh)"
+fi
+
+echo "[7/7] link + run"
 EXTRA=()
 case "$(uname -s)" in
   Darwin) EXTRA=(-lresolv -framework CoreFoundation -framework Security) ;;
@@ -137,5 +158,6 @@ esac
 cc "$HERE/verify.c" \
    "$OUT/libsuji_core.a" "$OUT/libsuji_rs_backend.a" "$OUT/libsuji_go_backend.a" \
    "$OUT/libsuji_zig_backend.a" "$OUT/libsuji_sqlite_backend.a" \
+   ${PY_FLAGS[@]+"${PY_FLAGS[@]}"} \
    -I"$REPO/include" "${EXTRA[@]}" -o "$OUT/verify"
 "$OUT/verify"

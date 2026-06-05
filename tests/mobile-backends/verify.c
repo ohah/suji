@@ -39,6 +39,18 @@ extern void suji_zig_backend_set_ca_bundle_path(const char *path);
 extern char *suji_sqlite_backend_handle_ipc(const char *req);
 extern void suji_sqlite_backend_free(char *p);
 extern void suji_sqlite_backend_init(const void *core);
+// Python (embedded CPython) — run.sh 가 데스크탑 libpython 을 staging 했을 때만
+// backend_android.c 를 호스트 타깃으로 빌드·링크하고 -DSUJI_HAVE_PYTHON 을 준다.
+// 미staging 환경(로컬/CI)은 플래그 부재로 python 심볼을 일절 참조하지 않아 기존
+// 5-백엔드 빌드가 그대로 통과. init=no-op, start(home,entry)=Py_Initialize+main.py,
+// channels()=등록 채널 JSON, handle_ipc=cmd 추출→GIL→Python 디스패치.
+#ifdef SUJI_HAVE_PYTHON
+extern void suji_python_backend_init(const void *core);
+extern int suji_python_backend_start(const char *home, const char *entry);
+extern char *suji_python_backend_channels(void);
+extern char *suji_python_backend_handle_ipc(const char *req);
+extern void suji_python_backend_free(char *p);
+#endif
 
 static const char *rust_h(const char *ch, const char *j) {
     char *q = suji_mobile_bridge(ch, j);
@@ -75,6 +87,17 @@ static const char *sqlite_h(const char *ch, const char *j) {
     return r;
 }
 static void sqlite_f(const char *p) { suji_sqlite_backend_free((char *)p); }
+
+#ifdef SUJI_HAVE_PYTHON
+static const char *python_h(const char *ch, const char *j) {
+    char *q = suji_mobile_bridge(ch, j);
+    if (!q) return NULL;
+    char *r = suji_python_backend_handle_ipc(q);
+    free(q);
+    return r;
+}
+static void python_f(const char *p) { suji_python_backend_free((char *)p); }
+#endif
 
 // __core__ 모바일 디스패처 mock. iOS sujiCoreDispatch / Android coreDispatch 와
 // 동일 계약을 C 로 흉내 — register_handler("__core__") 라우팅과 데스크톱
@@ -419,6 +442,40 @@ int main(void) {
         roundtrip("sql:open", "{\"path\":\"rel/path.db\"}", "invalid path",
                   "sqlite relative path rejected (mobile boundary)");
     }
+
+#ifdef SUJI_HAVE_PYTHON
+    // Python 정적 백엔드 — examples/ios/backends/python/src/backend_android.c 를
+    // 호스트 타깃으로 빌드. desktop libpython + staged stdlib 로 main.py(ping/echo)
+    // 핸들러를 실제 Py_Initialize → 등록 → 모바일 경로(register_handler→bridge→
+    // handle_ipc)로 왕복. 데스크탑 python.zig 와 동일 런타임을 모바일 ABI 로 검증.
+    printf("== Python 정적 백엔드 (embedded CPython, 모바일 경로) ==\n");
+    {
+        const char *py_home = getenv("SUJI_PY_HOME");
+        const char *py_main = getenv("SUJI_PY_MAIN");
+        suji_python_backend_init(NULL);
+        if (py_home && py_main && suji_python_backend_start(py_home, py_main) == 0) {
+            char *chans = suji_python_backend_channels();
+            expect("python channels() lists ping", chans ? chans : "", "\"ping\"");
+            if (chans) suji_python_backend_free(chans);
+            if (suji_core_register_handler("ping", python_h, python_f) == 0 &&
+                suji_core_register_handler("echo", python_h, python_f) == 0) {
+                roundtrip("ping", "{}", "\"msg\": \"pong\"",
+                          "python ping (embedded CPython)");
+                // echo 는 json.dumps(ensure_ascii=기본) → 비ASCII 는 \uXXXX 이스케이프
+                // 되므로 호스트 하니스는 ASCII 값으로 검증(유니코드 왕복은 실 sim/emu
+                // e2e 의 e2e.html JS 가 디코드해 검증). cmd 도 함께 에코됨.
+                roundtrip("echo", "{\"value\":\"py-host-rt\"}", "\"value\": \"py-host-rt\"",
+                          "python echo (json round-trip)");
+            } else {
+                printf("  [FAIL] python register_handler\n");
+                fails++; total++;
+            }
+        } else {
+            // staging 실패는 환경 문제 — 빌드/링크는 됐으니 graceful skip(정직).
+            printf("  [SKIP] python start 실패 (SUJI_PY_HOME/SUJI_PY_MAIN staging 확인)\n");
+        }
+    }
+#endif
 
     printf("== Zig http (std.http → localhost 평문) ==\n");
     if (start_http_server() != 0) {

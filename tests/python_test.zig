@@ -167,3 +167,29 @@ test "Android Python 백엔드 배선 계약" {
     defer a.free(core);
     try expectContains(core, "nativeRegisterPythonBackend");
 }
+
+// CEF-free 호스트 하니스(tests/mobile-backends/run.sh, CI 포함)가 모바일 python
+// 백엔드(backend_android.c)를 호스트 타깃으로 빌드·링크해 ping/echo 왕복까지
+// **CI 자동** 검증한다. iOS/Android e2e 는 sim/emu 필요라 CI 외 → 이 host 경로가
+// 모바일 python 의 유일한 CI 자동 기능 커버리지(sqlite 동급). 미staging 시 graceful skip.
+test "host harness(run.sh): 모바일 python ping/echo CI 자동 검증 배선" {
+    const a = std.testing.allocator;
+
+    const run = try slurp(a, "tests/mobile-backends/run.sh");
+    defer a.free(run);
+    try expectContains(run, "backend_android.c"); // 호스트 타깃 컴파일
+    try expectContains(run, "-DSUJI_HAVE_PYTHON"); // verify.c python 케이스 게이트
+    try expectContains(run, "-lpython3.13"); // desktop libpython 링크
+    try expectContains(run, "SUJI_PY_MAIN"); // main.py 경로 주입
+
+    const verify = try slurp(a, "tests/mobile-backends/verify.c");
+    defer a.free(verify);
+    try expectContains(verify, "SUJI_HAVE_PYTHON"); // 미staging 환경 무참조 가드
+    try expectContains(verify, "suji_python_backend_start");
+    try expectContains(verify, "python ping (embedded CPython)");
+
+    // CI mobile-backends job 이 run.sh 전에 libpython 을 staging.
+    const ci = try slurp(a, ".github/workflows/ci.yml");
+    defer a.free(ci);
+    try expectContains(ci, "Stage embedded CPython");
+}
