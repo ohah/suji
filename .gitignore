@@ -43,6 +43,7 @@ examples/android/*/local.properties
 examples/ios/backends/rust/target/
 examples/ios/backends/go/libsuji_go_backend.a
 examples/ios/backends/go/libsuji_go_backend.h
+examples/ios/backends/*/out/
 tests/mobile-backends/.build/
 
 # OS

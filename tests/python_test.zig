@@ -72,3 +72,45 @@ test "e2e runner + test 존재 + python 채널" {
     defer a.free(test_ts);
     try expectContains(test_ts, "embedded CPython");
 }
+
+// 모바일(iOS) Python 백엔드 소스 계약 — 실 기능 검증은 tests/mobile-backends/
+// ios-e2e.sh python(시뮬레이터, Xcode 필요라 CI 외 로컬/수동, clipboard 모바일
+// e2e 와 동일 바). 여기선 배선이 빠지지 않게 CEF/Xcode 없이 고정.
+test "iOS Python 백엔드 배선 계약" {
+    const a = std.testing.allocator;
+
+    // staging: Python-Apple-support(PEP 730) iOS xcframework.
+    const stage = try slurp(a, "scripts/stage-python-ios.sh");
+    defer a.free(stage);
+    try expectContains(stage, "Python-Apple-support");
+    try expectContains(stage, "Python.xcframework");
+
+    // backend.zig — 데스크탑 런타임 포팅 + 모바일 C ABI + outbound extern + 교훈.
+    const backend = try slurp(a, "examples/ios/backends/python/src/backend.zig");
+    defer a.free(backend);
+    try expectContains(backend, "export fn suji_python_backend_start");
+    try expectContains(backend, "export fn suji_python_backend_channels");
+    try expectContains(backend, "export fn suji_python_backend_handle_ipc");
+    try expectContains(backend, "extern fn suji_core_invoke"); // outbound 배선
+    try expectContains(backend, "_Py_USE_GCC_BUILTIN_ATOMICS"); // pyatomic 회피
+    try expectContains(backend, "PyObject_CallOneArg"); // non-variadic
+
+    // build-lib: xcframework 헤더로 컴파일(libpython 은 앱 링크 해소).
+    const bbuild = try slurp(a, "examples/ios/backends/python/build-lib.sh");
+    defer a.free(bbuild);
+    try expectContains(bbuild, "Python.xcframework");
+    try expectContains(bbuild, "ios-sim");
+
+    // 호스트 변형: bridging header + Backends.swift(start+channels) + project.yml(embed).
+    const bridge = try slurp(a, "examples/ios/_shared/Suji-Bridging-Header.h");
+    defer a.free(bridge);
+    try expectContains(bridge, "suji_python_backend_start");
+    const swift = try slurp(a, "examples/ios/python/Backends.swift");
+    defer a.free(swift);
+    try expectContains(swift, "suji_python_backend_start");
+    try expectContains(swift, "suji_python_backend_channels");
+    const proj = try slurp(a, "examples/ios/python/project.yml");
+    defer a.free(proj);
+    try expectContains(proj, "Python.xcframework");
+    try expectContains(proj, "embed: true");
+}

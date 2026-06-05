@@ -87,6 +87,11 @@ bash tests/mobile-backends/ios-sim-smoke.sh  # iOS 시뮬레이터 변형별 빌
 bash tests/mobile-backends/ios-e2e.sh   # iOS 시뮬 *기능* e2e — e2e.html 이 실
                                         # UIPasteboard clipboard 8케이스 자가검증
                                         # → 데이터컨테이너 파일 회수·assert
+bash scripts/stage-python-ios.sh        # iOS embedded CPython staging (BeeWare
+                                        # Python-Apple-support 3.13 → ~/.suji/python-ios)
+bash tests/mobile-backends/ios-e2e.sh python  # iOS 시뮬 embedded CPython e2e —
+                                        # ping/echo(json)/unicode/nested/20x stress
+                                        # (실 libpython+번들 stdlib, 5케이스 자가검증)
 bash tests/mobile-backends/android-e2e.sh # Android 에뮬 *기능* e2e — 실
                                         # ClipboardManager 8케이스 → logcat 회수
                                         # (ANDROID SDK+에뮬+JDK17~21 필요)
@@ -686,6 +691,22 @@ c-shared(Android는 Go c-archive 미지원 → JNI `.so`가 정적/공유 혼합
 (verify.c·JNI 공유, iOS는 Swift 동형). **Node 만 iOS 미지원** — V8 JIT 가
 iOS 코드서명 샌드박스에서 금지(정적 링크해도 런타임 코드 생성 불가).
 Android Node 는 NDK로 가능하나 예제 미배선(후속).
+
+**embedded CPython 은 iOS 동작**(Node 와 결정적 대조 — 인터프리터라 JIT/코드생성
+불요, CPython 3.13 PEP 730 공식 iOS 지원). `src/platform/python.zig` 데스크탑
+런타임을 모바일 백엔드(`examples/ios/backends/python/src/backend.zig`,
+`suji_python_backend_*`)로 포팅 — `@cImport(Python.h)` 를 zig 가 직접 컴파일,
+outbound `suji.invoke/send/on` 은 정적 링크된 `suji_core_*` extern 으로 배선. iOS
+libpython/stdlib 는 BeeWare **Python-Apple-support**(`Python.xcframework` + stdlib)를
+`scripts/stage-python-ios.sh` 로 staging → `examples/ios/python` 변형이 framework 를
+앱에 임베드 + stdlib 을 `<bundle>/python/lib/python3.13`(PYTHONHOME) 으로 번들 +
+main.py 를 `<bundle>/main.py` 로. main.py 가 `suji.handle` 로 등록한 핸들러 이름을
+`suji_python_backend_channels` 로 받아 호스트(Swift)가 각 채널을
+`suji_core_register_handler` 로 등록(데스크탑 채널=핸들러 의미 보존 →
+`suji.invoke("ping")` 동형). **iOS 시뮬레이터 실 e2e 검증**: `bash
+tests/mobile-backends/ios-e2e.sh python`(ping/echo json·unicode·nested·20x, 5/5).
+정직 경계: 검증 천장은 시뮬레이터(실기기 미검증, clipboard 모바일 e2e 와 동일 바);
+**Android Python**(PEP 738)는 NDK 크로스컴파일 + JNI 배선 후속(이 환경 SDK/NDK 부재).
 
 ## 앱별 cache / 사용자 데이터 (Electron `app.getPath('userData')` 동등)
 

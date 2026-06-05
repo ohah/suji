@@ -1112,11 +1112,19 @@ app.on("ready", () => {
       가 exe 옆 `python/` 자립 해석(`exeRelativePythonHome`) → batteries-included.
 - [x] `@suji/python` — `packages/suji-python`(PEP 561 stub-only `suji-stubs`) 스캐폴드
       (handle/invoke/send/on `.pyi`). PyPI 발행만 후속(토큰 대기).
+- [x] **모바일 iOS** — embedded CPython iOS(PEP 730). `examples/ios/backends/python`
+      (python.zig 포팅 + `suji_python_backend_*` C ABI + outbound `suji_core_*` extern),
+      BeeWare Python-Apple-support `Python.xcframework`+stdlib staging
+      (`scripts/stage-python-ios.sh`), `examples/ios/python` 변형(framework 임베드 +
+      stdlib `<bundle>/python` PYTHONHOME + main.py + channels→register). Node iOS
+      불가(V8 JIT)와 대조 — 인터프리터라 가능. **실 시뮬레이터 e2e 5/5**
+      (`tests/mobile-backends/ios-e2e.sh python`: ping/echo json·unicode·nested·20x).
 - 핫 리로드(정직): node/lua/python 임베드 런타임 모두 in-process 핫 리로드 미지원
       (dev 재시작) — python 특이 결함 아님. Py init·finalize 프로세스당 1회라 구조적.
 - 정직 경계(후속): Windows packaging(import-lib hard-link → build gate 에서 python off
-      강제, footgun 방지; PBS Windows 레이아웃 + Windows CI 반복 필요) / iOS(iOS용
-      python-build-standalone + 코드서명·샌드박스 + 모바일 호스트 배선, 모바일 트랙).
+      강제, footgun 방지; PBS Windows 레이아웃 + Windows CI 반복 필요) / iOS 실기기
+      (시뮬레이터 검증 천장 — clipboard 모바일 e2e 와 동일 바) / **Android Python**(PEP
+      738, NDK 크로스컴파일 + JNI — SDK/NDK/에뮬 있는 머신/CI 후속).
 
 **Lua 임베드** (vendored Lua 5.4 + cjson — 마감 완료):
 

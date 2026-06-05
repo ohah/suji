@@ -1,0 +1,41 @@
+name: SujiIOSPython
+
+options:
+  bundleIdPrefix: dev.suji.examples
+  deploymentTarget:
+    iOS: "15.0"
+
+targets:
+  SujiIOSPython:
+    type: application
+    platform: iOS
+    sources:
+      - path: ../_shared
+        excludes: [Info.plist]
+      - path: Backends.swift
+      - path: web
+      # build-lib.sh 가 스테이징: main.py(엔트리) + python/(번들 PYTHONHOME stdlib).
+      - path: Vendor/main.py
+      - path: Vendor/python
+        type: folder # 폴더 레퍼런스 — 구조 보존 복사 → <resourcePath>/python
+    dependencies:
+      # embedded CPython framework — backend.zig 의 undefined Py* 를 해소 + 앱에 임베드.
+      - framework: Vendor/Python.xcframework
+        embed: true
+        codeSign: true
+    settings:
+      base:
+        DEVELOPMENT_TEAM: ${SUJI_IOS_TEAM_ID}
+        CODE_SIGN_STYLE: Automatic
+        INFOPLIST_FILE: $(SRCROOT)/../_shared/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: $(SRCROOT)/../_shared/Suji-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/../../../include
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/Vendor
+        OTHER_LDFLAGS:
+          - -lsuji_core
+          - -lsuji_python_backend
+        LD_RUNPATH_SEARCH_PATHS:
+          - $(inherited)
+          - "@executable_path/Frameworks"
