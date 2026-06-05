@@ -183,6 +183,17 @@ mkdir -p "$install_dir"
 cp "$binary_path" "${install_dir}/${binary_name}"
 chmod 0755 "${install_dir}/${binary_name}"
 
+# embedded runtime 동반 — release 패키지가 suji 옆에 평탄 배치한 libnode/libpython +
+# python stdlib 를 함께 설치(없으면 skip). 이게 있어야 curl-install 한 suji 가
+# node/python 백엔드를 Node/Python 미설치 머신에서도 실행한다(exe 옆 자립 해석:
+# libnode/libpython=@executable_path, python stdlib=exeRelativePythonHome).
+bin_src_dir="$(dirname "$binary_path")"
+for lib in "$bin_src_dir"/libnode* "$bin_src_dir"/libpython*; do
+  [ -e "$lib" ] || continue
+  cp -P "$lib" "${install_dir}/" 2>/dev/null || true
+done
+[ -d "${bin_src_dir}/python" ] && cp -R "${bin_src_dir}/python" "${install_dir}/python" 2>/dev/null || true
+
 echo "Installed ${binary_name} to ${install_dir}/${binary_name}"
 case ":${PATH:-}:" in
   *":${install_dir}:"*) ;;

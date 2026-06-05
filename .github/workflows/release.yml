@@ -17,6 +17,10 @@ permissions:
 
 env:
   NODE_VERSION: '24.14.1'
+  # embedded CPython (python-build-standalone install_only) — released CLI 가 python
+  # 백엔드를 batteries-included 로 지원(libnode 선례 동형). scripts/stage-python.sh.
+  PYTHON_VERSION: '3.13.13'
+  PYTHON_PBS_TAG: '20260602'
   RUST_TOOLCHAIN: '1.93.0'
   GO_VERSION: '1.26.0'
 
@@ -180,6 +184,14 @@ jobs:
           Copy-Item -Force -LiteralPath $importLib -Destination "$nodeDir\libnode.dll.a"
           Copy-Item -Recurse -Force -Path "$includeDir\*" -Destination "$nodeDir\include\"
           Write-Host "libnode staged from MSYS2: $nodeDir"
+      # Windows 는 python3.lib import-lib hard-link 이라 python313.dll 동반 staging 이
+      # 필요한데 addInstallPythonRuntimeStep Windows 분기가 후속(정직 경계) → macOS/Linux
+      # 에서만 staging 해 released CLI 가 python 지원. Windows 릴리스는 python off.
+      - name: Stage Python (python-build-standalone)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/stage-python.sh
+
       - name: Build suji CLI
         shell: bash
         run: |
@@ -203,6 +215,14 @@ jobs:
             [ -e "$f" ] || continue
             cp -P "$f" "$DIR/"
           done
+          # embedded CPython: libpython(@executable_path) + stdlib(PYTHONHOME). released
+          # CLI 는 평탄 배치라 suji 가 exe 옆 python/ 을 sentinel 없이 자립 해석
+          # (packaged_paths.exeRelativePythonHome) → Python 미설치 머신에서도 동작.
+          for f in zig-out/bin/libpython*; do
+            [ -e "$f" ] || continue
+            cp -P "$f" "$DIR/"
+          done
+          [ -d zig-out/bin/python ] && cp -R zig-out/bin/python "$DIR/python" || true
           # macOS: CLI 바이너리 서명. identity secret 있으면 그걸로(hardened
           # runtime+timestamp), 없으면 ad-hoc. 배포 식별자 상세는 RELEASING.md.
           if [ "${{ runner.os }}" = "macOS" ]; then

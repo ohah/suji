@@ -124,11 +124,14 @@ pub fn createBundle(
     };
 
     // 2.5. embedded CPython runtime — exe 옆에 staging(addInstallPythonRuntimeStep)된
-    //   libpython + stdlib 를 Contents/MacOS 로 동반해 end-user 머신에 Python 미설치라도
-    //   동작하게 한다. libpython 은 install_name `@rpath/libpython3.13.dylib` + 메인
-    //   바이너리 rpath `@executable_path` 로 해석되고, stdlib(json 등)은 런타임
-    //   PYTHONHOME=`<exe-dir>/python`(packaged_paths.pythonHome)으로 로드된다. python
-    //   백엔드가 아니면 staging 이 없어 자동 skip(copy-if-exists).
+    //   libpython + stdlib 를 동반해 end-user 머신에 Python 미설치라도 동작하게 한다.
+    //   libpython(단일 Mach-O dylib)은 Contents/MacOS — install_name
+    //   `@rpath/libpython3.13.dylib` + 메인 바이너리 rpath `@executable_path` 로 해석.
+    //   ⚠️ stdlib(수천 .py + lib-dynload .so 트리)은 **Contents/Resources** 에 둔다 —
+    //   Contents/MacOS 안에 두면 메인 바이너리 codesign 이 그 디렉토리를 nested
+    //   subcomponent 로 보고 "bundle format unrecognized" 로 실패한다(실측). Resources
+    //   는 data 로 sealing 돼 안전. 런타임 PYTHONHOME=exeDir()/python(macOS=
+    //   Resources/python, packaged_paths.pythonHome). python 백엔드가 아니면 자동 skip.
     {
         const src_dir = std.fs.path.dirname(exe_path) orelse ".";
         const libpy_src = try std.fmt.allocPrint(allocator, "{s}/libpython3.13.dylib", .{src_dir});
@@ -138,7 +141,7 @@ pub fn createBundle(
             try copyFile(allocator, libpy_src, libpy_dst); // copyFile 이 dst free
             const stdlib_src = try std.fmt.allocPrint(allocator, "{s}/python", .{src_dir});
             defer allocator.free(stdlib_src);
-            const stdlib_dst = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/python", .{app_name});
+            const stdlib_dst = try std.fmt.allocPrint(allocator, "{s}/Contents/Resources/python", .{app_name});
             try copyDir(allocator, stdlib_src, stdlib_dst); // copyDir 이 dst free
         } else |_| {}
     }
@@ -663,11 +666,11 @@ fn generateMacIcon(allocator: std.mem.Allocator, app_name: []const u8, icon_path
 
     const Spec = struct { px: u16, name: []const u8 };
     const sizes = [_]Spec{
-        .{ .px = 16, .name = "icon_16x16" },     .{ .px = 32, .name = "icon_16x16@2x" },
-        .{ .px = 32, .name = "icon_32x32" },     .{ .px = 64, .name = "icon_32x32@2x" },
-        .{ .px = 128, .name = "icon_128x128" },  .{ .px = 256, .name = "icon_128x128@2x" },
-        .{ .px = 256, .name = "icon_256x256" },  .{ .px = 512, .name = "icon_256x256@2x" },
-        .{ .px = 512, .name = "icon_512x512" },  .{ .px = 1024, .name = "icon_512x512@2x" },
+        .{ .px = 16, .name = "icon_16x16" },    .{ .px = 32, .name = "icon_16x16@2x" },
+        .{ .px = 32, .name = "icon_32x32" },    .{ .px = 64, .name = "icon_32x32@2x" },
+        .{ .px = 128, .name = "icon_128x128" }, .{ .px = 256, .name = "icon_128x128@2x" },
+        .{ .px = 256, .name = "icon_256x256" }, .{ .px = 512, .name = "icon_256x256@2x" },
+        .{ .px = 512, .name = "icon_512x512" }, .{ .px = 1024, .name = "icon_512x512@2x" },
     };
     for (sizes) |s| {
         var pxbuf: [8]u8 = undefined;

@@ -524,13 +524,14 @@ pub fn build(b: *std.Build) void {
         else => "lib/libpython3.13.so",
     };
     const python_available = blk: {
+        // ⚠️ Windows 는 1차 미지원(정직 경계). python3.lib 는 import-lib hard-link 라
+        // python_available 을 켜면 python313.dll 동반 staging(addInstallPythonRuntimeStep
+        // Windows 분기 — PBS Windows 레이아웃 Lib/+DLLs/) 없이는 launch 시 crash 한다.
+        // staging 이 있어도 Windows 는 off 로 강제 → 깨진 exe footgun 방지. macOS/Linux
+        // 패키징·실 .app 런 검증 후, Windows CI 반복으로 별도 활성화.
+        if (os_tag == .windows) break :blk false;
         const lib_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ python_path, python_lib_rel }) catch break :blk false;
         if (!absolutePathExists(b, lib_path)) break :blk false;
-        if (os_tag == .windows) {
-            // MSVC import lib 가 있어야 zig clang(-msvc)로 링크 가능(node 의 .dll.a 게이트 동형).
-            const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python3.lib", .{python_path}) catch break :blk false;
-            if (!absolutePathExists(b, import_lib)) break :blk false;
-        }
         break :blk true;
     };
     const python_options = b.addOptions();
@@ -542,6 +543,9 @@ pub fn build(b: *std.Build) void {
     if (python_available) {
         root_module.link_libc = true;
         switch (os_tag) {
+            // ⚠️ UNREACHABLE: python_available 가 Windows 에서 false 로 강제됨(위 gate).
+            // Windows 활성화(addInstallPythonRuntimeStep Windows 분기 + CI 반복) 시
+            // 복구할 MSVC import-lib 링크 레시피 — 현재는 의도적 미실행.
             .windows => {
                 const py_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
                 root_module.addIncludePath(.{ .cwd_relative = py_include });
