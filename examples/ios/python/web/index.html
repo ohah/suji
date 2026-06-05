@@ -1,0 +1,21 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Suji iOS · Python</title>
+<body style="font:15px -apple-system,system-ui;padding:1rem">
+<h2>Suji iOS — embedded CPython</h2>
+<button id="ping">ping</button>
+<button id="echo">echo</button>
+<pre id="out">tap a button…</pre>
+<script>
+  // iOS: __suji__ 는 호스트 WKUserScript 가 documentStart 주입.
+  const out = document.getElementById("out");
+  function show(label, v) { out.textContent = label + " → " + JSON.stringify(v, null, 1); }
+  document.getElementById("ping").onclick = async () => {
+    show("ping", await window.__suji__.invoke("ping"));
+  };
+  document.getElementById("echo").onclick = async () => {
+    show("echo", await window.__suji__.invoke("echo", { value: "from-ios", n: 42 }));
+  };
+</script>
+</body>
+</html>

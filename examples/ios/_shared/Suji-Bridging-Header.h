@@ -23,3 +23,12 @@ extern void suji_sqlite_backend_init(const void *core);
 extern char *suji_sqlite_backend_handle_ipc(const char *request);
 extern void suji_sqlite_backend_free(char *ptr);
 extern void suji_sqlite_backend_destroy(void);
+
+// Python(embedded CPython): init=no-op, start=Py_Initialize+main.py(번들 PYTHONHOME/
+// entry), channels=등록 핸들러 이름 JSON 배열(호스트가 각 채널 register), 나머지 동형.
+extern void suji_python_backend_init(const void *core);
+extern int suji_python_backend_start(const char *home, const char *entry);
+extern char *suji_python_backend_channels(void);
+extern char *suji_python_backend_handle_ipc(const char *request);
+extern void suji_python_backend_free(char *ptr);
+extern void suji_python_backend_destroy(void);
