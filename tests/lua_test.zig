@@ -62,7 +62,7 @@ test "main.zig wires Lua backend load, routes, CEF fallback, and teardown" {
         "@import(\"../platform/lua.zig\")",
         "pub var g_lua_runtime: ?*LuaRuntime = null;",
         "pub fn startLua(",
-        "pub fn registerLuaRoute(",
+        "pub fn registerEmbedRoute(",
         "std.mem.eql(u8, be.lang, \"lua\")",
         "suji.BackendRegistry.registerEmbedRuntime(owned_name",
         "LuaRuntime.freeResponseC",
@@ -103,7 +103,7 @@ test "schema and docs advertise Lua backend shape" {
         .limited(256 * 1024),
     );
     defer std.testing.allocator.free(schema);
-    try std.testing.expect(std.mem.indexOf(u8, schema, "\"enum\": [\"zig\", \"rust\", \"go\", \"node\", \"lua\"]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, schema, "\"enum\": [\"zig\", \"rust\", \"go\", \"node\", \"lua\", \"python\"]") != null);
 
     const plan = try std.Io.Dir.cwd().readFileAlloc(
         std.testing.io,

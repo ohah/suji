@@ -1,0 +1,27 @@
+{
+  "$schema": "../../suji.schema.json",
+  "app": {
+    "name": "Suji Python Backend",
+    "version": "0.1.0"
+  },
+  "windows": [
+    {
+      "name": "main",
+      "title": "Suji Python Backend",
+      "width": 900,
+      "height": 640,
+      "debug": true
+    }
+  ],
+  "backend": {
+    "lang": "python",
+    "entry": "backends/python/main.py"
+  },
+  "frontend": {
+    "dir": "frontend",
+    "dev_url": "http://localhost:12300",
+    "dev_command": "bun run dev",
+    "build_command": "bun run build",
+    "dist_dir": "frontend/dist"
+  }
+}

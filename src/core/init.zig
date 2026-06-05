@@ -10,6 +10,7 @@ pub const BackendLang = enum {
     go,
     node,
     lua,
+    python,
     multi,
 
     pub fn fromString(s: []const u8) ?BackendLang {
@@ -222,6 +223,15 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
             defer lua_dir.close(io);
             try scaffoldLua(lua_dir);
         },
+        .python => {
+            try project_dir.createDir(io, "backends", .default_dir);
+            var backends_dir = try project_dir.openDir(io, "backends", .{});
+            defer backends_dir.close(io);
+            try backends_dir.createDir(io, "python", .default_dir);
+            var python_dir = try backends_dir.openDir(io, "python", .{});
+            defer python_dir.close(io);
+            try scaffoldPython(python_dir);
+        },
         .multi => {
             try project_dir.createDir(io, "backends", .default_dir);
             var backends_dir = try project_dir.openDir(io, "backends", .{});
@@ -332,6 +342,7 @@ fn backendEntry(backend: BackendLang) []const u8 {
     return switch (backend) {
         .node => "backends/node",
         .lua => "backends/lua",
+        .python => "backends/python",
         else => ".",
     };
 }
@@ -344,6 +355,7 @@ fn backendLabel(backend: BackendLang) []const u8 {
         .go => "Go",
         .node => "Node.js",
         .lua => "Lua",
+        .python => "Python",
         .multi => "Zig · Rust · Go (multi)",
     };
 }
@@ -404,6 +416,10 @@ fn scaffoldNode(dir: Dir) !void {
 
 fn scaffoldLua(dir: Dir) !void {
     try writeFileContent(dir, "main.lua", @embedFile("../templates/lua_main.lua"));
+}
+
+fn scaffoldPython(dir: Dir) !void {
+    try writeFileContent(dir, "main.py", @embedFile("../templates/python_main.py"));
 }
 
 // 번들 프론트엔드 템플릿의 상대 파일 목록 (src/templates/frontend/<fw>/).

@@ -16,7 +16,7 @@ npx @suji/cli init my-app \
 
 옵션:
 
-- `--backend=none|zig|rust|go|node|lua|multi`
+- `--backend=none|zig|rust|go|node|lua|python|multi`
 - `--frontend=react|vue|svelte|solid|preact|vanilla|next`
 - `--toolchain=vite|rsbuild|next` (`rspack`은 `rsbuild` 별칭)
 - `--pm=npm|pnpm|bun|vp` (`vz`, `voidzero`, `viteplus`는 VoidZero Vite+ `vp` 별칭)
@@ -27,7 +27,7 @@ npx @suji/cli init my-app \
 - 루트 `package.json` (`dev/build/types` scripts, `@suji/cli` devDependency)
 - 정적 `suji.json` (Zig 코어가 node 없이 직접 파싱하는 단일 설정 출처)
 - `frontend.dev_url=http://localhost:12300`, `dev_command`, `build_command`
-- 백엔드 템플릿 (`zig`, `rust`, `go`, `node`, `lua`, `multi`)
+- 백엔드 템플릿 (`zig`, `rust`, `go`, `node`, `lua`, `python`, `multi`)
 - `frontend/` 템플릿 (Vite, Rsbuild, Next static export)
 - `.github/workflows/suji.yml`
 

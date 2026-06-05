@@ -8,6 +8,10 @@ on:
 
 env:
   NODE_VERSION: '24.14.1'
+  # embedded CPython (python-build-standalone install_only). scripts/stage-python.sh
+  # 가 ~/.suji/python/<ver> 에 staging → build.zig auto-detect → python 백엔드 활성.
+  PYTHON_VERSION: '3.13.13'
+  PYTHON_PBS_TAG: '20260602'
   # specta-macros 2.0.0-rc.25 는 edition2024 + let-chains(1.88) +
   # extract_if(1.87) 사용 → 1.85 로 부족. 로컬 실증치 1.93.0 으로 핀.
   RUST_TOOLCHAIN: '1.93.0'
@@ -178,6 +182,18 @@ jobs:
 
       - name: Build (Lua)
         run: zig build -Dlua
+
+      # Windows 는 import lib(python3.lib) hard-link 이라 staging 시 python313.dll 동반이
+      # 필요한데 addInstallPythonRuntimeStep 가 아직 Windows 미배선(정직 경계) → macOS/Linux
+      # 에서만 staging 해 python_available 을 켠다. Windows 는 python off 로 빌드/테스트.
+      - name: Stage Python (python-build-standalone)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash scripts/stage-python.sh
+
+      - name: Build (Python)
+        if: runner.os != 'Windows'
+        run: zig build
 
       - name: Test
         run: zig build test

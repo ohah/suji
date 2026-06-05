@@ -123,6 +123,26 @@ pub fn createBundle(
         std.debug.print("[suji] warn: vtool min-os 설정 실패({s}) — minos 가 빌드 호스트 버전으로 남는다\n", .{@errorName(err)});
     };
 
+    // 2.5. embedded CPython runtime — exe 옆에 staging(addInstallPythonRuntimeStep)된
+    //   libpython + stdlib 를 Contents/MacOS 로 동반해 end-user 머신에 Python 미설치라도
+    //   동작하게 한다. libpython 은 install_name `@rpath/libpython3.13.dylib` + 메인
+    //   바이너리 rpath `@executable_path` 로 해석되고, stdlib(json 등)은 런타임
+    //   PYTHONHOME=`<exe-dir>/python`(packaged_paths.pythonHome)으로 로드된다. python
+    //   백엔드가 아니면 staging 이 없어 자동 skip(copy-if-exists).
+    {
+        const src_dir = std.fs.path.dirname(exe_path) orelse ".";
+        const libpy_src = try std.fmt.allocPrint(allocator, "{s}/libpython3.13.dylib", .{src_dir});
+        defer allocator.free(libpy_src);
+        if (Dir.cwd().access(runtime.io, libpy_src, .{})) |_| {
+            const libpy_dst = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/libpython3.13.dylib", .{app_name});
+            try copyFile(allocator, libpy_src, libpy_dst); // copyFile 이 dst free
+            const stdlib_src = try std.fmt.allocPrint(allocator, "{s}/python", .{src_dir});
+            defer allocator.free(stdlib_src);
+            const stdlib_dst = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/python", .{app_name});
+            try copyDir(allocator, stdlib_src, stdlib_dst); // copyDir 이 dst free
+        } else |_| {}
+    }
+
     // 3. CEF 프레임워크 복사 (옵션: locale 필터링 + binary strip)
     try copyCefFramework(allocator, app_name, opts);
 
@@ -247,8 +267,7 @@ pub fn buildInfoPlist(
             \\    </dict>
         , .{ scheme, scheme });
     }
-    const url_block: []const u8 = if (url_types.items.len == 0) "" else try std.fmt.allocPrint(
-        allocator,
+    const url_block: []const u8 = if (url_types.items.len == 0) "" else try std.fmt.allocPrint(allocator,
         \\
         \\  <key>CFBundleURLTypes</key>
         \\  <array>{s}
@@ -736,11 +755,11 @@ pub fn createDmg(allocator: std.mem.Allocator, name: []const u8, version: []cons
     // 기존 산출물 있으면 hdiutil 이 거부 → 선제 제거.
     runCmd(allocator, &.{ "rm", "-f", dmg }) catch {};
     try runCmd(allocator, &.{
-        "hdiutil",      "create",
-        "-volname",     name,
-        "-srcfolder",   app,
-        "-ov",          "-format",
-        "UDZO",         dmg,
+        "hdiutil",    "create",
+        "-volname",   name,
+        "-srcfolder", app,
+        "-ov",        "-format",
+        "UDZO",       dmg,
     });
     std.debug.print("[suji] dmg created: {s}\n", .{dmg});
     return dmg;

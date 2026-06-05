@@ -511,6 +511,69 @@ pub fn build(b: *std.Build) void {
         root_module.linkLibrary(lua_lib);
     }
 
+    // Embedded Python — python-build-standalone(prebuilt portable CPython)를
+    // ~/.suji/python/<ver> 에 staging 하고 weak-link + auto-detect(libnode 패턴).
+    // Lua 처럼 vendor 정적 컴파일이 아니라(CPython 은 거대) staged dynamic lib.
+    // ⚠️ Python 임베드 API 는 순수 C ABI 라 node 와 달리 bridge.cc/mingw/외부 g++
+    // 불필요 — src/platform/python.zig 의 @cImport(Python.h)를 zig 가 직접 컴파일.
+    const python_minor = "3.13";
+    const python_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/python/3.13.13", .{home}) catch @panic("OOM");
+    const python_lib_rel: []const u8 = switch (os_tag) {
+        .macos => "lib/libpython3.13.dylib",
+        .windows => "python313.dll",
+        else => "lib/libpython3.13.so",
+    };
+    const python_available = blk: {
+        const lib_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ python_path, python_lib_rel }) catch break :blk false;
+        if (!absolutePathExists(b, lib_path)) break :blk false;
+        if (os_tag == .windows) {
+            // MSVC import lib 가 있어야 zig clang(-msvc)로 링크 가능(node 의 .dll.a 게이트 동형).
+            const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python3.lib", .{python_path}) catch break :blk false;
+            if (!absolutePathExists(b, import_lib)) break :blk false;
+        }
+        break :blk true;
+    };
+    const python_options = b.addOptions();
+    python_options.addOption(bool, "python_enabled", python_available);
+    // PYTHONHOME 의 dev 폴백(staging). packaged 는 런타임에 exe-dir 로 재해석.
+    python_options.addOption([]const u8, "python_home", python_path);
+    python_options.addOption([]const u8, "python_minor", python_minor);
+    root_module.addImport("python_config", python_options.createModule());
+    if (python_available) {
+        root_module.link_libc = true;
+        switch (os_tag) {
+            .windows => {
+                const py_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
+                root_module.addIncludePath(.{ .cwd_relative = py_include });
+                const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python3.lib", .{python_path}) catch @panic("OOM");
+                root_module.addObjectFile(.{ .cwd_relative = import_lib });
+            },
+            else => {
+                const py_include = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
+                root_module.addIncludePath(.{ .cwd_relative = py_include });
+                const py_libdir = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
+                root_module.addLibraryPath(.{ .cwd_relative = py_libdir });
+                // weak-link: python staging 머신에서 빌드해도 비-python 앱은
+                // libpython 부재 시 graceful(심볼 null, start 미호출이면 무영향).
+                root_module.linkSystemLibrary("python3.13", .{ .weak = true });
+                switch (os_tag) {
+                    // @executable_path/$ORIGIN: packaged 시 addInstallPythonRuntimeStep 이
+                    // libpython 을 exe 옆에 둔다. py_libdir: dev(zig-out/bin/suji dev) 가
+                    // staging libpython 을 바로 찾도록 하는 절대경로 폴백.
+                    .macos => {
+                        root_module.addRPathSpecial("@executable_path");
+                        root_module.addRPathSpecial(py_libdir);
+                    },
+                    .linux => {
+                        root_module.addRPathSpecial("$ORIGIN");
+                        root_module.addRPathSpecial(py_libdir);
+                    },
+                    else => {},
+                }
+            },
+        }
+    }
+
     const exe = b.addExecutable(.{
         .name = "suji",
         .root_module = root_module,
@@ -569,6 +632,12 @@ pub fn build(b: *std.Build) void {
             prev_step = copy_node;
         }
 
+        if (python_available) {
+            const copy_python = addInstallPythonRuntimeStep(b, python_path, python_minor, "dylib", bin_dir);
+            copy_python.dependOn(prev_step);
+            prev_step = copy_python;
+        }
+
         const codesign = b.addSystemCommand(&.{
             "codesign", "--force", "--sign", "-", "--deep",
         });
@@ -587,6 +656,12 @@ pub fn build(b: *std.Build) void {
             const copy_node = addInstallNodeRuntimeStep(b, node_path, node_lib_name, b.getInstallPath(.bin, ""));
             copy_node.dependOn(copy_cef_runtime);
             b.getInstallStep().dependOn(copy_node);
+        }
+
+        if (python_available and os_tag == .linux) {
+            const copy_python = addInstallPythonRuntimeStep(b, python_path, python_minor, "so", b.getInstallPath(.bin, ""));
+            copy_python.dependOn(copy_cef_runtime);
+            b.getInstallStep().dependOn(copy_python);
         }
 
         // Windows: libnode.dll + mingw runtime + libnode deps 를 zig-out/bin/
@@ -808,6 +883,15 @@ pub fn build(b: *std.Build) void {
     });
     const release_workflow_test = b.addTest(.{ .root_module = release_workflow_test_mod });
     dependOnTestWithProjectCwd(b, test_step, release_workflow_test);
+
+    // Embedded Python 소스 계약 가드 (build.zig/staging/CI/예제 배선 — 파일 슬럽).
+    const python_contract_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/python_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const python_contract_test = b.addTest(.{ .root_module = python_contract_test_mod });
+    dependOnTestWithProjectCwd(b, test_step, python_contract_test);
 
     // init tests (suji init — BackendLang/FrontendTemplate 파싱 + create-vite 매핑)
     const init_module = b.createModule(.{
@@ -1257,6 +1341,31 @@ pub fn build(b: *std.Build) void {
     const lua_runtime_test = b.addTest(.{ .root_module = lua_runtime_test_mod });
     dependOnTestWithProjectCwd(b, test_step, lua_runtime_test);
 
+    // src/platform/python.zig 인라인 test — staged libpython(python_available)일 때만.
+    // 실제 Py_Initialize + main.py 로드 + invoke 검증(런타임 경계). vendored Lua 와
+    // 달리 staging 의존이라 부재 시 graceful skip(CI 는 python-build-standalone download).
+    if (python_available) {
+        const python_runtime_test_mod = b.createModule(.{
+            .root_source_file = b.path("src/platform/python.zig"),
+            .target = target,
+            .optimize = optimize,
+            .link_libc = true,
+        });
+        python_runtime_test_mod.addImport("python_config", python_options.createModule());
+        python_runtime_test_mod.addImport("runtime", runtime_module);
+        const py_inc = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
+        python_runtime_test_mod.addIncludePath(.{ .cwd_relative = py_inc });
+        const py_lib = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
+        python_runtime_test_mod.addLibraryPath(.{ .cwd_relative = py_lib });
+        // 테스트는 python_available 게이트 안에서만 빌드되므로 libpython 존재가
+        // 보장된다 → hard-link(정직한 의존). rpath 는 cache 디렉토리에서 실행되는
+        // 테스트가 staging libpython 을 찾도록 절대경로.
+        python_runtime_test_mod.linkSystemLibrary("python3.13", .{});
+        python_runtime_test_mod.addRPathSpecial(py_lib);
+        const python_runtime_test = b.addTest(.{ .root_module = python_runtime_test_mod });
+        dependOnTestWithProjectCwd(b, test_step, python_runtime_test);
+    }
+
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)
     const cef_ipc_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/cef_ipc_test.zig"),
@@ -1351,6 +1460,47 @@ pub fn build(b: *std.Build) void {
 /// directory for subprocess startup paths. Keep dev `zig build` output
 /// self-contained enough for E2E without requiring callers to mirror CEF's
 /// distribution layout manually.
+// Embedded CPython runtime 를 zig-out/bin 옆으로 staging — packaging(.app/AppImage)
+// 이 이 bin 디렉토리를 통째로 복사하므로, 여기 두면 end-user 머신에 Python 미설치라도
+// 동작한다(weak-link + bundled portable CPython). libpython 은 install_name 이
+// `@rpath/libpython3.13.dylib` 이고 suji 바이너리 rpath 에 `@executable_path` 가 있어
+// exe 옆 복사본으로 해석된다. stdlib(json 등)는 `<exe>/python/lib/pythonX.Y` 로 두고
+// 런타임에 PYTHONHOME=`<exe>/python`(backend_lifecycle.startPython)으로 가리킨다.
+// dev 는 이 복사본을 쓰지 않고 staging(python_config.python_home)을 직접 참조하므로
+// 큰 stdlib 복사는 `dest` 가 이미 있으면 skip(증분 빌드 비용 0).
+fn addInstallPythonRuntimeStep(b: *std.Build, python_path: []const u8, python_minor: []const u8, ext: []const u8, bin_dir: []const u8) *std.Build.Step {
+    const copy = b.addSystemCommand(&.{
+        "sh",
+        "-c",
+        \\set -eu
+        \\py_path="$1"
+        \\minor="$2"
+        \\ext="$3"
+        \\bin_dir="$4"
+        \\mkdir -p "$bin_dir"
+        \\libname="libpython${minor}.${ext}"
+        \\cp -f "$py_path/lib/$libname" "$bin_dir/$libname"
+        \\# Linux: 실파일 libpython3.13.so.1.0 + soname 심링크가 분리된 경우도 복사.
+        \\for f in "$py_path"/lib/libpython${minor}.so.*; do
+        \\  [ -e "$f" ] || continue
+        \\  cp -f "$f" "$bin_dir/$(basename "$f")"
+        \\done
+        \\# stdlib → PYTHONHOME 레이아웃(<bin>/python/lib/pythonX.Y). 수십 MB 라 1회만.
+        \\dest="$bin_dir/python/lib/python${minor}"
+        \\if [ ! -d "$dest" ]; then
+        \\  mkdir -p "$bin_dir/python/lib"
+        \\  cp -R "$py_path/lib/python${minor}" "$dest"
+        \\fi
+        ,
+        "install-python-runtime",
+        python_path,
+        python_minor,
+        ext,
+        bin_dir,
+    });
+    return &copy.step;
+}
+
 fn addInstallNodeRuntimeStep(b: *std.Build, node_path: []const u8, node_lib_name: []const u8, bin_dir: []const u8) *std.Build.Step {
     const copy = b.addSystemCommand(&.{
         "sh",
