@@ -1,0 +1,58 @@
+plugins {
+    id "com.android.application"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace "dev.suji.examples.android"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "dev.suji.examples.android.python"
+        minSdk 26
+        targetSdk 35
+        versionCode 1
+        versionName "0.1.0"
+        ndk { abiFilters "arm64-v8a" } // CPython aarch64 크로스빌드만 staging
+        externalNativeBuild { cmake { arguments "-DANDROID_STL=c++_shared" } }
+    }
+
+    externalNativeBuild { cmake { path "../cpp/CMakeLists.txt" } }
+
+    sourceSets {
+        main {
+            java.srcDirs = ["../../_shared/java"]
+            manifest.srcFile "../../_shared/AndroidManifest.xml"
+            // web/ = 데모+e2e html, assets/ = python-stdlib.zip + main.py(build-lib.sh).
+            assets.srcDirs = ["../web", "../assets"]
+            // 코어 .so + libpython.so 는 CMake SHARED IMPORTED 라 AGP 가 자동
+            // 패키징(lib/<abi>/). Python 백엔드는 .a 정적 링크.
+        }
+    }
+
+    // libpython.so 는 압축 해제 상태로 패키징(System.load + lib-dynload dlopen 호환).
+    packagingOptions { jniLibs { useLegacyPackaging true } }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = "17" }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig System.getenv("ANDROID_KEYSTORE_PATH") ? signingConfigs.release : null
+        }
+    }
+}

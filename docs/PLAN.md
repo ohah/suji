@@ -1119,12 +1119,21 @@ app.on("ready", () => {
       stdlib `<bundle>/python` PYTHONHOME + main.py + channels→register). Node iOS
       불가(V8 JIT)와 대조 — 인터프리터라 가능. **실 시뮬레이터 e2e 5/5**
       (`tests/mobile-backends/ios-e2e.sh python`: ping/echo json·unicode·nested·20x).
+- [x] **모바일 Android** — embedded CPython Android(PEP 738). prebuilt 부재라
+      `scripts/stage-python-android.sh`(official `Android/android.py` NDK 소스
+      크로스빌드 → libpython3.13.so + stdlib). zig translate-c 가 NDK bionic 못 풀어
+      백엔드는 C(`backend_android.c`, NDK clang; iOS 는 zig 유지). `examples/android/
+      python` 변형(JNI `backends.c` start+channels→register, libpython/core jniLibs,
+      stdlib zip+main.py 에셋→filesDir 추출, 공유 MainActivity `maybeStartPython`
+      게이트). **실 에뮬레이터 e2e 5/5**(`android-e2e.sh python` arm64-v8a:
+      ping/echo json·unicode·nested·20x).
 - 핫 리로드(정직): node/lua/python 임베드 런타임 모두 in-process 핫 리로드 미지원
       (dev 재시작) — python 특이 결함 아님. Py init·finalize 프로세스당 1회라 구조적.
 - 정직 경계(후속): Windows packaging(import-lib hard-link → build gate 에서 python off
-      강제, footgun 방지; PBS Windows 레이아웃 + Windows CI 반복 필요) / iOS 실기기
-      (시뮬레이터 검증 천장 — clipboard 모바일 e2e 와 동일 바) / **Android Python**(PEP
-      738, NDK 크로스컴파일 + JNI — SDK/NDK/에뮬 있는 머신/CI 후속).
+      강제, footgun 방지; PBS Windows 레이아웃 + Windows CI 반복 필요) / iOS·Android
+      실기기(시뮬레이터/에뮬레이터 검증 천장 — clipboard 모바일 e2e 와 동일 바) /
+      Android gradle apk 빌드는 AGP 호환 JDK(17~21) 필요 / lib-dynload filesDir dlopen
+      은 최신 Android W^X 제약(json 등 pure-python 폴백이라 무영향).
 
 **Lua 임베드** (vendored Lua 5.4 + cjson — 마감 완료):
 

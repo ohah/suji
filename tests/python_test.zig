@@ -114,3 +114,56 @@ test "iOS Python 백엔드 배선 계약" {
     try expectContains(proj, "Python.xcframework");
     try expectContains(proj, "embed: true");
 }
+
+// 모바일(Android) Python 백엔드 소스 계약 — 실 기능 검증은 tests/mobile-backends/
+// android-e2e.sh python(에뮬레이터, NDK/SDK/JDK 필요라 CI 외 로컬/수동). iOS 와
+// 달리 prebuilt 3.13 Android 가 없어 NDK 소스 크로스빌드(stage-python-android.sh)
+// + zig translate-c 가 NDK bionic 을 못 풀어 백엔드는 C(backend_android.c, NDK clang).
+test "Android Python 백엔드 배선 계약" {
+    const a = std.testing.allocator;
+
+    // staging: CPython NDK 크로스빌드(소스).
+    const stage = try slurp(a, "scripts/stage-python-android.sh");
+    defer a.free(stage);
+    try expectContains(stage, "android.py");
+    try expectContains(stage, "make-host");
+
+    // backend_android.c — iOS backend.zig 동일 로직의 C 포팅(NDK clang, translate-c 회피).
+    const backend = try slurp(a, "examples/ios/backends/python/src/backend_android.c");
+    defer a.free(backend);
+    try expectContains(backend, "suji_python_backend_start");
+    try expectContains(backend, "suji_python_backend_channels");
+    try expectContains(backend, "suji_python_backend_handle_ipc");
+    try expectContains(backend, "suji_core_invoke"); // outbound
+    try expectContains(backend, "PyImport_AppendInittab");
+
+    // 변형 build-lib: NDK clang 컴파일 + libpython.so + stdlib zip.
+    const bl = try slurp(a, "examples/android/python/build-lib.sh");
+    defer a.free(bl);
+    try expectContains(bl, "backend_android.c");
+    try expectContains(bl, "libpython3.13.so");
+    try expectContains(bl, "python-stdlib.zip");
+
+    // JNI 등록: start + channels 파싱 → suji_reg_backend.
+    const jni = try slurp(a, "examples/android/python/cpp/backends.c");
+    defer a.free(jni);
+    try expectContains(jni, "nativeRegisterPythonBackend");
+    try expectContains(jni, "suji_python_backend_start");
+    try expectContains(jni, "suji_reg_backend");
+
+    // CMake: libpython SHARED IMPORTED. app: assets ../assets.
+    const cmake = try slurp(a, "examples/android/python/cpp/CMakeLists.txt");
+    defer a.free(cmake);
+    try expectContains(cmake, "libpython");
+    const gradle = try slurp(a, "examples/android/python/app/build.gradle");
+    defer a.free(gradle);
+    try expectContains(gradle, "../assets");
+
+    // 공유 호스트 훅(게이트): MainActivity 추출 + SujiCore native 선언.
+    const main = try slurp(a, "examples/android/_shared/java/dev/suji/examples/android/MainActivity.kt");
+    defer a.free(main);
+    try expectContains(main, "maybeStartPython");
+    const core = try slurp(a, "examples/android/_shared/java/dev/suji/examples/android/SujiCore.kt");
+    defer a.free(core);
+    try expectContains(core, "nativeRegisterPythonBackend");
+}

@@ -19,6 +19,12 @@ object SujiCore {
     /// 정적 링크된 Rust(.a)/Go(.so) 백엔드를 채널에 등록 (iOS 와 동형).
     external fun nativeRegisterStaticBackends()
 
+    /// embedded CPython 백엔드 등록 (python 변형만). filesDir 하위에 추출된
+    /// stdlib(`<filesDir>/python`)+main.py 로 Py_Initialize 후 등록 핸들러를
+    /// suji_core 에 배선. python 변형 backends.c 만 구현 — MainActivity 가 python
+    /// 에셋이 있을 때만 호출하므로(JNI lazy bind) 다른 변형엔 영향 없음.
+    external fun nativeRegisterPythonBackend(filesDir: String): Int
+
     /// 네이티브 이벤트 수신 지점 (suji_jni.c event_trampoline 가 호출).
     /// 활성 호스트로 위임 — UI 스레드 전환은 호스트가 책임.
     @JvmStatic

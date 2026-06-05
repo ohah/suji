@@ -81,6 +81,11 @@ class MainActivity : Activity() {
         // 정적 링크 Rust/Go 백엔드 (greet/add=Rust, go:ping/go:upper=Go)
         SujiCore.nativeRegisterStaticBackends()
 
+        // embedded CPython (python 변형): PYTHONHOME 은 실 FS 경로가 필요한데
+        // Android 에셋은 FS 가 아니므로 번들 stdlib(zip)+main.py 를 filesDir 로 1회
+        // 추출 후 네이티브 등록. python 에셋 없는 다른 변형은 graceful skip.
+        maybeStartPython()
+
         webView = WebView(this)
         webView.settings.javaScriptEnabled = true
         webView.addJavascriptInterface(Bridge(), "SujiNative")
@@ -92,6 +97,45 @@ class MainActivity : Activity() {
         webView.loadUrl("file:///android_asset/$page.html")
 
         ui.postDelayed(tick, 2000)
+    }
+
+    // python 변형: 번들 stdlib(zip)+main.py 를 filesDir 로 1회 추출 후 네이티브 등록.
+    // 마커(assets/main.py) 없으면 graceful skip → 다른 변형은 nativeRegisterPython
+    // Backend 를 호출조차 안 함(JNI lazy bind, 미구현 변형 무영향).
+    private fun maybeStartPython() {
+        val hasPython = runCatching { assets.open("main.py").close(); true }.getOrDefault(false)
+        if (!hasPython) return
+
+        val pyHome = java.io.File(filesDir, "python")
+        val marker = java.io.File(pyHome, ".staged-3.13.13")
+        if (!marker.exists()) {
+            pyHome.deleteRecursively()
+            pyHome.mkdirs()
+            unzipAsset("python-stdlib.zip", pyHome) // → python/lib/python3.13/...
+            marker.createNewFile()
+        }
+        copyAsset("main.py", java.io.File(filesDir, "main.py")) // 작아서 매번 갱신
+        val rc = SujiCore.nativeRegisterPythonBackend(filesDir.path)
+        if (rc != 0) Log.w("suji", "python backend register failed rc=$rc")
+    }
+
+    private fun unzipAsset(name: String, dest: java.io.File) {
+        assets.open(name).use { ins ->
+            java.util.zip.ZipInputStream(ins).use { zis ->
+                var e = zis.nextEntry
+                while (e != null) {
+                    val out = java.io.File(dest, e.name)
+                    if (e.isDirectory) out.mkdirs()
+                    else { out.parentFile?.mkdirs(); out.outputStream().use { zis.copyTo(it) } }
+                    e = zis.nextEntry
+                }
+            }
+        }
+    }
+
+    private fun copyAsset(name: String, dest: java.io.File) {
+        dest.parentFile?.mkdirs()
+        assets.open(name).use { ins -> dest.outputStream().use { ins.copyTo(it) } }
     }
 
     override fun onDestroy() {

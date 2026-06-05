@@ -62,3 +62,4 @@ test-results/
 # (그 패턴은 Claude 스크래치 dir 용 — docs 사이트 콘텐츠와 무관).
 !website/src/content/docs/reference/
 !website/src/content/docs/reference/roadmap.mdx
+examples/android/*/assets/

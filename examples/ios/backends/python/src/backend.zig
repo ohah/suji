@@ -16,6 +16,9 @@
 //! 전달에서 깨지므로 non-variadic(PyTuple_GetItem/AsUTF8/CallOneArg) 사용,
 //! pyatomic.h 는 `_Py_USE_GCC_BUILTIN_ATOMICS` 로 GCC builtin 분기 강제.
 
+// iOS: zig @cImport(Python.h) 가 iOS SDK 헤더를 깔끔히 번역한다. Android NDK bionic
+// 헤더는 배열 nullability/__overloadable 을 zig translate-c 가 못 풀어, android 는
+// 같은 로직을 C(backend_android.c, NDK clang 컴파일 — translate-c 미경유)로 둔다.
 const std = @import("std");
 
 const c = @cImport({
