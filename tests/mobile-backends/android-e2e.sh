@@ -73,7 +73,10 @@ echo "=== assembleDebug ==="
 ( cd "$dir" && ./gradlew --console=plain :app:assembleDebug >/dev/null )
 apk="$(find "$dir/app/build/outputs/apk/debug" -name '*.apk' | head -1)"
 [ -n "$apk" ] || { echo "FAIL: apk 산출물 없음"; exit 1; }
-unzip -l "$apk" | grep -q 'assets/e2e.html' || { echo "FAIL: e2e.html 미번들"; exit 1; }
+# ⚠️ grep -q 는 첫 매치에서 즉시 종료 → 큰 apk(python stdlib 동봉 등)에서 unzip 이
+# SIGPIPE(141)로 죽고 set -o pipefail 이 매치 성공에도 파이프라인을 실패시킨다.
+# grep(no -q)로 전체를 소비해 SIGPIPE 회피.
+unzip -l "$apk" | grep 'assets/e2e.html' >/dev/null || { echo "FAIL: e2e.html 미번들"; exit 1; }
 
 echo "=== install + e2e launch ($PKG) ==="
 "$ADB" -s "$SERIAL" install -r "$apk" >/dev/null
