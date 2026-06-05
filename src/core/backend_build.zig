@@ -120,6 +120,10 @@ pub fn buildByLang(allocator: std.mem.Allocator, lang: []const u8, entry: []cons
         // Lua 백엔드: 빌드 단계 없음. startLuaBackend가 main.lua 존재 여부와
         // LuaJIT 활성화 여부를 런타임에서 검증한다.
         return;
+    } else if (std.mem.eql(u8, lang, "python")) {
+        // Python 백엔드: 빌드 단계 없음(인터프리터). startPython 이 main.py 존재와
+        // libpython staging 여부를 런타임에서 검증. requirements.txt pip 는 후속.
+        return;
     } else if (std.mem.eql(u8, lang, "zig")) {
         // Zig 백엔드는 자체 build.zig가 있어야 함
         // --prefix로 빌드 결과물을 entry 디렉토리에 설치

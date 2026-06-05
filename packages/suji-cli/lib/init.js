@@ -12,7 +12,7 @@ const die = (message) => {
   process.exit(1);
 };
 
-export const BACKENDS = new Set(["none", "zig", "rust", "go", "node", "lua", "multi"]);
+export const BACKENDS = new Set(["none", "zig", "rust", "go", "node", "lua", "python", "multi"]);
 export const FRAMEWORKS = new Set(["react", "vue", "svelte", "solid", "preact", "vanilla", "next"]);
 export const TOOLCHAINS = new Set(["vite", "rsbuild", "next"]);
 export const PMS = new Set(["npm", "pnpm", "bun", "vp"]);
@@ -29,7 +29,7 @@ export const COMPOSITE_TEMPLATES = new Set([
 ]);
 
 export const USAGE =
-  "Usage: npx @suji/cli init <name> [--backend=none|zig|rust|go|node|lua|multi] [--frontend=react|vue|svelte|solid|preact|vanilla|next] [--toolchain=vite|rsbuild|next] [--pm=npm|pnpm|bun|vp] [--install]";
+  "Usage: npx @suji/cli init <name> [--backend=none|zig|rust|go|node|lua|python|multi] [--frontend=react|vue|svelte|solid|preact|vanilla|next] [--toolchain=vite|rsbuild|next] [--pm=npm|pnpm|bun|vp] [--install]";
 
 export function normalizeToolchain(value) {
   if (value === "rspack") return "rsbuild";
@@ -213,7 +213,7 @@ export async function promptMissing(opts) {
 
     opts.name ??= await ask("Project name", null, "suji-app");
     opts.backend ??= await ask("Backend", [...BACKENDS], "zig");
-    if (!BACKENDS.has(opts.backend)) die("backend 는 none|zig|rust|go|node|lua|multi 중 하나");
+    if (!BACKENDS.has(opts.backend)) die("backend 는 none|zig|rust|go|node|lua|python|multi 중 하나");
 
     opts.frontend ??= await ask("Frontend", [...FRAMEWORKS], "react");
     if (!FRAMEWORKS.has(opts.frontend) && !COMPOSITE_TEMPLATES.has(opts.frontend)) {
@@ -247,6 +247,7 @@ export function backendLabel(backend) {
       go: "Go",
       node: "Node.js",
       lua: "Lua",
+      python: "Python",
       multi: "Zig · Rust · Go (multi)",
     }[backend] ?? backend
   );
@@ -310,7 +311,13 @@ export function sujiJson(name, backend, template, pm) {
     }, null, 2)}\n`;
   }
 
-  const entry = backend === "node" ? "backends/node" : backend === "lua" ? "backends/lua" : ".";
+  const entry = backend === "node"
+    ? "backends/node"
+    : backend === "lua"
+      ? "backends/lua"
+      : backend === "python"
+        ? "backends/python"
+        : ".";
   return `${JSON.stringify({
     ...base,
     backend: { lang: backend, entry },
@@ -334,6 +341,7 @@ export function scaffoldBackend(projectName, backend, name) {
     W(join(dir, "main.js"), tpl("node_main.js"));
   };
   const scaffoldLua = (dir) => W(join(dir, "main.lua"), tpl("lua_main.lua"));
+  const scaffoldPython = (dir) => W(join(dir, "main.py"), tpl("python_main.py"));
 
   if (backend === "none") return;
   if (backend === "zig") return scaffoldZig("");
@@ -341,6 +349,7 @@ export function scaffoldBackend(projectName, backend, name) {
   if (backend === "go") return scaffoldGo("");
   if (backend === "node") return scaffoldNode("backends/node");
   if (backend === "lua") return scaffoldLua("backends/lua");
+  if (backend === "python") return scaffoldPython("backends/python");
 
   scaffoldZig("backends/zig");
   scaffoldRust("backends/rust");
@@ -366,7 +375,7 @@ export function installFrontend(projectName, pm) {
 export async function runInitCli(argv = process.argv.slice(2)) {
   const opts = await promptMissing(parseArgs(argv));
   if (!opts.name) die("프로젝트 이름 필요: npx @suji/cli init <name>");
-  if (!BACKENDS.has(opts.backend)) die("backend 는 none|zig|rust|go|node|lua|multi 중 하나");
+  if (!BACKENDS.has(opts.backend)) die("backend 는 none|zig|rust|go|node|lua|python|multi 중 하나");
   opts.pm = normalizePackageManager(opts.pm);
   if (!PMS.has(opts.pm)) die("pm 은 npm|pnpm|bun|vp 중 하나");
   if (opts.toolchain) opts.toolchain = normalizeToolchain(opts.toolchain);

@@ -20,7 +20,8 @@
     { "name": "rust", "lang": "rust", "entry": "backends/rust" },
     { "name": "go", "lang": "go", "entry": "backends/go" },
     { "name": "node", "lang": "node", "entry": "backends/node" },
-    { "name": "lua", "lang": "lua", "entry": "backends/lua" }
+    { "name": "lua", "lang": "lua", "entry": "backends/lua" },
+    { "name": "python", "lang": "python", "entry": "backends/python" }
   ],
   "frontend": {
     "dir": "frontend",

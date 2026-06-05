@@ -8,8 +8,8 @@ test "BackendLang.fromString: 유효 토큰 + unknown→null" {
     try std.testing.expectEqual(init.BackendLang.go, init.BackendLang.fromString("go").?);
     try std.testing.expectEqual(init.BackendLang.node, init.BackendLang.fromString("node").?);
     try std.testing.expectEqual(init.BackendLang.lua, init.BackendLang.fromString("lua").?);
+    try std.testing.expectEqual(init.BackendLang.python, init.BackendLang.fromString("python").?);
     try std.testing.expectEqual(init.BackendLang.multi, init.BackendLang.fromString("multi").?);
-    try std.testing.expect(init.BackendLang.fromString("python") == null);
     try std.testing.expect(init.BackendLang.fromString("") == null);
     try std.testing.expect(init.BackendLang.fromString("Rust") == null); // case-sensitive
 }
@@ -99,7 +99,7 @@ test "번들 프론트엔드 템플릿: 계약 + suji-cli 미러 drift 가드" {
     }
 
     // 루트 백엔드 템플릿 미러도 동일 가드 (init.zig @embedFile 무가드였음).
-    inline for (.{ "gitignore", "zig_app.zig", "rust_cargo.toml", "rust_lib.rs", "go_main.go", "node_package.json", "node_main.js", "lua_main.lua", ".github/workflows/suji.yml" }) |rf| {
+    inline for (.{ "gitignore", "zig_app.zig", "rust_cargo.toml", "rust_lib.rs", "go_main.go", "node_package.json", "node_main.js", "lua_main.lua", "python_main.py", ".github/workflows/suji.yml" }) |rf| {
         const s = try slurp(a, "src/templates/" ++ rf);
         defer a.free(s);
         const m = try slurp(a, "packages/suji-cli/templates/" ++ rf);

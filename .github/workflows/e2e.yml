@@ -8,6 +8,10 @@ on:
 
 env:
   NODE_VERSION: '24.14.1'
+  # embedded CPython (python-build-standalone install_only) — run-python-e2e.sh
+  # 가 scripts/stage-python.sh 로 ~/.suji/python/<ver> 에 staging.
+  PYTHON_VERSION: '3.13.13'
+  PYTHON_PBS_TAG: '20260602'
   # ci.yml 과 동일 — specta-macros rc.25(edition2024+let-chains+
   # extract_if) 로컬 실증치 1.93.0.
   RUST_TOOLCHAIN: '1.93.0'
@@ -121,6 +125,15 @@ jobs:
         env:
           SUJI_LOG: ${{ runner.temp }}/suji-e2e-lua.log
         run: bash tests/e2e/run-lua-e2e.sh
+
+      - name: Install python-backend frontend dependencies
+        working-directory: examples/python-backend/frontend
+        run: bun install
+
+      - name: E2E — Python backend invoke (embedded CPython 3.13 + GIL)
+        env:
+          SUJI_LOG: ${{ runner.temp }}/suji-e2e-python.log
+        run: bash tests/e2e/run-python-e2e.sh
 
       - name: E2E — system integration
         env:

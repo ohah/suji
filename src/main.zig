@@ -347,7 +347,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
     if (config.isMultiBackend()) {
         if (config.backends) |bes| {
             for (bes) |be| {
-                if (std.mem.eql(u8, be.lang, "node") or std.mem.eql(u8, be.lang, "lua")) {
+                if (std.mem.eql(u8, be.lang, "node") or std.mem.eql(u8, be.lang, "lua") or std.mem.eql(u8, be.lang, "python")) {
                     try backends_list.append(allocator, .{
                         .name = be.name,
                         .lang = be.lang,
@@ -376,7 +376,7 @@ fn runBuild(allocator: std.mem.Allocator, args: []const [:0]const u8) !void {
             }
         }
     } else if (config.backend) |be| {
-        if (std.mem.eql(u8, be.lang, "node") or std.mem.eql(u8, be.lang, "lua")) {
+        if (std.mem.eql(u8, be.lang, "node") or std.mem.eql(u8, be.lang, "lua") or std.mem.eql(u8, be.lang, "python")) {
             try backends_list.append(allocator, .{
                 .name = be.lang,
                 .lang = be.lang,
@@ -1098,6 +1098,11 @@ fn openWindow(
         rt.shutdown();
         allocator.destroy(rt);
         backend_lifecycle.g_lua_runtime = null;
+    }
+    if (backend_lifecycle.g_python_runtime) |rt| {
+        rt.shutdown();
+        allocator.destroy(rt);
+        backend_lifecycle.g_python_runtime = null;
     }
 
     // cef.shutdown() 전에 정리: user close → OnBeforeClose → wm.markClosedExternal로

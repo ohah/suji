@@ -19,13 +19,20 @@ const node_enabled = node_mod.node_enabled;
 const lua_mod = @import("../platform/lua.zig");
 const LuaRuntime = lua_mod.LuaRuntime;
 const lua_enabled = lua_mod.lua_enabled;
+const python_mod = @import("../platform/python.zig");
+const PythonRuntime = python_mod.PythonRuntime;
+const python_enabled = python_mod.python_enabled;
 
 /// Embedded 런타임 글로벌 참조 (dev 모드에서 정리용)
 pub var g_node_runtime: ?*NodeRuntime = null;
 pub var g_lua_runtime: ?*LuaRuntime = null;
+pub var g_python_runtime: ?*PythonRuntime = null;
 
 pub fn embeddedSourceDir(lang: []const u8, entry: []const u8) []const u8 {
     if (std.mem.eql(u8, lang, "lua") and std.mem.endsWith(u8, entry, ".lua")) {
+        return std.fs.path.dirname(entry) orelse ".";
+    }
+    if (std.mem.eql(u8, lang, "python") and std.mem.endsWith(u8, entry, ".py")) {
         return std.fs.path.dirname(entry) orelse ".";
     }
     return entry;
@@ -55,6 +62,14 @@ pub fn loadFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, 
                         };
                         continue;
                     }
+                    if (std.mem.eql(u8, be.lang, "python")) {
+                        const py_dir = std.fmt.allocPrintSentinel(allocator, "{s}/backends/{s}", .{ exe_dir, be.name }, 0) catch continue;
+                        defer allocator.free(py_dir);
+                        startPython(allocator, be.name, py_dir) catch |err| {
+                            std.debug.print("[suji] python start failed for {s}: {}\n", .{ be.name, err });
+                        };
+                        continue;
+                    }
                     const dylib = (packaged_paths.backendDylibPath(allocator, exe_dir, be.name, be.lang) catch continue) orelse continue;
                     defer allocator.free(dylib);
                     var path_z: [1024]u8 = undefined;
@@ -78,6 +93,14 @@ pub fn loadFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, 
                 defer allocator.free(lua_dir);
                 startLua(allocator, be.lang, lua_dir) catch |err| {
                     std.debug.print("[suji] lua start failed: {}\n", .{err});
+                };
+                return;
+            }
+            if (std.mem.eql(u8, be.lang, "python")) {
+                const py_dir = std.fmt.allocPrintSentinel(allocator, "{s}/backends/{s}", .{ exe_dir, be.lang }, 0) catch return;
+                defer allocator.free(py_dir);
+                startPython(allocator, be.lang, py_dir) catch |err| {
+                    std.debug.print("[suji] python start failed: {}\n", .{err});
                 };
                 return;
             }
@@ -114,6 +137,12 @@ pub fn loadFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, 
                     };
                     continue;
                 }
+                if (std.mem.eql(u8, be.lang, "python")) {
+                    startPython(allocator, be.name, be.entry) catch |err| {
+                        std.debug.print("[suji] python start failed for {s}: {}\n", .{ be.name, err });
+                    };
+                    continue;
+                }
 
                 const path = backend_build.dylibPath(allocator, be.lang, be.entry, release) catch continue;
                 defer allocator.free(path);
@@ -140,6 +169,12 @@ pub fn loadFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, 
         if (std.mem.eql(u8, be.lang, "lua")) {
             startLua(allocator, be.lang, be.entry) catch |err| {
                 std.debug.print("[suji] lua start failed: {}\n", .{err});
+            };
+            return;
+        }
+        if (std.mem.eql(u8, be.lang, "python")) {
+            startPython(allocator, be.lang, be.entry) catch |err| {
+                std.debug.print("[suji] python start failed: {}\n", .{err});
             };
             return;
         }
@@ -203,7 +238,10 @@ pub fn luaEntryCandidate(allocator: std.mem.Allocator, entry_arg: []const u8) ![
     return std.fs.path.join(allocator, &.{ entry_arg, "main.lua" });
 }
 
-pub fn registerLuaRoute(backend_name: []const u8, channel: []const u8) void {
+// 임베드 런타임(lua/python 등)의 route 콜백 — handler 등록 시 채널 자동 라우팅
+// 매핑을 만들고, 같은 채널을 두 백엔드가 등록하면 auto-routing 을 끈다(target 명시
+// 요구). lua/python 이 동일 시그니처/로직이라 하나로 공유한다.
+pub fn registerEmbedRoute(backend_name: []const u8, channel: []const u8) void {
     const g = suji.BackendRegistry.global orelse return;
     if (g.routes.getPtr(channel)) |existing_ptr| {
         if (std.mem.eql(u8, existing_ptr.*, backend_name)) return;
@@ -213,7 +251,7 @@ pub fn registerLuaRoute(backend_name: []const u8, channel: []const u8) void {
         return;
     }
     g.putRoute(channel, backend_name) catch |err| {
-        std.debug.print("[suji] lua route registration failed for '{s}': {}\n", .{ channel, err });
+        std.debug.print("[suji] embed route registration failed for '{s}': {}\n", .{ channel, err });
     };
 }
 
@@ -235,7 +273,7 @@ pub fn startLua(allocator: std.mem.Allocator, backend_name: [:0]const u8, entry:
 
     const rt = try allocator.create(LuaRuntime);
     errdefer allocator.destroy(rt);
-    rt.* = LuaRuntime.init(allocator, owned_name, entry_lua, &registerLuaRoute, true);
+    rt.* = LuaRuntime.init(allocator, owned_name, entry_lua, &registerEmbedRoute, true);
     errdefer rt.shutdown();
 
     // 코어 함수 포인터 주입은 rt.start() 이전(node startNode 와 동일 이유):
@@ -253,6 +291,60 @@ pub fn startLua(allocator: std.mem.Allocator, backend_name: [:0]const u8, entry:
         .free_response = LuaRuntime.freeResponseC,
     }) catch |err| {
         std.debug.print("[suji] lua embed registration failed for {s}: {}\n", .{ owned_name, err });
+    };
+}
+
+pub fn pythonEntryCandidate(allocator: std.mem.Allocator, entry_arg: []const u8) ![]u8 {
+    if (entry_arg.len == 0) return error.InvalidPythonEntry;
+    if (std.mem.endsWith(u8, entry_arg, ".py")) {
+        return allocator.dupe(u8, entry_arg);
+    }
+    return std.fs.path.join(allocator, &.{ entry_arg, "main.py" });
+}
+
+pub fn startPython(allocator: std.mem.Allocator, backend_name: [:0]const u8, entry: [:0]const u8) !void {
+    if (!python_enabled) {
+        std.debug.print("[suji] Python backend not available (python-build-standalone not staged at ~/.suji/python)\n", .{});
+        return;
+    }
+
+    const candidate = try pythonEntryCandidate(allocator, entry);
+    defer allocator.free(candidate);
+    const abs_entry = try std.Io.Dir.cwd().realPathFileAlloc(runtime.io, candidate, allocator);
+    defer allocator.free(abs_entry);
+
+    const entry_py = try allocator.dupeZ(u8, abs_entry);
+    errdefer allocator.free(entry_py);
+    const owned_name = try allocator.dupeZ(u8, backend_name);
+    errdefer allocator.free(owned_name);
+
+    const rt = try allocator.create(PythonRuntime);
+    errdefer allocator.destroy(rt);
+    rt.* = PythonRuntime.init(allocator, owned_name, entry_py, &registerEmbedRoute, true);
+    errdefer rt.shutdown();
+
+    // 코어 함수 포인터 주입은 rt.start() 이전(node/lua 와 동일 — main.py top-level
+    // suji.invoke/send/on 대비).
+    if (suji.BackendRegistry.global) |g| {
+        PythonRuntime.setCore(g.core_api.invoke, g.core_api.free, g.core_api.emit, g.core_api.on, g.core_api.off);
+    }
+
+    // PYTHONHOME: packaged(.app/sentinel)면 실 실행파일 옆 번들 stdlib
+    // (`<real-exe-dir>/python/lib/pythonX.Y`). dev 면 null → python_config 의
+    // staging 경로 사용(run-python-e2e 로 실증된 경로). start() 가 home 을 즉시
+    // PyConfig 로 dupe 하므로 start 이후 해제 가능.
+    const py_home = packaged_paths.pythonHome(allocator);
+    defer if (py_home) |h| allocator.free(h);
+
+    try rt.start(py_home);
+    g_python_runtime = rt;
+
+    suji.BackendRegistry.registerEmbedRuntime(owned_name, .{
+        .invoke = PythonRuntime.invokeC,
+        .free_response = PythonRuntime.freeResponseC,
+        // is_catch_all 미지정(false) — lua 와 동일, 정확 매칭만.
+    }) catch |err| {
+        std.debug.print("[suji] python embed registration failed for {s}: {}\n", .{ owned_name, err });
     };
 }
 

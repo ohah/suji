@@ -1076,20 +1076,36 @@ app.on("ready", () => {
 - [x] `coreInvoke`(invoke) 가 native 실패 시 `embed_runtimes.get(name)` 제너릭 폴백 (`loader.zig:412`) — Node 전용 하드코딩 if 없음
 - [x] Node 는 `registerEmbedRuntime("node", ...)` 로 주입(이관 완료) — CLAUDE.md 구현 노트와 일치
 
-**Python 임베드**:
+**Python 임베드** (embedded CPython 3.13 + GIL — 1급 백엔드 마감):
 
-- [ ] libpython 빌드/다운로드 인프라 (macOS: python.org 프리빌트, Linux: apt `libpython3-dev`, Windows: Python installer)
-- [ ] `src/platform/python.zig` + `src/platform/python/bridge.cc` — `Py_Initialize`, `PyObject_CallObject`, `PyGILState_Ensure/Release` (GIL 관리)
-- [ ] JSON ↔ PyDict 변환 (Python stdlib `json` 활용)
-- [ ] 재진입 패턴 (Node의 `g_in_sync_invoke` 대응) — GIL 하나라 같은 스레드 재귀와 본질적으로 동일
-- [ ] `@suji/python` (pip 패키지)
-  ```python
-  import suji
-  suji.handle('ping', lambda: {'msg': 'pong'})
-  suji.handle('analyze', lambda data: {'mean': np.mean(data['values'])})
-  ```
-- [ ] 예제 (`examples/python-backend`, `examples/multi-backend`에 Python 추가)
-- [ ] suji.json 설정: `{ "lang": "python", "entry": "backend/main.py" }`
+- [x] libpython 인프라 — **python-build-standalone(astral) `install_only` portable
+      CPython** 을 `~/.suji/python/<ver>` 에 staging(`scripts/stage-python.sh`,
+      멱등) + **weak-link + auto-detect**(libnode 패턴). prebuilt 라 빌드 인프라 0.
+      build.zig `python_available` comptime 게이트(Unix=libpython, Windows=dll+
+      `libs/python3.lib`).
+- [x] `src/platform/python.zig` — **순수 C ABI 라 bridge.cc/mingw 불필요**
+      (`@cImport(Python.h)` zig 직접 컴파일). `Py_InitializeFromConfig`(Isolated)+
+      `PyImport_AppendInittab`("suji")+`PyEval_SaveThread`/`PyGILState_Ensure`.
+      ⚠️ zig C variadic 깨짐 → `PyArg_ParseTuple`/`CallFunction` 대신 non-variadic
+      `PyTuple_GetItem`/`PyUnicode_AsUTF8`/`PyObject_CallOneArg`. ⚠️ 3.13 pyatomic
+      translate-c 실패 → `@cDefine("_Py_USE_GCC_BUILTIN_ATOMICS","1")`.
+- [x] JSON in/out — 표준 `json` 모듈(cjson 대응, 의존성 0). raw JSON string ABI.
+- [x] 재진입 — **GIL 단일 메커니즘**이 lua mutex+depth+ReentrantGuard 대체.
+- [x] 1급 outbound: `suji.invoke`(cross-call) / `suji.send` / `suji.on` —
+      `startPython` 이 `setCore` 주입(node/lua 동형).
+- [x] 예제 — `examples/python-backend`(단독) + `examples/multi-backend`(python +
+      zig↔python cross-call/event, frontend 버튼).
+- [x] suji.json `{ "lang": "python", "entry": "backends/python" }` + schema enum +
+      `suji init --backend=python`(init.zig + @suji/cli, 템플릿 byte-동형 미러).
+- [x] packaging(end-user Python 미설치 대응) — `addInstallPythonRuntimeStep`
+      (libpython+stdlib → exe 옆) + PYTHONHOME dual-mode(`packaged_paths.pythonHome`,
+      packaged=실 exe-dir/python, dev=staging) + macOS `bundle_macos` 동반 복사.
+- [x] 검증 — python.zig 인라인 runtime test(staged 시) + `tests/python_test.zig`
+      소스 계약 가드 + **`tests/e2e/run-python-e2e.sh`**(invoke 왕복/json/50
+      concurrent GIL/send·on, 6 pass, CI 포함).
+- 정직 경계(후속): release.yml CLI 배포 python 번들 분배 결정 / Windows·packaged-app
+  실 런 검증 / 핫 리로드(Py init·finalize 프로세스당 1회) / iOS(코드서명·샌드박스).
+  `@suji/python`(pip 패키지) 도 후속 — 현재는 raw `import suji` 빌트인 모듈.
 
 **Lua 임베드** (vendored Lua 5.4 + cjson — 마감 완료):
 
