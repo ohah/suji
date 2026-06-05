@@ -1103,9 +1103,20 @@ app.on("ready", () => {
 - [x] 검증 — python.zig 인라인 runtime test(staged 시) + `tests/python_test.zig`
       소스 계약 가드 + **`tests/e2e/run-python-e2e.sh`**(invoke 왕복/json/50
       concurrent GIL/send·on, 6 pass, CI 포함).
-- 정직 경계(후속): release.yml CLI 배포 python 번들 분배 결정 / Windows·packaged-app
-  실 런 검증 / 핫 리로드(Py init·finalize 프로세스당 1회) / iOS(코드서명·샌드박스).
-  `@suji/python`(pip 패키지) 도 후속 — 현재는 raw `import suji` 빌트인 모듈.
+- [x] packaged `.app` 실행 검증(macOS 실측) — `suji build` → codesign 통과 →
+      staging 제거(Python 미설치 시뮬) 상태로 `.app` 실행 → 번들 libpython
+      (Contents/MacOS) + stdlib(Contents/Resources/python, codesign 회피 위해
+      MacOS 아닌 Resources) 로 `[suji-python] started` 확인.
+- [x] release / 배포 — `release.yml` 이 macOS/Linux 빌드에 python staging + Package
+      가 libpython+stdlib 동반, `install.sh` 가 curl-install 시 sibling 동반. CLI suji
+      가 exe 옆 `python/` 자립 해석(`exeRelativePythonHome`) → batteries-included.
+- [x] `@suji/python` — `packages/suji-python`(PEP 561 stub-only `suji-stubs`) 스캐폴드
+      (handle/invoke/send/on `.pyi`). PyPI 발행만 후속(토큰 대기).
+- 핫 리로드(정직): node/lua/python 임베드 런타임 모두 in-process 핫 리로드 미지원
+      (dev 재시작) — python 특이 결함 아님. Py init·finalize 프로세스당 1회라 구조적.
+- 정직 경계(후속): Windows packaging(import-lib hard-link → build gate 에서 python off
+      강제, footgun 방지; PBS Windows 레이아웃 + Windows CI 반복 필요) / iOS(iOS용
+      python-build-standalone + 코드서명·샌드박스 + 모바일 호스트 배선, 모바일 트랙).
 
 **Lua 임베드** (vendored Lua 5.4 + cjson — 마감 완료):
 

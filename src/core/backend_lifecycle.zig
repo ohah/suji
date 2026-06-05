@@ -329,11 +329,15 @@ pub fn startPython(allocator: std.mem.Allocator, backend_name: [:0]const u8, ent
         PythonRuntime.setCore(g.core_api.invoke, g.core_api.free, g.core_api.emit, g.core_api.on, g.core_api.off);
     }
 
-    // PYTHONHOME: packaged(.app/sentinel)면 실 실행파일 옆 번들 stdlib
-    // (`<real-exe-dir>/python/lib/pythonX.Y`). dev 면 null → python_config 의
-    // staging 경로 사용(run-python-e2e 로 실증된 경로). start() 가 home 을 즉시
-    // PyConfig 로 dupe 하므로 start 이후 해제 가능.
-    const py_home = packaged_paths.pythonHome(allocator);
+    // PYTHONHOME 해석(우선순위): ① packaged(.app/sentinel) → exeDir()/python
+    // (macOS=Resources/python). ② 포터블/CLI 평탄 배치 → 실 exe 옆 python/
+    // (released suji CLI + dev zig-out/bin 자립). ③ 둘 다 없으면 null → python.zig
+    // 가 python_config staging 경로 사용. start() 가 home 을 즉시 PyConfig 로 dupe
+    // 하므로 start 이후 해제 가능.
+    // 불변식: ①②는 레이아웃상 상호배타 — .app 은 stdlib 이 Resources 라 ②(exe 옆
+    // python/)가 안 걸리고, 평탄 배치는 sentinel 이 없어 ①이 안 걸린다. 그래서
+    // orelse 순서는 "둘 중 존재하는 하나"를 고르는 것이지 우선순위 의존이 아니다.
+    const py_home = packaged_paths.pythonHome(allocator) orelse packaged_paths.exeRelativePythonHome(allocator);
     defer if (py_home) |h| allocator.free(h);
 
     try rt.start(py_home);

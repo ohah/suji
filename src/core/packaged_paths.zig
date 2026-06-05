@@ -6,14 +6,21 @@ const std = @import("std");
 const builtin = @import("builtin");
 const runtime = @import("runtime");
 
+/// 실 실행파일이 있는 디렉토리(`@executable_path`) — `buf` 에 exe path 를 읽고
+/// dirname slice 를 반환(반환값 수명은 `buf` 에 묶임). sentinel/레이아웃 판정 없는
+/// raw 헬퍼. packagedRealExeDir(sentinel 게이트) 와 exeRelativePythonHome(probe) 가 공유.
+fn realExeDir(buf: []u8) ?[]const u8 {
+    const ep_len = std.process.executablePath(runtime.io, buf) catch return null;
+    return std.fs.path.dirname(buf[0..ep_len]);
+}
+
 /// packaged(.app/sentinel) 면 실제 실행파일이 있는 디렉토리(`@executable_path`)를,
 /// 아니면(dev) null 을 반환. is-packaged 판정(sentinel 위치는 macOS=Contents/Resources,
 /// else=exe dir)을 단일 출처로 둔다 — exeDir/pythonHome 가 반환 디렉토리만 다를 뿐
 /// 같은 판정을 공유. caller free.
 fn packagedRealExeDir(allocator: std.mem.Allocator) ?[]const u8 {
     var exe_buf: [1024]u8 = undefined;
-    const ep_len = std.process.executablePath(runtime.io, &exe_buf) catch return null;
-    const dir = std.fs.path.dirname(exe_buf[0..ep_len]) orelse return null;
+    const dir = realExeDir(&exe_buf) orelse return null;
 
     const sentinel = if (comptime builtin.os.tag == .macos) blk: {
         // <exe_dir>=<app>.app/Contents/MacOS → sentinel 은 sibling Resources 에.
@@ -24,6 +31,21 @@ fn packagedRealExeDir(allocator: std.mem.Allocator) ?[]const u8 {
     std.Io.Dir.cwd().access(runtime.io, sentinel, .{}) catch return null;
 
     return allocator.dupe(u8, dir) catch null;
+}
+
+/// 포터블/CLI 레이아웃: 실 실행파일 옆에 `python/`(libpython 도 옆) 이 실제로
+/// 있으면 그 경로를 반환. sentinel 불요 — released suji CLI(suji+libpython+python/
+/// 평탄 배치) 와 dev(zig-out/bin) 가 자기 옆 번들 stdlib 을 자립적으로 찾는다.
+/// 없으면 null. (`.app` 은 stdlib 이 Resources 라 여기 안 걸리고 pythonHome 이 처리.)
+pub fn exeRelativePythonHome(allocator: std.mem.Allocator) ?[]const u8 {
+    var exe_buf: [1024]u8 = undefined;
+    const dir = realExeDir(&exe_buf) orelse return null;
+    const home = std.fmt.allocPrint(allocator, "{s}/python", .{dir}) catch return null;
+    std.Io.Dir.cwd().access(runtime.io, home, .{}) catch {
+        allocator.free(home);
+        return null;
+    };
+    return home;
 }
 
 /// packaged 면 backend/plugin dylib 이 사는 디렉토리(macOS=Contents/Resources,
@@ -38,14 +60,14 @@ pub fn exeDir(allocator: std.mem.Allocator) ?[]const u8 {
     return allocator.dupe(u8, dir) catch null;
 }
 
-/// packaged 면 번들 CPython home(`<real-exe-dir>/python`)을 반환.
-/// addInstallPythonRuntimeStep(Linux/Windows) + bundle_macos(macOS) 가 stdlib 을
-/// 실 실행파일 옆 `python/lib/pythonX.Y` 로 둔다. libpython 은 `@executable_path`
-/// 로, stdlib 은 PYTHONHOME 로 같은 디렉토리에서 로드되므로 exeDir() 와 달리 macOS
-/// 도 Contents/MacOS(실 바이너리 위치)를 기준으로 한다. dev(sentinel 없음)면 null →
-/// python.zig 가 python_config 의 staging 경로(run-python-e2e 실증)를 쓴다.
+/// packaged 면 번들 CPython stdlib home(`exeDir()/python`)을 반환.
+/// stdlib 트리는 backend/plugin dylib 과 같은 곳에 둔다 — Linux/Windows=bin/python,
+/// **macOS=Contents/Resources/python**(Contents/MacOS 안의 디렉토리 트리는 메인
+/// 바이너리 codesign 을 깨므로 Resources 에 둠 — bundle_macos 참조). 그래서 libpython
+/// 위치(macOS=Contents/MacOS, `@executable_path`)와 달리 stdlib home 은 exeDir() 기준.
+/// dev(sentinel 없음)면 null → python.zig 가 python_config 의 staging 경로 사용.
 pub fn pythonHome(allocator: std.mem.Allocator) ?[]const u8 {
-    const dir = packagedRealExeDir(allocator) orelse return null;
+    const dir = exeDir(allocator) orelse return null;
     defer allocator.free(dir);
     return std.fmt.allocPrint(allocator, "{s}/python", .{dir}) catch null;
 }

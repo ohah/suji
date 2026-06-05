@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "suji-stubs"
+version = "0.1.0"
+description = "Type stubs (PEP 561) for the Suji embedded-Python backend `suji` module"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "ohah" }]
+keywords = ["suji", "desktop", "stubs", "typing"]
+classifiers = [
+  "Typing :: Stubs Only",
+  "Programming Language :: Python :: 3.13",
+]
+
+[project.urls]
+Homepage = "https://github.com/ohah/suji"
+Documentation = "https://ohah.github.io/suji"
+
+# PEP 561 stub-only distribution: ships `suji-stubs/` providing type info for the
+# runtime-injected built-in `suji` module (no runtime code — see README).
+[tool.setuptools]
+packages = ["suji-stubs"]
+
+[tool.setuptools.package-data]
+"suji-stubs" = ["__init__.pyi"]

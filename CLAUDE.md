@@ -958,17 +958,20 @@ suji.send("my-event", json.dumps({"x": 1}))         # 이벤트 발신
 suji.on("ping-all", lambda data: ...)                # 이벤트 수신
 ```
 
-**packaging(end-user 머신에 Python 미설치라도 동작)**: `build.zig`
-`addInstallPythonRuntimeStep` 이 libpython + stdlib 를 `zig-out/bin` 옆에 staging.
-libpython install_name 이 `@rpath/libpython3.13.dylib` 이고 suji 바이너리 rpath 에
-`@executable_path` 가 있어 exe 옆 복사본으로 해석된다. stdlib(json 등)은 런타임
-**PYTHONHOME=`<real-exe-dir>/python`**(`packaged_paths.pythonHome`)으로 로드.
-Linux/Windows 는 packaging 의 `copyDirContents` 가 bin 디렉토리를 통째 복사해
-자동 동반, macOS 는 `bundle_macos.zig` 가 libpython + `python/` 를 `Contents/MacOS`
-로 복사(packaged_paths.pythonHome 의 macOS 분기는 Resources sentinel 을 확인하되
-실 바이너리 위치 `Contents/MacOS` 기준으로 home 을 만든다). dev 는 이 복사본을 쓰지
-않고 staging(`python_config.python_home`)을 직접 참조 → 큰 stdlib 복사는 `dest`
-존재 시 skip(증분 빌드 비용 0).
+**packaging(end-user 머신에 Python 미설치라도 동작 — 실 `.app` 검증 완료)**:
+`build.zig` `addInstallPythonRuntimeStep` 이 libpython + stdlib 를 `zig-out/bin` 옆에
+staging. libpython install_name 이 `@rpath/libpython3.13.dylib` 이고 suji 바이너리
+rpath 에 `@executable_path` 가 있어 exe 옆 복사본으로 해석된다. stdlib(json 등)은
+런타임 **PYTHONHOME=`exeDir()/python`**(`packaged_paths.pythonHome`)으로 로드.
+Linux/Windows 는 packaging 의 `copyDirContents` 가 bin 디렉토리를 통째 복사해 자동
+동반(libpython+stdlib 둘 다 bin/). macOS 는 `bundle_macos.zig` 가 libpython(단일
+dylib)을 `Contents/MacOS`(@executable_path)로, **stdlib 트리는 `Contents/Resources/
+python`** 로 분리 복사한다 — stdlib 트리를 `Contents/MacOS` 안에 두면 메인 바이너리
+codesign 이 nested subcomponent 로 보고 "bundle format unrecognized" 로 실패하기
+때문(실측). 그래서 `pythonHome` 은 libpython 위치가 아니라 `exeDir()`(macOS=
+Contents/Resources) 기준. dev 는 이 복사본을 쓰지 않고 staging
+(`python_config.python_home`)을 직접 참조 → 큰 stdlib 복사는 `dest` 존재 시
+skip(증분 빌드 비용 0).
 
 구현 범위: `src/platform/python.zig`(lua.zig 복제 + Python C API),
 `build.zig`(staging weak-link auto-detect + `addInstallPythonRuntimeStep`),
@@ -984,16 +987,36 @@ schema/init/suji-cli `lang:"python"`, `examples/python-backend` +
 - `bash tests/e2e/run-python-e2e.sh` — 단독 python-backend: frontend invoke ↔
   Python handler 왕복 + json(nested/unicode/float) + **50 concurrent(GIL
   직렬화)** + **suji.send/on(이벤트 양방향)** (6 pass). CI(ci.yml/e2e.yml) 포함.
+- **packaged `.app` 실행(실측)** — `suji build` 로 `examples/python-backend` 를
+  `.app` 패키징 → codesign 통과 + 서명 valid → **staging 디렉토리를 치운 채**(=
+  Python 미설치 end-user 시뮬) 실행 → 번들 libpython(Contents/MacOS) + stdlib
+  (Contents/Resources/python) 로 `[suji-python] started`(Py_Initialize + bundled
+  json import + main.py 실행) 확인. macOS 한정 수동 검증.
 
-**정직 경계(후속)**: ① **release.yml 의 CLI 배포 python 번들**은 미결정 —
-released `suji` 바이너리에 python weak-link/40MB 런타임을 넣어 batteries-included
-로 할지, `suji build` 시점에 사용자 앱에만 staging 할지(CLI 아티팩트 크기 vs
-빌드타임 staging) 분배 결정 대기. ② **Windows packaging** 의 libpython 동반은
-Linux 자동복사 경로로 커버되나 실 패키지-런 미검증. ③ **packaged-app 실행**은
-build/번들 단계까지 검증(dev + e2e 는 staging 경로로 완전 실증) — 실 `.app`
-더블클릭 런은 CI/수동 후속. ④ **핫 리로드**: `Py_Initialize/Finalize` 가 프로세스당
-1회 안전이라 1차 미지원(프로세스 재시작). ⑤ **iOS**: V8 처럼 CPython JIT 아닌
-인터프리터라 가능성은 있으나 코드서명/샌드박스 검증 필요 — 미배선.
+**release / 배포(완료)**: released `suji` CLI 가 **batteries-included**(libnode 선례
+동형) — `release.yml` 이 macOS/Linux 빌드 전 `scripts/stage-python.sh` 로 staging,
+Package 가 libpython + `python/` stdlib 를 suji 옆에 평탄 동반, `install.sh` 가
+curl-install 시 그 sibling 들을 함께 설치. CLI suji 는 sentinel 없이 exe 옆 `python/`
+을 자립 해석(`packaged_paths.exeRelativePythonHome`) → Python 미설치 머신에서도 python
+백엔드 동작(dev e2e 가 이 경로로 실증).
+
+**핫 리로드(정직)**: node/lua/python 임베드 런타임은 **모두** in-process 핫 리로드
+미지원 — `reloadBackendCommon` 이 `getDylibPath`(rust/go/zig 만) 에서 graceful bail,
+파일 변경 시 dev 재시작 필요. python 은 node/lua 와 **동일 동작**(python 특이 결함
+아님) + 추가로 `Py_Initialize/Finalize` 가 프로세스당 1회 안전이라 in-process 재초기화
+자체가 불가(프로세스 재시작이 정답).
+
+**타입 스텁**: `packages/suji-python`(PEP 561 stub-only `suji-stubs`) — 런타임 주입
+빌트인 `suji` 모듈용 `.pyi`(handle/invoke/send/on). IDE/mypy/pyright 용, 런타임 코드
+없음. PyPI 발행만 후속(토큰 대기).
+
+**정직 경계(후속)**: ① **Windows packaging** — Windows 는 `python3.lib` import-lib
+hard-link 라 `python313.dll`+`Lib`/`DLLs` 동반 staging(PBS Windows 레이아웃)이
+필요해 build gate 에서 **python off 로 강제**(깨진 exe footgun 방지). `addInstall
+PythonRuntimeStep` Windows pwsh 분기 + Windows CI 반복이 필요한 별도 작업. CI/release
+의 python staging 도 macOS/Linux 한정. ② **iOS**: V8 처럼 CPython JIT 아닌
+인터프리터라 가능성은 있으나 iOS 용 python-build-standalone + 코드서명/샌드박스 +
+모바일 호스트(examples/ios) 배선이 필요 — 모바일 트랙 별도 작업, 미배선.
 
 ## 배포 / 설치
 
