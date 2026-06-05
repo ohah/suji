@@ -65,8 +65,8 @@ test "main.zig wires Lua backend load, routes, CEF fallback, and teardown" {
         "pub fn registerLuaRoute(",
         "std.mem.eql(u8, be.lang, \"lua\")",
         "suji.BackendRegistry.registerEmbedRuntime(owned_name",
-        "rt.invoke(lua_channel, data)",
-        "LuaRuntime.freeResponseC(resp)",
+        "LuaRuntime.freeResponseC",
+        "BackendRegistry.invokeEmbed",
         "rt.shutdown();",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, source, needle) != null);
