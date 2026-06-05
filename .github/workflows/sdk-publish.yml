@@ -1,7 +1,7 @@
 name: sdk-publish
 
 # SDK 배포 워크플로. 기본(workflow_dispatch, dry_run=true)은 pack /
-# --dry-run / build·vet 검증만 — 실제 발행 안 함. 실제 발행은
+# --dry-run / build·vet / twine check 검증만 — 실제 발행 안 함. 실제 발행은
 # `sdk-vX.Y.Z` 태그 푸시 또는 dry_run=false + 레지스트리 토큰 시크릿
 # 보유 시에만(토큰 없으면 자동 skip). app 릴리스(release.yml, v* 태그)
 # 와 태그 네임스페이스 분리(sdk-v*).
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: '검증만 (실제 npm/crates 발행 생략)'
+        description: '검증만 (실제 npm/crates/PyPI 발행 생략)'
         type: boolean
         default: true
 
@@ -123,3 +123,33 @@ jobs:
           # 을 misuse 로 오탐. 발행 비차단이라 경고로만.
           go vet ./... || echo "::warning::go vet 경고(기존 cgo unsafe.Pointer 핸들 패턴) — 발행 비차단"
           echo "Go SDK 검증 OK — 발행은 'sdk-vX.Y.Z' 태그로 (go get @태그)"
+
+  pypi:
+    # suji-stubs (PEP 561 타입 스텁) — 런타임 주입 빌트인 `suji` 모듈용 .pyi.
+    # 기본은 build + twine check(packability 검증)만, sdk 태그/명시적 발행 +
+    # PYPI_TOKEN 보유 시에만 PyPI 업로드(토큰 없으면 skip — npm/crate 동형).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build + twine check (항상 — packability 검증)
+        working-directory: packages/suji-python
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+          twine check dist/*
+      - name: Publish to PyPI
+        # sdk 태그 푸시 또는 명시적 dry_run=false 일 때만. 토큰 없으면 skip.
+        if: github.event_name == 'push' || github.event.inputs.dry_run == 'false'
+        working-directory: packages/suji-python
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          if [ -z "$TWINE_PASSWORD" ]; then
+            echo "::warning::PYPI_TOKEN 미설정 — suji-stubs 발행 skip"
+            exit 0
+          fi
+          twine upload dist/*
