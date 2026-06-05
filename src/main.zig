@@ -49,12 +49,6 @@ const runNodeScript = backend_lifecycle.runNodeScript;
 // stderr 핸들로 직출력 — buffered stderr 로 유실되는 케이스 대비(이슈 #60 진단).
 pub const panic = std.debug.FullPanic(cli_diagnostics.sujiDiagPanic);
 const Watcher = @import("platform/watcher.zig").Watcher;
-const node_mod = @import("platform/node.zig");
-const NodeRuntime = node_mod.NodeRuntime;
-const node_enabled = node_mod.node_enabled;
-const lua_mod = @import("platform/lua.zig");
-const LuaRuntime = lua_mod.LuaRuntime;
-const lua_enabled = lua_mod.lua_enabled;
 const builtin = @import("builtin");
 // bundle_macos 의 모든 참조(createBundle/BundleOptions/notarizeBundle/
 // createDmg)가 runBuild 의 `switch (comptime builtin.os.tag) { .macos =>
@@ -1145,36 +1139,13 @@ fn cefInvokeHandler(channel: []const u8, data: []const u8, response_buf: []u8) ?
         return response_buf[0..len];
     }
 
-    // 임베드 런타임 폴백 — dlopen 백엔드가 아니라 registry.invoke 가 null 이다.
-    // Lua 는 name(target/route)이 정확히 매칭될 때만 시도하고, Node 는 lua 가 아닌
-    // 미해결 채널의 catch-all 폴백으로 둔다(node 가 유일 임베드였던 기존 동작 유지 —
-    // 예: route 미등록 "node-stress"). 이 분리가 없으면 Node 가 lua target 호출까지
-    // 가로채(핸들러 없음 응답) Lua 가 못 받는다.
-    var lua_name: []const u8 = "";
-    if (lua_enabled) {
-        if (backend_lifecycle.g_lua_runtime) |rt| {
-            lua_name = rt.backend_name;
-            if (std.mem.eql(u8, name, rt.backend_name)) {
-                const lua_channel = util.extractJsonString(data, "cmd") orelse channel;
-                if (rt.invoke(lua_channel, data)) |resp| {
-                    const body = std.mem.span(resp);
-                    const len = @min(body.len, response_buf.len);
-                    @memcpy(response_buf[0..len], body[0..len]);
-                    LuaRuntime.freeResponseC(resp);
-                    return response_buf[0..len];
-                }
-            }
-        }
-    }
-
-    if (node_enabled and backend_lifecycle.g_node_runtime != null and !std.mem.eql(u8, name, lua_name)) {
-        const node_channel = util.extractJsonString(data, "cmd") orelse channel;
-        if (NodeRuntime.invoke(node_channel, data)) |resp| {
-            const len = @min(resp.len, response_buf.len);
-            @memcpy(response_buf[0..len], resp[0..len]);
-            NodeRuntime.freeResponse(resp);
-            return response_buf[0..len];
-        }
+    // 임베드 런타임 폴백(Node/Lua/Python) — dlopen 백엔드가 아니라 registry.invoke
+    // 가 null 이다. invokeEmbed 가 name 정확 매칭 → catch-all(node 등) 순으로
+    // 디스패치(data-driven). 새 임베드 런타임은 registerEmbedRuntime 등록만으로
+    // 자동 라우팅된다(분기 추가 불요).
+    const embed_channel = util.extractJsonString(data, "cmd") orelse channel;
+    if (suji.BackendRegistry.invokeEmbed(name, embed_channel, request, response_buf)) |resp| {
+        return resp;
     }
 
     return null;

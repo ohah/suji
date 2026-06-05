@@ -348,13 +348,10 @@ const EnabledRuntime = struct {
     }
 
     pub fn shutdown(self: *EnabledRuntime) void {
-        // 이벤트 리스너 정리: off 로 EventBus 에서 제거한 뒤 ref unref/destroy.
-        // off 는 이후(새) emit 의 dangling 호출을 막는다. ⚠️ 한계: 멀티스레드
-        // 백엔드(node libuv 등)가 teardown 과 동시에 emit 중이면 EventBus 가
-        // lock 밖에서 콜백을 도는 in-flight snapshot 이 freed listener 를 부를 수
-        // 있다 — EventBus snapshot 구조의 기존 특성(node 임베드도 동일). 단일스레드
-        // 기본 경로(suji dev)에선 발생하지 않으며, 정식 해소는 listener refcount
-        // 도입(EventBus 전역 변경)이라 별도 과제.
+        // 이벤트 리스너 정리: off 가 EventBus 에서 제거 + 진행 중 emit 콜백
+        // quiescence 까지 보장(off-quiescence)하므로, 반환 후 ref unref/destroy 가
+        // in-flight snapshot 과 경합하지 않는다 — 멀티스레드 teardown UAF 해소
+        // (events.zig EventBus.off 의 waitQuiescent).
         for (self.event_listeners.items) |listener| {
             if (g_core_off) |off| off(listener.id);
             if (self.state) |L| c.luaL_unref(L, c.LUA_REGISTRYINDEX, listener.ref);

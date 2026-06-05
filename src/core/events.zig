@@ -27,6 +27,12 @@ const Listener = struct {
 ///   JS emit → EventBus → Go/Rust on() 수신
 ///   Rust emit → EventBus → JS on() 수신
 ///   Zig emit → EventBus → 모든 on() 수신
+/// emit 콜백 루프(mutex 밖)를 실행 중인 스레드면 true. 콜백 안에서 off() 를
+/// 호출하면 자기 inflight 를 자기가 기다리는 데드락이 생기므로, 그 스레드의
+/// off() quiescence 대기를 건너뛰게 한다. 전역 threadlocal — 데스크톱은 EventBus
+/// 단일 인스턴스라 무방(임베드 다중 인스턴스는 과보수 skip = 안전쪽, 한계).
+threadlocal var in_dispatch: bool = false;
+
 pub const EventBus = struct {
     listeners: std.StringHashMap(std.ArrayList(Listener)),
     allocator: std.mem.Allocator,
@@ -34,6 +40,10 @@ pub const EventBus = struct {
     /// Zig 0.16: std.Thread.Mutex 제거 → std.Io.Mutex
     mutex: std.Io.Mutex = .init,
     io: std.Io,
+    /// mutex 밖 콜백 실행 구간 동안 >0. off()/offAll() 이 0 될 때까지 대기해
+    /// (epoch barrier) in-flight snapshot 이 freed 리스너 arg 를 부르는 UAF 를 막는다.
+    /// 단일스레드 경로는 off 시점에 항상 0이라 무회귀.
+    inflight: std.atomic.Value(u32) = .init(0),
 
     // WebView eval 콜백 (JS에 이벤트 전달용).
     // target=null이면 모든 윈도우로 브로드캐스트, u32이면 해당 WindowManager id만.
@@ -128,7 +138,16 @@ pub const EventBus = struct {
             }
         }
 
-        // 콜백 실행 (mutex 밖 — 블로킹 안전)
+        // 콜백 실행 (mutex 밖 — 블로킹 안전). inflight 를 올려 off() 가 이 구간을
+        // 기다리게 한다(c_abi arg 수명 보호). in_dispatch 로 콜백-내-off 데드락 회피.
+        const prev_in_dispatch = in_dispatch;
+        in_dispatch = true;
+        _ = self.inflight.fetchAdd(1, .acq_rel);
+        defer {
+            _ = self.inflight.fetchSub(1, .release);
+            in_dispatch = prev_in_dispatch;
+        }
+
         for (snapshot[0..snapshot_len]) |listener| {
             switch (listener.callback) {
                 .zig => |cb| {
@@ -150,33 +169,47 @@ pub const EventBus = struct {
         self.emitToJs(event_name, data, target);
     }
 
-    /// 리스너 해제 (ID 기반)
-    pub fn off(self: *EventBus, listener_id: u64) void {
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
+    /// off()/offAll() 공용: 진행 중인 emit 콜백이 모두 끝날 때까지 대기.
+    /// 반환 후엔 in-flight snapshot 이 없으므로 caller 가 리스너 arg 를 free 해도 안전.
+    fn waitQuiescent(self: *EventBus) void {
+        if (in_dispatch) return; // 콜백-내 호출: 자기 inflight 자기대기 데드락 회피
+        while (self.inflight.load(.acquire) != 0) std.atomic.spinLoopHint();
+    }
 
-        var iter = self.listeners.iterator();
-        while (iter.next()) |entry| {
-            var list = entry.value_ptr;
-            var i: usize = 0;
-            while (i < list.items.len) {
-                if (list.items[i].id == listener_id) {
-                    _ = list.orderedRemove(i);
-                    return;
+    /// 리스너 해제 (ID 기반). 제거 후 진행 중인 emit 콜백이 끝날 때까지 대기해
+    /// caller 의 후속 free 가 in-flight snapshot 과 경합하지 않게 한다.
+    pub fn off(self: *EventBus, listener_id: u64) void {
+        {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
+
+            var iter = self.listeners.iterator();
+            outer: while (iter.next()) |entry| {
+                var list = entry.value_ptr;
+                var i: usize = 0;
+                while (i < list.items.len) {
+                    if (list.items[i].id == listener_id) {
+                        _ = list.orderedRemove(i);
+                        break :outer;
+                    }
+                    i += 1;
                 }
-                i += 1;
             }
         }
+        self.waitQuiescent();
     }
 
     /// 특정 이벤트의 모든 리스너 해제
     pub fn offAll(self: *EventBus, event_name: []const u8) void {
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
+        {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
 
-        if (self.listeners.getPtr(event_name)) |list| {
-            list.clearRetainingCapacity();
+            if (self.listeners.getPtr(event_name)) |list| {
+                list.clearRetainingCapacity();
+            }
         }
+        self.waitQuiescent();
     }
 
     pub fn deinit(self: *EventBus) void {

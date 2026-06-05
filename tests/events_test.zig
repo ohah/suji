@@ -18,6 +18,15 @@ fn resetState() void {
     call_count = 0;
 }
 
+// 콜백-내 off 데드락 회피(in_dispatch skip) 검증용
+var dl_bus: ?*events.EventBus = null;
+var dl_id: u64 = 0;
+var dl_called: usize = 0;
+fn deadlockProbe(_: [*:0]const u8) void {
+    dl_called += 1;
+    if (dl_bus) |b| b.off(dl_id); // emit 콜백 중 → off quiescence 가 skip 돼 데드락 없음
+}
+
 test "EventBus init and deinit" {
     var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
     defer bus.deinit();
@@ -33,6 +42,22 @@ test "EventBus on and emit" {
 
     try std.testing.expectEqual(@as(usize, 1), call_count);
     try std.testing.expectEqualStrings("hello", last_data[0..last_data_len]);
+}
+
+test "EventBus off() inside emit callback does not deadlock (in_dispatch skip)" {
+    var bus = events.EventBus.init(std.testing.allocator, std.testing.io);
+    defer bus.deinit();
+    dl_bus = &bus;
+    defer dl_bus = null;
+    dl_called = 0;
+
+    dl_id = bus.on("dl", deadlockProbe);
+    bus.emit("dl", "{}"); // 콜백이 자기 자신을 off — quiescence 무한대기 데드락이면 여기서 멈춤
+    try std.testing.expectEqual(@as(usize, 1), dl_called);
+
+    // self-off 됐으므로 재emit 시 콜백 없음
+    bus.emit("dl", "{}");
+    try std.testing.expectEqual(@as(usize, 1), dl_called);
 }
 
 test "EventBus multiple listeners" {

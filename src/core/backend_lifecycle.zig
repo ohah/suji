@@ -187,6 +187,8 @@ pub fn startNode(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
         suji.BackendRegistry.registerEmbedRuntime("node", .{
             .invoke = node_mod.bridge.suji_node_invoke,
             .free_response = node_mod.bridge.suji_node_free,
+            // node 는 채널을 routes 에 등록하지 않으므로 미해결 채널의 catch-all.
+            .is_catch_all = true,
         }) catch |err| {
             std.debug.print("[suji] node embed registration failed: {}\n", .{err});
         };

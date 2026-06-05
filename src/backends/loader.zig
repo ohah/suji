@@ -46,6 +46,11 @@ pub const EmbedRuntime = struct {
     invoke: *const fn (channel: [*:0]const u8, data: [*:0]const u8) callconv(.c) ?[*:0]const u8,
     /// `invoke`가 반환한 응답 문자열의 소유 메모리 해제. null이면 leak (런타임이 정책상 관리 안 하는 경우).
     free_response: ?*const fn (ptr: [*:0]const u8) callconv(.c) void = null,
+    /// CEF 경로(cefInvokeHandler)에서 name 정확 매칭이 없을 때 미해결 채널을 받는
+    /// catch-all 런타임 여부. node 는 채널을 routes 에 등록하지 않아 catch-all(예:
+    /// route 미등록 "node-stress")로 동작 — 기존 동작 보존. lua/python 은 false
+    /// (정확 매칭만). catch-all 은 하나만 두는 것을 전제로 한다(여럿이면 순서 비결정).
+    is_catch_all: bool = false,
 };
 
 const builtin = @import("builtin");
@@ -197,6 +202,37 @@ pub const BackendRegistry = struct {
         const owned = try g.allocator.dupe(u8, name);
         errdefer g.allocator.free(owned);
         try embed_runtimes.put(owned, rt);
+    }
+
+    /// CEF 경로(cefInvokeHandler) 임베드 디스패치 — name(target/route) 정확 매칭
+    /// 우선, 없으면 catch-all 런타임. 응답을 response_buf 에 복사해 slice 반환.
+    /// 정확 매칭 런타임이 있으면 그 결과를 그대로 반환(invoke null → null)하고
+    /// catch-all 로 넘기지 않는다 — "백엔드 전용 채널이 다른 런타임에 새는" 일 방지.
+    pub fn invokeEmbed(name: []const u8, channel: []const u8, request: [*:0]const u8, response_buf: []u8) ?[]const u8 {
+        if (!embed_runtimes_initialized) return null;
+        if (embed_runtimes.get(name)) |rt| {
+            return dispatchEmbed(rt, channel, request, response_buf);
+        }
+        var it = embed_runtimes.valueIterator();
+        while (it.next()) |rt| {
+            if (rt.is_catch_all) {
+                if (dispatchEmbed(rt.*, channel, request, response_buf)) |r| return r;
+            }
+        }
+        return null;
+    }
+
+    fn dispatchEmbed(rt: EmbedRuntime, channel: []const u8, request: [*:0]const u8, response_buf: []u8) ?[]const u8 {
+        var ch_buf: [256]u8 = undefined;
+        const len = @min(channel.len, ch_buf.len - 1);
+        @memcpy(ch_buf[0..len], channel[0..len]);
+        ch_buf[len] = 0;
+        const p = rt.invoke(@ptrCast(&ch_buf), request) orelse return null;
+        const body = std.mem.span(p);
+        const out_len = @min(body.len, response_buf.len);
+        @memcpy(response_buf[0..out_len], body[0..out_len]);
+        if (rt.free_response) |ff| ff(p);
+        return response_buf[0..out_len];
     }
 
     pub fn init(allocator: std.mem.Allocator, io: std.Io) BackendRegistry {
