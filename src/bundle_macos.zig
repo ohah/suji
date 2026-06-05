@@ -65,6 +65,9 @@ pub const BundleOptions = struct {
     /// `config.app.macos_min_version`(기본 "12.0", CEF floor clamp 적용). Go dylib 의
     /// MACOSX_DEPLOYMENT_TARGET 과 같은 값이라 실효 floor 가 한 값으로 모인다.
     macos_min_version: []const u8 = "12.0",
+    /// 앱 아이콘 경로(`config.app.icon`). .png 면 .icns 생성, .icns 면 복사 →
+    /// Resources/AppIcon.icns + Info.plist CFBundleIconFile. 비어있으면 기본 아이콘.
+    icon: []const u8 = "",
 };
 
 pub fn createBundle(
@@ -105,7 +108,7 @@ pub fn createBundle(
     }
 
     // 1. Info.plist 생성
-    try writeInfoPlist(allocator, app_name, name, version, identifier, opts.deep_link_schemes, opts.macos_min_version);
+    try writeInfoPlist(allocator, app_name, name, version, identifier, opts.deep_link_schemes, opts.macos_min_version, opts.icon.len > 0);
 
     // 2. 메인 바이너리 복사 + 최소 macOS 배포 타겟 고정(vtool).
     // Zig 는 네이티브 빌드 시 호스트 OS 버전을 minos(LC_BUILD_VERSION) 로 박아, 빌드 머신보다
@@ -150,6 +153,13 @@ pub fn createBundle(
         }
     }
 
+    // 6.3. 앱 아이콘 — opts.icon(.png→.icns 생성 / .icns→복사) → Resources/AppIcon.icns.
+    //   Info.plist CFBundleIconFile 은 위(1단계)에서 opts.icon.len>0 일 때 이미 추가됨.
+    if (opts.icon.len > 0) {
+        generateMacIcon(allocator, app_name, opts.icon) catch |err|
+            std.debug.print("[suji] warn: 아이콘 생성 실패({s}) — 기본 아이콘으로 표시된다\n", .{@errorName(err)});
+    }
+
     // 6.5. backend/plugin dylib + sentinel — packagedExeDir 의 macOS 분기가
     // Contents/Resources/.suji-packaged 를 probe + 같은 디렉토리에 backends/
     // plugins/ 평탄 배치 기대.
@@ -187,10 +197,11 @@ fn writeInfoPlist(
     identifier: []const u8,
     deep_link_schemes: []const []const u8,
     min_version: []const u8,
+    has_icon: bool,
 ) !void {
     const path = try std.fmt.allocPrint(allocator, "{s}/Contents/Info.plist", .{app_name});
     defer allocator.free(path);
-    const plist = try buildInfoPlist(allocator, name, version, identifier, deep_link_schemes, min_version);
+    const plist = try buildInfoPlist(allocator, name, version, identifier, deep_link_schemes, min_version, has_icon);
     defer allocator.free(plist);
 
     const io = runtime.io;
@@ -212,6 +223,7 @@ pub fn buildInfoPlist(
     identifier: []const u8,
     deep_link_schemes: []const []const u8,
     min_version: []const u8,
+    has_icon: bool,
 ) ![]u8 {
     // CFBundleURLTypes — scheme 당 dict 1개. 유효 scheme 만(isValidUrlScheme).
     // 빈 블록(스킴 없음/전부 무효)이면 Info.plist 무변(기존 동작).
@@ -244,6 +256,14 @@ pub fn buildInfoPlist(
     , .{url_types.items});
     defer if (url_block.len > 0) allocator.free(url_block);
 
+    // CFBundleIconFile — opts.icon 이 있으면 AppIcon(.icns) 참조. 정적 문자열(할당/free 불필요).
+    const icon_block: []const u8 = if (has_icon)
+        \\
+        \\  <key>CFBundleIconFile</key>
+        \\  <string>AppIcon</string>
+    else
+        "";
+
     const plist = try std.fmt.allocPrint(allocator,
         \\<?xml version="1.0" encoding="UTF-8"?>
         \\<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -262,7 +282,7 @@ pub fn buildInfoPlist(
         \\  <key>CFBundlePackageType</key>
         \\  <string>APPL</string>
         \\  <key>CFBundleInfoDictionaryVersion</key>
-        \\  <string>6.0</string>
+        \\  <string>6.0</string>{s}
         \\  <key>LSMinimumSystemVersion</key>
         \\  <string>{s}</string>
         \\  <key>NSHighResolutionCapable</key>
@@ -271,7 +291,7 @@ pub fn buildInfoPlist(
         \\  <true/>{s}
         \\</dict>
         \\</plist>
-    , .{ name, name, identifier, version, version, min_version, url_block });
+    , .{ name, name, identifier, version, version, icon_block, min_version, url_block });
     return plist;
 }
 
@@ -602,6 +622,43 @@ fn setMinMacosVersion(allocator: std.mem.Allocator, path: []const u8, min_versio
     // minos 와 sdk 를 같은 값으로 — config.app.macos_min_version(기본 12.0, CEF floor clamp 적용).
     // Info.plist LSMinimumSystemVersion / Go MACOSX_DEPLOYMENT_TARGET 과 동일 값.
     try runCmd(allocator, &.{ "xcrun", "vtool", "-set-build-version", "macos", min_version, min_version, "-replace", "-output", path, path });
+}
+
+/// 앱 아이콘 생성 → {app}/Contents/Resources/AppIcon.icns. icon_path 가 .icns 면 그대로 복사,
+/// .png(1024 권장)면 sips 로 표준 10개 크기 iconset 을 만들어 iconutil 로 .icns 변환. macOS
+/// 전용 도구(sips/iconutil) 사용 — 실패해도 빌드는 계속(호출부가 warn). Info.plist 의
+/// CFBundleIconFile=AppIcon 은 buildInfoPlist 가 has_icon 일 때 이미 기록.
+fn generateMacIcon(allocator: std.mem.Allocator, app_name: []const u8, icon_path: []const u8) !void {
+    const dst = try std.fmt.allocPrint(allocator, "{s}/Contents/Resources/AppIcon.icns", .{app_name});
+    defer allocator.free(dst);
+
+    if (std.mem.endsWith(u8, icon_path, ".icns")) {
+        try runCmd(allocator, &.{ "cp", icon_path, dst });
+        return;
+    }
+
+    // .png → .iconset → .icns. iconset 은 Resources 옆 임시 dir 로 만들고 변환 후 제거.
+    const iconset = try std.fmt.allocPrint(allocator, "{s}/Contents/Resources/AppIcon.iconset", .{app_name});
+    defer allocator.free(iconset);
+    Dir.cwd().createDirPath(runtime.io, iconset) catch {};
+
+    const Spec = struct { px: u16, name: []const u8 };
+    const sizes = [_]Spec{
+        .{ .px = 16, .name = "icon_16x16" },     .{ .px = 32, .name = "icon_16x16@2x" },
+        .{ .px = 32, .name = "icon_32x32" },     .{ .px = 64, .name = "icon_32x32@2x" },
+        .{ .px = 128, .name = "icon_128x128" },  .{ .px = 256, .name = "icon_128x128@2x" },
+        .{ .px = 256, .name = "icon_256x256" },  .{ .px = 512, .name = "icon_256x256@2x" },
+        .{ .px = 512, .name = "icon_512x512" },  .{ .px = 1024, .name = "icon_512x512@2x" },
+    };
+    for (sizes) |s| {
+        var pxbuf: [8]u8 = undefined;
+        const pxs = try std.fmt.bufPrint(&pxbuf, "{d}", .{s.px});
+        const out = try std.fmt.allocPrint(allocator, "{s}/{s}.png", .{ iconset, s.name });
+        defer allocator.free(out);
+        try runCmd(allocator, &.{ "sips", "-z", pxs, pxs, icon_path, "--out", out });
+    }
+    try runCmd(allocator, &.{ "iconutil", "-c", "icns", iconset, "-o", dst });
+    runCmd(allocator, &.{ "rm", "-rf", iconset }) catch {};
 }
 
 fn copyDir(allocator: std.mem.Allocator, src: []const u8, dst: []const u8) !void {

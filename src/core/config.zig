@@ -45,6 +45,10 @@ pub const Config = struct {
         /// 번들 CEF 가 12.0 으로 프리빌트라 그 아래는 로드 불가 → 파싱 시 12.0 으로 clamp.
         /// macOS 빌드에서만 의미(Win/Linux 무시).
         macos_min_version: [:0]const u8 = "12.0",
+        /// 앱 아이콘 경로(`app.icon`). macOS: .png(1024 권장)면 빌드 시 .icns 생성, .icns 면
+        /// 그대로 복사 → Contents/Resources/AppIcon.icns + Info.plist CFBundleIconFile. 비어있으면
+        /// 미설정(기본 아이콘). 경로는 프로젝트(CWD) 기준.
+        icon: [:0]const u8 = "",
         /// 마지막 창이 닫힐 때 (window:all-closed 발화 시점) 코어가 자동으로 cef.quit().
         /// default false — Electron canonical 패턴(`suji.on("window:all-closed", ...)`로 user
         /// 코드가 platform 분기 후 quit 호출). true로 설정 시 모든 플랫폼에서 자동 종료.
@@ -356,6 +360,7 @@ pub const Config = struct {
                 if (getStr(app, "entitlements")) |s| config.app.entitlements = dupeStr(a, s);
                 if (getBool(app, "stripCef")) |b| config.app.strip_cef = b;
                 if (getStr(app, "minimumSystemVersion")) |s| config.app.macos_min_version = clampMacosVersion(a, s);
+                if (getStr(app, "icon")) |s| config.app.icon = dupeStr(a, s);
                 if (getBool(app, "quitOnAllWindowsClosed")) |b| config.app.quit_on_all_windows_closed = b;
                 if (app.get("crashReporter")) |cr_val| {
                     if (cr_val == .object) {

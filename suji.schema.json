@@ -37,6 +37,10 @@
           "default": "12.0",
           "description": "macOS 최소 배포 타겟. Info.plist LSMinimumSystemVersion + 메인 바이너리 minos(vtool) + Go 백엔드 MACOSX_DEPLOYMENT_TARGET 에 일관 적용. 번들 CEF 가 12.0 프리빌트라 그 아래는 12.0 으로 보정. macOS 빌드에서만 의미."
         },
+        "icon": {
+          "type": "string",
+          "description": "앱 아이콘 경로(프로젝트 기준). macOS: .png(1024 권장)면 빌드 시 .icns 생성, .icns 면 복사 → Contents/Resources/AppIcon.icns + Info.plist CFBundleIconFile. 비어있으면 기본 아이콘."
+        },
         "locales": {
           "type": "array",
           "items": { "type": "string" },
