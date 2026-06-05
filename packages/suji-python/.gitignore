@@ -1,0 +1,6 @@
+# Python build artifacts (twine/build outputs + local venv)
+dist/
+build/
+*.egg-info/
+.venv/
+__pycache__/
