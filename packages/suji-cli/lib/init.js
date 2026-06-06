@@ -306,6 +306,8 @@ export function sujiJson(name, backend, template, pm) {
         { name: "zig", lang: "zig", entry: "backends/zig" },
         { name: "rust", lang: "rust", entry: "backends/rust" },
         { name: "go", lang: "go", entry: "backends/go" },
+        { name: "lua", lang: "lua", entry: "backends/lua" },
+        { name: "python", lang: "python", entry: "backends/python" },
       ],
       frontend,
     }, null, 2)}\n`;
@@ -354,6 +356,10 @@ export function scaffoldBackend(projectName, backend, name) {
   scaffoldZig("backends/zig");
   scaffoldRust("backends/rust");
   scaffoldGo("backends/go");
+  // lua/python 임베드 런타임은 채널을 router 에 자동 등록하므로(rust/go raw dylib 과
+  // 달리) zig 의 ping/greet 와 충돌하지 않게 네임스페이스 채널 템플릿을 쓴다.
+  W(join("backends/lua", "main.lua"), tpl("multi_lua_main.lua"));
+  W(join("backends/python", "main.py"), tpl("multi_python_main.py"));
 }
 
 export function scaffoldFrontend(projectName, template) {
