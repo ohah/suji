@@ -386,6 +386,34 @@ describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
     );
     expect(r.ok).toBe(false);
   });
+
+  // Electron 패리티: set_content_bounds → get_content_bounds (콘텐츠 영역).
+  test("content_bounds: set 후 get roundtrip — 크기 정확", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "contentbounds", url: "about:blank" });
+    await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_content_bounds", windowId: c.windowId, x: 90, y: 90, width: 500, height: 360 },
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    const b: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "get_content_bounds", windowId: c.windowId },
+    );
+    expect(b.cmd).toBe("get_content_bounds");
+    expect(b.ok).toBe(true);
+    // 콘텐츠 크기는 정확히 round-trip(기본폴백 800x600 아님 = native 실독 증명).
+    expect(Math.abs(b.width - 500)).toBeLessThanOrEqual(4);
+    expect(Math.abs(b.height - 360)).toBeLessThanOrEqual(4);
+    expect(typeof b.x).toBe("number");
+    expect(typeof b.y).toBe("number");
+  });
+
+  test("get_content_bounds: 알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "get_content_bounds", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
 });
 
 // ============================================

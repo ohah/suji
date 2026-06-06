@@ -408,3 +408,42 @@ pub fn getMacWindowBounds(ns_window: *anyopaque) window_mod.Bounds {
         .height = @intFromFloat(@max(@round(frame.height), 0)),
     };
 }
+
+fn mainScreenHeight() f64 {
+    const NSScreen = cef.getClass("NSScreen") orelse return 0;
+    const mainScreen = cef.msgSend(NSScreen, "mainScreen") orelse return 0;
+    const sfFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    return sfFn(mainScreen, @ptrCast(objc.sel_registerName("frame"))).height;
+}
+
+// getMacWindowBounds 의 content(타이틀바/프레임 제외) 버전 — contentRectForFrameRect:.
+pub fn getMacWindowContentBounds(ns_window: *anyopaque) window_mod.Bounds {
+    const frameFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    const frame = frameFn(ns_window, @ptrCast(objc.sel_registerName("frame")));
+    const contentFn: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    const content = contentFn(ns_window, @ptrCast(objc.sel_registerName("contentRectForFrameRect:")), frame);
+    const sh = mainScreenHeight();
+    const top_y: f64 = if (sh > 0) sh - content.y - content.height else content.y;
+    return .{
+        .x = @intFromFloat(@round(content.x)),
+        .y = @intFromFloat(@round(top_y)),
+        .width = @intFromFloat(@max(@round(content.width), 0)),
+        .height = @intFromFloat(@max(@round(content.height), 0)),
+    };
+}
+
+// setMacWindowBounds 의 content 버전 — frameRectForContentRect: 로 프레임 환산 후 setFrame.
+pub fn setMacWindowContentBounds(ns_window: *anyopaque, bounds: window_mod.Bounds) void {
+    const w_f: f64 = @floatFromInt(bounds.width);
+    const h_f: f64 = @floatFromInt(bounds.height);
+    const x_f: f64 = @floatFromInt(bounds.x);
+    const sh = mainScreenHeight();
+    const cocoa_y: f64 = if (sh > 0) sh - @as(f64, @floatFromInt(bounds.y)) - h_f else @floatFromInt(bounds.y);
+    const content_rect: NSRect = .{ .x = x_f, .y = cocoa_y, .width = w_f, .height = h_f };
+
+    const frameForContentFn: *const fn (?*anyopaque, ?*anyopaque, NSRect) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    const frame = frameForContentFn(ns_window, @ptrCast(objc.sel_registerName("frameRectForContentRect:")), content_rect);
+
+    const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setFrameFn(ns_window, @ptrCast(objc.sel_registerName("setFrame:display:")), frame, 1);
+}

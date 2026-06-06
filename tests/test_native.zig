@@ -22,6 +22,7 @@ pub const TestNative = struct {
     stub_always_on_top: bool = false,
     last_title: ?[]const u8 = null,
     last_bounds: ?window.Bounds = null,
+    last_content_bounds: ?window.Bounds = null,
     /// 마지막 createWindow에 전달된 옵션의 sub-struct/parent_id 캡처 (Phase 3 매핑 검증용).
     /// 슬라이스 멤버(title/url/background_color)는 얕은 복사 — caller가 src 수명 보장.
     last_appearance: ?window.Appearance = null,
@@ -131,6 +132,8 @@ pub const TestNative = struct {
         .set_title = setTitle,
         .set_bounds = setBounds,
         .get_bounds = getBounds,
+        .set_content_bounds = setContentBounds,
+        .get_content_bounds = getContentBounds,
         .set_visible = setVisible,
         .focus = focus,
         .blur = blur,
@@ -236,6 +239,13 @@ pub const TestNative = struct {
 
     fn getBounds(ctx: ?*anyopaque, _: u64) window.Bounds {
         return fromCtx(ctx).last_bounds orelse .{};
+    }
+
+    fn setContentBounds(ctx: ?*anyopaque, _: u64, bounds: window.Bounds) void {
+        fromCtx(ctx).last_content_bounds = bounds;
+    }
+    fn getContentBounds(ctx: ?*anyopaque, _: u64) window.Bounds {
+        return fromCtx(ctx).last_content_bounds orelse .{};
     }
 
     fn setVisible(ctx: ?*anyopaque, _: u64, _: bool) void {

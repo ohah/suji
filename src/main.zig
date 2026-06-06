@@ -1513,6 +1513,18 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .height = @intCast(util.extractJsonInt(req_clean, "height") orelse 0),
         }, response_buf, wm);
     }
+    // Electron BrowserWindow.setContentBounds() — set_bounds 와 동일 인자(콘텐츠 영역).
+    if (std.mem.eql(u8, cmd, "set_content_bounds")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = @intCast(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetContentBounds(.{
+            .window_id = win_id,
+            .x = @intCast(util.extractJsonInt(req_clean, "x") orelse 0),
+            .y = @intCast(util.extractJsonInt(req_clean, "y") orelse 0),
+            .width = @intCast(util.extractJsonInt(req_clean, "width") orelse 0),
+            .height = @intCast(util.extractJsonInt(req_clean, "height") orelse 0),
+        }, response_buf, wm);
+    }
     // Phase 4-A: webContents (네비/JS)
     if (std.mem.eql(u8, cmd, "load_url")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1822,6 +1834,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "focus", &window_ipc.handleFocus },
         .{ "is_normal", &window_ipc.handleIsNormal },
         .{ "get_bounds", &window_ipc.handleGetBounds },
+        .{ "get_content_bounds", &window_ipc.handleGetContentBounds },
         .{ "blur", &window_ipc.handleBlur },
         .{ "is_focused", &window_ipc.handleIsFocused },
         .{ "is_visible", &window_ipc.handleIsVisible },

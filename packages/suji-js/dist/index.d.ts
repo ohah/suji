@@ -333,6 +333,12 @@ export declare const windows: {
     getSize(windowId: number): Promise<[number, number]>;
     /** Electron BrowserWindow.getPosition() — [x, y]. getBounds 에서 파생. */
     getPosition(windowId: number): Promise<[number, number]>;
+    /** Electron BrowserWindow.getContentBounds() — 콘텐츠 영역(프레임/타이틀바 제외). */
+    getContentBounds(windowId: number): Promise<BoundsResponse>;
+    /** Electron BrowserWindow.setContentBounds() — 콘텐츠 영역을 지정 사각형으로. */
+    setContentBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.getContentSize() — [width, height]. getContentBounds 에서 파생. */
+    getContentSize(windowId: number): Promise<[number, number]>;
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId: number): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isFocused(). */
@@ -468,6 +474,9 @@ export declare class BrowserWindow {
     getBounds(): Promise<BoundsResponse>;
     getSize(): Promise<[number, number]>;
     getPosition(): Promise<[number, number]>;
+    getContentBounds(): Promise<BoundsResponse>;
+    setContentBounds(bounds: SetBoundsArgs): Promise<WindowOpResponse>;
+    getContentSize(): Promise<[number, number]>;
     blur(): Promise<WindowOpResponse>;
     isFocused(): Promise<IsFocusedResponse>;
     isVisible(): Promise<IsVisibleResponse>;

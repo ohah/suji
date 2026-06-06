@@ -150,3 +150,55 @@ pub fn getBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
     }
     return .{};
 }
+
+// Electron getContentBounds() — 콘텐츠 영역(타이틀바/프레임 제외). CEF Views 는
+// get_client_area_bounds_in_screen(top-left) 직접 제공, 아니면 macOS NSWindow 변환.
+pub fn getContentBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return .{};
+    if (entry.views_window) |views_window| {
+        if (views_window.get_client_area_bounds_in_screen) |get_client| {
+            const rect = get_client(views_window);
+            return .{
+                .x = rect.x,
+                .y = rect.y,
+                .width = @intCast(@max(rect.width, 0)),
+                .height = @intCast(@max(rect.height, 0)),
+            };
+        }
+    }
+    if (is_macos) {
+        if (entry.ns_window) |ns_window| return cef.getMacWindowContentBounds(ns_window);
+    }
+    return .{};
+}
+
+// Electron setContentBounds() — 콘텐츠 영역을 원하는 사각형으로. CEF Views 는
+// frame↔content inset(get_bounds vs get_client_area_bounds_in_screen)을 구해 프레임으로
+// 환산 후 set_bounds(전 플랫폼). 비-Views 는 macOS frameRectForContentRect.
+pub fn setContentBounds(ctx: ?*anyopaque, handle: u64, content: window_mod.Bounds) void {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return;
+    if (entry.views_window) |views_window| {
+        const view = &views_window.base.base;
+        if (view.get_bounds != null and views_window.get_client_area_bounds_in_screen != null and view.set_bounds != null) {
+            const frame = view.get_bounds.?(view);
+            const cont = views_window.get_client_area_bounds_in_screen.?(views_window);
+            // 콘텐츠 사각형 → 프레임 사각형(inset 적용).
+            var rect: c.cef_rect_t = .{
+                .x = content.x - (cont.x - frame.x),
+                .y = content.y - (cont.y - frame.y),
+                .width = @as(c_int, @intCast(content.width)) + (frame.width - cont.width),
+                .height = @as(c_int, @intCast(content.height)) + (frame.height - cont.height),
+            };
+            view.set_bounds.?(view, &rect);
+            if (entry.views_window_delegate) |delegate| cef_views_delegate.viewsWindowEmitBoundsChanged(delegate, rect);
+            return;
+        }
+    }
+    if (!is_macos) return;
+    const ns_window = entry.ns_window orelse return;
+    cef.setMacWindowContentBounds(ns_window, content);
+}

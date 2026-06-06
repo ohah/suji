@@ -328,3 +328,5 @@ pub const closeMacWindow = cef_public_api.closeMacWindow;
 pub const setMacWindowTitle = cef_public_api.setMacWindowTitle;
 pub const setMacWindowBounds = cef_public_api.setMacWindowBounds;
 pub const getMacWindowBounds = cef_public_api.getMacWindowBounds;
+pub const getMacWindowContentBounds = cef_public_api.getMacWindowContentBounds;
+pub const setMacWindowContentBounds = cef_public_api.setMacWindowContentBounds;

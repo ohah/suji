@@ -261,6 +261,19 @@ export const windows = {
         const b = await windows.getBounds(windowId);
         return [b.x, b.y];
     },
+    /** Electron BrowserWindow.getContentBounds() — 콘텐츠 영역(프레임/타이틀바 제외). */
+    getContentBounds(windowId) {
+        return coreCall({ cmd: "get_content_bounds", windowId });
+    },
+    /** Electron BrowserWindow.setContentBounds() — 콘텐츠 영역을 지정 사각형으로. */
+    setContentBounds(windowId, bounds) {
+        return coreCall({ cmd: "set_content_bounds", windowId, ...bounds });
+    },
+    /** Electron BrowserWindow.getContentSize() — [width, height]. getContentBounds 에서 파생. */
+    async getContentSize(windowId) {
+        const b = await windows.getContentBounds(windowId);
+        return [b.width, b.height];
+    },
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId) {
         return coreCall({ cmd: "blur", windowId });
@@ -553,6 +566,15 @@ export class BrowserWindow {
     }
     getPosition() {
         return windows.getPosition(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    getContentBounds() {
+        return windows.getContentBounds(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setContentBounds(bounds) {
+        return windows.setContentBounds(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), bounds);
+    }
+    getContentSize() {
+        return windows.getContentSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     blur() {
         return windows.blur(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));

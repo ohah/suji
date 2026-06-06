@@ -912,6 +912,35 @@ pub fn handleGetBounds(window_id: u32, response_buf: []u8, wm: *window.WindowMan
     ) catch null;
 }
 
+// Electron BrowserWindow.getContentBounds() — 콘텐츠 영역(프레임/타이틀바 제외).
+pub fn handleGetContentBounds(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const b = wm.getContentBounds(window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"get_content_bounds\",\"windowId\":{d},\"ok\":false,\"x\":0,\"y\":0,\"width\":0,\"height\":0}}",
+            .{window_id},
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_content_bounds\",\"windowId\":{d},\"ok\":true,\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}}}",
+        .{ window_id, b.x, b.y, b.width, b.height },
+    ) catch null;
+}
+
+// Electron BrowserWindow.setContentBounds() — SetBoundsReq 재사용(동일 x/y/w/h).
+pub fn handleSetContentBounds(req: SetBoundsReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setContentBounds(req.window_id, .{
+        .x = req.x,
+        .y = req.y,
+        .width = req.width,
+        .height = req.height,
+    })) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_content_bounds", req.window_id, ok);
+}
+
 // Electron BrowserWindow blur/포커스·가시성·always-on-top.
 pub fn handleBlur(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     return handleDevToolsOp("blur", &window.WindowManager.blur, window_id, response_buf, wm);
