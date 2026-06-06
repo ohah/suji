@@ -806,7 +806,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
     - **구현 순서**: Phase 2 (기본) + Phase 2.5 (데이터 인프라) **분리 유지**. 2.5 없이 Phase 2만 완료되면 플러그인이 멀티 윈도우 인지 불가
     - **E2E 실행**: macOS/Linux/Windows CI + CEF runtime subset.
 - [x] CLI 도구
-  - [x] `suji init` — 프로젝트 스캐폴딩 (backend none/zig/rust/go/node/lua/multi + frontend Vite/Rsbuild/Next + pm npm/pnpm/bun/VoidZero `vp`)
+  - [x] `suji init` — 프로젝트 스캐폴딩 (backend none/zig/rust/go/node/lua/python/multi + frontend Vite/Rsbuild/Next + pm npm/pnpm/bun/VoidZero `vp`)
   - [x] `suji dev` — 개발 서버 (프론트엔드 + 백엔드 동시 실행)
   - [x] `suji build` — 프로덕션 빌드
   - [x] `suji run` — 빌드된 앱 실행
@@ -817,7 +817,7 @@ watch는 EventBus 연동: `state:set` 시 `state:{key}` 이벤트 발행.
 ```bash
 suji init my-app
 # 대화형으로 선택:
-#   Backend language? [none/zig/rust/go/node/lua/multi]
+#   Backend language? [none/zig/rust/go/node/lua/python/multi]
 #   Frontend framework? [react/vue/svelte/solid/preact/vanilla/next]
 #   Toolchain? [vite/rsbuild/next]
 #   Package manager? [npm/pnpm/bun/vp]
@@ -1610,7 +1610,7 @@ suji build → 결과물:
 | GitHub Releases CI 자동 빌드 | 사용자 직접 | 공식 actions | ✅ `.github/workflows/release.yml` — `v*.*.*` 태그 정식 릴리스 + `workflow_dispatch dry_run=true` 검증 모드. macOS/Linux/Windows CLI 패키지 + checksums + embed core libs 크로스빌드 아티팩트, 태그↔`build.zig.zon` 버전 일치 검증, release publish gate. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 workflow 계약 고정 |
 | Homebrew tap | 사용자 직접 | -- | ✅ `release.yml` `homebrew` job — 릴리스 아티팩트 checksum으로 `Formula/suji.rb` 생성 + `ruby -c` 검증 + `homebrew-formula` artifact 업로드. 정식 릴리스 시 `HOMEBREW_TAP_TOKEN`/`HOMEBREW_TAP_REPO` 있으면 외부 tap repo push, 없으면 경고 후 skip. 유닛(`release_workflow_test.zig`) + E2E(`run-release-workflow.sh`)로 Formula 계약 고정 |
 | curl installer | 직접 다운로드 | -- | ✅ `scripts/install.sh` — 최신/특정 버전 GitHub Release asset 다운로드 + `.sha256` 검증 + 기본 `~/.suji/bin` 설치. release job이 `dist/install.sh`에 포함. macOS arm64/Linux x64 tar.gz + Windows x64 zip 매핑. 유닛(`release_workflow_test.zig`) + E2E(fake release archive 설치/체크섬 mismatch)로 계약 고정 |
-| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(스캐폴더 + `suji` JS launcher) — `npx @suji/cli init <name> [--backend=none\|zig\|rust\|go\|node\|lua\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla\|next] [--toolchain=vite\|rsbuild\|next] [--pm=npm\|pnpm\|bun\|vp]`(`create-suji` 별칭, `vz`/`voidzero`/`viteplus`는 VoidZero Vite+ `vp` alias). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep), 정적 `suji.json`(Zig 코어가 node 없이 직접 파싱하는 단일 설정 출처), 12300 기본 포트, `.github/workflows/suji.yml`. `suji` JS launcher는 플랫폼 native binary를 찾아 실행만 하고 native가 `suji.json`을 직접 읽는다(node 불요 — go/rust/zig 동일). ⚠️ `suji.config.ts`/`defineConfig`/JS·TS config loader/빌드 훅/`dev.env`는 제거(node 의존이라 비-node 백엔드에서 사용 불가; 서명·공증은 CLI 플래그/env). 검증: `zig build test`, `zig build`, init CLI E2E(native/npx init, npm pack, JS launcher, 정적 suji.json 로드, Vite 6종, Rsbuild 2종, Next static export build). npm publish 는 토큰 대기 |
+| `npx @suji/cli` | -- | `create-tauri-app` | ✅ `packages/suji-cli`(스캐폴더 + `suji` JS launcher) — `npx @suji/cli init <name> [--backend=none\|zig\|rust\|go\|node\|lua\|python\|multi] [--frontend=react\|vue\|svelte\|solid\|preact\|vanilla\|next] [--toolchain=vite\|rsbuild\|next] [--pm=npm\|pnpm\|bun\|vp]`(`create-suji` 별칭, `vz`/`voidzero`/`viteplus`는 VoidZero Vite+ `vp` alias). 산출물 `init.zig` 동형(templates 사본, 단일출처=init.zig lockstep), 정적 `suji.json`(Zig 코어가 node 없이 직접 파싱하는 단일 설정 출처), 12300 기본 포트, `.github/workflows/suji.yml`. `suji` JS launcher는 플랫폼 native binary를 찾아 실행만 하고 native가 `suji.json`을 직접 읽는다(node 불요 — go/rust/zig 동일). ⚠️ `suji.config.ts`/`defineConfig`/JS·TS config loader/빌드 훅/`dev.env`는 제거(node 의존이라 비-node 백엔드에서 사용 불가; 서명·공증은 CLI 플래그/env). 검증: `zig build test`, `zig build`, init CLI E2E(native/npx init, npm pack, JS launcher, 정적 suji.json 로드, Vite 6종, Rsbuild 2종, Next static export build). npm publish 는 토큰 대기 |
 
 ### 플러그인 / 확장 API
 
