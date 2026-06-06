@@ -937,6 +937,40 @@ pub fn handleSetAlwaysOnTop(req: SetAlwaysOnTopReq, response_buf: []u8, wm: *win
     return respondWindowOp(response_buf, "set_always_on_top", req.window_id, ok);
 }
 
+// Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 id 배열(.view 제외).
+// windowId 입력 없음 → main.zig 가 전용 분기로 호출.
+pub fn handleGetAllWindows(response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    var ids: [256]u32 = undefined;
+    const n = wm.listWindowIds(&ids);
+    // handleGetChildViews 와 동일한 std.Io.Writer 배열 빌드 패턴(수동 offset 추적 회피).
+    var w = std.Io.Writer.fixed(response_buf);
+    w.writeAll("{\"from\":\"zig-core\",\"cmd\":\"get_all_windows\",\"ok\":true,\"windowIds\":[") catch return null;
+    for (ids[0..n], 0..) |id, i| {
+        if (i > 0) w.writeByte(',') catch return null;
+        w.print("{d}", .{id}) catch return null;
+    }
+    w.writeAll("]}") catch return null;
+    return w.buffered();
+}
+
+// Electron BrowserWindow.getFocusedWindow() — 포커스 창 id 또는 null. windowId 입력 없음.
+pub fn handleGetFocusedWindow(response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    if (wm.getFocusedWindow()) |id| {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"get_focused_window\",\"ok\":true,\"windowId\":{d}}}",
+            .{id},
+        ) catch null;
+    }
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_focused_window\",\"ok\":true,\"windowId\":null}}",
+        .{},
+    ) catch null;
+}
+
 // Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 가 모두 아닌
 // 상태. 기존 3 게터에서 파생(네이티브 추가 0). 하나라도 조회 실패 시 ok:false.
 pub fn handleIsNormal(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

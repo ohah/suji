@@ -282,6 +282,20 @@ export interface IsAlwaysOnTopResponse extends WindowOpResponse {
   cmd: "is_always_on_top";
   alwaysOnTop: boolean;
 }
+export interface GetAllWindowsResponse {
+  from: "zig-core";
+  cmd: "get_all_windows";
+  ok: boolean;
+  /** 살아있는 top-level 창 id (WebContentsView 제외) */
+  windowIds: number[];
+}
+export interface GetFocusedWindowResponse {
+  from: "zig-core";
+  cmd: "get_focused_window";
+  ok: boolean;
+  /** 포커스된 창 id, 없으면 null */
+  windowId: number | null;
+}
 
 // ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
 // viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
@@ -550,6 +564,14 @@ export const windows = {
   isAlwaysOnTop(windowId: number): Promise<IsAlwaysOnTopResponse> {
     return coreCall<IsAlwaysOnTopResponse>({ cmd: "is_always_on_top", windowId });
   },
+  /** Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 id (view 제외). */
+  getAllWindows(): Promise<GetAllWindowsResponse> {
+    return coreCall<GetAllWindowsResponse>({ cmd: "get_all_windows" });
+  },
+  /** Electron BrowserWindow.getFocusedWindow() — 포커스 창 id 또는 null. */
+  getFocusedWindow(): Promise<GetFocusedWindowResponse> {
+    return coreCall<GetFocusedWindowResponse>({ cmd: "get_focused_window" });
+  },
 
   // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
   undo(windowId: number): Promise<WindowOpResponse> {
@@ -714,6 +736,16 @@ export class BrowserWindow {
   /** 기존 windowId(예: 메인 창, 이벤트의 windowId)를 인스턴스로 래핑. */
   static fromId(id: number): BrowserWindow {
     return new BrowserWindow(id);
+  }
+  /** Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 인스턴스 배열. */
+  static async getAllWindows(): Promise<BrowserWindow[]> {
+    const r = await windows.getAllWindows();
+    return r.windowIds.map((id) => BrowserWindow.fromId(id));
+  }
+  /** Electron BrowserWindow.getFocusedWindow() — 포커스 창 인스턴스 또는 null. */
+  static async getFocusedWindow(): Promise<BrowserWindow | null> {
+    const r = await windows.getFocusedWindow();
+    return r.windowId == null ? null : BrowserWindow.fromId(r.windowId);
   }
 
   setTitle(title: string) {

@@ -292,6 +292,42 @@ test "blur/isVisible/isFocused/alwaysOnTop native vtable wiring" {
     try std.testing.expectError(error.WindowNotFound, wm.setAlwaysOnTop(99999, true));
 }
 
+test "listWindowIds / getFocusedWindow — top-level only (view/destroyed 제외)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const w1 = try wm.create(.{ .title = "A" });
+    const w2 = try wm.create(.{ .title = "B" });
+    const view = try wm.createView(.{ .host_window_id = w1, .url = "about:blank", .bounds = .{} });
+
+    var ids: [16]u32 = undefined;
+    var n = wm.listWindowIds(&ids);
+    try std.testing.expectEqual(@as(usize, 2), n); // .view 제외
+    var saw_w1 = false;
+    var saw_w2 = false;
+    var saw_view = false;
+    for (ids[0..n]) |id| {
+        if (id == w1) saw_w1 = true;
+        if (id == w2) saw_w2 = true;
+        if (id == view) saw_view = true;
+    }
+    try std.testing.expect(saw_w1 and saw_w2 and !saw_view);
+
+    // getFocusedWindow: stub_focused=false → null.
+    try std.testing.expectEqual(@as(?u32, null), wm.getFocusedWindow());
+    // stub_focused=true → 어떤 top-level 창(view 아님).
+    native.stub_focused = true;
+    const focused = wm.getFocusedWindow().?;
+    try std.testing.expect(focused == w1 or focused == w2);
+
+    // destroy 후 목록에서 제외.
+    try wm.destroy(w2);
+    n = wm.listWindowIds(&ids);
+    try std.testing.expectEqual(@as(usize, 1), n);
+    try std.testing.expectEqual(w1, ids[0]);
+}
+
 test "create propagates native failure as NativeCreateFailed" {
     var native = TestNative{ .fail_next_create = true };
     var wm = newManager(&native);
