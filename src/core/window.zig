@@ -231,6 +231,7 @@ pub const Native = struct {
         destroy_window: *const fn (ctx: ?*anyopaque, handle: u64) void,
         set_title: *const fn (ctx: ?*anyopaque, handle: u64, title: []const u8) void,
         set_bounds: *const fn (ctx: ?*anyopaque, handle: u64, bounds: Bounds) void,
+        get_bounds: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
         set_visible: *const fn (ctx: ?*anyopaque, handle: u64, visible: bool) void,
         focus: *const fn (ctx: ?*anyopaque, handle: u64) void,
         // Phase 4-A: webContents 네비/JS
@@ -303,6 +304,9 @@ pub const Native = struct {
     }
     pub fn setBounds(self: Native, handle: u64, bounds: Bounds) void {
         self.vtable.set_bounds(self.ctx, handle, bounds);
+    }
+    pub fn getBounds(self: Native, handle: u64) Bounds {
+        return self.vtable.get_bounds(self.ctx, handle);
     }
     pub fn setVisible(self: Native, handle: u64, visible: bool) void {
         self.vtable.set_visible(self.ctx, handle, visible);
@@ -1233,6 +1237,14 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.isAudioMuted(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.getBounds() — 창의 현재 화면 좌표/크기(top-left 원점).
+    pub fn getBounds(self: *WindowManager, id: u32) Error!Bounds {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.getBounds(win.native_handle);
     }
 
     pub fn setOpacity(self: *WindowManager, id: u32, opacity: f64) Error!void {

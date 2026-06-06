@@ -355,6 +355,37 @@ describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
     );
     expect(r2.ok).toBe(false);
   });
+
+  // Electron 패리티: get_bounds (→ SDK getBounds/getSize/getPosition).
+  test("get_bounds: set_bounds 후 roundtrip — 크기 정확, 위치 근사", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "getbounds", url: "about:blank" });
+    await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_bounds", windowId: c.windowId, x: 90, y: 90, width: 520, height: 380 },
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    const b: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "get_bounds", windowId: c.windowId },
+    );
+    expect(b.cmd).toBe("get_bounds");
+    expect(b.ok).toBe(true);
+    // 크기는 정확히 round-trip — 기본값 폴백(.{}=800x600)이면 실패하므로 native 실독 증명.
+    expect(Math.abs(b.width - 520)).toBeLessThanOrEqual(4);
+    expect(Math.abs(b.height - 380)).toBeLessThanOrEqual(4);
+    // 위치는 WM 보정 가능 — 좌표계(top-left) 변환이 대략 맞는지(gross 오류 차단)만.
+    expect(typeof b.x).toBe("number");
+    expect(typeof b.y).toBe("number");
+    expect(Math.abs(b.x - 90)).toBeLessThanOrEqual(50);
+    expect(Math.abs(b.y - 90)).toBeLessThanOrEqual(50);
+  });
+
+  test("get_bounds: 알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "get_bounds", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
 });
 
 // ============================================

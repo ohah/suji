@@ -190,6 +190,7 @@ pub const applyBackgroundColor = cef_mac_window.applyBackgroundColor;
 pub const closeMacWindow = cef_mac_window.closeMacWindow;
 pub const setMacWindowTitle = cef_mac_window.setMacWindowTitle;
 pub const setMacWindowBounds = cef_mac_window.setMacWindowBounds;
+pub const getMacWindowBounds = cef_mac_window.getMacWindowBounds;
 const cef_window_lifecycle = @import("cef_window_lifecycle.zig");
 
 pub const crashReporterEnabled = cef_crash_reporter.crashReporterEnabled;

@@ -112,3 +112,26 @@ pub fn setBounds(ctx: ?*anyopaque, handle: u64, bounds: window_mod.Bounds) void 
     const ns_window = entry.ns_window orelse return;
     cef.setMacWindowBounds(ns_window, bounds);
 }
+
+pub fn getBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return .{};
+    // CEF Views 창은 get_bounds 가 top-left 원점 cef_rect_t 반환(set_bounds 와 동일
+    // 좌표계) → 변환 불필요. setBounds 와 대칭.
+    if (entry.views_window) |views_window| {
+        if (views_window.base.base.get_bounds) |get_bounds| {
+            const rect = get_bounds(&views_window.base.base);
+            return .{
+                .x = rect.x,
+                .y = rect.y,
+                .width = @intCast(@max(rect.width, 0)),
+                .height = @intCast(@max(rect.height, 0)),
+            };
+        }
+    }
+    if (is_macos) {
+        if (entry.ns_window) |ns_window| return cef.getMacWindowBounds(ns_window);
+    }
+    return .{};
+}

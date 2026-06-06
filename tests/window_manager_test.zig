@@ -247,6 +247,24 @@ test "create stores bounds and title" {
     try std.testing.expectEqual(@as(u32, 1024), win.bounds.width);
 }
 
+test "getBounds returns native-reported bounds (vtable wiring)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "B" });
+    // TestNative.getBounds 는 마지막 setBounds 값을 반환 → WM→native vtable 왕복 검증.
+    try wm.setBounds(id, .{ .x = 42, .y = 24, .width = 640, .height = 480 });
+    const b = try wm.getBounds(id);
+    try std.testing.expectEqual(@as(i32, 42), b.x);
+    try std.testing.expectEqual(@as(i32, 24), b.y);
+    try std.testing.expectEqual(@as(u32, 640), b.width);
+    try std.testing.expectEqual(@as(u32, 480), b.height);
+
+    // 미존재 창 → WindowNotFound.
+    try std.testing.expectError(error.WindowNotFound, wm.getBounds(99999));
+}
+
 test "create propagates native failure as NativeCreateFailed" {
     var native = TestNative{ .fail_next_create = true };
     var wm = newManager(&native);

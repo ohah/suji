@@ -191,6 +191,14 @@ export interface IsNormalResponse extends WindowOpResponse {
     /** minimized/maximized/fullscreen 모두 아닌 일반 상태 */
     normal: boolean;
 }
+export interface BoundsResponse extends WindowOpResponse {
+    cmd: "get_bounds";
+    /** 화면 좌표(top-left 원점) */
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
 export interface ViewOptions {
     /** view를 합성할 host 창 id. live & .window이어야 함 */
     hostId: number;
@@ -293,6 +301,12 @@ export declare const windows: {
     focus(windowId: number): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 모두 아님. */
     isNormal(windowId: number): Promise<IsNormalResponse>;
+    /** Electron BrowserWindow.getBounds() — {x,y,width,height} (top-left 원점). */
+    getBounds(windowId: number): Promise<BoundsResponse>;
+    /** Electron BrowserWindow.getSize() — [width, height]. getBounds 에서 파생. */
+    getSize(windowId: number): Promise<[number, number]>;
+    /** Electron BrowserWindow.getPosition() — [x, y]. getBounds 에서 파생. */
+    getPosition(windowId: number): Promise<[number, number]>;
     undo(windowId: number): Promise<WindowOpResponse>;
     redo(windowId: number): Promise<WindowOpResponse>;
     cut(windowId: number): Promise<WindowOpResponse>;
@@ -407,6 +421,9 @@ export declare class BrowserWindow {
     isFullScreen(): Promise<IsFullScreenResponse>;
     focus(): Promise<WindowOpResponse>;
     isNormal(): Promise<IsNormalResponse>;
+    getBounds(): Promise<BoundsResponse>;
+    getSize(): Promise<[number, number]>;
+    getPosition(): Promise<[number, number]>;
     undo(): Promise<WindowOpResponse>;
     redo(): Promise<WindowOpResponse>;
     cut(): Promise<WindowOpResponse>;

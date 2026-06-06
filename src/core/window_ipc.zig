@@ -894,6 +894,24 @@ pub fn handleFocus(window_id: u32, response_buf: []u8, wm: *window.WindowManager
     return handleDevToolsOp("focus", &window.WindowManager.focus, window_id, response_buf, wm);
 }
 
+// Electron BrowserWindow.getBounds() — 창 화면 좌표/크기(top-left 원점). getSize/
+// getPosition 은 SDK 가 이 응답에서 파생. 조회 실패 시 ok:false + 0 좌표.
+pub fn handleGetBounds(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const b = wm.getBounds(window_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"get_bounds\",\"windowId\":{d},\"ok\":false,\"x\":0,\"y\":0,\"width\":0,\"height\":0}}",
+            .{window_id},
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_bounds\",\"windowId\":{d},\"ok\":true,\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}}}",
+        .{ window_id, b.x, b.y, b.width, b.height },
+    ) catch null;
+}
+
 // Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 가 모두 아닌
 // 상태. 기존 3 게터에서 파생(네이티브 추가 0). 하나라도 조회 실패 시 ok:false.
 pub fn handleIsNormal(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

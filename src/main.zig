@@ -1803,6 +1803,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "is_fullscreen", &window_ipc.handleIsFullscreen },
         .{ "focus", &window_ipc.handleFocus },
         .{ "is_normal", &window_ipc.handleIsNormal },
+        .{ "get_bounds", &window_ipc.handleGetBounds },
     }) |entry| {
         if (std.mem.eql(u8, cmd, entry[0])) {
             const wm = window_mod.WindowManager.global orelse return null;
