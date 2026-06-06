@@ -684,7 +684,7 @@ beep)·notification(4)·**dialog(message_box/error/open/save — 호스트-async
 safe_storage(3, iOS Keychain / Android Keystore AES-GCM)·app 메타(4)·
 fs(read/write/readdir/stat/mkdir/rm 6, 샌드박스 내). 검증:
 `tests/mobile-backends/run.sh`(mock `__core__` 라우팅+키-동형+unknown_cmd,
-전체 65/65) + **`ios-e2e.sh`/`android-e2e.sh`**(실 디바이스 e2e: 실 UIPasteboard
+전체 68/68) + **`ios-e2e.sh`/`android-e2e.sh`**(실 디바이스 e2e: 실 UIPasteboard
 (public.html/rtf/png/buffer)/ClipboardManager·Keychain/Keystore·Bundle/
 Locale·샌드박스 FS(stat/mkdir/rm) 왕복 자가검증, iOS 32/32 + Android 32/32).
 ⚠️ **미검증/범위밖**: dialog 탭·실 알림 표시·실 URL open(스모크), 실기기

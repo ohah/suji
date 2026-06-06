@@ -176,7 +176,7 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
         SQLITE_STATIC(arena 가 handler 끝까지 생존). 응답이 데스크탑
         plugins/sqlite 와 **바이트 동형**(`{"from":"zig","result"/"error":..}`)
         → 동일 Rust/Go/JS 래퍼 무수정 동작(Tauri 동형). 검증: 호스트 하니스
-        `tests/mobile-backends/run.sh` 65/65(실 sqlite3 CRUD 10 — open/
+        `tests/mobile-backends/run.sh` 68/68(실 sqlite3 CRUD 10 — open/
         create/insert(params,UTF-8)/query/injection-safe/close/use-after-close/
         상대경로거부, register_handler→bridge→handle_ipc, rust/go/zig 와 정적
         링크 공존=심볼 무충돌) + 크로스 컴파일 aarch64-ios/-simulator/
@@ -196,7 +196,7 @@ Suji 코어 (Zig) ← 상태 소유자 (단일 진실의 원천)
         .a 스테이징). ⚠️ 정직 경계: 실기기·시뮬/에뮬 *런타임* 미검증
         (iOS=빌드+링크까지, Android APK 어셈블은 JDK/SDK 필요=기존
         android-e2e.sh 와 동일 CI 게이트). 백엔드 동작 자체는 호스트
-        하니스 65/65(실 sqlite3 CRUD + Zig HTTPS PEM 주입)로 실증.
+        하니스 68/68(실 sqlite3 CRUD + Zig HTTPS PEM 주입)로 실증.
 - [x] ~~바이너리 데이터 채널~~ — CEF `suji://` 커스텀 프로토콜로 대체 (fetch + 로컬 파일 접근 가능, 별도 HTTP 서버 불필요)
 
 **결과물**:
@@ -1127,6 +1127,13 @@ app.on("ready", () => {
       stdlib zip+main.py 에셋→filesDir 추출, 공유 MainActivity `maybeStartPython`
       게이트). **실 에뮬레이터 e2e 5/5**(`android-e2e.sh python` arm64-v8a:
       ping/echo json·unicode·nested·20x).
+- [x] **모바일 python CI 자동 커버리지** — sim/emu e2e(ios-e2e.sh/android-e2e.sh)는
+      Xcode/NDK/에뮬 필요라 CI 외 → CEF-free 호스트 하니스 `tests/mobile-backends/
+      run.sh`(CI 포함)에 python 을 엮어 `backend_android.c` 를 호스트 타깃으로
+      빌드(순수 C — real clang 이 bionic/pyatomic 무사)·실 데스크탑 libpython 링크 →
+      `channels()`/ping/echo 왕복을 **CI 에서 자동 검증**(sqlite 동급, `#ifdef
+      SUJI_HAVE_PYTHON` 게이트라 미staging 시 graceful skip·무회귀). 모바일 python 의
+      유일한 CI 자동 *기능* 커버리지. 검증: `run.sh` **68/68**(python 3 케이스 포함).
 - 핫 리로드(정직): node/lua/python 임베드 런타임 모두 in-process 핫 리로드 미지원
       (dev 재시작) — python 특이 결함 아님. Py init·finalize 프로세스당 1회라 구조적.
 - 정직 경계(후속): Windows packaging(import-lib hard-link → build gate 에서 python off
@@ -1580,7 +1587,7 @@ suji build → 결과물:
 |------|----------|-------|------|
 | **fs sandbox (frontend path 화이트리스트)** | `webPreferences.sandbox` + nodeIntegration:false | allowlist | ✅ `fs.allowedRoots` config + `..` traversal 가드 + boundary check + backend bypass. 렌더러-제어 경로 cmd(쓰기: print_to_pdf/capture_page/desktop_capturer_capture_thumbnail · 읽기: native_image_get_size/to_png|jpeg = 파일내용 base64 유출 · tray_create.iconPath)도 `rendererPathFsGate`로 동일 경계 게이트(opt-in 비파괴 — allowedRoots 설정 시 fs 읽기/쓰기/이미지 로드 우회 차단). 보안 점검 후속 보완 |
 | **앱별 cache 격리** | `app.getPath('userData')` | 자동 | ✅ OS 표준 (macOS Application Support / Linux XDG / Windows APPDATA) — 앱 이름별 자동 격리 |
-| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs(default-deny) + **shell/dialog allowlist**(opt-in — `shell.allowedPaths`/`allowedExternalUrls`(glob, util.matchGlob 재사용)/`dialog.allowedPaths`. 키 부재=레거시 무제한 비파괴, 존재=enforce(`[]`=deny-all/`["*"]`=allow/특정=제한). backend SDK 우회·`..`/boundary 가드 fs 동형. 단위 포괄(opt-in/deny-all/glob/boundary/traversal/backend-bypass)). network(webRequest setter)는 그 자체가 선언적 net-control이라 데이터 유출 sink 아님 → 범위 제외(정직). **모바일(Tauri 패리티) 완료**: Stage 1 = embed C ABI `suji_core_set_permissions`/`suji_core_permission_check`(게이트 로직 `util.*` CEF-free 단일 출처, Swift/Kotlin glob 재구현 0, uniform opt-in, null fail-closed). Stage 2 = iOS `_shared` Swift + Android `_shared` Kotlin/JNI 가 네이티브 shell/fs 액션 직전 C ABI 호출 + init 시 앱 컨테이너 정책 전달(보안 로직 0, JSON 직렬화로 escape 안전). dialog 는 모바일=OS 문서 피커(사용자 중재)라 미게이트(데드 config 회피). **검증: iOS 실 시뮬레이터 + Android 실 에뮬레이터 기능 e2e 양쪽 37/37(권한 5케이스 — allowed fs→success, denied fs read/write→forbidden, denied url→forbidden, allowed url→not forbidden — 정책이 네이티브 액션 전 실제 enforce 됨을 격리 검증)** + Zig-side embed_abi 종합 + iOS/Android 크로스빌드 + 모바일 하니스 65/65 무회귀 |
+| 권한 시스템 (API 접근 제어) | contextBridge/sandbox | allowlist + CSP | 🟡 fs(default-deny) + **shell/dialog allowlist**(opt-in — `shell.allowedPaths`/`allowedExternalUrls`(glob, util.matchGlob 재사용)/`dialog.allowedPaths`. 키 부재=레거시 무제한 비파괴, 존재=enforce(`[]`=deny-all/`["*"]`=allow/특정=제한). backend SDK 우회·`..`/boundary 가드 fs 동형. 단위 포괄(opt-in/deny-all/glob/boundary/traversal/backend-bypass)). network(webRequest setter)는 그 자체가 선언적 net-control이라 데이터 유출 sink 아님 → 범위 제외(정직). **모바일(Tauri 패리티) 완료**: Stage 1 = embed C ABI `suji_core_set_permissions`/`suji_core_permission_check`(게이트 로직 `util.*` CEF-free 단일 출처, Swift/Kotlin glob 재구현 0, uniform opt-in, null fail-closed). Stage 2 = iOS `_shared` Swift + Android `_shared` Kotlin/JNI 가 네이티브 shell/fs 액션 직전 C ABI 호출 + init 시 앱 컨테이너 정책 전달(보안 로직 0, JSON 직렬화로 escape 안전). dialog 는 모바일=OS 문서 피커(사용자 중재)라 미게이트(데드 config 회피). **검증: iOS 실 시뮬레이터 + Android 실 에뮬레이터 기능 e2e 양쪽 37/37(권한 5케이스 — allowed fs→success, denied fs read/write→forbidden, denied url→forbidden, allowed url→not forbidden — 정책이 네이티브 액션 전 실제 enforce 됨을 격리 검증)** + Zig-side embed_abi 종합 + iOS/Android 크로스빌드 + 모바일 하니스 68/68 무회귀 |
 | CSP (Content Security Policy) | 수동 설정 | 빌트인 | ✅ `suji://` 응답에 default CSP + X-Content-Type-Options + X-Frame-Options. `config.security.csp` override + `"disabled"` escape |
 | IPC 유효성 검사 | preload 격리 | 커맨드별 타입 검증 | ✅ payload size 32KB · cmd char allowlist (injection 차단) · missing/invalid/unknown_cmd 표준 에러 |
 | macOS App Sandbox (App Store 진출) | electron-osx-sign | tauri.conf.json | ✅ `suji build --sandbox` — helper별 entitlements 자동 부착 (main / Browser / GPU / Renderer / Plugin). 루트=non-sandbox(Developer ID, Hardened Runtime 기본) / `sandbox/`=App Sandbox+inherit(MAS). signing 모드와 직교. Security-scoped bookmarks API ✅ (다음 행) |
@@ -1618,7 +1625,7 @@ suji build → 결과물:
 | 셸 명령 실행 — 외부 핸들러 | `shell.openExternal` | `shell` 플러그인 | ✅ Phase 5-A. macOS NSWorkspace + Linux GIO default URI handler + Windows ShellExecuteW + scheme 사전 검사 + 5 SDK + Linux x-scheme-handler E2E |
 | 셸 명령 실행 — child_process | `child_process.spawn` | `shell.Command` | 🟡 백엔드 only — `suji.process.run(allocator, io, argv)` (std.process.run wrap). Frontend 미노출 (보안) |
 | HTTP 클라이언트 | Node `fetch` | `http` 플러그인 | ✅ `@suji/plugin-http` — renderer-safe fetch with URL allowlist(deny-by-default), Zig backend + JS/Node wrapper + 단위 테스트. 백엔드 전용 `suji.http.fetch(allocator, io, url, payload?)`도 유지 |
-| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 65/65(실 sqlite3 CRUD 모바일 경로 포함) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
+| 로컬 DB (SQLite 등) | better-sqlite3 | `sql` 플러그인 | ✅ `plugins/sqlite` (두 번째 공식 플러그인). 벤더 SQLite 3.51.0 amalgamation(public domain, 결정론적 크로스플랫폼) + `sql:open/execute/query/close`, positional `?` 파라미터(injection-safe), dbId 레지스트리+뮤텍스. Zig 코어 + Rust/Go/JS/Node 래퍼(state 동형 — js=`@suji/plugin-sqlite`/Node=`@suji/plugin-sqlite-node`, 각 mock 브릿지 bun 테스트 js 12·node 16. malformed 응답 하드닝 4언어 일관: `open`=명시 throw(dbId 날조 불가)·`query`/`close`=graceful(`r?.rows ?? []`, Rust None·state.keys 동형)). `zig build test-sqlite` 10 테스트(round-trip/주입안전/타입 INT·REAL·TEXT·NULL/DB 격리/에러/close-후-재사용). **모바일도 지원** — `examples/ios/backends/sqlite/`(정적 링크, 코어독립, 응답 데스크탑 바이트 동형 → 동일 래퍼 무수정). 호스트 하니스 68/68(실 sqlite3 CRUD 모바일 경로 포함) + iOS/Android 크로스 컴파일 빌드 성공(실기기 런타임 미검증=기존 모바일 경계) |
 | 딥링크 | `protocol.registerSchemesAsPrivileged` | `deep-link` | ✅ `suji.json app.deepLinkSchemes:["myapp"]` → bundle_macos 가 `.app` Info.plist `CFBundleURLTypes` 자동 주입(scheme 당 dict, identifier-prefixed URLName). isValidUrlScheme(RFC 3986 — ALPHA 시작 [A-Za-z0-9+.-])로 무효 skip(XML 주입 차단). writeInfoPlist→buildInfoPlist 순수 분리. 검증: 실 `suji build` adhoc → `plutil -lint` OK + CFBundleURLTypes 에 유효 2/무효 1 skip 실증 + 단위 회귀. ⚠️ OS 레벨 *라우팅 실동작*(Launch Services)은 설치+등록 필요 = 헤드리스 미검증, plist 선언만 |
 | 스플래시 스크린 | BrowserWindow 조합 | `splashscreen` | ✅ 별도 API 없이 `windows.create` + `is_loading` polling + close 조합으로 표현. e2e 검증 (`tests/e2e/run-splash.sh`) |
 | 클립보드 — 이미지/HTML/format 검사 | `clipboard.readImage` / `writeImage` / `readHTML` / `has` / `availableFormats` | -- | ✅ HTML (`readHTML`/`writeHTML`) + format 검사 (`has`/`availableFormats`) + PNG image (`writeImage(base64)` / `readImage()` — NSPasteboard `public.png`, raw 한도 ~8KB 1차) + TIFF (`writeTiff`/`readTiff` — `public.tiff`, PNG 동형, 5 SDK + e2e 3) + RTF (`readRtf`/`writeRtf` — `public.rtf`) |
@@ -1887,7 +1894,7 @@ CEF import 0이라 분리선이 이미 존재했음.
         `std.http.Client`(자체 `std.Io.Threaded.init_single_threaded` —
         embed.zig 코어 패턴 복제, handle_ipc 에 io 인자 없으므로) 로 GET/POST.
         backend-only(프론트 shim 미노출 — Zig SDK 보안모델 유지, 관례+문서).
-        실증: `tests/mobile-backends` 호스트 하니스 65/65 ALL PASS 중
+        실증: `tests/mobile-backends` 호스트 하니스 68/68 ALL PASS 중
         Zig http/https 6케이스
         (register_handler→handle_ipc→std.http→인프로세스 localhost 평문 GET/
         POST/echo/error + 자체 서명 localhost HTTPS, PEM CA 주입). 빌드-only:
@@ -1920,7 +1927,7 @@ CEF import 0이라 분리선이 이미 존재했음.
         **최종 상태**: 모바일 대응 가능한 데스크톱 API **사실상 전부 배선
         완료**. 총 cmd ≈35 (clipboard 12·fs 6·dialog 4·notification 4·
         safe_storage 3·app 메타 4·shell open_external+beep). 검증: 호스트
-        하니스 `tests/mobile-backends/run.sh` **65/65** + 실 디바이스
+        하니스 `tests/mobile-backends/run.sh` **68/68** + 실 디바이스
         `ios-e2e.sh` **iOS 32/32** + `android-e2e.sh` **Android 32/32**
         (실 UIPasteboard/ClipboardManager/Keychain/Keystore/FileManager/
         샌드박스 FS 왕복 자가검증). 진짜 디바이스 e2e 가 호스트 하니스·
@@ -2048,7 +2055,7 @@ CEF import 0이라 분리선이 이미 존재했음.
           Recursively. 데스크톱 키-동형(read_buffer=data, has=present,
           available_formats=formats[], stat=success+type+size+mtime/error,
           mkdir/rm=success). fs_rm force=미존재무시(node:fs.rm 동등),
-          mkdir 이미존재=성공. 검증: harness 65/65 + iOS 32/32 + Android
+          mkdir 이미존재=성공. 검증: harness 68/68 + iOS 32/32 + Android
           32/32 e2e(buffer 왕복·has·formats·stat 파일/디렉토리·mkdir·rm
           후 stat 실패 — 디바이스 실 네이티브). 모바일 ✅ 배선 사실상 완료.
           ⚠️ 의미차(정직): fs_stat `type` 은 모바일 file|directory 2종
