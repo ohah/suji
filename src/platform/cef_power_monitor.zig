@@ -60,8 +60,16 @@ const win_power = if (is_windows) struct {
 // macOS: IOKit IOPS (power_monitor.m). 1=배터리 전원.
 extern "c" fn suji_power_monitor_is_on_battery() i32;
 
-// Linux: /sys/class/power_supply/<AC>/online == "0" → AC offline → 배터리. io 불요라
-// std.posix 직접 사용. AC 어댑터 미발견 시 null(데스크탑 등).
+// libc 파일 I/O — zig 0.16 std.posix 엔 open/openZ 가 없음(read 만 존재). io 불요한
+// /sys 단발 읽기라 libc open/read/close 직접 사용(XOpenDisplay 등과 동일 extern 패턴).
+const c_fs = struct {
+    extern "c" fn open(path: [*:0]const u8, flags: c_int) c_int;
+    extern "c" fn read(fd: c_int, buf: [*]u8, count: usize) isize;
+    extern "c" fn close(fd: c_int) c_int;
+};
+
+// Linux: /sys/class/power_supply/<AC>/online == "0" → AC offline → 배터리.
+// AC 어댑터 미발견 시 null(데스크탑 등).
 fn linuxAcOnline() ?bool {
     if (!comptime is_linux) return null;
     const candidates = [_][:0]const u8{
@@ -71,10 +79,11 @@ fn linuxAcOnline() ?bool {
         "/sys/class/power_supply/ADP1/online",
     };
     for (candidates) |path| {
-        const fd = std.posix.openZ(path, .{}, 0) catch continue;
-        defer std.posix.close(fd);
+        const fd = c_fs.open(path.ptr, 0); // O_RDONLY = 0
+        if (fd < 0) continue;
+        defer _ = c_fs.close(fd);
         var buf: [4]u8 = undefined;
-        const n = std.posix.read(fd, &buf) catch continue;
+        const n = c_fs.read(fd, &buf, buf.len);
         if (n >= 1) return buf[0] == '0';
     }
     return null;
