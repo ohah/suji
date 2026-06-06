@@ -257,6 +257,11 @@ export interface IsFullScreenResponse extends WindowOpResponse {
   cmd: "is_fullscreen";
   fullscreen: boolean;
 }
+export interface IsNormalResponse extends WindowOpResponse {
+  cmd: "is_normal";
+  /** minimized/maximized/fullscreen 모두 아닌 일반 상태 */
+  normal: boolean;
+}
 
 // ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
 // viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
@@ -482,6 +487,14 @@ export const windows = {
   },
   isFullScreen(windowId: number): Promise<IsFullScreenResponse> {
     return coreCall<IsFullScreenResponse>({ cmd: "is_fullscreen", windowId });
+  },
+  /** Electron BrowserWindow.focus() — 창을 포그라운드로 키 창으로. */
+  focus(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "focus", windowId });
+  },
+  /** Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 모두 아님. */
+  isNormal(windowId: number): Promise<IsNormalResponse> {
+    return coreCall<IsNormalResponse>({ cmd: "is_normal", windowId });
   },
 
   // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
@@ -754,6 +767,12 @@ export class BrowserWindow {
   }
   isFullScreen() {
     return windows.isFullScreen(this.#id);
+  }
+  focus() {
+    return windows.focus(this.#id);
+  }
+  isNormal() {
+    return windows.isNormal(this.#id);
   }
   undo() {
     return windows.undo(this.#id);

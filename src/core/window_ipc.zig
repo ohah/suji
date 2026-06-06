@@ -887,3 +887,26 @@ pub fn handleIsMaximized(window_id: u32, response_buf: []u8, wm: *window.WindowM
 pub fn handleIsFullscreen(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     return handleStateGet("is_fullscreen", "fullscreen", &window.WindowManager.isFullscreen, window_id, response_buf, wm);
 }
+
+// Electron BrowserWindow.focus() — Native.focus/WindowManager.focus 는 이미 존재
+// (set_visible 동선) → void action 패턴으로 노출만.
+pub fn handleFocus(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("focus", &window.WindowManager.focus, window_id, response_buf, wm);
+}
+
+// Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 가 모두 아닌
+// 상태. 기존 3 게터에서 파생(네이티브 추가 0). 하나라도 조회 실패 시 ok:false.
+pub fn handleIsNormal(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const normal: ?bool = blk: {
+        const minimized = wm.isMinimized(window_id) catch break :blk null;
+        const maximized = wm.isMaximized(window_id) catch break :blk null;
+        const fullscreen = wm.isFullscreen(window_id) catch break :blk null;
+        break :blk !minimized and !maximized and !fullscreen;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"is_normal\",\"windowId\":{d},\"ok\":{},\"normal\":{}}}",
+        .{ window_id, normal != null, normal orelse false },
+    ) catch null;
+}

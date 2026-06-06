@@ -235,6 +235,53 @@ describe("window lifecycle events", () => {
     await new Promise((r) => setTimeout(r, 200));
   });
 
+  // Electron 패리티: BrowserWindow.focus() + isNormal().
+  // focus 는 native focus/WM.focus 기존 동선 노출(ok 스모크). isNormal 은 기존
+  // minimize/maximize 상태 게터에서 파생 — 상태 전이로 행동 검증.
+  test("focus → ok, isNormal: 일반→minimize=false→restore=true→maximize=false", async () => {
+    const created = await core<{ windowId: number }>({
+      cmd: "create_window",
+      title: "lifecycle-focus-isnormal",
+      x: 300, y: 300, width: 400, height: 300,
+    });
+    const id = created.windowId;
+    await new Promise((r) => setTimeout(r, 200));
+
+    const f = await core<{ ok: boolean; windowId: number }>({ cmd: "focus", windowId: id });
+    expect(f.ok).toBe(true);
+    expect(f.windowId).toBe(id);
+
+    const n0 = await core<{ ok: boolean; normal: boolean }>({ cmd: "is_normal", windowId: id });
+    expect(n0.ok).toBe(true);
+    expect(n0.normal).toBe(true);
+
+    // minimize/restore(deminiaturize)/maximize 는 일부 플랫폼에서 비동기 반영 →
+    // is_normal 을 원하는 값까지 폴링(상태 전이 검증, 타이밍 flaky 회피).
+    const waitNormal = async (want: boolean) => {
+      for (let i = 0; i < 25; i++) {
+        if ((await core<{ normal: boolean }>({ cmd: "is_normal", windowId: id })).normal === want) return true;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return false;
+    };
+
+    await core({ cmd: "minimize", windowId: id });
+    expect(await waitNormal(false)).toBe(true);
+
+    await core({ cmd: "restore_window", windowId: id });
+    expect(await waitNormal(true)).toBe(true);
+
+    await core({ cmd: "maximize", windowId: id });
+    expect(await waitNormal(false)).toBe(true);
+    await core({ cmd: "unmaximize", windowId: id });
+
+    // 알 수 없는 창 → ok:false (게터 invariant).
+    expect((await core<{ ok: boolean }>({ cmd: "is_normal", windowId: 99999 })).ok).toBe(false);
+
+    await core({ cmd: "destroy_window", windowId: id });
+    await new Promise((r) => setTimeout(r, 200));
+  });
+
   test("maximize → window:maximize 이벤트, unmaximize → window:unmaximize", async () => {
     const created = await core<{ windowId: number }>({
       cmd: "create_window",

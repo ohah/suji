@@ -239,6 +239,14 @@ export const windows = {
     isFullScreen(windowId) {
         return coreCall({ cmd: "is_fullscreen", windowId });
     },
+    /** Electron BrowserWindow.focus() — 창을 포그라운드로 키 창으로. */
+    focus(windowId) {
+        return coreCall({ cmd: "focus", windowId });
+    },
+    /** Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 모두 아님. */
+    isNormal(windowId) {
+        return coreCall({ cmd: "is_normal", windowId });
+    },
     // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
     undo(windowId) {
         return coreCall({ cmd: "undo", windowId });
@@ -478,6 +486,12 @@ export class BrowserWindow {
     }
     isFullScreen() {
         return windows.isFullScreen(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    focus() {
+        return windows.focus(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isNormal() {
+        return windows.isNormal(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     undo() {
         return windows.undo(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
