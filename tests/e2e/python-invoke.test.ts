@@ -50,6 +50,13 @@ describe("Python backend invoke (embedded CPython 3.13 + GIL)", () => {
     expect(typeof r.index).toBe("number");
   });
 
+  test("backend → __core__ 도달: app.hasSingleInstanceLock", async () => {
+    // Python 백엔드가 단일 인스턴스 락 cmd 에도 __core__ 로 도달(read-only has).
+    const r: any = await invoke("core-single-instance", {});
+    expect(r.cmd).toBe("app_has_single_instance_lock");
+    expect(typeof r.locked).toBe("boolean");
+  });
+
   test("echo: json decode/encode roundtrip", async () => {
     const r: any = await invoke("echo", { message: "hello from frontend", value: 42 });
     expect(r.runtime).toBe("python");

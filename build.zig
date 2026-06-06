@@ -1458,6 +1458,16 @@ pub fn build(b: *std.Build) void {
     });
     const safe_storage_test = b.addTest(.{ .root_module = safe_storage_test_mod });
     test_step.dependOn(&b.addRunArtifact(safe_storage_test).step);
+
+    // single-instance lock 메커니즘 테스트 (flock — libc 필요, CEF 불필요).
+    const single_instance_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/cef_single_instance.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const single_instance_test = b.addTest(.{ .root_module = single_instance_test_mod });
+    test_step.dependOn(&b.addRunArtifact(single_instance_test).step);
 }
 
 /// Linux/Windows CEF expects required runtime assets in the executable

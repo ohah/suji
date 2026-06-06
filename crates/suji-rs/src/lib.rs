@@ -2615,6 +2615,23 @@ pub fn exit() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_exit"}"#)
 }
 
+/// Electron `app.requestSingleInstanceLock()` — primary 면 `{"locked":true}`,
+/// 다른 인스턴스가 이미 보유 중이면 `{"locked":false}` (보통 앱 quit). 이미 보유
+/// 중이면 멱등적으로 true. macOS/Linux=userData flock, Windows=named mutex.
+pub fn request_single_instance_lock() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_request_single_instance_lock"}"#)
+}
+
+/// Electron `app.hasSingleInstanceLock()` — 이 프로세스가 락 보유 중인지. raw: `{"locked":bool}`.
+pub fn has_single_instance_lock() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_has_single_instance_lock"}"#)
+}
+
+/// Electron `app.releaseSingleInstanceLock()` — 보유 락 해제. raw: `{"success":bool}`.
+pub fn release_single_instance_lock() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_release_single_instance_lock"}"#)
+}
+
 /// 앱 frontmost로. raw JSON: `{"success":bool}`.
 pub fn focus() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_focus"}"#)

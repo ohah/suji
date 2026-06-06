@@ -1105,6 +1105,16 @@ export declare const app: {
     setProgressBar(progress: number): Promise<boolean>;
     /** 앱 강제 종료 (Electron `app.exit(code)`). exit code는 무시 (cef.quit 경유). */
     exit(): Promise<boolean>;
+    /**
+     * Electron `app.requestSingleInstanceLock()` — 이 프로세스를 primary 로 만들고
+     * true 반환. 다른 인스턴스가 이미 락을 보유 중이면 false (앱은 보통 quit).
+     * 이미 보유 중이면 멱등적으로 true. macOS/Linux=userData flock, Windows=named mutex.
+     */
+    requestSingleInstanceLock(): Promise<boolean>;
+    /** Electron `app.hasSingleInstanceLock()` — 이 프로세스가 락 보유 중인지. */
+    hasSingleInstanceLock(): Promise<boolean>;
+    /** Electron `app.releaseSingleInstanceLock()` — 보유 락 해제(없으면 no-op). */
+    releaseSingleInstanceLock(): Promise<boolean>;
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
     focus(): Promise<boolean>;
     /** 모든 윈도우 hide (macOS Cmd+H 동등). */
