@@ -771,6 +771,85 @@ pub mod windows {
         invoke("__core__", &req)
     }
 
+    // ── Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티) ──
+    // 대부분 `{"cmd":"X","windowId":N}` 동형 → window_op 로 DRY. 응답은 raw JSON.
+    fn window_op_request(cmd: &str, window_id: u32) -> String {
+        format!(r#"{{"cmd":"{}","windowId":{}}}"#, cmd, window_id)
+    }
+    fn set_visible_request(window_id: u32, visible: bool) -> String {
+        format!(r#"{{"cmd":"set_visible","windowId":{},"visible":{}}}"#, window_id, visible)
+    }
+    fn set_fullscreen_request(window_id: u32, flag: bool) -> String {
+        format!(r#"{{"cmd":"set_fullscreen","windowId":{},"flag":{}}}"#, window_id, flag)
+    }
+    fn set_always_on_top_request(window_id: u32, on_top: bool) -> String {
+        format!(r#"{{"cmd":"set_always_on_top","windowId":{},"onTop":{}}}"#, window_id, on_top)
+    }
+
+    pub fn minimize(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("minimize", window_id))
+    }
+    pub fn maximize(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("maximize", window_id))
+    }
+    pub fn unmaximize(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("unmaximize", window_id))
+    }
+    pub fn restore(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("restore_window", window_id))
+    }
+    pub fn close(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("destroy_window", window_id))
+    }
+    pub fn show(window_id: u32) -> Option<String> {
+        invoke("__core__", &set_visible_request(window_id, true))
+    }
+    pub fn hide(window_id: u32) -> Option<String> {
+        invoke("__core__", &set_visible_request(window_id, false))
+    }
+    pub fn set_fullscreen(window_id: u32, flag: bool) -> Option<String> {
+        invoke("__core__", &set_fullscreen_request(window_id, flag))
+    }
+    pub fn is_minimized(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_minimized", window_id))
+    }
+    pub fn is_maximized(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_maximized", window_id))
+    }
+    pub fn is_fullscreen(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_fullscreen", window_id))
+    }
+    pub fn is_normal(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_normal", window_id))
+    }
+    pub fn focus(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("focus", window_id))
+    }
+    pub fn blur(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("blur", window_id))
+    }
+    pub fn is_focused(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_focused", window_id))
+    }
+    pub fn is_visible(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_visible", window_id))
+    }
+    pub fn get_bounds(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("get_bounds", window_id))
+    }
+    pub fn set_always_on_top(window_id: u32, on_top: bool) -> Option<String> {
+        invoke("__core__", &set_always_on_top_request(window_id, on_top))
+    }
+    pub fn is_always_on_top(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_always_on_top", window_id))
+    }
+    pub fn get_all_windows() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"get_all_windows"}"#)
+    }
+    pub fn get_focused_window() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"get_focused_window"}"#)
+    }
+
     #[derive(Default, Clone, Copy)]
     pub struct ViewBoundsArgs {
         pub x: i32,
@@ -1047,6 +1126,64 @@ pub mod windows {
         pub fn set_bounds(&self, b: SetBoundsArgs) -> Option<String> {
             set_bounds(self.id, b)
         }
+        // Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티).
+        pub fn minimize(&self) -> Option<String> {
+            minimize(self.id)
+        }
+        pub fn maximize(&self) -> Option<String> {
+            maximize(self.id)
+        }
+        pub fn unmaximize(&self) -> Option<String> {
+            unmaximize(self.id)
+        }
+        pub fn restore(&self) -> Option<String> {
+            restore(self.id)
+        }
+        pub fn close(&self) -> Option<String> {
+            close(self.id)
+        }
+        pub fn show(&self) -> Option<String> {
+            show(self.id)
+        }
+        pub fn hide(&self) -> Option<String> {
+            hide(self.id)
+        }
+        pub fn set_fullscreen(&self, flag: bool) -> Option<String> {
+            set_fullscreen(self.id, flag)
+        }
+        pub fn is_minimized(&self) -> Option<String> {
+            is_minimized(self.id)
+        }
+        pub fn is_maximized(&self) -> Option<String> {
+            is_maximized(self.id)
+        }
+        pub fn is_fullscreen(&self) -> Option<String> {
+            is_fullscreen(self.id)
+        }
+        pub fn is_normal(&self) -> Option<String> {
+            is_normal(self.id)
+        }
+        pub fn focus(&self) -> Option<String> {
+            focus(self.id)
+        }
+        pub fn blur(&self) -> Option<String> {
+            blur(self.id)
+        }
+        pub fn is_focused(&self) -> Option<String> {
+            is_focused(self.id)
+        }
+        pub fn is_visible(&self) -> Option<String> {
+            is_visible(self.id)
+        }
+        pub fn get_bounds(&self) -> Option<String> {
+            get_bounds(self.id)
+        }
+        pub fn set_always_on_top(&self, on_top: bool) -> Option<String> {
+            set_always_on_top(self.id, on_top)
+        }
+        pub fn is_always_on_top(&self) -> Option<String> {
+            is_always_on_top(self.id)
+        }
         pub fn create_view(&self, mut opts: CreateViewOptions<'_>) -> Option<String> {
             opts.host_id = self.id;
             create_view(opts)
@@ -1079,9 +1216,21 @@ pub mod windows {
         use super::{
             add_child_view_request, create_view_request, destroy_view_request, escape_json,
             get_child_views_request, parse_window_id, remove_child_view_request,
-            set_top_view_request, set_view_bounds_request, set_view_visible_request,
+            set_always_on_top_request, set_fullscreen_request, set_top_view_request,
+            set_view_bounds_request, set_view_visible_request, set_visible_request, window_op_request,
             BrowserWindow, CreateViewOptions, ViewBoundsArgs,
         };
+
+        #[test]
+        fn window_state_request_shapes() {
+            assert_eq!(window_op_request("minimize", 3), r#"{"cmd":"minimize","windowId":3}"#);
+            assert_eq!(window_op_request("is_visible", 7), r#"{"cmd":"is_visible","windowId":7}"#);
+            assert_eq!(window_op_request("get_bounds", 1), r#"{"cmd":"get_bounds","windowId":1}"#);
+            assert_eq!(set_visible_request(2, true), r#"{"cmd":"set_visible","windowId":2,"visible":true}"#);
+            assert_eq!(set_visible_request(2, false), r#"{"cmd":"set_visible","windowId":2,"visible":false}"#);
+            assert_eq!(set_fullscreen_request(4, true), r#"{"cmd":"set_fullscreen","windowId":4,"flag":true}"#);
+            assert_eq!(set_always_on_top_request(5, true), r#"{"cmd":"set_always_on_top","windowId":5,"onTop":true}"#);
+        }
 
         #[test]
         fn parse_window_id_extracts() {
