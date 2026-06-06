@@ -837,6 +837,20 @@ pub mod windows {
     pub fn get_bounds(window_id: u32) -> Option<String> {
         invoke("__core__", &window_op_request("get_bounds", window_id))
     }
+    /// 콘텐츠 영역(프레임/타이틀바 제외) raw JSON. `{"x","y","width","height","ok"}`.
+    pub fn get_content_bounds(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("get_content_bounds", window_id))
+    }
+    /// 콘텐츠 영역을 지정 사각형으로 (Electron `setContentBounds`).
+    pub fn set_content_bounds(window_id: u32, b: SetBoundsArgs) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_content_bounds","windowId":{},"x":{},"y":{},"width":{},"height":{}}}"#,
+                window_id, b.x, b.y, b.width, b.height,
+            ),
+        )
+    }
     pub fn set_always_on_top(window_id: u32, on_top: bool) -> Option<String> {
         invoke("__core__", &set_always_on_top_request(window_id, on_top))
     }
@@ -1177,6 +1191,12 @@ pub mod windows {
         }
         pub fn get_bounds(&self) -> Option<String> {
             get_bounds(self.id)
+        }
+        pub fn get_content_bounds(&self) -> Option<String> {
+            get_content_bounds(self.id)
+        }
+        pub fn set_content_bounds(&self, b: SetBoundsArgs) -> Option<String> {
+            set_content_bounds(self.id, b)
         }
         pub fn set_always_on_top(&self, on_top: bool) -> Option<String> {
             set_always_on_top(self.id, on_top)

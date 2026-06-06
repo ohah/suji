@@ -544,6 +544,19 @@ export const windows = {
     const b = await windows.getBounds(windowId);
     return [b.x, b.y];
   },
+  /** Electron BrowserWindow.getContentBounds() — 콘텐츠 영역(프레임/타이틀바 제외). */
+  getContentBounds(windowId: number): Promise<BoundsResponse> {
+    return coreCall<BoundsResponse>({ cmd: "get_content_bounds", windowId });
+  },
+  /** Electron BrowserWindow.setContentBounds() — 콘텐츠 영역을 지정 사각형으로. */
+  setContentBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_content_bounds", windowId, ...bounds });
+  },
+  /** Electron BrowserWindow.getContentSize() — [width, height]. getContentBounds 에서 파생. */
+  async getContentSize(windowId: number): Promise<[number, number]> {
+    const b = await windows.getContentBounds(windowId);
+    return [b.width, b.height];
+  },
   /** Electron BrowserWindow.blur() — 창 포커스 해제. */
   blur(windowId: number): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "blur", windowId });
@@ -868,6 +881,15 @@ export class BrowserWindow {
   }
   getPosition() {
     return windows.getPosition(this.#id);
+  }
+  getContentBounds() {
+    return windows.getContentBounds(this.#id);
+  }
+  setContentBounds(bounds: SetBoundsArgs) {
+    return windows.setContentBounds(this.#id, bounds);
+  }
+  getContentSize() {
+    return windows.getContentSize(this.#id);
   }
   blur() {
     return windows.blur(this.#id);

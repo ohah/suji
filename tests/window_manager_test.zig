@@ -265,6 +265,24 @@ test "getBounds returns native-reported bounds (vtable wiring)" {
     try std.testing.expectError(error.WindowNotFound, wm.getBounds(99999));
 }
 
+test "getContentBounds returns native content bounds (vtable wiring)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "C" });
+    // TestNative.getContentBounds 는 마지막 setContentBounds 값을 반환 → 왕복 검증.
+    try wm.setContentBounds(id, .{ .x = 10, .y = 20, .width = 300, .height = 200 });
+    const b = try wm.getContentBounds(id);
+    try std.testing.expectEqual(@as(i32, 10), b.x);
+    try std.testing.expectEqual(@as(i32, 20), b.y);
+    try std.testing.expectEqual(@as(u32, 300), b.width);
+    try std.testing.expectEqual(@as(u32, 200), b.height);
+
+    try std.testing.expectError(error.WindowNotFound, wm.getContentBounds(99999));
+    try std.testing.expectError(error.WindowNotFound, wm.setContentBounds(99999, .{}));
+}
+
 test "blur/isVisible/isFocused/alwaysOnTop native vtable wiring" {
     var native = TestNative{};
     var wm = newManager(&native);

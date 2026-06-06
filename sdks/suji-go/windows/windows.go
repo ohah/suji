@@ -387,6 +387,19 @@ func IsVisible(windowID uint32) string {
 func GetBounds(windowID uint32) string {
 	return suji.Invoke("__core__", windowOpRequest("get_bounds", windowID))
 }
+
+// GetContentBounds returns the content area (excl. frame/title bar). raw JSON: `{"x","y","width","height","ok"}`.
+func GetContentBounds(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("get_content_bounds", windowID))
+}
+
+// SetContentBounds sets the content area to the given rectangle (Electron setContentBounds).
+func SetContentBounds(windowID uint32, b SetBoundsArgs) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"set_content_bounds","windowId":%d,"x":%d,"y":%d,"width":%d,"height":%d}`,
+		windowID, b.X, b.Y, b.Width, b.Height,
+	))
+}
 func SetAlwaysOnTop(windowID uint32, onTop bool) string {
 	return suji.Invoke("__core__", setAlwaysOnTopRequest(windowID, onTop))
 }
@@ -485,22 +498,24 @@ func (w *BrowserWindow) SetViewVisible(viewID uint32, visible bool) string {
 func (w *BrowserWindow) GetChildViews() string { return GetChildViews(w.ID) }
 
 // Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티).
-func (w *BrowserWindow) Minimize() string                 { return Minimize(w.ID) }
-func (w *BrowserWindow) Maximize() string                 { return Maximize(w.ID) }
-func (w *BrowserWindow) Unmaximize() string               { return Unmaximize(w.ID) }
-func (w *BrowserWindow) Restore() string                  { return Restore(w.ID) }
-func (w *BrowserWindow) Close() string                    { return Close(w.ID) }
-func (w *BrowserWindow) Show() string                     { return Show(w.ID) }
-func (w *BrowserWindow) Hide() string                     { return Hide(w.ID) }
-func (w *BrowserWindow) SetFullScreen(flag bool) string   { return SetFullScreen(w.ID, flag) }
-func (w *BrowserWindow) IsMinimized() string              { return IsMinimized(w.ID) }
-func (w *BrowserWindow) IsMaximized() string              { return IsMaximized(w.ID) }
-func (w *BrowserWindow) IsFullScreen() string             { return IsFullScreen(w.ID) }
-func (w *BrowserWindow) IsNormal() string                 { return IsNormal(w.ID) }
-func (w *BrowserWindow) Focus() string                    { return Focus(w.ID) }
-func (w *BrowserWindow) Blur() string                     { return Blur(w.ID) }
-func (w *BrowserWindow) IsFocused() string                { return IsFocused(w.ID) }
-func (w *BrowserWindow) IsVisible() string                { return IsVisible(w.ID) }
-func (w *BrowserWindow) GetBounds() string                { return GetBounds(w.ID) }
-func (w *BrowserWindow) SetAlwaysOnTop(onTop bool) string { return SetAlwaysOnTop(w.ID, onTop) }
-func (w *BrowserWindow) IsAlwaysOnTop() string            { return IsAlwaysOnTop(w.ID) }
+func (w *BrowserWindow) Minimize() string                        { return Minimize(w.ID) }
+func (w *BrowserWindow) Maximize() string                        { return Maximize(w.ID) }
+func (w *BrowserWindow) Unmaximize() string                      { return Unmaximize(w.ID) }
+func (w *BrowserWindow) Restore() string                         { return Restore(w.ID) }
+func (w *BrowserWindow) Close() string                           { return Close(w.ID) }
+func (w *BrowserWindow) Show() string                            { return Show(w.ID) }
+func (w *BrowserWindow) Hide() string                            { return Hide(w.ID) }
+func (w *BrowserWindow) SetFullScreen(flag bool) string          { return SetFullScreen(w.ID, flag) }
+func (w *BrowserWindow) IsMinimized() string                     { return IsMinimized(w.ID) }
+func (w *BrowserWindow) IsMaximized() string                     { return IsMaximized(w.ID) }
+func (w *BrowserWindow) IsFullScreen() string                    { return IsFullScreen(w.ID) }
+func (w *BrowserWindow) IsNormal() string                        { return IsNormal(w.ID) }
+func (w *BrowserWindow) Focus() string                           { return Focus(w.ID) }
+func (w *BrowserWindow) Blur() string                            { return Blur(w.ID) }
+func (w *BrowserWindow) IsFocused() string                       { return IsFocused(w.ID) }
+func (w *BrowserWindow) IsVisible() string                       { return IsVisible(w.ID) }
+func (w *BrowserWindow) GetBounds() string                       { return GetBounds(w.ID) }
+func (w *BrowserWindow) GetContentBounds() string                { return GetContentBounds(w.ID) }
+func (w *BrowserWindow) SetContentBounds(b SetBoundsArgs) string { return SetContentBounds(w.ID, b) }
+func (w *BrowserWindow) SetAlwaysOnTop(onTop bool) string        { return SetAlwaysOnTop(w.ID, onTop) }
+func (w *BrowserWindow) IsAlwaysOnTop() string                   { return IsAlwaysOnTop(w.ID) }

@@ -232,6 +232,8 @@ pub const Native = struct {
         set_title: *const fn (ctx: ?*anyopaque, handle: u64, title: []const u8) void,
         set_bounds: *const fn (ctx: ?*anyopaque, handle: u64, bounds: Bounds) void,
         get_bounds: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
+        set_content_bounds: *const fn (ctx: ?*anyopaque, handle: u64, bounds: Bounds) void,
+        get_content_bounds: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
         set_visible: *const fn (ctx: ?*anyopaque, handle: u64, visible: bool) void,
         focus: *const fn (ctx: ?*anyopaque, handle: u64) void,
         // Electron BrowserWindow blur/포커스·가시성·always-on-top 게터/세터.
@@ -313,6 +315,12 @@ pub const Native = struct {
     }
     pub fn getBounds(self: Native, handle: u64) Bounds {
         return self.vtable.get_bounds(self.ctx, handle);
+    }
+    pub fn setContentBounds(self: Native, handle: u64, bounds: Bounds) void {
+        self.vtable.set_content_bounds(self.ctx, handle, bounds);
+    }
+    pub fn getContentBounds(self: Native, handle: u64) Bounds {
+        return self.vtable.get_content_bounds(self.ctx, handle);
     }
     pub fn setVisible(self: Native, handle: u64, visible: bool) void {
         self.vtable.set_visible(self.ctx, handle, visible);
@@ -1337,6 +1345,22 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.getBounds(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.getContentBounds() — 콘텐츠 영역(프레임/타이틀바 제외).
+    pub fn getContentBounds(self: *WindowManager, id: u32) Error!Bounds {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.getContentBounds(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.setContentBounds() — 콘텐츠 영역을 지정 사각형으로.
+    pub fn setContentBounds(self: *WindowManager, id: u32, bounds: Bounds) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setContentBounds(win.native_handle, bounds);
     }
 
     pub fn setOpacity(self: *WindowManager, id: u32, opacity: f64) Error!void {
