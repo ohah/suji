@@ -1202,6 +1202,12 @@ export const powerMonitor = {
     });
     return r.state;
   },
+
+  /** Electron `powerMonitor.isOnBatteryPower()` — 배터리 전원 여부(정보 없으면 false). */
+  async isOnBatteryPower(): Promise<boolean> {
+    const r = await invoke<{ onBattery: boolean }>('__core__', { cmd: 'power_monitor_is_on_battery' });
+    return r.onBattery === true;
+  },
 };
 
 export const shell = {
@@ -1267,6 +1273,12 @@ export const nativeTheme = {
   async setThemeSource(source: ThemeSource): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'native_theme_set_source', source });
     return r.success === true;
+  },
+
+  /** Electron `nativeTheme.themeSource` (getter) — 마지막 설정값(기본 "system"). */
+  async getThemeSource(): Promise<ThemeSource> {
+    const r = await invoke<{ source: ThemeSource }>('__core__', { cmd: 'native_theme_get_source' });
+    return r.source;
   },
 };
 
@@ -1375,6 +1387,12 @@ export const notification = {
 
   async close(notificationId: string): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'notification_close', notificationId });
+    return r.success === true;
+  },
+
+  /** Electron `Notification` 전체 제거 — 표시/대기 모든 알림(macOS 실동작). */
+  async removeAll(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'notification_remove_all' });
     return r.success === true;
   },
 };

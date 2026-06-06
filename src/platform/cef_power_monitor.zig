@@ -44,6 +44,54 @@ const win_idle = if (is_windows) struct {
     extern "kernel32" fn GetTickCount() callconv(.winapi) u32;
 } else struct {};
 
+const win_power = if (is_windows) struct {
+    const w = std.os.windows;
+    const SYSTEM_POWER_STATUS = extern struct {
+        ACLineStatus: u8,
+        BatteryFlag: u8,
+        BatteryLifePercent: u8,
+        SystemStatusFlag: u8,
+        BatteryLifeTime: u32,
+        BatteryFullLifeTime: u32,
+    };
+    extern "kernel32" fn GetSystemPowerStatus(lpSystemPowerStatus: *SYSTEM_POWER_STATUS) callconv(.winapi) w.BOOL;
+} else struct {};
+
+// macOS: IOKit IOPS (power_monitor.m). 1=배터리 전원.
+extern "c" fn suji_power_monitor_is_on_battery() i32;
+
+// Linux: /sys/class/power_supply/<AC>/online == "0" → AC offline → 배터리. io 불요라
+// std.posix 직접 사용. AC 어댑터 미발견 시 null(데스크탑 등).
+fn linuxAcOnline() ?bool {
+    if (!comptime is_linux) return null;
+    const candidates = [_][:0]const u8{
+        "/sys/class/power_supply/AC/online",
+        "/sys/class/power_supply/AC0/online",
+        "/sys/class/power_supply/ACAD/online",
+        "/sys/class/power_supply/ADP1/online",
+    };
+    for (candidates) |path| {
+        const fd = std.posix.openZ(path, .{}, 0) catch continue;
+        defer std.posix.close(fd);
+        var buf: [4]u8 = undefined;
+        const n = std.posix.read(fd, &buf) catch continue;
+        if (n >= 1) return buf[0] == '0';
+    }
+    return null;
+}
+
+/// Electron powerMonitor.isOnBatteryPower() — 현재 배터리 전원 여부.
+pub fn powerMonitorIsOnBattery() bool {
+    if (comptime is_macos) return suji_power_monitor_is_on_battery() != 0;
+    if (comptime is_windows) {
+        var st: win_power.SYSTEM_POWER_STATUS = undefined;
+        if (!win_power.GetSystemPowerStatus(&st).toBool()) return false;
+        return st.ACLineStatus == 0; // 0=offline(배터리), 1=online(AC), 255=unknown
+    }
+    if (comptime is_linux) return linuxAcOnline() orelse false;
+    return false;
+}
+
 /// 시스템 유휴 시간 (초). 활성 입력이 발생할 때마다 0으로 리셋.
 pub fn powerMonitorIdleSeconds() f64 {
     if (comptime is_linux) {

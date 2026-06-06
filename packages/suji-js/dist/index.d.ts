@@ -504,6 +504,9 @@ export declare const powerMonitor: {
     /** 화면 잠금이면 "locked", 유휴 시간 ≥ threshold(초)면 "idle", 아니면 "active".
      *  Electron `powerMonitor.getSystemIdleState(threshold)` 동등. */
     getSystemIdleState(threshold: number): Promise<"active" | "idle" | "locked">;
+    /** Electron `powerMonitor.isOnBatteryPower()` — 현재 배터리 전원 여부.
+     *  macOS IOKit / Windows GetSystemPowerStatus / Linux /sys. 정보 없으면 false. */
+    isOnBatteryPower(): Promise<boolean>;
 };
 export declare const clipboard: {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
@@ -556,6 +559,8 @@ export declare const notification: {
         success: boolean;
     }>;
     close(notificationId: string): Promise<boolean>;
+    /** Electron `Notification` 전체 제거 — 표시/대기 모든 알림(macOS 실동작). */
+    removeAll(): Promise<boolean>;
 };
 export interface TrayMenuSeparator {
     type: "separator";
@@ -679,6 +684,8 @@ export declare const nativeTheme: {
      *  system은 OS 따름 (NSApp.appearance = nil), light/dark는 NSAppearance 강제.
      *  잘못된 값은 false. */
     setThemeSource(source: ThemeSource): Promise<boolean>;
+    /** Electron `nativeTheme.themeSource` (getter) — 마지막 설정값(기본 "system"). */
+    getThemeSource(): Promise<ThemeSource>;
 };
 export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
 export interface FsStat {

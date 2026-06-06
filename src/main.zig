@@ -1304,6 +1304,9 @@ var g_crash_reporter_upload_to_server: bool = true;
 var g_crash_params: [MAX_CRASH_PARAMS]CrashParam = [_]CrashParam{.{}} ** MAX_CRASH_PARAMS;
 var g_crash_param_count: usize = 0;
 var g_app_badge_count: u32 = 0;
+// nativeTheme.themeSource getter 용 — set_source 성공 시 갱신(정적 리터럴만 저장).
+// Electron 동등: setter 가 설정한 마지막 값, 미설정 시 "system".
+var g_theme_source: []const u8 = "system";
 
 fn crashParamIndex(key: []const u8) ?usize {
     for (g_crash_params[0..g_crash_param_count], 0..) |p, i| {
@@ -1953,6 +1956,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{seconds},
         ) catch null;
     }
+    // Electron powerMonitor.isOnBatteryPower() — macOS IOKit / Windows GetSystemPowerStatus
+    // / Linux /sys (AC online). 정보 없으면 false.
+    if (std.mem.eql(u8, cmd, "power_monitor_is_on_battery")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_is_on_battery\",\"onBattery\":{}}}",
+            .{cef.powerMonitorIsOnBattery()},
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "power_monitor_get_idle_state")) {
         const threshold = util.extractJsonInt(req_clean, "threshold") orelse 0;
         const seconds = cef.powerMonitorIdleSeconds();
@@ -2071,10 +2083,27 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "native_theme_set_source")) {
         const source = util.extractJsonString(req_clean, "source") orelse "system";
         const ok = cef.nativeThemeSetSource(source);
+        if (ok) {
+            // 정적 리터럴만 저장(req_clean 은 일시적).
+            g_theme_source = if (std.mem.eql(u8, source, "dark"))
+                "dark"
+            else if (std.mem.eql(u8, source, "light"))
+                "light"
+            else
+                "system";
+        }
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"native_theme_set_source\",\"success\":{}}}",
             .{ok},
+        ) catch null;
+    }
+    // Electron nativeTheme.themeSource (getter) — setter 가 설정한 값(기본 "system").
+    if (std.mem.eql(u8, cmd, "native_theme_get_source")) {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"native_theme_get_source\",\"source\":\"{s}\"}}",
+            .{g_theme_source},
         ) catch null;
     }
     if (std.mem.eql(u8, cmd, "screen_get_cursor_point")) {
@@ -2821,6 +2850,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = cef.notificationClose(id_buf[0..id_n]);
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_close\",\"success\":{}}}", .{ok}) catch return null;
         return result;
+    }
+    // Electron Notification.removeAll() — 표시/대기 모든 알림 제거(macOS 실동작).
+    if (std.mem.eql(u8, cmd, "notification_remove_all")) {
+        const ok = cef.notificationRemoveAll();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_remove_all\",\"success\":{}}}", .{ok}) catch null;
     }
 
     if (std.mem.eql(u8, cmd, "core_info")) {
