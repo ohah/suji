@@ -99,7 +99,7 @@ test "번들 프론트엔드 템플릿: 계약 + suji-cli 미러 drift 가드" {
     }
 
     // 루트 백엔드 템플릿 미러도 동일 가드 (init.zig @embedFile 무가드였음).
-    inline for (.{ "gitignore", "zig_app.zig", "rust_cargo.toml", "rust_lib.rs", "go_main.go", "node_package.json", "node_main.js", "lua_main.lua", "python_main.py", ".github/workflows/suji.yml" }) |rf| {
+    inline for (.{ "gitignore", "zig_app.zig", "rust_cargo.toml", "rust_lib.rs", "go_main.go", "node_package.json", "node_main.js", "lua_main.lua", "python_main.py", "multi_lua_main.lua", "multi_python_main.py", ".github/workflows/suji.yml" }) |rf| {
         const s = try slurp(a, "src/templates/" ++ rf);
         defer a.free(s);
         const m = try slurp(a, "packages/suji-cli/templates/" ++ rf);

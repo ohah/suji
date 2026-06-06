@@ -138,7 +138,13 @@ test("@suji/cli scaffolds multi backend rsbuild project", async () => {
   expect(suji.frontend.dev_command).toBe("pnpm run dev");
   expect(suji.frontend.build_command).toBe("pnpm run build");
   expect(suji.frontend.dist_dir).toBe("frontend/dist");
-  expect(suji.backends.map((b: any) => b.lang)).toEqual(["zig", "rust", "go"]);
+  expect(suji.backends.map((b: any) => b.lang)).toEqual(["zig", "rust", "go", "lua", "python"]);
+  // lua/python 임베드 런타임은 router 자동 등록이라 zig 의 ping/greet 와 충돌하지
+  // 않도록 네임스페이스 채널 템플릿이 스캐폴드돼야 한다(중복 등록 → auto-routing 차단 방지).
+  const luaMain = await readFile(path.join(projectDir, "backends", "lua", "main.lua"), "utf8");
+  expect(luaMain).toContain('suji.handle("lua-ping"');
+  const pyMain = await readFile(path.join(projectDir, "backends", "python", "main.py"), "utf8");
+  expect(pyMain).toContain('suji.handle("python-ping"');
   await expectAgentDocs(projectDir, "(multi)");
   await buildFrontend(projectDir);
 });
