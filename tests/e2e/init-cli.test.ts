@@ -171,7 +171,7 @@ test("@suji/cli supports VoidZero Vite+ runner aliases", async () => {
   await buildFrontend(projectDir);
 });
 
-test("@suji/cli scaffolds node and lua backend entries without root package conflicts", async () => {
+test("@suji/cli scaffolds node, lua, and python backend entries without root package conflicts", async () => {
   const dir = await tempDir();
 
   const nodeInit = await run("node", [
@@ -204,6 +204,19 @@ test("@suji/cli scaffolds node and lua backend entries without root package conf
   const luaSuji = await readJson<any>(path.join(dir, "app-lua", "suji.json"));
   expect(luaSuji.backend).toEqual({ lang: "lua", entry: "backends/lua" });
   expect(await readFile(path.join(dir, "app-lua", "backends", "lua", "main.lua"), "utf8")).toContain("suji.handle");
+
+  const pythonInit = await run("node", [
+    CLI_BIN,
+    "init",
+    "app-python",
+    "--backend=python",
+    "--frontend=vanilla",
+  ], dir);
+  expectClean(pythonInit, "@suji/cli python init");
+
+  const pythonSuji = await readJson<any>(path.join(dir, "app-python", "suji.json"));
+  expect(pythonSuji.backend).toEqual({ lang: "python", entry: "backends/python" });
+  expect(await readFile(path.join(dir, "app-python", "backends", "python", "main.py"), "utf8")).toContain("suji.handle");
 });
 
 const frontendCases = [
