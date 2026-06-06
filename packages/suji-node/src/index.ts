@@ -1605,6 +1605,37 @@ export interface Display {
   scaleFactor: number;
 }
 
+/**
+ * rect 와 겹침 면적이 최대인 Display 선택 (Electron `screen.getDisplayMatching` 로직).
+ * 겹치는 display 가 없으면 rect 중심에 가장 가까운 display. 빈 배열이면 null.
+ * 순수 함수 — getAllDisplays 결과 + rect 만으로 계산(테스트용 export, suji-js 동형).
+ */
+export function pickDisplayMatching(
+  displays: Display[],
+  rect: { x: number; y: number; width: number; height: number },
+): Display | null {
+  if (displays.length === 0) return null;
+  const overlapArea = (d: Display): number => {
+    const iw = Math.min(d.x + d.width, rect.x + rect.width) - Math.max(d.x, rect.x);
+    const ih = Math.min(d.y + d.height, rect.y + rect.height) - Math.max(d.y, rect.y);
+    return iw > 0 && ih > 0 ? iw * ih : 0;
+  };
+  let best = displays[0];
+  let bestArea = overlapArea(displays[0]);
+  for (const d of displays) {
+    const a = overlapArea(d);
+    if (a > bestArea) {
+      best = d;
+      bestArea = a;
+    }
+  }
+  if (bestArea > 0) return best;
+  const cx = rect.x + rect.width / 2;
+  const cy = rect.y + rect.height / 2;
+  const dist2 = (d: Display): number => (d.x + d.width / 2 - cx) ** 2 + (d.y + d.height / 2 - cy) ** 2;
+  return displays.reduce((b, d) => (dist2(d) < dist2(b) ? d : b), displays[0]);
+}
+
 export const screen = {
   /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
   async getAllDisplays(): Promise<Display[]> {
@@ -1628,6 +1659,20 @@ export const screen = {
   async getPrimaryDisplay(): Promise<Display | null> {
     const all = await this.getAllDisplays();
     return all.find((d) => d.isPrimary) ?? all[0] ?? null;
+  },
+
+  /**
+   * rect(보통 창 bounds)와 가장 많이 겹치는 Display (Electron `screen.getDisplayMatching`).
+   * 듀얼/멀티모니터에서 "이 창이 있는 모니터" 판정 — 겹침 없으면 중심 최근접.
+   * getAllDisplays 에서 파생(순수 로직은 pickDisplayMatching).
+   */
+  async getDisplayMatching(rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<Display | null> {
+    return pickDisplayMatching(await this.getAllDisplays(), rect);
   },
 };
 
