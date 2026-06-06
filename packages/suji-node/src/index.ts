@@ -498,6 +498,14 @@ export interface IsNormalResponse extends WindowOpResponse {
   /** minimized/maximized/fullscreen 모두 아닌 일반 상태 */
   normal: boolean;
 }
+export interface BoundsResponse extends WindowOpResponse {
+  cmd: 'get_bounds';
+  /** 화면 좌표(top-left 원점) */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export interface SetBoundsArgs {
   x?: number;
@@ -712,6 +720,20 @@ export const windows = {
   /** Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 모두 아님. */
   isNormal(windowId: number): Promise<IsNormalResponse> {
     return invoke<IsNormalResponse>('__core__', { cmd: 'is_normal', windowId });
+  },
+  /** Electron BrowserWindow.getBounds() — {x,y,width,height} (top-left 원점). */
+  getBounds(windowId: number): Promise<BoundsResponse> {
+    return invoke<BoundsResponse>('__core__', { cmd: 'get_bounds', windowId });
+  },
+  /** Electron BrowserWindow.getSize() — [width, height]. getBounds 에서 파생. */
+  async getSize(windowId: number): Promise<[number, number]> {
+    const b = await windows.getBounds(windowId);
+    return [b.width, b.height];
+  },
+  /** Electron BrowserWindow.getPosition() — [x, y]. getBounds 에서 파생. */
+  async getPosition(windowId: number): Promise<[number, number]> {
+    const b = await windows.getBounds(windowId);
+    return [b.x, b.y];
   },
 
   undo(windowId: number): Promise<WindowOpResponse> {
@@ -945,6 +967,15 @@ export class BrowserWindow {
   }
   isNormal() {
     return windows.isNormal(this.#id);
+  }
+  getBounds() {
+    return windows.getBounds(this.#id);
+  }
+  getSize() {
+    return windows.getSize(this.#id);
+  }
+  getPosition() {
+    return windows.getPosition(this.#id);
   }
   undo() {
     return windows.undo(this.#id);

@@ -247,6 +247,20 @@ export const windows = {
     isNormal(windowId) {
         return coreCall({ cmd: "is_normal", windowId });
     },
+    /** Electron BrowserWindow.getBounds() — {x,y,width,height} (top-left 원점). */
+    getBounds(windowId) {
+        return coreCall({ cmd: "get_bounds", windowId });
+    },
+    /** Electron BrowserWindow.getSize() — [width, height]. getBounds 에서 파생. */
+    async getSize(windowId) {
+        const b = await windows.getBounds(windowId);
+        return [b.width, b.height];
+    },
+    /** Electron BrowserWindow.getPosition() — [x, y]. getBounds 에서 파생. */
+    async getPosition(windowId) {
+        const b = await windows.getBounds(windowId);
+        return [b.x, b.y];
+    },
     // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
     undo(windowId) {
         return coreCall({ cmd: "undo", windowId });
@@ -492,6 +506,15 @@ export class BrowserWindow {
     }
     isNormal() {
         return windows.isNormal(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    getBounds() {
+        return windows.getBounds(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    getSize() {
+        return windows.getSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    getPosition() {
+        return windows.getPosition(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     undo() {
         return windows.undo(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));

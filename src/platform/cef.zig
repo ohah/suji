@@ -324,3 +324,4 @@ pub const applyBackgroundColor = cef_public_api.applyBackgroundColor;
 pub const closeMacWindow = cef_public_api.closeMacWindow;
 pub const setMacWindowTitle = cef_public_api.setMacWindowTitle;
 pub const setMacWindowBounds = cef_public_api.setMacWindowBounds;
+pub const getMacWindowBounds = cef_public_api.getMacWindowBounds;

@@ -124,6 +124,7 @@ pub const TestNative = struct {
         .destroy_window = destroyWindow,
         .set_title = setTitle,
         .set_bounds = setBounds,
+        .get_bounds = getBounds,
         .set_visible = setVisible,
         .focus = focus,
         .load_url = loadUrl,
@@ -220,6 +221,10 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.set_bounds_calls += 1;
         self.last_bounds = bounds;
+    }
+
+    fn getBounds(ctx: ?*anyopaque, _: u64) window.Bounds {
+        return fromCtx(ctx).last_bounds orelse .{};
     }
 
     fn setVisible(ctx: ?*anyopaque, _: u64, _: bool) void {

@@ -14,6 +14,7 @@ pub const vtable: window_mod.Native.VTable = .{
     .destroy_window = cef_window_runtime.destroyWindow,
     .set_title = cef_window_runtime.setTitle,
     .set_bounds = cef_window_runtime.setBounds,
+    .get_bounds = cef_window_runtime.getBounds,
     .set_visible = cef_window_runtime.setVisible,
     .focus = cef_window_runtime.focus,
     .load_url = cef_web_contents.loadUrl,

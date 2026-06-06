@@ -385,3 +385,26 @@ pub fn setMacWindowBounds(ns_window: *anyopaque, bounds: window_mod.Bounds) void
     const setFrameFn: *const fn (?*anyopaque, ?*anyopaque, NSRect, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     setFrameFn(ns_window, @ptrCast(setFrameSel), rect, 1);
 }
+
+// setMacWindowBounds 의 역 — NSWindow.frame 을 읽어 top-left 원점 Bounds 로 변환.
+// Cocoa 는 bottom-left 원점이라 y 를 screen.height - frame.y - frame.height 로 뒤집는다
+// (setMacWindowBounds 의 cocoa_y 계산을 역으로).
+pub fn getMacWindowBounds(ns_window: *anyopaque) window_mod.Bounds {
+    const frameFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+    const frame = frameFn(ns_window, @ptrCast(objc.sel_registerName("frame")));
+
+    const top_y: f64 = blk: {
+        const NSScreen = cef.getClass("NSScreen") orelse break :blk frame.y;
+        const mainScreen = cef.msgSend(NSScreen, "mainScreen") orelse break :blk frame.y;
+        const sfFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+        const screen_frame = sfFn(mainScreen, @ptrCast(objc.sel_registerName("frame")));
+        break :blk screen_frame.height - frame.y - frame.height;
+    };
+
+    return .{
+        .x = @intFromFloat(@round(frame.x)),
+        .y = @intFromFloat(@round(top_y)),
+        .width = @intFromFloat(@max(@round(frame.width), 0)),
+        .height = @intFromFloat(@max(@round(frame.height), 0)),
+    };
+}
