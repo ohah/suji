@@ -19,3 +19,9 @@ func GetSystemIdleTime() string {
 func GetSystemIdleState(threshold int64) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"power_monitor_get_idle_state","threshold":%d}`, threshold))
 }
+
+// IsOnBatteryPower reports whether the system is on battery power.
+// Response: `{"onBattery":bool}` (정보 없으면 false). (Electron powerMonitor.isOnBatteryPower)
+func IsOnBatteryPower() string {
+	return suji.Invoke("__core__", `{"cmd":"power_monitor_is_on_battery"}`)
+}

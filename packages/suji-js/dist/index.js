@@ -621,6 +621,12 @@ export const powerMonitor = {
         });
         return r.state;
     },
+    /** Electron `powerMonitor.isOnBatteryPower()` — 현재 배터리 전원 여부.
+     *  macOS IOKit / Windows GetSystemPowerStatus / Linux /sys. 정보 없으면 false. */
+    async isOnBatteryPower() {
+        const r = await coreCall({ cmd: "power_monitor_is_on_battery" });
+        return r.onBattery === true;
+    },
 };
 export const clipboard = {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
@@ -721,6 +727,11 @@ export const notification = {
     },
     async close(notificationId) {
         const r = await coreCall({ cmd: "notification_close", notificationId });
+        return r.success === true;
+    },
+    /** Electron `Notification` 전체 제거 — 표시/대기 모든 알림(macOS 실동작). */
+    async removeAll() {
+        const r = await coreCall({ cmd: "notification_remove_all" });
         return r.success === true;
     },
 };
@@ -859,6 +870,11 @@ export const nativeTheme = {
     async setThemeSource(source) {
         const r = await coreCall({ cmd: "native_theme_set_source", source });
         return r.success === true;
+    },
+    /** Electron `nativeTheme.themeSource` (getter) — 마지막 설정값(기본 "system"). */
+    async getThemeSource() {
+        const r = await coreCall({ cmd: "native_theme_get_source" });
+        return r.source;
     },
 };
 export const fs = {

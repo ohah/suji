@@ -17,6 +17,7 @@ extern "c" fn suji_notification_set_click_callback(cb: *const fn ([*:0]const u8)
 extern "c" fn suji_notification_request_permission() i32;
 extern "c" fn suji_notification_show(id: [*:0]const u8, title: [*:0]const u8, body: [*:0]const u8, silent: i32) i32;
 extern "c" fn suji_notification_close(id: [*:0]const u8) void;
+extern "c" fn suji_notification_remove_all() void;
 
 // ============================================
 // Notification API — UNUserNotificationCenter (Electron `Notification`)
@@ -85,5 +86,14 @@ pub fn notificationClose(id: []const u8) bool {
     var id_buf: [64]u8 = undefined;
     const id_cstr = writeCStr(id, &id_buf) orelse return false;
     suji_notification_close(id_cstr);
+    return true;
+}
+
+/// Electron Notification.removeAll() — 표시된/대기 모든 알림 제거.
+/// macOS=UNUserNotificationCenter removeAll* (실동작). Linux/Windows 는 개별 id
+/// 추적이 없어 후속(OS 플랫폼 경계) → false.
+pub fn notificationRemoveAll() bool {
+    if (!comptime is_macos) return false;
+    suji_notification_remove_all();
     return true;
 }

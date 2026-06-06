@@ -1116,6 +1116,13 @@ describe("powerMonitor.getSystemIdleState", () => {
   });
 });
 
+describe("powerMonitor.isOnBatteryPower", () => {
+  test("onBattery boolean 필드 반환 (하드웨어 의존 — 타입만 검증)", async () => {
+    const r = await core<{ onBattery: boolean }>({ cmd: "power_monitor_is_on_battery" });
+    expect(typeof r.onBattery).toBe("boolean");
+  });
+});
+
 describe("shell.openPath", () => {
   test("존재하는 경로 → success:true (실제 앱 열림은 환경 의존)", async () => {
     const r = await core<{ success: boolean }>({ cmd: "shell_open_path", path: "/tmp" });
@@ -1155,6 +1162,17 @@ describe("nativeTheme.setThemeSource", () => {
 
     const invalid = await core<{ success: boolean }>({ cmd: "native_theme_set_source", source: "neon" });
     expect(invalid.success).toBe(false);
+  });
+});
+
+describe("nativeTheme.getThemeSource (getter)", () => {
+  test("set 한 값을 getter 가 반환 (dark→light→system round-trip)", async () => {
+    await core({ cmd: "native_theme_set_source", source: "dark" });
+    expect((await core<{ source: string }>({ cmd: "native_theme_get_source" })).source).toBe("dark");
+    await core({ cmd: "native_theme_set_source", source: "light" });
+    expect((await core<{ source: string }>({ cmd: "native_theme_get_source" })).source).toBe("light");
+    await core({ cmd: "native_theme_set_source", source: "system" }); // 복원
+    expect((await core<{ source: string }>({ cmd: "native_theme_get_source" })).source).toBe("system");
   });
 });
 

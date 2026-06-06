@@ -222,6 +222,7 @@ pub const clipboardWriteBuffer = cef_clipboard.clipboardWriteBuffer;
 pub const clipboardReadBuffer = cef_clipboard.clipboardReadBuffer;
 
 pub const powerMonitorIdleSeconds = cef_power_monitor.powerMonitorIdleSeconds;
+pub const powerMonitorIsOnBattery = cef_power_monitor.powerMonitorIsOnBattery;
 pub const powerMonitorInstall = cef_power_monitor.powerMonitorInstall;
 pub const powerMonitorUninstall = cef_power_monitor.powerMonitorUninstall;
 pub const powerMonitorSetScreenLocked = cef_power_monitor.powerMonitorSetScreenLocked;
@@ -301,6 +302,7 @@ pub const notificationIsSupported = cef_notification.notificationIsSupported;
 pub const notificationRequestPermission = cef_notification.notificationRequestPermission;
 pub const notificationShow = cef_notification.notificationShow;
 pub const notificationClose = cef_notification.notificationClose;
+pub const notificationRemoveAll = cef_notification.notificationRemoveAll;
 
 pub const GlobalShortcutEmitHandler = cef_global_shortcut.GlobalShortcutEmitHandler;
 pub const GlobalShortcutStatus = cef_global_shortcut.GlobalShortcutStatus;

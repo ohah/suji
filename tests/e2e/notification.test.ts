@@ -110,6 +110,13 @@ describe("notification.close", () => {
   });
 });
 
+describe("notification.removeAll", () => {
+  test("응답 형식 — success boolean (macOS removeAllDelivered)", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "notification_remove_all" });
+    expect(typeof r.success).toBe("boolean");
+  });
+});
+
 describe("notification.requestPermission — IPC 라우팅", () => {
   test("응답 형식 — granted boolean", async () => {
     // 첫 호출 시 OS 다이얼로그 가능 — Bundle ID 없으면 즉시 false 반환.

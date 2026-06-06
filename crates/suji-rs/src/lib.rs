@@ -1498,6 +1498,11 @@ pub mod power_monitor {
             &serde_json::json!({ "cmd": "power_monitor_get_idle_state", "threshold": threshold }).to_string(),
         )
     }
+
+    /// 배터리 전원 여부 raw JSON: `{"onBattery":bool}` (Electron `powerMonitor.isOnBatteryPower`).
+    pub fn is_on_battery() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"power_monitor_is_on_battery"}"#)
+    }
 }
 
 pub mod shell {
@@ -1591,6 +1596,11 @@ pub mod native_theme {
                 escape_json_full(source)
             ),
         )
+    }
+
+    /// themeSource getter — 마지막 설정값 raw JSON: `{"source":"system"|"light"|"dark"}`.
+    pub fn get_theme_source() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"native_theme_get_source"}"#)
     }
 }
 
@@ -1784,6 +1794,11 @@ pub mod notification {
                 escape_json_full(notification_id),
             ),
         )
+    }
+
+    /// 표시/대기 모든 알림 제거 raw JSON: `{"success":bool}` (Electron `Notification.removeAll`, macOS 실동작).
+    pub fn remove_all() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"notification_remove_all"}"#)
     }
 }
 

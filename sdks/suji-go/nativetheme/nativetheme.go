@@ -19,3 +19,9 @@ func ShouldUseDarkColors() string {
 func SetThemeSource(source string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"native_theme_set_source","source":"%s"}`, jsonesc.Full(source)))
 }
+
+// GetThemeSource returns the last-set themeSource (default "system").
+// Response: `{"source":"system"|"light"|"dark"}`. (Electron nativeTheme.themeSource getter)
+func GetThemeSource() string {
+	return suji.Invoke("__core__", `{"cmd":"native_theme_get_source"}`)
+}

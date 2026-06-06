@@ -132,3 +132,11 @@ void suji_notification_close(const char *id) {
     [center removeDeliveredNotificationsWithIdentifiers:ids];
     [center removePendingNotificationRequestsWithIdentifiers:ids];
 }
+
+// Electron Notification.removeAll() — 표시된/대기 중 모든 알림 제거.
+void suji_notification_remove_all(void) {
+    if (!suji_notification_is_supported()) return;
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    [center removeAllDeliveredNotifications];
+    [center removeAllPendingNotificationRequests];
+}

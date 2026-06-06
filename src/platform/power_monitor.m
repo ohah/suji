@@ -10,6 +10,8 @@
 // Linux/Windows는 power_monitor_linux.c / power_monitor_win.c가 동일 C 콜백 ABI를 제공.
 
 #import <AppKit/AppKit.h>
+#import <IOKit/ps/IOPowerSources.h>
+#import <IOKit/ps/IOPSKeys.h>
 
 static void (*g_power_callback)(const char *event) = NULL;
 
@@ -54,4 +56,18 @@ void suji_power_monitor_uninstall(void) {
     [nc removeObserver:g_observer];
     g_observer = nil;
     g_power_callback = NULL;
+}
+
+// Electron powerMonitor.isOnBatteryPower() — 현재 전원이 배터리인지(IOKit IOPS).
+// IOPSGetProvidingPowerSourceType: "AC Power" | "Battery Power" | "UPS Power".
+int suji_power_monitor_is_on_battery(void) {
+    CFTypeRef blob = IOPSCopyPowerSourcesInfo();
+    if (blob == NULL) return 0;
+    CFStringRef type = IOPSGetProvidingPowerSourceType(blob);
+    int on_battery = (type != NULL &&
+                      CFStringCompare(type, CFSTR(kIOPSBatteryPowerValue), 0) == kCFCompareEqualTo)
+                         ? 1
+                         : 0;
+    CFRelease(blob);
+    return on_battery;
 }

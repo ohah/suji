@@ -37,3 +37,9 @@ func Close(notificationID string) string {
 		jsonesc.Full(notificationID),
 	))
 }
+
+// RemoveAll removes all delivered/pending notifications.
+// Response: `{"success":bool}` (macOS 실동작). (Electron Notification.removeAll)
+func RemoveAll() string {
+	return suji.Invoke("__core__", `{"cmd":"notification_remove_all"}`)
+}
