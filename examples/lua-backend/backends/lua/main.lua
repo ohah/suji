@@ -40,3 +40,9 @@ suji.handle("core-display-matching", function(request_json)
     height = req.height or 0,
   }))
 end)
+
+-- 단일 인스턴스 락도 __core__ 로 도달(전 백엔드 동일 cmd). 부작용 없이 reach 만
+-- 실증하려고 read-only has 사용(전역 락 상태 변경 X).
+suji.handle("core-single-instance", function(_)
+  return suji.invoke("__core__", cjson.encode({ cmd = "app_has_single_instance_lock" }))
+end)

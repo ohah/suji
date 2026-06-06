@@ -1617,3 +1617,36 @@ describe("@suji/api SDK — round-trip", () => {
     expect(await sdk<boolean>("app.cancelUserAttentionRequest", 0)).toBe(false);
   });
 });
+
+// ============================================
+// app.requestSingleInstanceLock — Electron single-instance 락.
+// round-trip(__core__: 실 userData flock lifecycle) + SDK wrapper.
+// 두 번째 프로세스 차단(cross-fd flock) 메커니즘은 cef_single_instance.zig
+// 유닛 테스트가 커버 — 여기선 전체 와이어 + 락 lifecycle 만 검증.
+// ============================================
+describe("app.requestSingleInstanceLock", () => {
+  test("round-trip: request → has → idempotent → release → has=false → re-acquire", async () => {
+    await core({ cmd: "app_release_single_instance_lock" }); // 깨끗한 상태에서 시작
+
+    expect((await core<{ locked: boolean }>({ cmd: "app_request_single_instance_lock" })).locked).toBe(true);
+    expect((await core<{ locked: boolean }>({ cmd: "app_has_single_instance_lock" })).locked).toBe(true);
+    // 멱등 — 이미 보유 중이면 재요청도 true(재락 없음).
+    expect((await core<{ locked: boolean }>({ cmd: "app_request_single_instance_lock" })).locked).toBe(true);
+
+    expect((await core<{ success: boolean }>({ cmd: "app_release_single_instance_lock" })).success).toBe(true);
+    expect((await core<{ locked: boolean }>({ cmd: "app_has_single_instance_lock" })).locked).toBe(false);
+
+    // 해제 후 재획득.
+    expect((await core<{ locked: boolean }>({ cmd: "app_request_single_instance_lock" })).locked).toBe(true);
+    await core({ cmd: "app_release_single_instance_lock" }); // 정리
+  });
+
+  test("SDK round-trip: app.request/has/release 가 boolean 반환", async () => {
+    await sdk<boolean>("app.releaseSingleInstanceLock"); // 깨끗한 상태
+
+    expect(await sdk<boolean>("app.requestSingleInstanceLock")).toBe(true);
+    expect(await sdk<boolean>("app.hasSingleInstanceLock")).toBe(true);
+    expect(await sdk<boolean>("app.releaseSingleInstanceLock")).toBe(true);
+    expect(await sdk<boolean>("app.hasSingleInstanceLock")).toBe(false);
+  });
+});

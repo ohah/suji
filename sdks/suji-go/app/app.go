@@ -79,6 +79,26 @@ func Exit() string {
 	return suji.Invoke("__core__", `{"cmd":"app_exit"}`)
 }
 
+// RequestSingleInstanceLock makes this process the primary instance.
+// Electron `app.requestSingleInstanceLock()`. primary 면 `{"locked":true}`,
+// 다른 인스턴스가 이미 보유 중이면 `{"locked":false}` (보통 앱 quit). 이미 보유
+// 중이면 멱등적으로 true. macOS/Linux=userData flock, Windows=named mutex.
+func RequestSingleInstanceLock() string {
+	return suji.Invoke("__core__", `{"cmd":"app_request_single_instance_lock"}`)
+}
+
+// HasSingleInstanceLock reports whether this process holds the lock.
+// Electron `app.hasSingleInstanceLock()`. Response: `{"locked":bool}`.
+func HasSingleInstanceLock() string {
+	return suji.Invoke("__core__", `{"cmd":"app_has_single_instance_lock"}`)
+}
+
+// ReleaseSingleInstanceLock releases the held lock (no-op if not held).
+// Electron `app.releaseSingleInstanceLock()`. Response: `{"success":bool}`.
+func ReleaseSingleInstanceLock() string {
+	return suji.Invoke("__core__", `{"cmd":"app_release_single_instance_lock"}`)
+}
+
 // Focus brings the app frontmost. raw JSON: `{"success":bool}`.
 func Focus() string {
 	return suji.Invoke("__core__", `{"cmd":"app_focus"}`)

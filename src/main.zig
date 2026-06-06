@@ -2343,6 +2343,24 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{esc_buf[0..esc_n]},
         ) catch null;
     }
+    // Electron app.requestSingleInstanceLock — primary 면 locked:true, 다른
+    // 인스턴스가 이미 보유 중이면 false. macOS/Linux=userData flock, Windows=
+    // named mutex. POSIX 는 userData 경로(앱별 격리)로 lockfile 위치 결정.
+    if (std.mem.eql(u8, cmd, "app_request_single_instance_lock")) {
+        const app_name: []const u8 = if (g_config) |c| c.app.name else "Suji";
+        var ud_buf: [1024]u8 = undefined;
+        const user_data = cef.appGetPath(&ud_buf, "userData", app_name) orelse "";
+        const locked = cef.requestSingleInstanceLock(user_data, app_name);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_request_single_instance_lock\",\"locked\":{}}}", .{locked}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_has_single_instance_lock")) {
+        const locked = cef.hasSingleInstanceLock();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_has_single_instance_lock\",\"locked\":{}}}", .{locked}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_release_single_instance_lock")) {
+        cef.releaseSingleInstanceLock();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_release_single_instance_lock\",\"success\":true}}", .{}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "app_is_ready")) {
         // V8 binding이 호출 가능한 시점은 이미 init 후. 항상 true.
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_ready\",\"ready\":true}}", .{}) catch null;

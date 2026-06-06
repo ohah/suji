@@ -39,6 +39,7 @@ const cef_scheme = @import("cef_scheme.zig");
 const cef_security_scoped_bookmark = @import("cef_security_scoped_bookmark.zig");
 const cef_session_cookies = @import("cef_session_cookies.zig");
 const cef_shell = @import("cef_shell.zig");
+const cef_single_instance = @import("cef_single_instance.zig");
 const cef_tray = @import("cef_tray.zig");
 const cef_util = @import("cef_util.zig");
 const cef_web_request = @import("cef_web_request.zig");
@@ -229,6 +230,10 @@ pub const powerMonitorInstall = cef_power_monitor.powerMonitorInstall;
 pub const powerMonitorUninstall = cef_power_monitor.powerMonitorUninstall;
 pub const powerMonitorSetScreenLocked = cef_power_monitor.powerMonitorSetScreenLocked;
 pub const powerMonitorScreenLocked = cef_power_monitor.powerMonitorScreenLocked;
+
+pub const requestSingleInstanceLock = cef_single_instance.requestSingleInstanceLock;
+pub const hasSingleInstanceLock = cef_single_instance.hasSingleInstanceLock;
+pub const releaseSingleInstanceLock = cef_single_instance.releaseSingleInstanceLock;
 
 pub const shellOpenExternal = cef_shell.shellOpenExternal;
 pub const shellShowItemInFolder = cef_shell.shellShowItemInFolder;

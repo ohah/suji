@@ -2336,6 +2336,28 @@ export const app = {
     return r.success === true;
   },
 
+  /**
+   * Electron `app.requestSingleInstanceLock()` — 이 프로세스를 primary 로 만들고
+   * true 반환. 다른 인스턴스가 이미 락을 보유 중이면 false (앱은 보통 quit).
+   * 이미 보유 중이면 멱등적으로 true. macOS/Linux=userData flock, Windows=named mutex.
+   */
+  async requestSingleInstanceLock(): Promise<boolean> {
+    const r = await coreCall<{ locked: boolean }>({ cmd: "app_request_single_instance_lock" });
+    return r.locked === true;
+  },
+
+  /** Electron `app.hasSingleInstanceLock()` — 이 프로세스가 락 보유 중인지. */
+  async hasSingleInstanceLock(): Promise<boolean> {
+    const r = await coreCall<{ locked: boolean }>({ cmd: "app_has_single_instance_lock" });
+    return r.locked === true;
+  },
+
+  /** Electron `app.releaseSingleInstanceLock()` — 보유 락 해제(없으면 no-op). */
+  async releaseSingleInstanceLock(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_release_single_instance_lock" });
+    return r.success === true;
+  },
+
   /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
   async focus(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_focus" });

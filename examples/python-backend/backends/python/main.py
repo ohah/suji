@@ -50,3 +50,12 @@ def core_display_matching(request_json):
 
 
 suji.handle("core-display-matching", core_display_matching)
+
+
+# 단일 인스턴스 락도 __core__ 로 도달(전 백엔드 동일 cmd). 부작용 없이 reach 만
+# 실증하려고 read-only has 사용(전역 락 상태 변경 X).
+def core_single_instance(_request_json):
+    return suji.invoke("__core__", json.dumps({"cmd": "app_has_single_instance_lock"}))
+
+
+suji.handle("core-single-instance", core_single_instance)
