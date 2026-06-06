@@ -107,3 +107,28 @@ func TestViewOperationRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestWindowStateRequests(t *testing.T) {
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"minimize", windowOpRequest("minimize", 3), `{"cmd":"minimize","windowId":3}`},
+		{"is_visible", windowOpRequest("is_visible", 7), `{"cmd":"is_visible","windowId":7}`},
+		{"get_bounds", windowOpRequest("get_bounds", 1), `{"cmd":"get_bounds","windowId":1}`},
+		{"restore", windowOpRequest("restore_window", 2), `{"cmd":"restore_window","windowId":2}`},
+		{"close", windowOpRequest("destroy_window", 2), `{"cmd":"destroy_window","windowId":2}`},
+		{"show", setVisibleRequest(2, true), `{"cmd":"set_visible","windowId":2,"visible":true}`},
+		{"hide", setVisibleRequest(2, false), `{"cmd":"set_visible","windowId":2,"visible":false}`},
+		{"set_fullscreen", setFullscreenRequest(4, true), `{"cmd":"set_fullscreen","windowId":4,"flag":true}`},
+		{"set_always_on_top", setAlwaysOnTopRequest(5, true), `{"cmd":"set_always_on_top","windowId":5,"onTop":true}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if c.got != c.want {
+				t.Errorf("%s request = %q, want %q", c.name, c.got, c.want)
+			}
+		})
+	}
+}

@@ -327,6 +327,75 @@ func parseWindowID(raw string) (uint32, error) {
 	return *v.WindowID, nil
 }
 
+// ── Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티) ──
+// 대부분 {"cmd":"X","windowId":N} 동형 → windowOpRequest 로 DRY. 응답은 raw JSON.
+func windowOpRequest(cmd string, windowID uint32) string {
+	return fmt.Sprintf(`{"cmd":"%s","windowId":%d}`, cmd, windowID)
+}
+func setVisibleRequest(windowID uint32, visible bool) string {
+	return fmt.Sprintf(`{"cmd":"set_visible","windowId":%d,"visible":%t}`, windowID, visible)
+}
+func setFullscreenRequest(windowID uint32, flag bool) string {
+	return fmt.Sprintf(`{"cmd":"set_fullscreen","windowId":%d,"flag":%t}`, windowID, flag)
+}
+func setAlwaysOnTopRequest(windowID uint32, onTop bool) string {
+	return fmt.Sprintf(`{"cmd":"set_always_on_top","windowId":%d,"onTop":%t}`, windowID, onTop)
+}
+
+func Minimize(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("minimize", windowID))
+}
+func Maximize(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("maximize", windowID))
+}
+func Unmaximize(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("unmaximize", windowID))
+}
+func Restore(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("restore_window", windowID))
+}
+func Close(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("destroy_window", windowID))
+}
+func Show(windowID uint32) string { return suji.Invoke("__core__", setVisibleRequest(windowID, true)) }
+func Hide(windowID uint32) string { return suji.Invoke("__core__", setVisibleRequest(windowID, false)) }
+func SetFullScreen(windowID uint32, flag bool) string {
+	return suji.Invoke("__core__", setFullscreenRequest(windowID, flag))
+}
+func IsMinimized(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_minimized", windowID))
+}
+func IsMaximized(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_maximized", windowID))
+}
+func IsFullScreen(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_fullscreen", windowID))
+}
+func IsNormal(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_normal", windowID))
+}
+func Focus(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("focus", windowID))
+}
+func Blur(windowID uint32) string { return suji.Invoke("__core__", windowOpRequest("blur", windowID)) }
+func IsFocused(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_focused", windowID))
+}
+func IsVisible(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_visible", windowID))
+}
+func GetBounds(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("get_bounds", windowID))
+}
+func SetAlwaysOnTop(windowID uint32, onTop bool) string {
+	return suji.Invoke("__core__", setAlwaysOnTopRequest(windowID, onTop))
+}
+func IsAlwaysOnTop(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_always_on_top", windowID))
+}
+func GetAllWindows() string    { return suji.Invoke("__core__", `{"cmd":"get_all_windows"}`) }
+func GetFocusedWindow() string { return suji.Invoke("__core__", `{"cmd":"get_focused_window"}`) }
+
 // BrowserWindow — windows.*(raw windowID)의 객체지향 facade (Electron
 // `BrowserWindow` 패리티, @suji/api 와 동형). 각 메서드는 <Fn>(w.ID, ...)
 // 위임 — 로직 무중복, windows 변경에 자동 동기화.
@@ -414,3 +483,24 @@ func (w *BrowserWindow) SetViewVisible(viewID uint32, visible bool) string {
 	return SetViewVisible(viewID, visible)
 }
 func (w *BrowserWindow) GetChildViews() string { return GetChildViews(w.ID) }
+
+// Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티).
+func (w *BrowserWindow) Minimize() string                 { return Minimize(w.ID) }
+func (w *BrowserWindow) Maximize() string                 { return Maximize(w.ID) }
+func (w *BrowserWindow) Unmaximize() string               { return Unmaximize(w.ID) }
+func (w *BrowserWindow) Restore() string                  { return Restore(w.ID) }
+func (w *BrowserWindow) Close() string                    { return Close(w.ID) }
+func (w *BrowserWindow) Show() string                     { return Show(w.ID) }
+func (w *BrowserWindow) Hide() string                     { return Hide(w.ID) }
+func (w *BrowserWindow) SetFullScreen(flag bool) string   { return SetFullScreen(w.ID, flag) }
+func (w *BrowserWindow) IsMinimized() string              { return IsMinimized(w.ID) }
+func (w *BrowserWindow) IsMaximized() string              { return IsMaximized(w.ID) }
+func (w *BrowserWindow) IsFullScreen() string             { return IsFullScreen(w.ID) }
+func (w *BrowserWindow) IsNormal() string                 { return IsNormal(w.ID) }
+func (w *BrowserWindow) Focus() string                    { return Focus(w.ID) }
+func (w *BrowserWindow) Blur() string                     { return Blur(w.ID) }
+func (w *BrowserWindow) IsFocused() string                { return IsFocused(w.ID) }
+func (w *BrowserWindow) IsVisible() string                { return IsVisible(w.ID) }
+func (w *BrowserWindow) GetBounds() string                { return GetBounds(w.ID) }
+func (w *BrowserWindow) SetAlwaysOnTop(onTop bool) string { return SetAlwaysOnTop(w.ID, onTop) }
+func (w *BrowserWindow) IsAlwaysOnTop() string            { return IsAlwaysOnTop(w.ID) }
