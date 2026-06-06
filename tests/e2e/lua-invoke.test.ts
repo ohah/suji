@@ -42,6 +42,14 @@ describe("Lua backend invoke (vendored Lua 5.4 + cjson)", () => {
     expect(r.msg).toBe("pong");
   });
 
+  test("backend → __core__ 도달: suji.invoke('__core__', screen_get_display_matching)", async () => {
+    // Lua 백엔드가 suji.invoke("__core__", ...) 로 네이티브 코어 cmd 를 호출 →
+    // 모든 언어 백엔드가 코어 API 에 도달함을 실증(타입드 래퍼 없이 raw invoke).
+    const r: any = await invoke("core-display-matching", { x: 10, y: 10, width: 100, height: 100 });
+    expect(r.cmd).toBe("screen_get_display_matching");
+    expect(typeof r.index).toBe("number");
+  });
+
   test("echo: cjson decode/encode roundtrip", async () => {
     const r: any = await invoke("echo", { message: "hello from frontend", value: 42 });
     expect(r.runtime).toBe("lua");

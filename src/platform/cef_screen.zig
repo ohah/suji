@@ -4,6 +4,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const linux_screen = @import("cef_screen_linux.zig");
 const windows_screen = @import("cef_screen_windows.zig");
+const screen_model = @import("screen_model.zig");
 const cef = @import("cef.zig");
 
 const is_macos = builtin.os.tag == .macos;
@@ -125,4 +126,35 @@ pub fn screenGetDisplayNearestPoint(x: f64, y: f64) i32 {
         }
     }
     return -1;
+}
+
+/// rect 와 겹침 면적이 최대인 display index (Electron `screen.getDisplayMatching`).
+/// 겹침 없으면 중심 최근접. 전 플랫폼 공유 screen_model.matchingDisplayIndex 사용 —
+/// 각 플랫폼은 DisplayBounds 열거만(getAllDisplays 와 동일 좌표/순서 → index 일치).
+pub fn screenGetDisplayMatching(x: f64, y: f64, w: f64, h: f64) i32 {
+    if (comptime builtin.os.tag == .windows) return windows_screen.displayMatching(x, y, w, h);
+    if (comptime is_linux) return linux_screen.displayMatching(x, y, w, h);
+    if (!comptime is_macos) return -1;
+    const NSScreen = getClass("NSScreen") orelse return -1;
+    const screens = msgSend(NSScreen, "screens") orelse return -1;
+    const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
+    const count = count_fn(screens, @ptrCast(objc.sel_registerName("count")));
+
+    var displays: [16]screen_model.DisplayBounds = undefined;
+    var len: usize = 0;
+    var i: usize = 0;
+    while (i < count and len < displays.len) : (i += 1) {
+        const obj_fn: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+        const screen = obj_fn(screens, @ptrCast(objc.sel_registerName("objectAtIndex:")), i) orelse continue;
+        const rect_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) NSRect = @ptrCast(&objc.objc_msgSend);
+        const frame = rect_fn(screen, @ptrCast(objc.sel_registerName("frame")));
+        displays[len] = .{
+            .x = @intFromFloat(frame.x),
+            .y = @intFromFloat(frame.y),
+            .width = @intFromFloat(frame.width),
+            .height = @intFromFloat(frame.height),
+        };
+        len += 1;
+    }
+    return screen_model.matchingDisplayIndex(displays[0..len], x, y, w, h);
 }

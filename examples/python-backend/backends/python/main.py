@@ -34,3 +34,19 @@ suji.handle("emit-test", emit_test)
 
 # 이벤트 수신(suji.on): 프론트가 emit 한 "from-frontend" 를 받아 "python-echo" 로 되돌린다.
 suji.on("from-frontend", lambda data: suji.send("python-echo", data))
+
+
+# 네이티브 코어 cmd 호출: suji.invoke("__core__", ...) 로 Python 백엔드도 모든 코어
+# API(screen/window/clipboard 등)에 도달함을 실증. 여기선 screen.getDisplayMatching.
+def core_display_matching(request_json):
+    req = json.loads(request_json)
+    return suji.invoke("__core__", json.dumps({
+        "cmd": "screen_get_display_matching",
+        "x": req.get("x", 0),
+        "y": req.get("y", 0),
+        "width": req.get("width", 0),
+        "height": req.get("height", 0),
+    }))
+
+
+suji.handle("core-display-matching", core_display_matching)

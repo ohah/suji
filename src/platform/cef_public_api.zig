@@ -236,6 +236,7 @@ pub const shellTrashItem = cef_shell.shellTrashItem;
 pub const screenGetAllDisplays = cef_screen.screenGetAllDisplays;
 pub const screenGetCursorPoint = cef_screen.screenGetCursorPoint;
 pub const screenGetDisplayNearestPoint = cef_screen.screenGetDisplayNearestPoint;
+pub const screenGetDisplayMatching = cef_screen.screenGetDisplayMatching;
 
 pub const desktopCapturerGetSources = cef_desktop_capturer.desktopCapturerGetSources;
 pub const desktopCapturerCaptureThumbnail = cef_desktop_capturer.desktopCapturerCaptureThumbnail;

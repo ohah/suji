@@ -106,6 +106,25 @@ const impl = if (builtin.os.tag == .linux) struct {
         }
         return screen_model.containedDisplayIndex(displays[0..len], x, y);
     }
+
+    pub fn displayMatching(x: f64, y: f64, w: f64, h: f64) i32 {
+        const display = XOpenDisplay(null) orelse return -1;
+        defer _ = XCloseDisplay(display);
+
+        const count = XScreenCount(display);
+        if (count <= 0) return -1;
+
+        var displays: [32]screen_model.DisplayBounds = undefined;
+        var len: usize = 0;
+        var idx: c_int = 0;
+        while (idx < count and len < displays.len) : (idx += 1) {
+            if (displayBounds(display, idx)) |b| {
+                displays[len] = b;
+                len += 1;
+            }
+        }
+        return screen_model.matchingDisplayIndex(displays[0..len], x, y, w, h);
+    }
 } else struct {
     pub fn getAllDisplays(out_buf: []u8) []const u8 {
         const empty = "[]";
@@ -121,8 +140,13 @@ const impl = if (builtin.os.tag == .linux) struct {
     pub fn displayNearestPoint(_: f64, _: f64) i32 {
         return -1;
     }
+
+    pub fn displayMatching(_: f64, _: f64, _: f64, _: f64) i32 {
+        return -1;
+    }
 };
 
 pub const getAllDisplays = impl.getAllDisplays;
 pub const cursorPoint = impl.cursorPoint;
 pub const displayNearestPoint = impl.displayNearestPoint;
+pub const displayMatching = impl.displayMatching;

@@ -2184,6 +2184,18 @@ pub mod screen {
             "y": y,
         }).to_string())
     }
+
+    /// rect 와 겹침 면적이 최대인 display index raw JSON. `{"index":N}` (없으면 -1).
+    /// 겹침 없으면 rect 중심 최근접 (Electron `screen.getDisplayMatching`, 듀얼모니터).
+    pub fn get_display_matching(x: f64, y: f64, width: f64, height: f64) -> Option<String> {
+        invoke("__core__", &crate::serde_json::json!({
+            "cmd": "screen_get_display_matching",
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+        }).to_string())
+    }
 }
 
 /// Electron `desktopCapturer`. 화면/창 소스 열거(썸네일 미포함 — 정직 경계).

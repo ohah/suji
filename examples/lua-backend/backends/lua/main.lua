@@ -27,3 +27,16 @@ end)
 suji.on("from-frontend", function(data)
   suji.send("lua-echo", data)
 end)
+
+-- 네이티브 코어 cmd 호출: suji.invoke("__core__", ...) 로 Lua 백엔드도 모든 코어 API
+-- (screen/window/clipboard 등)에 도달함을 실증. 여기선 screen.getDisplayMatching.
+suji.handle("core-display-matching", function(request_json)
+  local req = cjson.decode(request_json)
+  return suji.invoke("__core__", cjson.encode({
+    cmd = "screen_get_display_matching",
+    x = req.x or 0,
+    y = req.y or 0,
+    width = req.width or 0,
+    height = req.height or 0,
+  }))
+end)

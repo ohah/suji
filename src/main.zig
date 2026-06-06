@@ -2095,6 +2095,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{idx},
         ) catch null;
     }
+    // Electron screen.getDisplayMatching — rect 와 겹침 최대 display index(없으면 중심 최근접).
+    if (std.mem.eql(u8, cmd, "screen_get_display_matching")) {
+        const x = util.extractJsonFloat(req_clean, "x") orelse 0;
+        const y = util.extractJsonFloat(req_clean, "y") orelse 0;
+        const w = util.extractJsonFloat(req_clean, "width") orelse 0;
+        const h = util.extractJsonFloat(req_clean, "height") orelse 0;
+        const idx = cef.screenGetDisplayMatching(x, y, w, h);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"screen_get_display_matching\",\"index\":{d}}}",
+            .{idx},
+        ) catch null;
+    }
 
     // app.getPath — Electron 표준 키 7개. config.app.name이 userData 경로에 들어감.
     if (std.mem.eql(u8, cmd, "app_get_path")) {

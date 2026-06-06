@@ -2,6 +2,7 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const screen_model = @import("screen_model.zig");
 
 const impl = if (builtin.os.tag == .windows) struct {
     const RECT = extern struct { left: i32, top: i32, right: i32, bottom: i32 };
@@ -102,6 +103,34 @@ const impl = if (builtin.os.tag == .windows) struct {
         _ = EnumDisplayMonitors(null, null, &find_cb, @intCast(@intFromPtr(&ctx)));
         return ctx.index;
     }
+
+    const BoundsCtx = struct {
+        list: *[32]screen_model.DisplayBounds,
+        len: usize = 0,
+    };
+    fn boundsEnumProc(hmon: ?*anyopaque, _: ?*anyopaque, _: *RECT, lparam: isize) callconv(.winapi) i32 {
+        const ctx: *BoundsCtx = @ptrFromInt(@as(usize, @intCast(lparam)));
+        if (ctx.len >= ctx.list.len) return 0;
+        var info: MONITORINFO = .{};
+        if (GetMonitorInfoW(hmon, &info) == 0) return 1; // skip, keep enumerating
+        ctx.list[ctx.len] = .{
+            .x = info.rcMonitor.left,
+            .y = info.rcMonitor.top,
+            .width = info.rcMonitor.right - info.rcMonitor.left,
+            .height = info.rcMonitor.bottom - info.rcMonitor.top,
+        };
+        ctx.len += 1;
+        return 1;
+    }
+
+    // getAllDisplays 와 동일한 EnumDisplayMonitors 순서로 DisplayBounds 열거 →
+    // 공유 screen_model.matchingDisplayIndex (index 가 getAllDisplays 와 일치).
+    pub fn displayMatching(x: f64, y: f64, w: f64, h: f64) i32 {
+        var list: [32]screen_model.DisplayBounds = undefined;
+        var ctx: BoundsCtx = .{ .list = &list };
+        _ = EnumDisplayMonitors(null, null, &boundsEnumProc, @intCast(@intFromPtr(&ctx)));
+        return screen_model.matchingDisplayIndex(list[0..ctx.len], x, y, w, h);
+    }
 } else struct {
     pub fn getAllDisplays(out_buf: []u8) []const u8 {
         const empty = "[]";
@@ -117,8 +146,13 @@ const impl = if (builtin.os.tag == .windows) struct {
     pub fn displayNearestPoint(_: f64, _: f64) i32 {
         return -1;
     }
+
+    pub fn displayMatching(_: f64, _: f64, _: f64, _: f64) i32 {
+        return -1;
+    }
 };
 
 pub const getAllDisplays = impl.getAllDisplays;
 pub const cursorPoint = impl.cursorPoint;
 pub const displayNearestPoint = impl.displayNearestPoint;
+pub const displayMatching = impl.displayMatching;
