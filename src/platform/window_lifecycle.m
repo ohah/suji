@@ -276,3 +276,29 @@ int suji_window_lifecycle_is_fullscreen(void *ns_window) {
     NSWindow *win = (__bridge NSWindow *)ns_window;
     return ([win styleMask] & NSWindowStyleMaskFullScreen) != 0 ? 1 : 0;
 }
+
+// Electron BrowserWindow 포커스·가시성·always-on-top 게터/세터 — NSWindow 폴백
+// (비-CEF-Views 창용; Views 창은 zig 측이 cef_window_t 로 직접 처리).
+// blur 는 cef_window_runtime 이 host.set_focus(0) 으로 처리(focus 대칭)라 obj-c 불요.
+int suji_window_lifecycle_is_visible(void *ns_window) {
+    if (ns_window == NULL) return 0;
+    return [(__bridge NSWindow *)ns_window isVisible] ? 1 : 0;
+}
+
+int suji_window_lifecycle_is_focused(void *ns_window) {
+    if (ns_window == NULL) return 0;
+    return [(__bridge NSWindow *)ns_window isKeyWindow] ? 1 : 0;
+}
+
+void suji_window_lifecycle_set_always_on_top(void *ns_window, int on_top) {
+    if (ns_window == NULL) return;
+    NSWindow *win = (__bridge NSWindow *)ns_window;
+    [win setLevel:on_top ? NSFloatingWindowLevel : NSNormalWindowLevel];
+}
+
+int suji_window_lifecycle_is_always_on_top(void *ns_window) {
+    if (ns_window == NULL) return 0;
+    // 세터가 NSFloatingWindowLevel 만 set 하므로 정확히 그 레벨인지로 판정(대칭).
+    // != NSNormalWindowLevel 은 status/modal 등 다른 레벨도 true 가 돼 과허용.
+    return [(__bridge NSWindow *)ns_window level] == NSFloatingWindowLevel ? 1 : 0;
+}

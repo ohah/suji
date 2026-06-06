@@ -76,6 +76,21 @@ pub fn focus(ctx: ?*anyopaque, handle: u64) void {
     host.set_focus.?(host, 1);
 }
 
+// Electron BrowserWindow.blur() — focus 대칭. Views 창은 deactivate, 아니면 browser
+// host 포커스 해제(set_focus(0)). NSWindow obj-c 불요(focus 와 동일 경로).
+pub fn blur(ctx: ?*anyopaque, handle: u64) void {
+    const self = fromCtx(ctx);
+    assertUiThread();
+    if (self.browsers.get(handle)) |entry| {
+        if (entry.views_window) |views_window| {
+            views_window.deactivate.?(views_window);
+            return;
+        }
+    }
+    const host = getHost(self, handle) orelse return;
+    host.set_focus.?(host, 0);
+}
+
 pub fn setTitle(ctx: ?*anyopaque, handle: u64, title: []const u8) void {
     assertUiThread();
     const self = fromCtx(ctx);

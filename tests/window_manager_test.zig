@@ -265,6 +265,33 @@ test "getBounds returns native-reported bounds (vtable wiring)" {
     try std.testing.expectError(error.WindowNotFound, wm.getBounds(99999));
 }
 
+test "blur/isVisible/isFocused/alwaysOnTop native vtable wiring" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "W" });
+
+    try wm.blur(id);
+    try std.testing.expectEqual(@as(usize, 1), native.blur_calls);
+
+    native.stub_visible = false;
+    try std.testing.expectEqual(false, try wm.isVisible(id));
+    native.stub_focused = true;
+    try std.testing.expectEqual(true, try wm.isFocused(id));
+
+    // setAlwaysOnTop 가 stub 갱신 → isAlwaysOnTop 반영(왕복).
+    try std.testing.expectEqual(false, try wm.isAlwaysOnTop(id));
+    try wm.setAlwaysOnTop(id, true);
+    try std.testing.expectEqual(true, try wm.isAlwaysOnTop(id));
+    try std.testing.expectEqual(@as(usize, 1), native.set_always_on_top_calls);
+
+    // 미존재 창 → WindowNotFound.
+    try std.testing.expectError(error.WindowNotFound, wm.isVisible(99999));
+    try std.testing.expectError(error.WindowNotFound, wm.blur(99999));
+    try std.testing.expectError(error.WindowNotFound, wm.setAlwaysOnTop(99999, true));
+}
+
 test "create propagates native failure as NativeCreateFailed" {
     var native = TestNative{ .fail_next_create = true };
     var wm = newManager(&native);

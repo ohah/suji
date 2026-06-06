@@ -234,6 +234,12 @@ pub const Native = struct {
         get_bounds: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
         set_visible: *const fn (ctx: ?*anyopaque, handle: u64, visible: bool) void,
         focus: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        // Electron BrowserWindow blur/포커스·가시성·always-on-top 게터/세터.
+        blur: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        is_focused: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        is_visible: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_always_on_top: *const fn (ctx: ?*anyopaque, handle: u64, on_top: bool) void,
+        is_always_on_top: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         // Phase 4-A: webContents 네비/JS
         load_url: *const fn (ctx: ?*anyopaque, handle: u64, url: []const u8) void,
         reload: *const fn (ctx: ?*anyopaque, handle: u64, ignore_cache: bool) void,
@@ -313,6 +319,21 @@ pub const Native = struct {
     }
     pub fn focus(self: Native, handle: u64) void {
         self.vtable.focus(self.ctx, handle);
+    }
+    pub fn blur(self: Native, handle: u64) void {
+        self.vtable.blur(self.ctx, handle);
+    }
+    pub fn isFocused(self: Native, handle: u64) bool {
+        return self.vtable.is_focused(self.ctx, handle);
+    }
+    pub fn isVisible(self: Native, handle: u64) bool {
+        return self.vtable.is_visible(self.ctx, handle);
+    }
+    pub fn setAlwaysOnTop(self: Native, handle: u64, on_top: bool) void {
+        self.vtable.set_always_on_top(self.ctx, handle, on_top);
+    }
+    pub fn isAlwaysOnTop(self: Native, handle: u64) bool {
+        return self.vtable.is_always_on_top(self.ctx, handle);
     }
     pub fn loadUrl(self: Native, handle: u64, url: []const u8) void {
         self.vtable.load_url(self.ctx, handle, url);
@@ -1123,6 +1144,46 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         self.native.focus(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.blur() — 창 포커스 해제.
+    pub fn blur(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.blur(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.isFocused().
+    pub fn isFocused(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.isFocused(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.isVisible().
+    pub fn isVisible(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.isVisible(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.setAlwaysOnTop(flag).
+    pub fn setAlwaysOnTop(self: *WindowManager, id: u32, on_top: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.setAlwaysOnTop(win.native_handle, on_top);
+    }
+
+    /// Electron BrowserWindow.isAlwaysOnTop().
+    pub fn isAlwaysOnTop(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        return self.native.isAlwaysOnTop(win.native_handle);
     }
 
     // ==================== Phase 4-A: webContents (네비 / JS) ====================

@@ -261,6 +261,26 @@ export const windows = {
         const b = await windows.getBounds(windowId);
         return [b.x, b.y];
     },
+    /** Electron BrowserWindow.blur() — 창 포커스 해제. */
+    blur(windowId) {
+        return coreCall({ cmd: "blur", windowId });
+    },
+    /** Electron BrowserWindow.isFocused(). */
+    isFocused(windowId) {
+        return coreCall({ cmd: "is_focused", windowId });
+    },
+    /** Electron BrowserWindow.isVisible(). */
+    isVisible(windowId) {
+        return coreCall({ cmd: "is_visible", windowId });
+    },
+    /** Electron BrowserWindow.setAlwaysOnTop(flag). */
+    setAlwaysOnTop(windowId, flag) {
+        return coreCall({ cmd: "set_always_on_top", windowId, onTop: flag });
+    },
+    /** Electron BrowserWindow.isAlwaysOnTop(). */
+    isAlwaysOnTop(windowId) {
+        return coreCall({ cmd: "is_always_on_top", windowId });
+    },
     // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
     undo(windowId) {
         return coreCall({ cmd: "undo", windowId });
@@ -515,6 +535,21 @@ export class BrowserWindow {
     }
     getPosition() {
         return windows.getPosition(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    blur() {
+        return windows.blur(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isFocused() {
+        return windows.isFocused(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    isVisible() {
+        return windows.isVisible(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setAlwaysOnTop(flag) {
+        return windows.setAlwaysOnTop(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), flag);
+    }
+    isAlwaysOnTop() {
+        return windows.isAlwaysOnTop(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     undo() {
         return windows.undo(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));

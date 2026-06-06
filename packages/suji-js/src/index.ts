@@ -270,6 +270,18 @@ export interface BoundsResponse extends WindowOpResponse {
   width: number;
   height: number;
 }
+export interface IsFocusedResponse extends WindowOpResponse {
+  cmd: "is_focused";
+  focused: boolean;
+}
+export interface IsVisibleResponse extends WindowOpResponse {
+  cmd: "is_visible";
+  visible: boolean;
+}
+export interface IsAlwaysOnTopResponse extends WindowOpResponse {
+  cmd: "is_always_on_top";
+  alwaysOnTop: boolean;
+}
 
 // ── Phase 17-A: WebContentsView (한 창 multi-content 합성) ──
 // viewId는 windowId와 같은 monotonic 풀에서 발급 — `windows.loadURL(viewId, ...)`,
@@ -517,6 +529,26 @@ export const windows = {
   async getPosition(windowId: number): Promise<[number, number]> {
     const b = await windows.getBounds(windowId);
     return [b.x, b.y];
+  },
+  /** Electron BrowserWindow.blur() — 창 포커스 해제. */
+  blur(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "blur", windowId });
+  },
+  /** Electron BrowserWindow.isFocused(). */
+  isFocused(windowId: number): Promise<IsFocusedResponse> {
+    return coreCall<IsFocusedResponse>({ cmd: "is_focused", windowId });
+  },
+  /** Electron BrowserWindow.isVisible(). */
+  isVisible(windowId: number): Promise<IsVisibleResponse> {
+    return coreCall<IsVisibleResponse>({ cmd: "is_visible", windowId });
+  },
+  /** Electron BrowserWindow.setAlwaysOnTop(flag). */
+  setAlwaysOnTop(windowId: number, flag: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_always_on_top", windowId, onTop: flag });
+  },
+  /** Electron BrowserWindow.isAlwaysOnTop(). */
+  isAlwaysOnTop(windowId: number): Promise<IsAlwaysOnTopResponse> {
+    return coreCall<IsAlwaysOnTopResponse>({ cmd: "is_always_on_top", windowId });
   },
 
   // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
@@ -804,6 +836,21 @@ export class BrowserWindow {
   }
   getPosition() {
     return windows.getPosition(this.#id);
+  }
+  blur() {
+    return windows.blur(this.#id);
+  }
+  isFocused() {
+    return windows.isFocused(this.#id);
+  }
+  isVisible() {
+    return windows.isVisible(this.#id);
+  }
+  setAlwaysOnTop(flag: boolean) {
+    return windows.setAlwaysOnTop(this.#id, flag);
+  }
+  isAlwaysOnTop() {
+    return windows.isAlwaysOnTop(this.#id);
   }
   undo() {
     return windows.undo(this.#id);
