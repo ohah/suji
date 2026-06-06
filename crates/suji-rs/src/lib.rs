@@ -1226,6 +1226,9 @@ pub mod windows {
             assert_eq!(window_op_request("minimize", 3), r#"{"cmd":"minimize","windowId":3}"#);
             assert_eq!(window_op_request("is_visible", 7), r#"{"cmd":"is_visible","windowId":7}"#);
             assert_eq!(window_op_request("get_bounds", 1), r#"{"cmd":"get_bounds","windowId":1}"#);
+            // 리네임 트랩 cmd 문서/가드 — restore→restore_window, close→destroy_window (Go 테스트 대칭).
+            assert_eq!(window_op_request("restore_window", 2), r#"{"cmd":"restore_window","windowId":2}"#);
+            assert_eq!(window_op_request("destroy_window", 2), r#"{"cmd":"destroy_window","windowId":2}"#);
             assert_eq!(set_visible_request(2, true), r#"{"cmd":"set_visible","windowId":2,"visible":true}"#);
             assert_eq!(set_visible_request(2, false), r#"{"cmd":"set_visible","windowId":2,"visible":false}"#);
             assert_eq!(set_fullscreen_request(4, true), r#"{"cmd":"set_fullscreen","windowId":4,"flag":true}"#);
