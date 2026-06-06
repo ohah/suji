@@ -186,6 +186,11 @@ export interface IsFullScreenResponse extends WindowOpResponse {
     cmd: "is_fullscreen";
     fullscreen: boolean;
 }
+export interface IsNormalResponse extends WindowOpResponse {
+    cmd: "is_normal";
+    /** minimized/maximized/fullscreen 모두 아닌 일반 상태 */
+    normal: boolean;
+}
 export interface ViewOptions {
     /** view를 합성할 host 창 id. live & .window이어야 함 */
     hostId: number;
@@ -284,6 +289,10 @@ export declare const windows: {
     isMinimized(windowId: number): Promise<IsMinimizedResponse>;
     isMaximized(windowId: number): Promise<IsMaximizedResponse>;
     isFullScreen(windowId: number): Promise<IsFullScreenResponse>;
+    /** Electron BrowserWindow.focus() — 창을 포그라운드로 키 창으로. */
+    focus(windowId: number): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 모두 아님. */
+    isNormal(windowId: number): Promise<IsNormalResponse>;
     undo(windowId: number): Promise<WindowOpResponse>;
     redo(windowId: number): Promise<WindowOpResponse>;
     cut(windowId: number): Promise<WindowOpResponse>;
@@ -396,6 +405,8 @@ export declare class BrowserWindow {
     isMinimized(): Promise<IsMinimizedResponse>;
     isMaximized(): Promise<IsMaximizedResponse>;
     isFullScreen(): Promise<IsFullScreenResponse>;
+    focus(): Promise<WindowOpResponse>;
+    isNormal(): Promise<IsNormalResponse>;
     undo(): Promise<WindowOpResponse>;
     redo(): Promise<WindowOpResponse>;
     cut(): Promise<WindowOpResponse>;

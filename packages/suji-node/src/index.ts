@@ -493,6 +493,11 @@ export interface IsFullScreenResponse extends WindowOpResponse {
   cmd: 'is_fullscreen';
   fullscreen: boolean;
 }
+export interface IsNormalResponse extends WindowOpResponse {
+  cmd: 'is_normal';
+  /** minimized/maximized/fullscreen 모두 아닌 일반 상태 */
+  normal: boolean;
+}
 
 export interface SetBoundsArgs {
   x?: number;
@@ -699,6 +704,14 @@ export const windows = {
   },
   isFullScreen(windowId: number): Promise<IsFullScreenResponse> {
     return invoke<IsFullScreenResponse>('__core__', { cmd: 'is_fullscreen', windowId });
+  },
+  /** Electron BrowserWindow.focus() — 창을 포그라운드로 키 창으로. */
+  focus(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'focus', windowId });
+  },
+  /** Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 모두 아님. */
+  isNormal(windowId: number): Promise<IsNormalResponse> {
+    return invoke<IsNormalResponse>('__core__', { cmd: 'is_normal', windowId });
   },
 
   undo(windowId: number): Promise<WindowOpResponse> {
@@ -926,6 +939,12 @@ export class BrowserWindow {
   }
   isFullScreen() {
     return windows.isFullScreen(this.#id);
+  }
+  focus() {
+    return windows.focus(this.#id);
+  }
+  isNormal() {
+    return windows.isNormal(this.#id);
   }
   undo() {
     return windows.undo(this.#id);
