@@ -1793,6 +1793,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const visible = util.extractJsonBool(req_clean, "visible") orelse false;
         return window_ipc.handleSetVisible(.{ .window_id = win_id, .visible = visible }, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "set_always_on_top")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const on_top = util.extractJsonBool(req_clean, "onTop") orelse false;
+        return window_ipc.handleSetAlwaysOnTop(.{ .window_id = win_id, .on_top = on_top }, response_buf, wm);
+    }
     inline for (.{
         .{ "minimize", &window_ipc.handleMinimize },
         .{ "restore_window", &window_ipc.handleRestoreWindow },
@@ -1804,6 +1810,10 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "focus", &window_ipc.handleFocus },
         .{ "is_normal", &window_ipc.handleIsNormal },
         .{ "get_bounds", &window_ipc.handleGetBounds },
+        .{ "blur", &window_ipc.handleBlur },
+        .{ "is_focused", &window_ipc.handleIsFocused },
+        .{ "is_visible", &window_ipc.handleIsVisible },
+        .{ "is_always_on_top", &window_ipc.handleIsAlwaysOnTop },
     }) |entry| {
         if (std.mem.eql(u8, cmd, entry[0])) {
             const wm = window_mod.WindowManager.global orelse return null;

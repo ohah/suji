@@ -199,6 +199,18 @@ export interface BoundsResponse extends WindowOpResponse {
     width: number;
     height: number;
 }
+export interface IsFocusedResponse extends WindowOpResponse {
+    cmd: "is_focused";
+    focused: boolean;
+}
+export interface IsVisibleResponse extends WindowOpResponse {
+    cmd: "is_visible";
+    visible: boolean;
+}
+export interface IsAlwaysOnTopResponse extends WindowOpResponse {
+    cmd: "is_always_on_top";
+    alwaysOnTop: boolean;
+}
 export interface ViewOptions {
     /** view를 합성할 host 창 id. live & .window이어야 함 */
     hostId: number;
@@ -307,6 +319,16 @@ export declare const windows: {
     getSize(windowId: number): Promise<[number, number]>;
     /** Electron BrowserWindow.getPosition() — [x, y]. getBounds 에서 파생. */
     getPosition(windowId: number): Promise<[number, number]>;
+    /** Electron BrowserWindow.blur() — 창 포커스 해제. */
+    blur(windowId: number): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isFocused(). */
+    isFocused(windowId: number): Promise<IsFocusedResponse>;
+    /** Electron BrowserWindow.isVisible(). */
+    isVisible(windowId: number): Promise<IsVisibleResponse>;
+    /** Electron BrowserWindow.setAlwaysOnTop(flag). */
+    setAlwaysOnTop(windowId: number, flag: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isAlwaysOnTop(). */
+    isAlwaysOnTop(windowId: number): Promise<IsAlwaysOnTopResponse>;
     undo(windowId: number): Promise<WindowOpResponse>;
     redo(windowId: number): Promise<WindowOpResponse>;
     cut(windowId: number): Promise<WindowOpResponse>;
@@ -424,6 +446,11 @@ export declare class BrowserWindow {
     getBounds(): Promise<BoundsResponse>;
     getSize(): Promise<[number, number]>;
     getPosition(): Promise<[number, number]>;
+    blur(): Promise<WindowOpResponse>;
+    isFocused(): Promise<IsFocusedResponse>;
+    isVisible(): Promise<IsVisibleResponse>;
+    setAlwaysOnTop(flag: boolean): Promise<WindowOpResponse>;
+    isAlwaysOnTop(): Promise<IsAlwaysOnTopResponse>;
     undo(): Promise<WindowOpResponse>;
     redo(): Promise<WindowOpResponse>;
     cut(): Promise<WindowOpResponse>;

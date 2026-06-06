@@ -14,6 +14,12 @@ pub const TestNative = struct {
     set_bounds_calls: usize = 0,
     set_visible_calls: usize = 0,
     focus_calls: usize = 0,
+    blur_calls: usize = 0,
+    set_always_on_top_calls: usize = 0,
+    /// is_* 게터 stub 반환값 (set/blur 이 갱신하거나 테스트가 미리 세팅).
+    stub_visible: bool = true,
+    stub_focused: bool = false,
+    stub_always_on_top: bool = false,
     last_title: ?[]const u8 = null,
     last_bounds: ?window.Bounds = null,
     /// 마지막 createWindow에 전달된 옵션의 sub-struct/parent_id 캡처 (Phase 3 매핑 검증용).
@@ -127,6 +133,11 @@ pub const TestNative = struct {
         .get_bounds = getBounds,
         .set_visible = setVisible,
         .focus = focus,
+        .blur = blur,
+        .is_focused = isFocused,
+        .is_visible = isVisible,
+        .set_always_on_top = setAlwaysOnTop,
+        .is_always_on_top = isAlwaysOnTop,
         .load_url = loadUrl,
         .reload = reload,
         .execute_javascript = executeJavascript,
@@ -233,6 +244,24 @@ pub const TestNative = struct {
 
     fn focus(ctx: ?*anyopaque, _: u64) void {
         fromCtx(ctx).focus_calls += 1;
+    }
+
+    fn blur(ctx: ?*anyopaque, _: u64) void {
+        fromCtx(ctx).blur_calls += 1;
+    }
+    fn isFocused(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_focused;
+    }
+    fn isVisible(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_visible;
+    }
+    fn setAlwaysOnTop(ctx: ?*anyopaque, _: u64, on_top: bool) void {
+        const self = fromCtx(ctx);
+        self.set_always_on_top_calls += 1;
+        self.stub_always_on_top = on_top;
+    }
+    fn isAlwaysOnTop(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_always_on_top;
     }
 
     fn loadUrl(ctx: ?*anyopaque, _: u64, url: []const u8) void {

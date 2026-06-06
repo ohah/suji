@@ -506,6 +506,18 @@ export interface BoundsResponse extends WindowOpResponse {
   width: number;
   height: number;
 }
+export interface IsFocusedResponse extends WindowOpResponse {
+  cmd: 'is_focused';
+  focused: boolean;
+}
+export interface IsVisibleResponse extends WindowOpResponse {
+  cmd: 'is_visible';
+  visible: boolean;
+}
+export interface IsAlwaysOnTopResponse extends WindowOpResponse {
+  cmd: 'is_always_on_top';
+  alwaysOnTop: boolean;
+}
 
 export interface SetBoundsArgs {
   x?: number;
@@ -734,6 +746,26 @@ export const windows = {
   async getPosition(windowId: number): Promise<[number, number]> {
     const b = await windows.getBounds(windowId);
     return [b.x, b.y];
+  },
+  /** Electron BrowserWindow.blur() — 창 포커스 해제. */
+  blur(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'blur', windowId });
+  },
+  /** Electron BrowserWindow.isFocused(). */
+  isFocused(windowId: number): Promise<IsFocusedResponse> {
+    return invoke<IsFocusedResponse>('__core__', { cmd: 'is_focused', windowId });
+  },
+  /** Electron BrowserWindow.isVisible(). */
+  isVisible(windowId: number): Promise<IsVisibleResponse> {
+    return invoke<IsVisibleResponse>('__core__', { cmd: 'is_visible', windowId });
+  },
+  /** Electron BrowserWindow.setAlwaysOnTop(flag). */
+  setAlwaysOnTop(windowId: number, flag: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_always_on_top', windowId, onTop: flag });
+  },
+  /** Electron BrowserWindow.isAlwaysOnTop(). */
+  isAlwaysOnTop(windowId: number): Promise<IsAlwaysOnTopResponse> {
+    return invoke<IsAlwaysOnTopResponse>('__core__', { cmd: 'is_always_on_top', windowId });
   },
 
   undo(windowId: number): Promise<WindowOpResponse> {
@@ -976,6 +1008,21 @@ export class BrowserWindow {
   }
   getPosition() {
     return windows.getPosition(this.#id);
+  }
+  blur() {
+    return windows.blur(this.#id);
+  }
+  isFocused() {
+    return windows.isFocused(this.#id);
+  }
+  isVisible() {
+    return windows.isVisible(this.#id);
+  }
+  setAlwaysOnTop(flag: boolean) {
+    return windows.setAlwaysOnTop(this.#id, flag);
+  }
+  isAlwaysOnTop() {
+    return windows.isAlwaysOnTop(this.#id);
   }
   undo() {
     return windows.undo(this.#id);

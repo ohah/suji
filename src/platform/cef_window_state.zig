@@ -190,3 +190,51 @@ pub fn isFullscreenImpl(ctx: ?*anyopaque, handle: u64) bool {
     }
     return callOnNsBool(ctx, handle, cef_window_lifecycle.suji_window_lifecycle_is_fullscreen);
 }
+
+// Electron BrowserWindow.isVisible() — CEF view-level is_visible(cef_view_t), 비-Views 는
+// NSWindow isVisible 폴백.
+pub fn isVisibleImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const self = fromCtx(ctx);
+    assertUiThread();
+    if (self.browsers.get(handle)) |entry| {
+        if (entry.views_window) |views_window| {
+            return views_window.base.base.is_visible.?(&views_window.base.base) != 0;
+        }
+    }
+    return callOnNsBool(ctx, handle, cef_window_lifecycle.suji_window_lifecycle_is_visible);
+}
+
+// Electron BrowserWindow.isFocused() — CEF window is_active, 비-Views 는 NSWindow isKeyWindow.
+pub fn isFocusedImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const self = fromCtx(ctx);
+    assertUiThread();
+    if (self.browsers.get(handle)) |entry| {
+        if (entry.views_window) |views_window| return views_window.is_active.?(views_window) != 0;
+    }
+    return callOnNsBool(ctx, handle, cef_window_lifecycle.suji_window_lifecycle_is_focused);
+}
+
+// Electron BrowserWindow.isAlwaysOnTop() — CEF window is_always_on_top, 비-Views 는 NSWindow level.
+pub fn isAlwaysOnTopImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const self = fromCtx(ctx);
+    assertUiThread();
+    if (self.browsers.get(handle)) |entry| {
+        if (entry.views_window) |views_window| return views_window.is_always_on_top.?(views_window) != 0;
+    }
+    return callOnNsBool(ctx, handle, cef_window_lifecycle.suji_window_lifecycle_is_always_on_top);
+}
+
+// Electron BrowserWindow.setAlwaysOnTop(flag) — CEF window set_always_on_top, 비-Views 는 NSWindow level.
+pub fn setAlwaysOnTopImpl(ctx: ?*anyopaque, handle: u64, on_top: bool) void {
+    const self = fromCtx(ctx);
+    assertUiThread();
+    if (self.browsers.get(handle)) |entry| {
+        if (entry.views_window) |views_window| {
+            views_window.set_always_on_top.?(views_window, if (on_top) 1 else 0);
+            return;
+        }
+    }
+    if (!is_macos) return;
+    const ns = nsWindowFor(self, handle) orelse return;
+    cef_window_lifecycle.suji_window_lifecycle_set_always_on_top(ns, if (on_top) 1 else 0);
+}

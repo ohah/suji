@@ -912,6 +912,31 @@ pub fn handleGetBounds(window_id: u32, response_buf: []u8, wm: *window.WindowMan
     ) catch null;
 }
 
+// Electron BrowserWindow blur/포커스·가시성·always-on-top.
+pub fn handleBlur(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleDevToolsOp("blur", &window.WindowManager.blur, window_id, response_buf, wm);
+}
+pub fn handleIsFocused(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_focused", "focused", &window.WindowManager.isFocused, window_id, response_buf, wm);
+}
+pub fn handleIsVisible(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_visible", "visible", &window.WindowManager.isVisible, window_id, response_buf, wm);
+}
+pub fn handleIsAlwaysOnTop(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_always_on_top", "alwaysOnTop", &window.WindowManager.isAlwaysOnTop, window_id, response_buf, wm);
+}
+
+pub const SetAlwaysOnTopReq = struct {
+    window_id: u32,
+    on_top: bool,
+};
+
+pub fn handleSetAlwaysOnTop(req: SetAlwaysOnTopReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setAlwaysOnTop(req.window_id, req.on_top)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_always_on_top", req.window_id, ok);
+}
+
 // Electron BrowserWindow.isNormal() — minimized/maximized/fullscreen 가 모두 아닌
 // 상태. 기존 3 게터에서 파생(네이티브 추가 0). 하나라도 조회 실패 시 ok:false.
 pub fn handleIsNormal(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

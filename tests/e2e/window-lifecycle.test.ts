@@ -389,6 +389,53 @@ describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
 });
 
 // ============================================
+// Electron 패리티: 가시성 / 포커스 / always-on-top
+// ============================================
+describe("BrowserWindow 가시성/포커스/always-on-top (Electron 패리티)", () => {
+  const op = (req: object): Promise<any> =>
+    page.evaluate((r) => (window as any).__suji__.core(JSON.stringify(r)), req);
+
+  test("is_visible: show/hide(set_visible) 상태 반영", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "vis", url: "about:blank" });
+    const id = c.windowId;
+    expect((await op({ cmd: "is_visible", windowId: id })).visible).toBe(true);
+    await op({ cmd: "set_visible", windowId: id, visible: false });
+    await new Promise((r) => setTimeout(r, 150));
+    expect((await op({ cmd: "is_visible", windowId: id })).visible).toBe(false);
+    await op({ cmd: "set_visible", windowId: id, visible: true });
+    await new Promise((r) => setTimeout(r, 150));
+    expect((await op({ cmd: "is_visible", windowId: id })).visible).toBe(true);
+  });
+
+  test("set_always_on_top → is_always_on_top 왕복", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "aot", url: "about:blank" });
+    const id = c.windowId;
+    expect((await op({ cmd: "is_always_on_top", windowId: id })).alwaysOnTop).toBe(false);
+    const s1 = await op({ cmd: "set_always_on_top", windowId: id, onTop: true });
+    expect(s1.ok).toBe(true);
+    expect((await op({ cmd: "is_always_on_top", windowId: id })).alwaysOnTop).toBe(true);
+    await op({ cmd: "set_always_on_top", windowId: id, onTop: false });
+    expect((await op({ cmd: "is_always_on_top", windowId: id })).alwaysOnTop).toBe(false);
+  });
+
+  test("blur: ok + is_focused 는 boolean 반환(헤드리스 포커스 불확정)", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "foc", url: "about:blank" });
+    const id = c.windowId;
+    expect((await op({ cmd: "blur", windowId: id })).ok).toBe(true);
+    const f = await op({ cmd: "is_focused", windowId: id });
+    expect(f.ok).toBe(true);
+    expect(typeof f.focused).toBe("boolean");
+  });
+
+  test("알 수 없는 windowId — 게터/세터 모두 ok:false", async () => {
+    for (const cmd of ["is_visible", "is_focused", "is_always_on_top", "blur"]) {
+      expect((await op({ cmd, windowId: 99999 })).ok).toBe(false);
+    }
+    expect((await op({ cmd: "set_always_on_top", windowId: 99999, onTop: true })).ok).toBe(false);
+  });
+});
+
+// ============================================
 // 멀티 윈도우 시나리오 — 동시 작업 + 교차 영향 없음
 // ============================================
 

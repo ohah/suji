@@ -187,3 +187,14 @@ pub const suji_window_lifecycle_is_maximized: *const fn (?*anyopaque) callconv(.
     if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_maximized" }) else &wl_stub.i32Ns;
 pub const suji_window_lifecycle_is_fullscreen: *const fn (?*anyopaque) callconv(.c) i32 =
     if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_fullscreen" }) else &wl_stub.i32Ns;
+// Electron 포커스·가시성·always-on-top NSWindow 폴백(비-Views 창용). 셋터는
+// setFs(?*anyopaque,i32) 형태, bool 게터는 i32Ns 스텁 재사용. blur 는 obj-c 불요
+// (cef_window_runtime 가 host.set_focus(0) 으로 focus 대칭 처리).
+pub const suji_window_lifecycle_is_visible: *const fn (?*anyopaque) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_visible" }) else &wl_stub.i32Ns;
+pub const suji_window_lifecycle_is_focused: *const fn (?*anyopaque) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_focused" }) else &wl_stub.i32Ns;
+pub const suji_window_lifecycle_set_always_on_top: *const fn (?*anyopaque, i32) callconv(.c) void =
+    if (is_macos) @extern(*const fn (?*anyopaque, i32) callconv(.c) void, .{ .name = "suji_window_lifecycle_set_always_on_top" }) else &wl_stub.setFs;
+pub const suji_window_lifecycle_is_always_on_top: *const fn (?*anyopaque) callconv(.c) i32 =
+    if (is_macos) @extern(*const fn (?*anyopaque) callconv(.c) i32, .{ .name = "suji_window_lifecycle_is_always_on_top" }) else &wl_stub.i32Ns;
