@@ -112,7 +112,9 @@ const impl = if (builtin.os.tag == .windows) struct {
         const ctx: *BoundsCtx = @ptrFromInt(@as(usize, @intCast(lparam)));
         if (ctx.len >= ctx.list.len) return 0;
         var info: MONITORINFO = .{};
-        if (GetMonitorInfoW(hmon, &info) == 0) return 1; // skip, keep enumerating
+        // getAllDisplays 의 enumProc 는 writeDisplay 실패(GetMonitorInfoW==0) 시 0(중단)
+        // 반환 → 동일하게 중단해야 두 열거가 같은 부분집합/순서 = index 정합.
+        if (GetMonitorInfoW(hmon, &info) == 0) return 0;
         ctx.list[ctx.len] = .{
             .x = info.rcMonitor.left,
             .y = info.rcMonitor.top,

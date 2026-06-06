@@ -140,7 +140,9 @@ pub fn screenGetDisplayMatching(x: f64, y: f64, w: f64, h: f64) i32 {
     const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
     const count = count_fn(screens, @ptrCast(objc.sel_registerName("count")));
 
-    var displays: [16]screen_model.DisplayBounds = undefined;
+    // 캡은 Windows/Linux(32) 와 동일 — getAllDisplays(버퍼 ~34개 수용)와 같은 수준이라
+    // 현실적 모니터 수에서 잘림 없이 index 정합 유지.
+    var displays: [32]screen_model.DisplayBounds = undefined;
     var len: usize = 0;
     var i: usize = 0;
     while (i < count and len < displays.len) : (i += 1) {
