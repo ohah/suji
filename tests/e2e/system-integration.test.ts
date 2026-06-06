@@ -14,6 +14,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { getMainPage } from "./_page";
+import { pickDisplayMatching, type Display } from "../../packages/suji-js/dist/index.js";
 
 let browser: Browser;
 let page: Page;
@@ -1402,12 +1403,55 @@ const sdk = <T = unknown>(path: string, ...args: unknown[]): Promise<T> =>
     { path, args },
   ) as Promise<T>;
 
+// screen.getDisplayMatching 순수 선택 로직(pickDisplayMatching) — 듀얼모니터를
+// 모킹해 page 없이 검증(핵심 로직 가드). 실 디스플레이 라운드트립은 아래 SDK describe.
+describe("screen.getDisplayMatching — pickDisplayMatching (듀얼모니터 순수 로직)", () => {
+  const d = (index: number, isPrimary: boolean, x: number, scaleFactor: number): Display => ({
+    index, isPrimary, x, y: 0, width: 1920, height: 1080,
+    visibleX: x, visibleY: 0, visibleWidth: 1920, visibleHeight: 1040, scaleFactor,
+  });
+  const left = d(0, true, 0, 1); // 0..1920
+  const right = d(1, false, 1920, 2); // 1920..3840
+  const displays = [left, right];
+
+  test("우측 모니터 안의 창 → right", () => {
+    expect(pickDisplayMatching(displays, { x: 2000, y: 100, width: 400, height: 300 })?.index).toBe(1);
+  });
+  test("좌측 모니터 안의 창 → left", () => {
+    expect(pickDisplayMatching(displays, { x: 100, y: 100, width: 400, height: 300 })?.index).toBe(0);
+  });
+  test("경계 걸침(1800~2200) → 겹침 면적 큰 right", () => {
+    // left 겹침 120px, right 겹침 280px → right.
+    expect(pickDisplayMatching(displays, { x: 1800, y: 100, width: 400, height: 300 })?.index).toBe(1);
+  });
+  test("모든 모니터 밖 → 중심 최근접 fallback(right)", () => {
+    expect(pickDisplayMatching(displays, { x: 5000, y: 100, width: 100, height: 100 })?.index).toBe(1);
+  });
+  test("빈 배열 → null", () => {
+    expect(pickDisplayMatching([], { x: 0, y: 0, width: 1, height: 1 })).toBeNull();
+  });
+});
+
 describe("@suji/api SDK — round-trip", () => {
   test("screen.getAllDisplays returns array", async () => {
     const r = await sdk<any[]>("screen.getAllDisplays");
     expect(Array.isArray(r)).toBe(true);
     expect(r.length).toBeGreaterThan(0);
     expect(r[0]).toHaveProperty("scaleFactor");
+  });
+
+  test("screen.getDisplayMatching returns the display containing a rect", async () => {
+    const all = await sdk<any[]>("screen.getAllDisplays");
+    const d0 = all[0];
+    const m = await sdk<any>("screen.getDisplayMatching", {
+      x: d0.x + 10,
+      y: d0.y + 10,
+      width: 100,
+      height: 100,
+    });
+    expect(m).not.toBeNull();
+    expect(m).toHaveProperty("scaleFactor");
+    expect(m.index).toBe(d0.index);
   });
 
   test("desktopCapturer.getSources returns screen sources", async () => {

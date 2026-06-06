@@ -890,6 +890,17 @@ export interface Display {
     visibleHeight: number;
     scaleFactor: number;
 }
+/**
+ * rect 와 겹침 면적이 최대인 Display 선택 (Electron `screen.getDisplayMatching` 로직).
+ * 겹치는 display 가 없으면 rect 중심에 가장 가까운 display. 빈 배열이면 null.
+ * 순수 함수 — getAllDisplays 결과 + rect 만으로 계산(테스트용 export).
+ */
+export declare function pickDisplayMatching(displays: Display[], rect: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}): Display | null;
 export declare const screen: {
     /** 연결된 모든 모니터의 bounds/scale 정보. macOS NSScreen 기반. */
     getAllDisplays(): Promise<Display[]>;
@@ -905,6 +916,17 @@ export declare const screen: {
     }): Promise<number>;
     /** Primary display 객체 반환 (없으면 null) — getAllDisplays.find(isPrimary) wrapper. */
     getPrimaryDisplay(): Promise<Display | null>;
+    /**
+     * rect(보통 창 bounds)와 가장 많이 겹치는 Display (Electron `screen.getDisplayMatching`).
+     * 듀얼/멀티모니터에서 "이 창이 있는 모니터" 판정 — 겹침 없으면 중심 최근접.
+     * getAllDisplays 에서 파생(getPrimaryDisplay 동형, 순수 로직은 pickDisplayMatching).
+     */
+    getDisplayMatching(rect: {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    }): Promise<Display | null>;
 };
 /** Electron `desktopCapturer.getSources` 소스. ⚠️ thumbnail/appIcon 미포함. */
 export interface DesktopCapturerSource {
