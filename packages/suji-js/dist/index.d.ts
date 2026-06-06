@@ -211,6 +211,20 @@ export interface IsAlwaysOnTopResponse extends WindowOpResponse {
     cmd: "is_always_on_top";
     alwaysOnTop: boolean;
 }
+export interface GetAllWindowsResponse {
+    from: "zig-core";
+    cmd: "get_all_windows";
+    ok: boolean;
+    /** 살아있는 top-level 창 id (WebContentsView 제외) */
+    windowIds: number[];
+}
+export interface GetFocusedWindowResponse {
+    from: "zig-core";
+    cmd: "get_focused_window";
+    ok: boolean;
+    /** 포커스된 창 id, 없으면 null */
+    windowId: number | null;
+}
 export interface ViewOptions {
     /** view를 합성할 host 창 id. live & .window이어야 함 */
     hostId: number;
@@ -329,6 +343,10 @@ export declare const windows: {
     setAlwaysOnTop(windowId: number, flag: boolean): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isAlwaysOnTop(). */
     isAlwaysOnTop(windowId: number): Promise<IsAlwaysOnTopResponse>;
+    /** Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 id (view 제외). */
+    getAllWindows(): Promise<GetAllWindowsResponse>;
+    /** Electron BrowserWindow.getFocusedWindow() — 포커스 창 id 또는 null. */
+    getFocusedWindow(): Promise<GetFocusedWindowResponse>;
     undo(windowId: number): Promise<WindowOpResponse>;
     redo(windowId: number): Promise<WindowOpResponse>;
     cut(windowId: number): Promise<WindowOpResponse>;
@@ -406,6 +424,10 @@ export declare class BrowserWindow {
     static create(opts?: WindowOptions): Promise<BrowserWindow>;
     /** 기존 windowId(예: 메인 창, 이벤트의 windowId)를 인스턴스로 래핑. */
     static fromId(id: number): BrowserWindow;
+    /** Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 인스턴스 배열. */
+    static getAllWindows(): Promise<BrowserWindow[]>;
+    /** Electron BrowserWindow.getFocusedWindow() — 포커스 창 인스턴스 또는 null. */
+    static getFocusedWindow(): Promise<BrowserWindow | null>;
     setTitle(title: string): Promise<WindowOpResponse>;
     setBounds(bounds: SetBoundsArgs): Promise<WindowOpResponse>;
     loadURL(url: string): Promise<WindowOpResponse>;

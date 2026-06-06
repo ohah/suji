@@ -281,6 +281,14 @@ export const windows = {
     isAlwaysOnTop(windowId) {
         return coreCall({ cmd: "is_always_on_top", windowId });
     },
+    /** Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 id (view 제외). */
+    getAllWindows() {
+        return coreCall({ cmd: "get_all_windows" });
+    },
+    /** Electron BrowserWindow.getFocusedWindow() — 포커스 창 id 또는 null. */
+    getFocusedWindow() {
+        return coreCall({ cmd: "get_focused_window" });
+    },
     // Phase 4-E: 편집 — 모두 main frame에 위임. 응답은 ok만.
     undo(windowId) {
         return coreCall({ cmd: "undo", windowId });
@@ -414,6 +422,16 @@ export class BrowserWindow {
     /** 기존 windowId(예: 메인 창, 이벤트의 windowId)를 인스턴스로 래핑. */
     static fromId(id) {
         return new BrowserWindow(id);
+    }
+    /** Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 인스턴스 배열. */
+    static async getAllWindows() {
+        const r = await windows.getAllWindows();
+        return r.windowIds.map((id) => BrowserWindow.fromId(id));
+    }
+    /** Electron BrowserWindow.getFocusedWindow() — 포커스 창 인스턴스 또는 null. */
+    static async getFocusedWindow() {
+        const r = await windows.getFocusedWindow();
+        return r.windowId == null ? null : BrowserWindow.fromId(r.windowId);
     }
     setTitle(title) {
         return windows.setTitle(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), title);

@@ -1799,6 +1799,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const on_top = util.extractJsonBool(req_clean, "onTop") orelse false;
         return window_ipc.handleSetAlwaysOnTop(.{ .window_id = win_id, .on_top = on_top }, response_buf, wm);
     }
+    // getAllWindows/getFocusedWindow 는 windowId 입력이 없어 전용 분기.
+    if (std.mem.eql(u8, cmd, "get_all_windows")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        return window_ipc.handleGetAllWindows(response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "get_focused_window")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        return window_ipc.handleGetFocusedWindow(response_buf, wm);
+    }
     inline for (.{
         .{ "minimize", &window_ipc.handleMinimize },
         .{ "restore_window", &window_ipc.handleRestoreWindow },

@@ -436,6 +436,44 @@ describe("BrowserWindow 가시성/포커스/always-on-top (Electron 패리티)",
 });
 
 // ============================================
+// Electron 패리티: getAllWindows / getFocusedWindow
+// ============================================
+describe("BrowserWindow.getAllWindows / getFocusedWindow (Electron 패리티)", () => {
+  const op = (req: object): Promise<any> =>
+    page.evaluate((r) => (window as any).__suji__.core(JSON.stringify(r)), req);
+
+  test("get_all_windows: 생성한 top-level 창 포함", async () => {
+    const a = await coreCall({ cmd: "create_window", title: "all-a", url: "about:blank" });
+    const b = await coreCall({ cmd: "create_window", title: "all-b", url: "about:blank" });
+    const r = await op({ cmd: "get_all_windows" });
+    expect(r.ok).toBe(true);
+    expect(Array.isArray(r.windowIds)).toBe(true);
+    expect(r.windowIds).toContain(a.windowId);
+    expect(r.windowIds).toContain(b.windowId);
+  });
+
+  test("get_all_windows: WebContentsView 는 제외(top-level 만)", async () => {
+    const host = await coreCall({ cmd: "create_window", title: "all-host", url: "about:blank" });
+    const v = await op({
+      cmd: "create_view",
+      hostId: host.windowId,
+      url: "about:blank",
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+    });
+    expect(typeof v.viewId).toBe("number");
+    const r = await op({ cmd: "get_all_windows" });
+    expect(r.windowIds).toContain(host.windowId);
+    expect(r.windowIds).not.toContain(v.viewId);
+  });
+
+  test("get_focused_window: ok + windowId 는 null 또는 숫자", async () => {
+    const r = await op({ cmd: "get_focused_window" });
+    expect(r.ok).toBe(true);
+    expect(r.windowId === null || typeof r.windowId === "number").toBe(true);
+  });
+});
+
+// ============================================
 // 멀티 윈도우 시나리오 — 동시 작업 + 교차 영향 없음
 // ============================================
 

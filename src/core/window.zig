@@ -1186,6 +1186,37 @@ pub const WindowManager = struct {
         return self.native.isAlwaysOnTop(win.native_handle);
     }
 
+    /// Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창(.window) id 를
+    /// out 에 채우고 개수 반환. .view 와 destroyed 는 제외. out 초과분은 버림.
+    pub fn listWindowIds(self: *WindowManager, out: []u32) usize {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        var n: usize = 0;
+        var it = self.windows.iterator();
+        while (it.next()) |entry| {
+            const win = entry.value_ptr.*;
+            if (win.kind != .window or win.destroyed) continue;
+            if (n >= out.len) break;
+            out[n] = win.id;
+            n += 1;
+        }
+        return n;
+    }
+
+    /// Electron BrowserWindow.getFocusedWindow() — 포커스(key) top-level 창 id, 없으면
+    /// null. native.isFocused 를 직접 질의(개별 WM 게터 재호출 시 잠금 재진입 회피).
+    pub fn getFocusedWindow(self: *WindowManager) ?u32 {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        var it = self.windows.iterator();
+        while (it.next()) |entry| {
+            const win = entry.value_ptr.*;
+            if (win.kind != .window or win.destroyed) continue;
+            if (self.native.isFocused(win.native_handle)) return win.id;
+        }
+        return null;
+    }
+
     // ==================== Phase 4-A: webContents (네비 / JS) ====================
 
     pub fn loadUrl(self: *WindowManager, id: u32, url: []const u8) Error!void {
