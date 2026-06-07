@@ -357,6 +357,12 @@ func Restore(windowID uint32) string {
 func Close(windowID uint32) string {
 	return suji.Invoke("__core__", windowOpRequest("destroy_window", windowID))
 }
+
+// Destroy force-destroys a window (Electron `BrowserWindow.destroy`). Unlike Close,
+// it skips the `window:close` (cancelable hook) and emits only `window:closed`.
+func Destroy(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("destroy_window_force", windowID))
+}
 func Show(windowID uint32) string { return suji.Invoke("__core__", setVisibleRequest(windowID, true)) }
 func Hide(windowID uint32) string { return suji.Invoke("__core__", setVisibleRequest(windowID, false)) }
 func SetFullScreen(windowID uint32, flag bool) string {
@@ -503,6 +509,7 @@ func (w *BrowserWindow) Maximize() string                        { return Maximi
 func (w *BrowserWindow) Unmaximize() string                      { return Unmaximize(w.ID) }
 func (w *BrowserWindow) Restore() string                         { return Restore(w.ID) }
 func (w *BrowserWindow) Close() string                           { return Close(w.ID) }
+func (w *BrowserWindow) Destroy() string                         { return Destroy(w.ID) }
 func (w *BrowserWindow) Show() string                            { return Show(w.ID) }
 func (w *BrowserWindow) Hide() string                            { return Hide(w.ID) }
 func (w *BrowserWindow) SetFullScreen(flag bool) string          { return SetFullScreen(w.ID, flag) }

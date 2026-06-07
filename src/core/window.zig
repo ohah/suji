@@ -891,9 +891,14 @@ pub const WindowManager = struct {
         }
     }
 
-    /// 창 파괴 (강제). `window:closed` 이벤트는 `close()` 경로에서만 발화. 단 host destroy로
-    /// 자동 정리되는 child view는 view-destroyed 이벤트 발화 (Electron WebContentsView 호환).
-    pub fn destroy(self: *WindowManager, id: u32) Error!void {
+    /// 파괴 + 단방향 이벤트 공용 (destroy/destroyWithClosedEvent/close Phase 3~4 공유).
+    /// lock 안에서 destroyLocked, lock 밖에서 view-destroyed + (emit_closed 면) window:closed
+    /// + all-closed. 유효성/취소(window:close) 단계는 caller 책임. name 은 destroy 전 캡처.
+    fn destroyAndEmitClosed(self: *WindowManager, id: u32, emit_closed: bool) Error!void {
+        const name_snapshot: ?[]const u8 = if (emit_closed)
+            (if (self.windows.get(id)) |w| w.name else null)
+        else
+            null;
         var live_after: usize = undefined;
         var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
         {
@@ -904,7 +909,33 @@ pub const WindowManager = struct {
             live_after = self.liveCountLocked();
         }
         self.emitViewDestroyedAndDeinit(&destroyed_views);
+        if (emit_closed) {
+            if (self.sink) |s| {
+                var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
+                const payload = buildIdPayload(&buf, id, name_snapshot);
+                s.emit(events.closed, payload);
+            }
+        }
         self.maybeEmitAllClosed(true, live_after);
+    }
+
+    /// 창 파괴 (강제, silent). `window:closed` 미발화(close()/destroyWithClosedEvent() 경로
+    /// 에서만 발화). 단 host destroy로 자동 정리되는 child view는 view-destroyed 발화.
+    pub fn destroy(self: *WindowManager, id: u32) Error!void {
+        return self.destroyAndEmitClosed(id, false);
+    }
+
+    /// Electron BrowserWindow.destroy() — 강제 파괴 + `window:closed`(단방향) 발화.
+    /// close() 와 달리 `window:close`(취소 가능 hook)는 **스킵**(force-close, listener
+    /// 가 막을 수 없음). .window 전용(view 는 destroyView) — close() 와 동일 가드. 미존재/
+    /// view id 는 error.
+    pub fn destroyWithClosedEvent(self: *WindowManager, id: u32) Error!void {
+        {
+            self.lock.lockUncancelable(self.io);
+            defer self.lock.unlock(self.io);
+            _ = try self.getLiveWindowLocked(id); // .window 전용 (Electron destroy = BrowserWindow)
+        }
+        return self.destroyAndEmitClosed(id, true);
     }
 
     /// 정책적 close. `window:close`(취소 가능) 발화 → preventDefault 아니면 파괴 +
@@ -918,7 +949,8 @@ pub const WindowManager = struct {
             _ = try self.getLiveWindowLocked(id);
         }
 
-        // Phase 2: 취소 가능 이벤트 (lock 밖). name은 destroy 전에 캡처해서 close/closed 동일 사용.
+        // Phase 2: 취소 가능 이벤트 (lock 밖). name은 destroy 전에 캡처(window:close 용 —
+        // window:closed 는 헬퍼가 재캡처, name 불변이라 동일 값).
         const name_snapshot: ?[]const u8 = if (self.windows.get(id)) |w| w.name else null;
         if (self.sink) |s| {
             var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
@@ -928,26 +960,9 @@ pub const WindowManager = struct {
             if (ev.default_prevented) return false;
         }
 
-        // Phase 3: 실제 파괴 (lock, listener 도중 destroy됐는지 재확인)
-        var live_after: usize = undefined;
-        var destroyed_views: std.ArrayListUnmanaged(DestroyedView) = .empty;
-        {
-            self.lock.lockUncancelable(self.io);
-            defer self.lock.unlock(self.io);
-            const win = try self.getLiveLocked(id);
-            self.destroyLocked(win, &destroyed_views);
-            live_after = self.liveCountLocked();
-        }
-
-        // Phase 4: 단방향 이벤트 (lock 밖) — view-destroyed 먼저 (자식 → 부모 순서),
-        // 그 다음 host의 closed.
-        self.emitViewDestroyedAndDeinit(&destroyed_views);
-        if (self.sink) |s| {
-            var buf: [PAYLOAD_BUF_SIZE]u8 = undefined;
-            const payload = buildIdPayload(&buf, id, name_snapshot);
-            s.emit(events.closed, payload);
-        }
-        self.maybeEmitAllClosed(true, live_after);
+        // Phase 3~4: 실제 파괴 + 단방향 이벤트 (공용 헬퍼 — listener 도중 destroy됐는지
+        // getLiveLocked 로 재확인, view-destroyed → closed → all-closed).
+        try self.destroyAndEmitClosed(id, true);
         return true;
     }
 

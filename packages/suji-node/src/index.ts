@@ -727,6 +727,10 @@ export const windows = {
   close(windowId: number): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'destroy_window', windowId });
   },
+  /** 강제 파괴 (Electron `BrowserWindow.destroy`). `window:close`(취소 hook) 스킵, `window:closed` 만. */
+  destroy(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'destroy_window_force', windowId });
+  },
   setFullScreen(windowId: number, flag: boolean): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'set_fullscreen', windowId, flag });
   },
@@ -1026,6 +1030,10 @@ export class BrowserWindow {
   }
   close() {
     return windows.close(this.#id);
+  }
+  /** 강제 파괴 (Electron `BrowserWindow.destroy`) — `window:close` 스킵, `window:closed` 만. */
+  destroy() {
+    return windows.destroy(this.#id);
   }
   setFullScreen(flag: boolean) {
     return windows.setFullScreen(this.#id, flag);

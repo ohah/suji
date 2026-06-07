@@ -201,6 +201,32 @@ describe("window lifecycle events", () => {
     }
   });
 
+  test("destroy()(force) → window:closed 발화, window:close(취소 hook)는 스킵", async () => {
+    const a = (await core<{ windowId: number }>({
+      cmd: "create_window", title: "destroy-force-a", x: 510, y: 510, width: 300, height: 200,
+    })).windowId;
+    const closeCol = collect<{ windowId: number }>("window:close", 1500);
+    const closedCol = collect<{ windowId: number }>("window:closed", 1500);
+    await core({ cmd: "destroy_window_force", windowId: a });
+    const closeEvts = await closeCol;
+    const closedEvts = await closedCol;
+    // Electron destroy(): window:closed 발화, window:close(취소 hook)는 미발화.
+    expect(closedEvts.some((e) => e.windowId === a)).toBe(true);
+    expect(closeEvts.some((e) => e.windowId === a)).toBe(false);
+  });
+
+  test("close() 대조 → window:close + window:closed 둘 다 발화 (destroy 와 차이)", async () => {
+    // harness 가 window:close 를 실제 감지함을 확인 → 위 destroy 의 '스킵' 단언이 유의미.
+    const b = (await core<{ windowId: number }>({
+      cmd: "create_window", title: "close-ctrl-b", x: 520, y: 520, width: 300, height: 200,
+    })).windowId;
+    const closeCol = collect<{ windowId: number }>("window:close", 1500);
+    const closedCol = collect<{ windowId: number }>("window:closed", 1500);
+    await core({ cmd: "destroy_window", windowId: b });
+    expect((await closeCol).some((e) => e.windowId === b)).toBe(true);
+    expect((await closedCol).some((e) => e.windowId === b)).toBe(true);
+  });
+
   // ==================== Phase 5: minimize/maximize/fullscreen ====================
   // 새 창을 만들고 IPC로 NSWindow를 조작 → NSWindowDelegate가 이벤트 발화.
   // CI runner는 dock 동작이 비결정적이라 toBeGreaterThan(0)만 검증 (정확한 횟수 X).

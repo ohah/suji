@@ -119,6 +119,7 @@ func TestWindowStateRequests(t *testing.T) {
 		{"get_bounds", windowOpRequest("get_bounds", 1), `{"cmd":"get_bounds","windowId":1}`},
 		{"restore", windowOpRequest("restore_window", 2), `{"cmd":"restore_window","windowId":2}`},
 		{"close", windowOpRequest("destroy_window", 2), `{"cmd":"destroy_window","windowId":2}`},
+		{"destroy", windowOpRequest("destroy_window_force", 2), `{"cmd":"destroy_window_force","windowId":2}`},
 		{"show", setVisibleRequest(2, true), `{"cmd":"set_visible","windowId":2,"visible":true}`},
 		{"hide", setVisibleRequest(2, false), `{"cmd":"set_visible","windowId":2,"visible":false}`},
 		{"set_fullscreen", setFullscreenRequest(4, true), `{"cmd":"set_fullscreen","windowId":4,"flag":true}`},

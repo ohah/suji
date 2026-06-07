@@ -1055,6 +1055,31 @@ test "destroy does not emit window:close or window:closed (silent destruction)" 
     try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.closed));
 }
 
+test "destroyWithClosedEvent emits window:closed but skips window:close (force, Electron destroy)" {
+    var native = TestNative{};
+    var sink = TestSink{};
+    defer sink.deinit();
+    var wm = newManager(&native);
+    defer wm.deinit();
+    wm.setEventSink(sink.asSink());
+
+    const id = try wm.create(.{});
+    sink.events.clearRetainingCapacity();
+
+    try wm.destroyWithClosedEvent(id);
+    // Electron destroy(): 취소 hook(window:close) 스킵, window:closed 만 발화.
+    try std.testing.expectEqual(@as(usize, 0), countEvents(&sink, window.events.close));
+    try std.testing.expectEqual(@as(usize, 1), countEvents(&sink, window.events.closed));
+    try std.testing.expect(wm.get(id).?.destroyed);
+}
+
+test "destroyWithClosedEvent on unknown id returns WindowNotFound" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+    try std.testing.expectError(window.Error.WindowNotFound, wm.destroyWithClosedEvent(999));
+}
+
 // ============================================
 // 동시성 — 같은 name으로 N 스레드 create → singleton 유지
 // ============================================

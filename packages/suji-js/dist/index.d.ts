@@ -319,6 +319,9 @@ export declare const windows: {
     show(windowId: number): Promise<WindowOpResponse>;
     hide(windowId: number): Promise<WindowOpResponse>;
     close(windowId: number): Promise<WindowOpResponse>;
+    /** 강제 파괴 (Electron `BrowserWindow.destroy`). close 와 달리 `window:close`
+     *  (취소 hook)를 스킵하고 `window:closed` 만 발화 — listener 가 막을 수 없음. */
+    destroy(windowId: number): Promise<WindowOpResponse>;
     setFullScreen(windowId: number, flag: boolean): Promise<WindowOpResponse>;
     isMinimized(windowId: number): Promise<IsMinimizedResponse>;
     isMaximized(windowId: number): Promise<IsMaximizedResponse>;
@@ -465,6 +468,8 @@ export declare class BrowserWindow {
     show(): Promise<WindowOpResponse>;
     hide(): Promise<WindowOpResponse>;
     close(): Promise<WindowOpResponse>;
+    /** 강제 파괴 (Electron `BrowserWindow.destroy`) — `window:close` 스킵, `window:closed` 만. */
+    destroy(): Promise<WindowOpResponse>;
     setFullScreen(flag: boolean): Promise<WindowOpResponse>;
     isMinimized(): Promise<IsMinimizedResponse>;
     isMaximized(): Promise<IsMaximizedResponse>;

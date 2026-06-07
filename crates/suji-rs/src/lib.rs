@@ -801,6 +801,10 @@ pub mod windows {
     pub fn close(window_id: u32) -> Option<String> {
         invoke("__core__", &window_op_request("destroy_window", window_id))
     }
+    /// 강제 파괴 (Electron `BrowserWindow.destroy`) — `window:close`(취소 hook) 스킵, `window:closed` 만.
+    pub fn destroy(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("destroy_window_force", window_id))
+    }
     pub fn show(window_id: u32) -> Option<String> {
         invoke("__core__", &set_visible_request(window_id, true))
     }
@@ -1156,6 +1160,10 @@ pub mod windows {
         pub fn close(&self) -> Option<String> {
             close(self.id)
         }
+        /// 강제 파괴 (Electron `BrowserWindow.destroy`) — `window:close` 스킵, `window:closed` 만.
+        pub fn destroy(&self) -> Option<String> {
+            destroy(self.id)
+        }
         pub fn show(&self) -> Option<String> {
             show(self.id)
         }
@@ -1249,6 +1257,7 @@ pub mod windows {
             // 리네임 트랩 cmd 문서/가드 — restore→restore_window, close→destroy_window (Go 테스트 대칭).
             assert_eq!(window_op_request("restore_window", 2), r#"{"cmd":"restore_window","windowId":2}"#);
             assert_eq!(window_op_request("destroy_window", 2), r#"{"cmd":"destroy_window","windowId":2}"#);
+            assert_eq!(window_op_request("destroy_window_force", 2), r#"{"cmd":"destroy_window_force","windowId":2}"#);
             assert_eq!(set_visible_request(2, true), r#"{"cmd":"set_visible","windowId":2,"visible":true}"#);
             assert_eq!(set_visible_request(2, false), r#"{"cmd":"set_visible","windowId":2,"visible":false}"#);
             assert_eq!(set_fullscreen_request(4, true), r#"{"cmd":"set_fullscreen","windowId":4,"flag":true}"#);
