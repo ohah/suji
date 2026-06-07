@@ -12,7 +12,8 @@
 //!   멱등 — 이미 보유 중이면 request 재호출은 재락 없이 true.
 //!
 //! second-instance argv 전달(Electron `second-instance` 이벤트)은 별도 IPC
-//! (Unix 소켓)가 담당할 후속 작업 — 여기선 락만(역할 분리).
+//! (macOS/Linux Unix 소켓 / Windows named pipe)가 담당 — 아래 second-instance 섹션.
+//! 락(flock/mutex)과 IPC 채널은 역할 분리.
 //! 보유 상태는 app 당 단일(Electron 도 프로세스당 하나) → 전역 1개.
 //!
 //! 스레드 안전: `__core__` cmd 는 프론트(CEF UI 스레드)와 백엔드(Node/Lua/Python
@@ -95,17 +96,28 @@ const win_impl = if (is_windows) struct {
             mutex = null;
         }
     }
+
+    // prefix + app_name 을 UTF-16 NUL-종단 이름으로. app_name 의 백슬래시만 '_' 치환
+    // (prefix 의 백슬래시는 보존 — mutex 네임스페이스 "Local\" / 파이프 경로 "\\.\pipe\"
+    //  구분자). 과길이면 null. mutex 이름과 파이프 이름 빌드에 공용.
+    fn buildWinNameZ(out8: []u8, out16: []u16, prefix: []const u8, app_name: []const u8) ?[:0]const u16 {
+        const full = std.fmt.bufPrint(out8, "{s}{s}", .{ prefix, app_name }) catch return null;
+        std.mem.replaceScalar(u8, out8[prefix.len..full.len], '\\', '_');
+        const n16 = std.unicode.utf8ToUtf16Le(out16, full) catch return null;
+        if (n16 >= out16.len) return null;
+        out16[n16] = 0;
+        return out16[0..n16 :0];
+    }
 } else struct {};
 
 // ============================================================
-// second-instance IPC (PR-B) — macOS/Linux Unix 도메인 소켓.
-// primary(락 보유)는 <userData>/.suji-si.sock 에 listen 하며 두 번째 인스턴스가
-// 보낸 argv 를 받아 호스트 콜백(→ app:second-instance EventBus emit)으로 넘기고,
-// secondary(락 실패)는 그 소켓에 connect 해 자기 argv 를 보낸 뒤 종료(Electron
-// second-instance 동등). 락은 flock(PR-A)이 담당 — 소켓은 순수 argv 전달 채널.
-// listener 는 프로세스 수명 동안 유지(release 는 flock 만 해제; 소켓 teardown 은
+// second-instance IPC — macOS/Linux Unix 도메인 소켓 (PR-B) + Windows named pipe (PR-B2).
+// primary(락 보유)는 IPC 서버를 띄워 두 번째 인스턴스가 보낸 argv 를 받아 호스트
+// 콜백(→ app:second-instance EventBus emit)으로 넘기고, secondary(락 실패)는 그
+// 채널에 connect 해 자기 argv 를 보낸 뒤 종료(Electron second-instance 동등).
+// 락은 flock/mutex(PR-A)가 담당 — IPC 채널은 순수 argv 전달 전용(역할 분리).
+// listener 는 프로세스 수명 동안 유지(release 는 락만 해제; 소켓 teardown 은
 // blocked accept unblock 이 POSIX 상 비결정적이라 생략 — 종료 시 OS 가 회수).
-// Windows named pipe 는 후속(PR-B2) — Windows 는 락만(second-instance 이벤트 미발).
 // ============================================================
 
 // 호스트가 등록하는 수신 콜백(받은 argv JSON → EventBus emit) + 이 프로세스가
@@ -125,6 +137,14 @@ pub fn setLaunchArgv(argv_json: []const u8) void {
     const n = @min(argv_json.len, g_argv_buf.len);
     @memcpy(g_argv_buf[0..n], argv_json[0..n]);
     g_argv_len = n;
+}
+
+// 수신한 argv bytes(total)를 NUL-종단해 수신 콜백으로 디스패치. posix_si.acceptLoop
+// 와 win_si.serverLoop 공용(플랫폼 무관 — read 원시 함수만 다름).
+fn dispatchArgv(buf: *[4097]u8, total: usize) void {
+    if (total == 0) return;
+    buf[total] = 0;
+    if (g_si_cb) |cb| cb(@ptrCast(buf));
 }
 
 const posix_si = if (!is_windows) struct {
@@ -190,10 +210,7 @@ const posix_si = if (!is_windows) struct {
                 total += @intCast(n);
             }
             _ = std.c.close(cfd);
-            if (total > 0) {
-                buf[total] = 0;
-                if (g_si_cb) |cb| cb(@ptrCast(&buf));
-            }
+            dispatchArgv(&buf, total);
         }
     }
 
@@ -205,6 +222,89 @@ const posix_si = if (!is_windows) struct {
         defer _ = std.c.close(fd);
         if (std.c.connect(fd, @ptrCast(&addr), @sizeOf(std.c.sockaddr.un)) != 0) return;
         if (g_argv_len > 0) _ = std.c.write(fd, &g_argv_buf, g_argv_len);
+    }
+} else struct {};
+
+// ---- Windows: named pipe (PR-B2) — POSIX Unix 소켓의 Windows 대응 ----
+// primary 는 \\.\pipe\suji-si-<app> 서버를 띄워 두 번째 인스턴스의 argv 를 받고,
+// secondary 는 그 파이프에 자기 argv 를 쓴 뒤 종료. POSIX posix_si 와 동형 흐름.
+// 정직 경계: 이 머신엔 Windows 가 없어 컴파일 검증(gnu+msvc cross-compile)만 — 런타임
+// 미검증(Windows CI 빌드 통과 + 메커니즘은 POSIX 와 동형). PIPE_WAIT 블로킹 서버 루프.
+const win_si = if (is_windows) struct {
+    const w = std.os.windows;
+    const PIPE_ACCESS_INBOUND: w.DWORD = 0x00000001;
+    const PIPE_TYPE_BYTE: w.DWORD = 0x00000000;
+    const PIPE_WAIT: w.DWORD = 0x00000000;
+    const PIPE_UNLIMITED_INSTANCES: w.DWORD = 255;
+    const GENERIC_WRITE: w.DWORD = 0x40000000;
+    const OPEN_EXISTING: w.DWORD = 3;
+    const ERROR_PIPE_CONNECTED: w.DWORD = 535;
+    const ERROR_PIPE_BUSY: w.DWORD = 231;
+
+    // BOOL 반환은 c_int 로 받아 `!= 0` 비교(Bool(c_int) enum 회피 — CreateMutexW 교훈).
+    extern "kernel32" fn CreateNamedPipeW(name: [*:0]const u16, open_mode: w.DWORD, pipe_mode: w.DWORD, max_instances: w.DWORD, out_buf: w.DWORD, in_buf: w.DWORD, default_timeout: w.DWORD, sa: ?*anyopaque) callconv(.winapi) w.HANDLE;
+    extern "kernel32" fn ConnectNamedPipe(pipe: w.HANDLE, overlapped: ?*anyopaque) callconv(.winapi) c_int;
+    extern "kernel32" fn DisconnectNamedPipe(pipe: w.HANDLE) callconv(.winapi) c_int;
+    extern "kernel32" fn ReadFile(file: w.HANDLE, buf: [*]u8, n: w.DWORD, read_n: *w.DWORD, overlapped: ?*anyopaque) callconv(.winapi) c_int;
+    extern "kernel32" fn WriteFile(file: w.HANDLE, buf: [*]const u8, n: w.DWORD, written: *w.DWORD, overlapped: ?*anyopaque) callconv(.winapi) c_int;
+    extern "kernel32" fn CreateFileW(name: [*:0]const u16, access: w.DWORD, share: w.DWORD, sa: ?*anyopaque, disposition: w.DWORD, flags: w.DWORD, template: ?w.HANDLE) callconv(.winapi) w.HANDLE;
+    extern "kernel32" fn WaitNamedPipeW(name: [*:0]const u16, timeout: w.DWORD) callconv(.winapi) c_int;
+    extern "kernel32" fn CloseHandle(h: w.HANDLE) callconv(.winapi) c_int;
+    extern "kernel32" fn GetLastError() callconv(.winapi) w.DWORD;
+
+    var started: bool = false;
+    var pipe_name: [256]u16 = undefined; // 서버 스레드가 참조(스레드 수명 = 프로세스).
+
+    fn startListener(name16: [:0]const u16) void {
+        if (started) return; // 멱등(posix_si 동형)
+        if (name16.len + 1 > pipe_name.len) return; // 보관 불가 → IPC 비활성(락은 유효)
+        @memcpy(pipe_name[0..name16.len], name16[0..name16.len]);
+        pipe_name[name16.len] = 0; // NUL 종단(서버 스레드가 [*:0] 로 참조)
+        const t = std.Thread.spawn(.{}, serverLoop, .{}) catch return;
+        t.detach();
+        started = true;
+    }
+
+    fn serverLoop() void {
+        const name_ptr: [*:0]const u16 = @ptrCast(&pipe_name);
+        // 파이프 인스턴스를 1회 생성 후 Disconnect→재Connect 로 재사용 — 인스턴스가
+        // 루프 내내 항상 존재해 recreate gap(POSIX 소켓엔 없는)을 제거. 종료 시 OS 회수.
+        const h = CreateNamedPipeW(name_ptr, PIPE_ACCESS_INBOUND, PIPE_TYPE_BYTE | PIPE_WAIT, PIPE_UNLIMITED_INSTANCES, 0, 4096, 0, null);
+        if (h == w.INVALID_HANDLE_VALUE) return; // 생성 불가 → second-instance 비활성(락 유효)
+        defer _ = CloseHandle(h);
+        while (true) {
+            // 클라 연결 대기. FALSE 라도 ERROR_PIPE_CONNECTED 면 Connect 전 이미 연결된
+            // 정상 케이스. 그 외 실패는 영구 에러로 보고 종료(busy-spin 방지, POSIX 동형).
+            if (ConnectNamedPipe(h, null) == 0 and GetLastError() != ERROR_PIPE_CONNECTED) break;
+            var buf: [4097]u8 = undefined;
+            var total: usize = 0;
+            while (total < buf.len - 1) {
+                var read_n: w.DWORD = 0;
+                if (ReadFile(h, buf[total..].ptr, @intCast(buf.len - 1 - total), &read_n, null) == 0 or read_n == 0) break;
+                total += read_n;
+            }
+            dispatchArgv(&buf, total);
+            _ = DisconnectNamedPipe(h); // 인스턴스 재사용(다음 클라 위해 — gap 없음)
+        }
+    }
+
+    fn forward(name16: [:0]const u16) void {
+        // 단일 인스턴스라 다른 secondary 가 read 중이면 ERROR_PIPE_BUSY → WaitNamedPipe
+        // 로 가용 대기 후 재시도(소량 한도 — argv 전달은 best-effort).
+        var attempts: u8 = 0;
+        while (attempts < 5) : (attempts += 1) {
+            const h = CreateFileW(name16.ptr, GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
+            if (h != w.INVALID_HANDLE_VALUE) {
+                defer _ = CloseHandle(h);
+                if (g_argv_len > 0) {
+                    var written: w.DWORD = 0;
+                    _ = WriteFile(h, &g_argv_buf, @intCast(g_argv_len), &written, null);
+                }
+                return;
+            }
+            if (GetLastError() != ERROR_PIPE_BUSY) return; // not-found 등 → 포기
+            if (WaitNamedPipeW(name16.ptr, 200) == 0) return; // 타임아웃/에러 → 포기
+        }
     }
 } else struct {};
 
@@ -226,18 +326,18 @@ pub fn requestSingleInstanceLock(user_data_dir: []const u8, app_name: []const u8
         }
     }
     if (comptime is_windows) {
-        // "Local\suji-single-instance-<app>" — app 의 백슬래시만 '_' 치환
-        // (백슬래시는 mutex 네임스페이스 구분자 → prefix 의 "Local\" 는 보존하고
-        //  app_name 영역만 치환). 이름 과길이는 bufPrint 가 error → false.
-        const prefix = "Local\\suji-single-instance-";
-        var name8: [512]u8 = undefined;
-        const full = std.fmt.bufPrint(&name8, "{s}{s}", .{ prefix, app_name }) catch return false;
-        std.mem.replaceScalar(u8, name8[prefix.len..full.len], '\\', '_');
-        var name16: [512]u16 = undefined;
-        const n16 = std.unicode.utf8ToUtf16Le(&name16, full) catch return false;
-        if (n16 >= name16.len) return false;
-        name16[n16] = 0;
-        g_has_lock = win_impl.request(@ptrCast(&name16));
+        // 락: named mutex "Local\suji-single-instance-<app>".
+        var mn8: [512]u8 = undefined;
+        var mn16: [512]u16 = undefined;
+        const mutex_name = win_impl.buildWinNameZ(&mn8, &mn16, "Local\\suji-single-instance-", app_name) orelse return false;
+        g_has_lock = win_impl.request(mutex_name.ptr);
+        // second-instance: primary 는 named pipe listen, secondary 는 argv 전달.
+        // 파이프 이름 "\\.\pipe\suji-si-<app>"(prefix 백슬래시 보존, app 만 치환).
+        var pn8: [512]u8 = undefined;
+        var pn16: [512]u16 = undefined;
+        if (win_impl.buildWinNameZ(&pn8, &pn16, "\\\\.\\pipe\\suji-si-", app_name)) |pipe_name| {
+            if (g_has_lock) win_si.startListener(pipe_name) else win_si.forward(pipe_name);
+        }
     } else {
         var buf: [1100]u8 = undefined;
         const path = std.fmt.bufPrintZ(&buf, "{s}/.suji-single-instance.lock", .{user_data_dir}) catch return false;
@@ -322,7 +422,9 @@ test "single instance: acquire / idempotent / release / re-acquire + cross-fd bl
 }
 
 test "second-instance: forward → listener → callback (argv 전달)" {
-    if (is_windows) return error.SkipZigTest; // POSIX 소켓 (Windows 후속 PR-B2)
+    // POSIX 소켓 라운드트립. Windows named pipe(win_si)는 동형 메커니즘이나 런타임
+    // 환경 부재로 컴파일 검증만(CI 빌드 + cross-compile) — 유닛 테스트는 POSIX 한정.
+    if (is_windows) return error.SkipZigTest;
 
     // 수신 콜백 — 받은 argv 를 캡처(다른 스레드에서 발화 → atomic 가시성).
     const Cap = struct {
