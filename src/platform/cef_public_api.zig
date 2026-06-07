@@ -234,6 +234,8 @@ pub const powerMonitorScreenLocked = cef_power_monitor.powerMonitorScreenLocked;
 pub const requestSingleInstanceLock = cef_single_instance.requestSingleInstanceLock;
 pub const hasSingleInstanceLock = cef_single_instance.hasSingleInstanceLock;
 pub const releaseSingleInstanceLock = cef_single_instance.releaseSingleInstanceLock;
+pub const setSecondInstanceHandler = cef_single_instance.setSecondInstanceHandler;
+pub const setLaunchArgv = cef_single_instance.setLaunchArgv;
 
 pub const shellOpenExternal = cef_shell.shellOpenExternal;
 pub const shellShowItemInFolder = cef_shell.shellShowItemInFolder;
