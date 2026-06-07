@@ -24,6 +24,8 @@ type MenuItem struct {
 	// Accelerator — Electron MenuItem.accelerator (예 "Cmd+Shift+K"). macOS keyEquivalent
 	// (단일 문자), Win/Linux no-op.
 	Accelerator string `json:"accelerator,omitempty"`
+	// Role — Electron MenuItem.role (copy/paste/quit 등; 설정 시 click 무시). macOS only.
+	Role string `json:"role,omitempty"`
 }
 
 func Item(label, click string) MenuItem {

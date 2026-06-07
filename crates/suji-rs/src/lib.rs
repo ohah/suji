@@ -2173,6 +2173,8 @@ pub mod menu {
             visible: bool,
             /// Electron MenuItem.accelerator (예 "Cmd+Shift+K"). 미사용 시 "".
             accelerator: &'a str,
+            /// Electron MenuItem.role (copy/paste/quit 등; 설정 시 click 무시). 미사용 시 "".
+            role: &'a str,
         },
         Checkbox {
             label: &'a str,
@@ -2202,6 +2204,7 @@ pub mod menu {
                 id,
                 visible,
                 accelerator,
+                role,
             } => serde_json::json!({
                 "type": "item",
                 "label": label,
@@ -2210,6 +2213,7 @@ pub mod menu {
                 "id": id,
                 "visible": visible,
                 "accelerator": accelerator,
+                "role": role,
             }),
             MenuItem::Checkbox {
                 label,
@@ -3081,6 +3085,7 @@ mod tests {
                     id: "run-item",
                     visible: false,
                     accelerator: "Cmd+R",
+                    role: "",
                 },
                 crate::menu::MenuItem::Checkbox {
                     label: "Flag",
@@ -3122,6 +3127,7 @@ mod tests {
                 id: "",
                 visible: true,
                 accelerator: "",
+                role: "",
             }],
             id: "",
             visible: true,

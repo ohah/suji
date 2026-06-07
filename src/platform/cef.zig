@@ -252,6 +252,7 @@ pub const addDefaultAppMenu = cef_public_api.addDefaultAppMenu;
 pub const createMenu = cef_public_api.createMenu;
 pub const addSubmenuItem = cef_public_api.addSubmenuItem;
 pub const allocNSMenuItem = cef_public_api.allocNSMenuItem;
+pub const ensureQuitTarget = cef_public_api.ensureQuitTarget;
 
 // ============================================
 // Win32 message pump thread — cef_win_pump.zig 로 분리(동작 무변경).
