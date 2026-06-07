@@ -46,3 +46,9 @@ end)
 suji.handle("core-single-instance", function(_)
   return suji.invoke("__core__", cjson.encode({ cmd = "app_has_single_instance_lock" }))
 end)
+
+-- session.setProxy 도 __core__ 로 도달. 백엔드(lua 워커 스레드)에서 호출하면 UI
+-- 스레드로 post 되는 경로 검증(크래시 없이 success). mode=direct(부작용 없음).
+suji.handle("core-set-proxy", function(_)
+  return suji.invoke("__core__", cjson.encode({ cmd = "session_set_proxy", mode = "direct" }))
+end)

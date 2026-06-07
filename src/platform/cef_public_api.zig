@@ -38,6 +38,7 @@ const cef_screen = @import("cef_screen.zig");
 const cef_scheme = @import("cef_scheme.zig");
 const cef_security_scoped_bookmark = @import("cef_security_scoped_bookmark.zig");
 const cef_session_cookies = @import("cef_session_cookies.zig");
+const cef_session_proxy = @import("cef_session_proxy.zig");
 const cef_shell = @import("cef_shell.zig");
 const cef_single_instance = @import("cef_single_instance.zig");
 const cef_tray = @import("cef_tray.zig");
@@ -288,6 +289,7 @@ pub const sessionClearStorageData = cef_session_cookies.sessionClearStorageData;
 pub const sessionSetCookie = cef_session_cookies.sessionSetCookie;
 pub const sessionRemoveCookies = cef_session_cookies.sessionRemoveCookies;
 pub const sessionGetCookies = cef_session_cookies.sessionGetCookies;
+pub const sessionSetProxy = cef_session_proxy.sessionSetProxy;
 
 pub const ApplicationMenuItem = cef_menu.ApplicationMenuItem;
 pub const MenuEmitHandler = cef_menu.MenuEmitHandler;

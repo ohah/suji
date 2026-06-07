@@ -2495,6 +2495,20 @@ pub mod session {
         invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
     }
 
+    /// Electron `session.setProxy(config)` — Chromium "proxy" preference 설정.
+    /// mode "" → "direct"(프록시 해제). proxy_rules: "host:port". raw: `{"success":bool}`.
+    pub fn set_proxy(mode: &str, proxy_rules: &str, proxy_bypass_rules: &str, pac_script: &str) -> Option<String> {
+        let req = json!({
+            "cmd": "session_set_proxy",
+            "mode": mode,
+            "proxyRules": proxy_rules,
+            "proxyBypassRules": proxy_bypass_rules,
+            "pacScript": pac_script,
+        })
+        .to_string();
+        invoke("__core__", &req)
+    }
+
     /// IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
     /// origin "" → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
     /// 삭제 불가). storage_types None → "all".

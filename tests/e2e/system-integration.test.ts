@@ -1686,3 +1686,58 @@ describe("app.requestSingleInstanceLock", () => {
     expect(evt.argv).toContain("/tmp/x.txt");
   });
 });
+
+// session.setProxy — 프록시 설정이 렌더러 네트워크 요청에 실효하는지 실측.
+// dead proxy + "<-loopback>"(루프백도 프록시 경유)로 fetch 실패 → direct 복귀로 성공.
+describe("session.setProxy", () => {
+  const setProxy = (cfg: Record<string, string>) =>
+    core({ cmd: "session_set_proxy", mode: "", proxyRules: "", proxyBypassRules: "", pacScript: "", ...cfg });
+
+  test("프록시 설정이 렌더러 요청에 실효 (프록시 경유 .invalid 해석 → 성공, direct → 실패)", async () => {
+    // 로컬 http 서버를 프록시로 사용 — 프록시는 target host 를 자체 해석하므로
+    // .invalid 호스트는 direct 면 DNS 실패, 프록시 경유면 이 서버가 200 응답.
+    const proxy = http.createServer((_req, res) => {
+      res.writeHead(200, { "content-type": "text/plain", "access-control-allow-origin": "*" });
+      res.end("via-proxy");
+    });
+    const target = "http://suji-proxy-probe.invalid/"; // 프록시 경유로만 도달
+    try {
+      await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+      const addr = proxy.address();
+      if (typeof addr !== "object" || addr === null) throw new Error("no proxy address");
+      const proxyHostPort = `127.0.0.1:${addr.port}`;
+
+      const fetchOk = (): Promise<boolean> =>
+        page.evaluate(async (u: string) => {
+          try {
+            const r = await fetch(u, { cache: "no-store" });
+            return r.ok;
+          } catch {
+            return false;
+          }
+        }, target);
+      const poll = async (want: boolean): Promise<boolean> => {
+        for (let i = 0; i < 20; i++) {
+          if ((await fetchOk()) === want) return true;
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        return false;
+      };
+
+      // direct: .invalid 는 DNS 실패 → fetch 실패
+      await setProxy({ mode: "direct" });
+      expect(await poll(false)).toBe(true);
+
+      // 프록시 경유: .invalid 요청이 127.0.0.1:PORT 프록시로 가서 200 → fetch 성공
+      expect((await setProxy({ mode: "fixed_servers", proxyRules: proxyHostPort }) as any).success).toBe(true);
+      expect(await poll(true)).toBe(true);
+    } finally {
+      await setProxy({ mode: "direct" }).catch(() => {}); // 다른 테스트 보호(프록시 해제)
+      proxy.close();
+    }
+  }, 30000);
+
+  test("SDK round-trip: session.setProxy 가 boolean 반환", async () => {
+    expect(await sdk<boolean>("session.setProxy", { mode: "direct" })).toBe(true);
+  });
+});

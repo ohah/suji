@@ -39,6 +39,9 @@ pub const c = @cImport({
     @cInclude("include/capi/cef_resource_handler_capi.h");
     @cInclude("include/capi/cef_task_capi.h");
     @cInclude("include/capi/cef_cookie_capi.h");
+    @cInclude("include/capi/cef_preference_capi.h");
+    @cInclude("include/capi/cef_request_context_capi.h");
+    @cInclude("include/capi/cef_values_capi.h");
     @cInclude("include/capi/cef_crash_util_capi.h");
     @cInclude("include/capi/cef_print_handler_capi.h");
     @cInclude("include/capi/views/cef_browser_view_capi.h");

@@ -59,3 +59,12 @@ def core_single_instance(_request_json):
 
 
 suji.handle("core-single-instance", core_single_instance)
+
+
+# session.setProxy 도 __core__ 로 도달. 백엔드(python 워커 스레드)에서 호출하면 UI
+# 스레드로 post 되는 경로 검증(크래시 없이 success). mode=direct(부작용 없음).
+def core_set_proxy(_request_json):
+    return suji.invoke("__core__", json.dumps({"cmd": "session_set_proxy", "mode": "direct"}))
+
+
+suji.handle("core-set-proxy", core_set_proxy)
