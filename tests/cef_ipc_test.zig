@@ -818,6 +818,7 @@ fn readCefSource() ![]u8 {
         "src/platform/cef_power_save_blocker.zig",
         "src/platform/cef_desktop_capturer.zig",
         "src/platform/cef_session_cookies.zig",
+        "src/platform/cef_session_permission.zig",
         "src/platform/cef_session_proxy.zig",
         "src/platform/cef_security_scoped_bookmark.zig",
         "src/platform/cef_request_user_attention.zig",
@@ -1975,6 +1976,40 @@ test "app.exit + session.clearCookies/flushStore IPC" {
         "Network.clearBrowserCache",
         "cef_cookie_manager_get_global_manager",
         "cef_request_context_get_global_context",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "session.setPermissionRequestHandler IPC + CEF wire" {
+    // main.zig: cmd 디스패치 + emit 핸들러 등록.
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"session_set_permission_handler\"",
+        "\"session_permission_response\"",
+        "cef.permissionSetHandlerEnabled",
+        "cef.permissionRespond",
+        "cef.setPermissionEmitHandler",
+        "fn permissionEmitHandler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    // cef_session_permission.zig + cef_client_handler.zig: 핸들러/콜백/이벤트/UI-post 와이어.
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn permissionSetHandlerEnabled",
+        "pub fn permissionRespond",
+        "pub fn getPermissionHandler",
+        "on_show_permission_prompt",
+        "on_dismiss_permission_prompt",
+        "CEF_PERMISSION_RESULT_ACCEPT",
+        "CEF_PERMISSION_RESULT_DENY",
+        "session:permission-request", // emit 채널
+        "cef_post_task", // off-UI → UI 라우팅(setProxy 동형)
+        "client_ptr.get_permission_handler", // client 배선
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }

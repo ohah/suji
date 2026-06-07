@@ -1027,6 +1027,78 @@ describe("session.cookies set/get/remove", () => {
 // app.exit는 실제 호출 시 dev server 종료 → 후속 테스트 모두 fail.
 // IPC handler 등록은 cef_ipc_test.zig grep + app_test.zig InvokeSpy로 커버.
 
+describe("session.setPermissionRequestHandler", () => {
+  // @suji/api SDK wrapper(window.__suji_sdk__.session.setPermissionRequestHandler)를
+  // 직접 호출 → 렌더러 권한 요청 → 네이티브 on_show_permission_prompt → 이벤트 →
+  // 핸들러 결정 → cont(ACCEPT|DENY) 왕복을 실 권한 API(geolocation/notifications)로 검증.
+
+  // 핸들러를 enabled 로 남기지 않도록 항상 해제(이후 describe 가 CEF 기본 처리 유지).
+  afterAll(async () => {
+    await page.evaluate(() =>
+      (window as any).__suji_sdk__.session.setPermissionRequestHandler(null),
+    );
+  });
+  test("deny geolocation → getCurrentPosition PERMISSION_DENIED(code 1) + 핸들러 호출", async () => {
+    // 핸들러: geolocation deny. 호출된 details를 window.__permreq에 기록.
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__permreq = null;
+      w.__suji_sdk__.session.setPermissionRequestHandler((d: any) => {
+        w.__permreq = d;
+        return false; // deny
+      });
+    });
+    // 렌더러에서 geolocation 요청(localhost = secure context). 우리 핸들러가 deny → code 1.
+    const result = await page.evaluate(
+      () =>
+        new Promise<{ ok: boolean; code: number }>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            () => resolve({ ok: true, code: 0 }),
+            (err) => resolve({ ok: false, code: err.code }),
+            { timeout: 10000 },
+          );
+        }),
+    );
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe(1); // PERMISSION_DENIED — cont(DENY) 적용 증명
+    const req = await page.evaluate(() => (window as any).__permreq);
+    expect(req).not.toBeNull();
+    expect(typeof req.permissionId).toBe("number");
+    expect(Array.isArray(req.permissions)).toBe(true);
+    expect(req.permissions).toContain("geolocation");
+  });
+
+  test("grant notifications → Notification.requestPermission() === 'granted'", async () => {
+    await page.evaluate(() => {
+      const w = window as any;
+      w.__permreq2 = null;
+      w.__suji_sdk__.session.setPermissionRequestHandler((d: any) => {
+        w.__permreq2 = d;
+        return true; // grant
+      });
+    });
+    const perm = await page.evaluate(() =>
+      Promise.race([
+        Notification.requestPermission(),
+        new Promise<string>((r) => setTimeout(() => r("__timeout__"), 10000)),
+      ]),
+    );
+    expect(perm).toBe("granted"); // cont(ACCEPT) 적용 증명
+    const req = await page.evaluate(() => (window as any).__permreq2);
+    expect(req).not.toBeNull();
+    expect(req.permissions).toContain("notifications");
+  });
+
+  test("핸들러 해제(null) — 에러 없이 수행", async () => {
+    await page.evaluate(() =>
+      (window as any).__suji_sdk__.session.setPermissionRequestHandler(null),
+    );
+    // 해제 후 enabled:false 가 전송됐는지 = 다음 권한은 CEF 기본 처리(Alloy=IGNORE).
+    // 행 동작(hang) 검증은 천장 — 여기선 해제 호출 자체가 throw 없이 끝남을 확인.
+    expect(true).toBe(true);
+  });
+});
+
 describe("clipboard RTF / Buffer", () => {
   test("RTF write → read round-trip", async () => {
     const rtf = "{\\rtf1\\ansi hello suji}";

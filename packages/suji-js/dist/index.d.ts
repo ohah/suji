@@ -807,6 +807,18 @@ export interface CookieFilter {
     /** httpOnly 쿠키 포함 여부 (visit_url_cookies 시). 기본 true. */
     includeHttpOnly?: boolean;
 }
+/** 렌더러(웹 콘텐츠)가 권한을 요청할 때 핸들러가 받는 정보. */
+export interface PermissionRequestDetails {
+    /** 응답 매칭용 CEF prompt id. */
+    permissionId: number;
+    /** 요청 origin (예: "https://example.com"). file:// 페이지는 빈 문자열일 수 있음. */
+    origin: string;
+    /** 요청된 권한 이름 배열 (예: ["geolocation"], ["notifications","clipboard"]). */
+    permissions: string[];
+}
+/** 권한 요청 핸들러 — true 반환 시 허용(grant), false 반환 시 거부(deny).
+ *  async 가능(커스텀 UI 등). 한 번에 1 핸들러만 active. */
+export type PermissionRequestHandler = (details: PermissionRequestDetails) => boolean | Promise<boolean>;
 export declare const session: {
     /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
      *  fire-and-forget — 실제 cleanup은 비동기. */
@@ -824,6 +836,19 @@ export declare const session: {
         proxyBypassRules?: string;
         pacScript?: string;
     }): Promise<boolean>;
+    /**
+     * Electron `session.setPermissionRequestHandler(handler)` 동등. 렌더러(웹 콘텐츠)가
+     * geolocation/notifications/clipboard/midi-sysex/idle-detection/window-management 등
+     * 권한을 요청하면 handler 가 호출돼 `true`(허용)/`false`(거부)를 결정한다. async 가능
+     * (커스텀 UI 등 — 타임아웃 없음. 핸들러가 응답할 때까지 요청 hold).
+     *
+     * `handler` 가 throw 하거나 비-bool 반환 시 **거부**(deny, 안전 기본). `null` 전달 시
+     * 핸들러 해제(이후 CEF 기본 처리). 한 번에 1 핸들러만 active — 재등록 시 이전 detach.
+     *
+     * 정직 경계: camera/mic(getUserMedia)는 별도 CEF 경로(media access)라 이 핸들러
+     * 미포함 — on_show_permission_prompt 가 덮는 권한군 대상.
+     */
+    setPermissionRequestHandler(handler: PermissionRequestHandler | null): Promise<void>;
     /**
      * IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
      * origin 미지정 → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄

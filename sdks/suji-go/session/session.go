@@ -28,6 +28,56 @@ func SetProxy(mode, proxyRules, proxyBypassRules, pacScript string) string {
 	return suji.Invoke("__core__", string(req))
 }
 
+// PermissionRequest is the renderer (web content) permission request passed to
+// the handler registered via SetPermissionRequestHandler.
+type PermissionRequest struct {
+	// PermissionID matches the response to the CEF prompt.
+	PermissionID uint64 `json:"permissionId"`
+	// Origin of the requester (may be "" for file:// pages).
+	Origin string `json:"origin"`
+	// Permissions requested, e.g. ["geolocation"].
+	Permissions []string `json:"permissions"`
+}
+
+// activePermissionListener holds the current `session:permission-request`
+// listener id so re-registration detaches the previous one (1 handler active,
+// matching JS/Node). 0 = none.
+var activePermissionListener uint64
+
+// SetPermissionRequestHandler registers a permission handler (Electron
+// `session.setPermissionRequestHandler`). When the renderer requests a
+// permission (geolocation/notifications/clipboard/...), handler is called and
+// returns true to grant, false to deny. Pass nil to clear (CEF default after).
+// Re-registering detaches the previous handler (1 handler active).
+//
+// Subscribes `session:permission-request` and responds via
+// `session_permission_response` (same wire as JS/Node/Rust). Honest boundary:
+// camera/mic (getUserMedia) is a separate CEF media-access path — not covered.
+func SetPermissionRequestHandler(handler func(PermissionRequest) bool) {
+	if activePermissionListener != 0 {
+		suji.Off(activePermissionListener)
+		activePermissionListener = 0
+	}
+	if handler == nil {
+		suji.Invoke("__core__", `{"cmd":"session_set_permission_handler","enabled":false}`)
+		return
+	}
+	activePermissionListener = suji.On("session:permission-request", func(_ string, data string) {
+		var d PermissionRequest
+		if err := json.Unmarshal([]byte(data), &d); err != nil {
+			return // malformed payload: 응답할 permissionId 없음 — 무시(JS/Node SDK 동형)
+		}
+		granted := handler(d)
+		resp, _ := json.Marshal(map[string]any{
+			"cmd":          "session_permission_response",
+			"permissionId": d.PermissionID,
+			"granted":      granted,
+		})
+		suji.Invoke("__core__", string(resp))
+	})
+	suji.Invoke("__core__", `{"cmd":"session_set_permission_handler","enabled":true}`)
+}
+
 // ClearStorageData removes IndexedDB/localStorage/cache (Electron
 // `session.clearStorageData`). origin "" → 전역 HTTP 캐시만(웹 플랫폼상
 // origin 없이 storage 일괄 삭제 불가). storageTypes "" → "all".

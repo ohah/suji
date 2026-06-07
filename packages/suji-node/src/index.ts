@@ -2028,6 +2028,23 @@ export interface CookieFilter {
   includeHttpOnly?: boolean;
 }
 
+/** 렌더러(웹 콘텐츠)가 권한을 요청할 때 핸들러가 받는 정보. */
+export interface PermissionRequestDetails {
+  /** 응답 매칭용 CEF prompt id. */
+  permissionId: number;
+  /** 요청 origin. file:// 페이지는 빈 문자열일 수 있음. */
+  origin: string;
+  /** 요청된 권한 이름 배열 (예: ["geolocation"]). */
+  permissions: string[];
+}
+
+/** 권한 요청 핸들러 — true 반환 시 허용, false 반환 시 거부. async 가능. 1 핸들러만 active. */
+export type PermissionRequestHandler = (
+  details: PermissionRequestDetails,
+) => boolean | Promise<boolean>;
+
+let activePermissionOff: (() => void) | null = null;
+
 export const session = {
   /** 모든 cookie 삭제 (fire-and-forget). 실제 cleanup은 비동기. */
   async clearCookies(): Promise<boolean> {
@@ -2059,6 +2076,45 @@ export const session = {
       pacScript: config.pacScript ?? '',
     });
     return r.success === true;
+  },
+
+  /**
+   * Electron `session.setPermissionRequestHandler(handler)` 동등. 렌더러가 geolocation/
+   * notifications/clipboard 등 권한을 요청하면 handler 가 호출돼 true(허용)/false(거부) 결정.
+   * async 가능(타임아웃 없음). throw/비-bool → 거부(안전 기본). null → 핸들러 해제.
+   * 1 핸들러만 active. 정직 경계: camera/mic(getUserMedia)는 별도 CEF 경로라 미포함.
+   */
+  async setPermissionRequestHandler(
+    handler: PermissionRequestHandler | null,
+  ): Promise<void> {
+    if (activePermissionOff) {
+      activePermissionOff();
+      activePermissionOff = null;
+    }
+    if (!handler) {
+      await invoke('__core__', { cmd: 'session_set_permission_handler', enabled: false });
+      return;
+    }
+    activePermissionOff = on<PermissionRequestDetails>(
+      'session:permission-request',
+      (ev) => {
+        let settled = false;
+        const respond = (granted: boolean) => {
+          if (settled) return;
+          settled = true;
+          void invoke('__core__', {
+            cmd: 'session_permission_response',
+            permissionId: ev.permissionId,
+            granted,
+          });
+        };
+        Promise.resolve()
+          .then(() => handler(ev))
+          .then((granted) => respond(granted === true))
+          .catch(() => respond(false));
+      },
+    );
+    await invoke('__core__', { cmd: 'session_set_permission_handler', enabled: true });
   },
 
   /**

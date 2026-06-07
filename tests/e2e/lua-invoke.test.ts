@@ -64,6 +64,19 @@ describe("Lua backend invoke (vendored Lua 5.4 + cjson)", () => {
     expect(r.success).toBe(true);
   });
 
+  test("backend → __core__ 도달: session.setPermissionRequestHandler 등록", async () => {
+    const r: any = await invoke("core-set-permission-handler", {});
+    expect(r.cmd).toBe("session_set_permission_handler");
+    expect(r.success).toBe(true);
+  });
+
+  test("backend → __core__ 도달: session_permission_response (없는 id → false, 무크래시)", async () => {
+    // 없는 permissionId → pendingTake 실패(false) 지만 cmd 라우팅 + 무크래시 검증.
+    const r: any = await invoke("core-permission-response", {});
+    expect(r.cmd).toBe("session_permission_response");
+    expect(r.success).toBe(false);
+  });
+
   test("echo: cjson decode/encode roundtrip", async () => {
     const r: any = await invoke("echo", { message: "hello from frontend", value: 42 });
     expect(r.runtime).toBe("lua");

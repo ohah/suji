@@ -301,6 +301,9 @@ suji::export_handlers!(ping);
 //     argv 는 suji::on("app:second-instance", ...) 로 수신
 // suji::session::{clear_cookies(), flush_store()}  — CEF cookie_manager fire-and-forget
 // suji::session::set_proxy(mode, proxy_rules, proxy_bypass_rules, pac_script)  — Electron session.setProxy
+// suji::session::set_permission_request_handler(|req: PermissionRequest| -> bool { req.permissions ... })
+//   / clear_permission_request_handler()  — Electron session.setPermissionRequestHandler
+//   (session:permission-request 구독 → grant/deny. camera/mic 별도 경로 미포함)
 // suji::platform()             — "macos" | "linux" | "windows"
 // suji::typescript::SujiHandlers::new()
 //   .handler::<GreetReq, GreetRes>("greet")
@@ -349,6 +352,8 @@ var _ = suji.Bind(&App{})
 // import "github.com/ohah/suji-go/session"
 // session.ClearCookies() / session.FlushStore()
 // session.SetProxy(mode, proxyRules, proxyBypassRules, pacScript)  — Electron session.setProxy
+// session.SetPermissionRequestHandler(func(req session.PermissionRequest) bool { ... })  — nil=해제
+//   Electron session.setPermissionRequestHandler (session:permission-request 구독 → grant/deny)
 // import "github.com/ohah/suji-go/attention"
 // attention.RequestUser(true) / attention.CancelUserRequest(id)
 // import "github.com/ohah/suji-go/webrequest"
@@ -378,6 +383,13 @@ suji.platform                                                // "macos" | "linux
 // await session.setProxy({ mode:"fixed_servers", proxyRules:"host:port", proxyBypassRules, pacScript })
 //   — Electron session.setProxy. Chromium "proxy" pref(전역 request context). mode:"direct"=해제.
 //     프론트=UI 스레드 직접, 백엔드 SDK=UI 스레드로 post(워커 스레드)
+// await session.setPermissionRequestHandler((details) => boolean | Promise<boolean>)
+//   — Electron session.setPermissionRequestHandler. 렌더러 권한 요청(geolocation/
+//     notifications/clipboard/midi/idle/window-management 등)을 핸들러가 grant(true)/
+//     deny(false). null 전달=해제. throw/비-bool=deny(안전 기본). 1 핸들러만 active.
+//     → suji.on("session:permission-request", {permissionId,origin,permissions[]}) +
+//       session_permission_response 로 응답(CEF cef_permission_handler_t deferred-callback).
+//     ⚠️ camera/mic(getUserMedia)는 별도 CEF media-access 경로 → 미포함(후속).
 
 // TypeScript type-safe invoke — `SujiHandlers` interface를 augment하면 cmd/req/res 추론.
 // declare module '@suji/api' {
@@ -559,6 +571,8 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await webRequest.setBlockedUrls(["https://*.ad/*"])
 // await session.clearCookies() / session.flushStore()                    — CEF cookie_manager
 // await session.setProxy({ mode, proxyRules, proxyBypassRules, pacScript }) — Electron session.setProxy
+// await session.setPermissionRequestHandler((details) => boolean | Promise<boolean>)  — null=해제
+//   Electron session.setPermissionRequestHandler (session:permission-request 구독 → grant/deny)
 
 // 공식 플러그인 backend 래퍼 (renderer @suji/plugin-* 의 Node 백엔드 변형)
 // const { state } = require('@suji/plugin-state-node')

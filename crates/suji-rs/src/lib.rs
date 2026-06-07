@@ -2518,6 +2518,94 @@ pub mod session {
         invoke("__core__", &req)
     }
 
+    /// 렌더러(웹 콘텐츠) 권한 요청 정보 — `set_permission_request_handler` 핸들러 인자.
+    #[derive(Debug, Clone)]
+    pub struct PermissionRequest {
+        /// 응답 매칭용 CEF prompt id.
+        pub permission_id: u64,
+        /// 요청 origin (file:// 페이지는 빈 문자열 가능).
+        pub origin: String,
+        /// 요청된 권한 이름 (예: ["geolocation"]).
+        pub permissions: Vec<String>,
+    }
+
+    /// Electron `session.setPermissionRequestHandler(handler)` 동등. 렌더러가 geolocation/
+    /// notifications/clipboard 등 권한을 요청하면 `handler` 가 호출돼 `true`(허용)/`false`(거부)
+    /// 를 반환한다. 한 번 등록(앱 수명). 정직 경계: camera/mic(getUserMedia)는 별도 CEF
+    /// 경로라 미포함 — on_show_permission_prompt 권한군 대상.
+    ///
+    /// `session:permission-request` 이벤트를 구독해 결정 후 `session_permission_response`
+    /// 로 응답한다(JS/Node SDK 와 동일 wire). 핸들러는 leak 되어 앱 수명 동안 유지.
+    pub fn set_permission_request_handler<F>(handler: F)
+    where
+        F: Fn(PermissionRequest) -> bool + Send + Sync + 'static,
+    {
+        type BoxedHandler = Box<dyn Fn(PermissionRequest) -> bool + Send + Sync>;
+        let boxed: Box<BoxedHandler> = Box::new(Box::new(handler));
+        let arg = Box::into_raw(boxed) as *mut std::os::raw::c_void;
+        crate::on("session:permission-request", permission_trampoline, arg);
+        invoke(
+            "__core__",
+            r#"{"cmd":"session_set_permission_handler","enabled":true}"#,
+        );
+    }
+
+    /// 권한 핸들러 해제(이후 CEF 기본 처리).
+    pub fn clear_permission_request_handler() {
+        invoke(
+            "__core__",
+            r#"{"cmd":"session_set_permission_handler","enabled":false}"#,
+        );
+    }
+
+    extern "C" fn permission_trampoline(
+        _channel: *const std::os::raw::c_char,
+        data: *const std::os::raw::c_char,
+        arg: *mut std::os::raw::c_void,
+    ) {
+        // arg = leaked Box<Box<dyn Fn>> — 빌림만(앱 수명 동안 유지).
+        if arg.is_null() || data.is_null() {
+            return;
+        }
+        let handler =
+            unsafe { &*(arg as *const Box<dyn Fn(PermissionRequest) -> bool + Send + Sync>) };
+        let payload = unsafe { std::ffi::CStr::from_ptr(data) }
+            .to_str()
+            .unwrap_or("");
+        let v: serde_json::Value = serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
+        let permission_id = v.get("permissionId").and_then(|x| x.as_u64()).unwrap_or(0);
+        let origin = v
+            .get("origin")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let permissions: Vec<String> = v
+            .get("permissions")
+            .and_then(|x| x.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        // 패닉이 FFI 경계 넘으면 UB → catch 후 deny(안전 기본).
+        let granted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handler(PermissionRequest {
+                permission_id,
+                origin,
+                permissions,
+            })
+        }))
+        .unwrap_or(false);
+        let resp = json!({
+            "cmd": "session_permission_response",
+            "permissionId": permission_id,
+            "granted": granted,
+        })
+        .to_string();
+        invoke("__core__", &resp);
+    }
+
     /// IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
     /// origin "" → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
     /// 삭제 불가). storage_types None → "all".
