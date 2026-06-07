@@ -449,6 +449,49 @@ describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
     expect(r.ok).toBe(false);
   });
 
+  // Electron 패리티: setResizable/setMinimizable/setMaximizable/setClosable.
+  // getter 는 delegate constraints(결정적) 반환 → 정확 round-trip. 실제 enforcement
+  // (사용자 drag/zoom/close 차단)은 헤드리스 미검증 정직 경계 — round-trip 으로 wire 검증.
+  test("capability flags: set false → get false → set true round-trip", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "caps", url: "about:blank" });
+    const cases: Array<[string, string, string]> = [
+      ["set_resizable", "is_resizable", "resizable"],
+      ["set_minimizable", "is_minimizable", "minimizable"],
+      ["set_maximizable", "is_maximizable", "maximizable"],
+      ["set_closable", "is_closable", "closable"],
+    ];
+    for (const [setCmd, getCmd, prop] of cases) {
+      const sr: any = await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: setCmd, windowId: c.windowId, [prop]: false },
+      );
+      expect(sr.ok).toBe(true);
+      const gr: any = await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: getCmd, windowId: c.windowId },
+      );
+      expect(gr.ok).toBe(true);
+      expect(gr[prop]).toBe(false);
+      // 다시 true 로 복원되는지(토글).
+      await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: setCmd, windowId: c.windowId, [prop]: true },
+      );
+      const gr2: any = await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: getCmd, windowId: c.windowId },
+      );
+      expect(gr2[prop]).toBe(true);
+    }
+  });
+
+  test("capability flags: 알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "is_resizable", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+
   // Electron 패리티: set_content_bounds → get_content_bounds (콘텐츠 영역).
   test("content_bounds: set 후 get roundtrip — 크기 정확", async () => {
     const c = await coreCall({ cmd: "create_window", title: "contentbounds", url: "about:blank" });

@@ -292,6 +292,30 @@ test "min/max size set/get round-trip (vtable wiring)" {
     try std.testing.expectError(error.WindowNotFound, wm.getMaximumSize(99999));
 }
 
+test "capability flags set/get round-trip (resizable/minimizable/maximizable/closable)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "C" });
+    // 기본 true → false 토글 → getter 반영(WM→native 왕복).
+    try wm.setResizable(id, false);
+    try std.testing.expect(!(try wm.isResizable(id)));
+    try wm.setMinimizable(id, false);
+    try std.testing.expect(!(try wm.isMinimizable(id)));
+    try wm.setMaximizable(id, false);
+    try std.testing.expect(!(try wm.isMaximizable(id)));
+    try wm.setClosable(id, false);
+    try std.testing.expect(!(try wm.isClosable(id)));
+    // 다시 true.
+    try wm.setResizable(id, true);
+    try std.testing.expect(try wm.isResizable(id));
+
+    // .window 전용 — 미존재 창 → WindowNotFound.
+    try std.testing.expectError(error.WindowNotFound, wm.setClosable(99999, false));
+    try std.testing.expectError(error.WindowNotFound, wm.isMaximizable(99999));
+}
+
 test "getContentBounds returns native content bounds (vtable wiring)" {
     var native = TestNative{};
     var wm = newManager(&native);

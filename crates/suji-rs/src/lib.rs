@@ -828,6 +828,36 @@ pub mod windows {
         invoke("__core__", &window_op_request("get_maximum_size", window_id))
     }
 
+    // ── 창 capability 토글 (Electron setResizable/setMinimizable/setMaximizable/setClosable) ──
+    // setter: {"cmd","windowId","<prop>":bool}. getter: raw JSON {"<prop>":bool,"ok"}.
+    fn set_bool_request(cmd: &str, window_id: u32, prop: &str, value: bool) -> String {
+        format!(r#"{{"cmd":"{}","windowId":{},"{}":{}}}"#, cmd, window_id, prop, value)
+    }
+    pub fn set_resizable(window_id: u32, resizable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_resizable", window_id, "resizable", resizable))
+    }
+    pub fn is_resizable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_resizable", window_id))
+    }
+    pub fn set_minimizable(window_id: u32, minimizable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_minimizable", window_id, "minimizable", minimizable))
+    }
+    pub fn is_minimizable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_minimizable", window_id))
+    }
+    pub fn set_maximizable(window_id: u32, maximizable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_maximizable", window_id, "maximizable", maximizable))
+    }
+    pub fn is_maximizable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_maximizable", window_id))
+    }
+    pub fn set_closable(window_id: u32, closable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_closable", window_id, "closable", closable))
+    }
+    pub fn is_closable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_closable", window_id))
+    }
+
     // ── Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티) ──
     // 대부분 `{"cmd":"X","windowId":N}` 동형 → window_op 로 DRY. 응답은 raw JSON.
     fn window_op_request(cmd: &str, window_id: u32) -> String {
@@ -1218,6 +1248,30 @@ pub mod windows {
         }
         pub fn get_maximum_size(&self) -> Option<String> {
             get_maximum_size(self.id)
+        }
+        pub fn set_resizable(&self, resizable: bool) -> Option<String> {
+            set_resizable(self.id, resizable)
+        }
+        pub fn is_resizable(&self) -> Option<String> {
+            is_resizable(self.id)
+        }
+        pub fn set_minimizable(&self, minimizable: bool) -> Option<String> {
+            set_minimizable(self.id, minimizable)
+        }
+        pub fn is_minimizable(&self) -> Option<String> {
+            is_minimizable(self.id)
+        }
+        pub fn set_maximizable(&self, maximizable: bool) -> Option<String> {
+            set_maximizable(self.id, maximizable)
+        }
+        pub fn is_maximizable(&self) -> Option<String> {
+            is_maximizable(self.id)
+        }
+        pub fn set_closable(&self, closable: bool) -> Option<String> {
+            set_closable(self.id, closable)
+        }
+        pub fn is_closable(&self) -> Option<String> {
+            is_closable(self.id)
         }
         // Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티).
         pub fn minimize(&self) -> Option<String> {

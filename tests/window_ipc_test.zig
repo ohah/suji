@@ -195,6 +195,38 @@ test "handleSetMaximumSize forwards + handleGetMaximumSize on unknown id → ok:
     try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"width\":0") != null);
 }
 
+test "capability set/get handlers: JSON shape + native round-trip" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .bounds = .{ .width = 100, .height = 100 } });
+    var buf: [256]u8 = undefined;
+
+    const sr = ipc.handleSetResizable(1, false, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, sr, "\"cmd\":\"set_resizable\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sr, "\"ok\":true") != null);
+    try std.testing.expect(!native.stub_resizable);
+
+    var buf2: [256]u8 = undefined;
+    const gr = ipc.handleIsResizable(1, &buf2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, gr, "\"cmd\":\"is_resizable\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, gr, "\"resizable\":false") != null);
+
+    // closable getter on unknown id → ok:false + closable:false.
+    var buf3: [256]u8 = undefined;
+    const cr = ipc.handleIsClosable(99999, &buf3, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, cr, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, cr, "\"closable\":false") != null);
+
+    // minimizable/maximizable setter forwards to native.
+    var buf4: [256]u8 = undefined;
+    _ = ipc.handleSetMinimizable(1, false, &buf4, &wm).?;
+    try std.testing.expect(!native.stub_minimizable);
+    _ = ipc.handleSetMaximizable(1, false, &buf4, &wm).?;
+    try std.testing.expect(!native.stub_maximizable);
+}
+
 test "handleSetBounds rejects small buffer" {
     var native = TestNative{};
     var wm = newWm(&native);

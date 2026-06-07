@@ -2013,6 +2013,39 @@ test "window min/max size IPC + native wire" {
     }
 }
 
+test "window capability flags IPC + CEF wire" {
+    const cap_main_src = try readMainSource();
+    defer std.testing.allocator.free(cap_main_src);
+    inline for (.{
+        "\"set_resizable\"",   "\"is_resizable\"",
+        "\"set_minimizable\"", "\"is_minimizable\"",
+        "\"set_maximizable\"", "\"is_maximizable\"",
+        "\"set_closable\"",    "\"is_closable\"",
+        "handleSetResizable",   "handleIsResizable",
+        "handleSetMinimizable", "handleIsMinimizable",
+        "handleSetMaximizable", "handleIsMaximizable",
+        "handleSetClosable",    "handleIsClosable",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cap_main_src, needle) != null);
+    }
+
+    const cap_cef_src = try readCefSource();
+    defer std.testing.allocator.free(cap_cef_src);
+    inline for (.{
+        "pub fn setResizableImpl",   "pub fn isResizableImpl",
+        "pub fn setMinimizableImpl", "pub fn isMinimizableImpl",
+        "pub fn setMaximizableImpl", "pub fn isMaximizableImpl",
+        "pub fn setClosableImpl",    "pub fn isClosableImpl",
+        ".set_resizable = cef_window_runtime.setResizableImpl", // vtable 배선
+        "pub fn setMacStyleMaskBit", // macOS styleMask 비트 토글
+        "pub fn setMacZoomButtonEnabled", // maximizable=zoom 버튼
+        "d.constraints.minimizable", // delegate can_minimize 단일 출처
+        "d.constraints.closable", // delegate can_close
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cap_cef_src, needle) != null);
+    }
+}
+
 test "session.setPermissionRequestHandler IPC + CEF wire" {
     // main.zig: cmd 디스패치 + emit 핸들러 등록.
     const main_src = try readMainSource();

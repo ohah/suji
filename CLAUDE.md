@@ -420,6 +420,13 @@ suji.platform                                                // "macos" | "linux
 //   / setMaximumSize(id, w, h) / getMaximumSize(id) → [w,h]  — Electron BrowserWindow.setMinimumSize 등.
 //   w/h=0=제한 없음. 네이티브: delegate constraints(CEF Views get_minimum_size 콜백) + macOS
 //   NSWindow setContentMinSize/MaxSize + invalidate_layout. getter=추적값(결정적). 전 6개 언어 + BrowserWindow 클래스
+// await windows.setResizable(id, bool) / isResizable(id) / setMinimizable(id, bool) / isMinimizable(id)
+//   / setMaximizable(id, bool) / isMaximizable(id) / setClosable(id, bool) / isClosable(id)
+//   — Electron BrowserWindow.setResizable 등 capability 토글. 네이티브: delegate constraints
+//   (CEF Views can_resize/can_minimize/can_maximize/can_close 콜백 = 단일 출처) + macOS NSWindow
+//   styleMask 비트(Resizable/Closable/Miniaturizable)/zoom 버튼(maximizable) + invalidate_layout.
+//   getter=추적값(결정적). 전 6개 언어 + BrowserWindow 클래스. ⚠️ 실제 enforcement(사용자
+//   drag/zoom/close 차단)은 macOS 확인, Win/Linux 는 CEF Views can_* 의존(real-runner 천장)
 // await windows.destroy(id)  — Electron BrowserWindow.destroy() 강제 파괴. close 와 달리
 //   window:close(취소 hook) 스킵, window:closed 만 발화(listener 가 막을 수 없음). 전 6개 언어
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)

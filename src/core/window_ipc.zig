@@ -1023,6 +1023,48 @@ pub fn handleSetAlwaysOnTop(req: SetAlwaysOnTopReq, response_buf: []u8, wm: *win
     return respondWindowOp(response_buf, "set_always_on_top", req.window_id, ok);
 }
 
+// 창 capability 토글 (Electron setResizable/setMinimizable/setMaximizable/setClosable).
+// setter 는 handleBoolSet, getter 는 handleStateGet 로 DRY(set_always_on_top/is_* 동형).
+const WmBoolSetFn = *const fn (*window.WindowManager, u32, bool) window.Error!void;
+
+fn handleBoolSet(
+    cmd: []const u8,
+    method: WmBoolSetFn,
+    window_id: u32,
+    value: bool,
+    response_buf: []u8,
+    wm: *window.WindowManager,
+) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (method(wm, window_id, value)) |_| true else |_| false;
+    return respondWindowOp(response_buf, cmd, window_id, ok);
+}
+
+pub fn handleSetResizable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_resizable", &window.WindowManager.setResizable, window_id, value, response_buf, wm);
+}
+pub fn handleIsResizable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_resizable", "resizable", &window.WindowManager.isResizable, window_id, response_buf, wm);
+}
+pub fn handleSetMinimizable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_minimizable", &window.WindowManager.setMinimizable, window_id, value, response_buf, wm);
+}
+pub fn handleIsMinimizable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_minimizable", "minimizable", &window.WindowManager.isMinimizable, window_id, response_buf, wm);
+}
+pub fn handleSetMaximizable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_maximizable", &window.WindowManager.setMaximizable, window_id, value, response_buf, wm);
+}
+pub fn handleIsMaximizable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_maximizable", "maximizable", &window.WindowManager.isMaximizable, window_id, response_buf, wm);
+}
+pub fn handleSetClosable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_closable", &window.WindowManager.setClosable, window_id, value, response_buf, wm);
+}
+pub fn handleIsClosable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_closable", "closable", &window.WindowManager.isClosable, window_id, response_buf, wm);
+}
+
 // Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 id 배열(.view 제외).
 // windowId 입력 없음 → main.zig 가 전용 분기로 호출.
 pub fn handleGetAllWindows(response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

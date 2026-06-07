@@ -182,6 +182,22 @@ export interface IsMaximizedResponse extends WindowOpResponse {
     cmd: "is_maximized";
     maximized: boolean;
 }
+export interface IsResizableResponse extends WindowOpResponse {
+    cmd: "is_resizable";
+    resizable: boolean;
+}
+export interface IsMinimizableResponse extends WindowOpResponse {
+    cmd: "is_minimizable";
+    minimizable: boolean;
+}
+export interface IsMaximizableResponse extends WindowOpResponse {
+    cmd: "is_maximizable";
+    maximizable: boolean;
+}
+export interface IsClosableResponse extends WindowOpResponse {
+    cmd: "is_closable";
+    closable: boolean;
+}
 export interface IsFullScreenResponse extends WindowOpResponse {
     cmd: "is_fullscreen";
     fullscreen: boolean;
@@ -360,6 +376,22 @@ export declare const windows: {
     setMaximumSize(windowId: number, width: number, height: number): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.getMaximumSize() — [width, height] (추적된 제약값, 0=없음). */
     getMaximumSize(windowId: number): Promise<[number, number]>;
+    /** Electron BrowserWindow.setResizable(resizable). false 면 사용자 리사이즈 불가. */
+    setResizable(windowId: number, resizable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isResizable(). */
+    isResizable(windowId: number): Promise<IsResizableResponse>;
+    /** Electron BrowserWindow.setMinimizable(minimizable). */
+    setMinimizable(windowId: number, minimizable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isMinimizable(). */
+    isMinimizable(windowId: number): Promise<IsMinimizableResponse>;
+    /** Electron BrowserWindow.setMaximizable(maximizable). */
+    setMaximizable(windowId: number, maximizable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isMaximizable(). */
+    isMaximizable(windowId: number): Promise<IsMaximizableResponse>;
+    /** Electron BrowserWindow.setClosable(closable). false 면 닫기 불가. */
+    setClosable(windowId: number, closable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isClosable(). */
+    isClosable(windowId: number): Promise<IsClosableResponse>;
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId: number): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isFocused(). */
@@ -506,6 +538,14 @@ export declare class BrowserWindow {
     getMinimumSize(): Promise<[number, number]>;
     setMaximumSize(width: number, height: number): Promise<WindowOpResponse>;
     getMaximumSize(): Promise<[number, number]>;
+    setResizable(resizable: boolean): Promise<WindowOpResponse>;
+    isResizable(): Promise<IsResizableResponse>;
+    setMinimizable(minimizable: boolean): Promise<WindowOpResponse>;
+    isMinimizable(): Promise<IsMinimizableResponse>;
+    setMaximizable(maximizable: boolean): Promise<WindowOpResponse>;
+    isMaximizable(): Promise<IsMaximizableResponse>;
+    setClosable(closable: boolean): Promise<WindowOpResponse>;
+    isClosable(): Promise<IsClosableResponse>;
     blur(): Promise<WindowOpResponse>;
     isFocused(): Promise<IsFocusedResponse>;
     isVisible(): Promise<IsVisibleResponse>;

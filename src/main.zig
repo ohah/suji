@@ -1857,6 +1857,28 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const on_top = util.extractJsonBool(req_clean, "onTop") orelse false;
         return window_ipc.handleSetAlwaysOnTop(.{ .window_id = win_id, .on_top = on_top }, response_buf, wm);
     }
+    // 창 capability 토글 (Electron setResizable/setMinimizable/setMaximizable/setClosable).
+    // 각 cmd 는 동명 bool 키(resizable/minimizable/maximizable/closable) 사용.
+    if (std.mem.eql(u8, cmd, "set_resizable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetResizable(win_id, util.extractJsonBool(req_clean, "resizable") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_minimizable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetMinimizable(win_id, util.extractJsonBool(req_clean, "minimizable") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_maximizable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetMaximizable(win_id, util.extractJsonBool(req_clean, "maximizable") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_closable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetClosable(win_id, util.extractJsonBool(req_clean, "closable") orelse false, response_buf, wm);
+    }
     // getAllWindows/getFocusedWindow 는 windowId 입력이 없어 전용 분기.
     if (std.mem.eql(u8, cmd, "get_all_windows")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1884,6 +1906,10 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "is_focused", &window_ipc.handleIsFocused },
         .{ "is_visible", &window_ipc.handleIsVisible },
         .{ "is_always_on_top", &window_ipc.handleIsAlwaysOnTop },
+        .{ "is_resizable", &window_ipc.handleIsResizable },
+        .{ "is_minimizable", &window_ipc.handleIsMinimizable },
+        .{ "is_maximizable", &window_ipc.handleIsMaximizable },
+        .{ "is_closable", &window_ipc.handleIsClosable },
     }) |entry| {
         if (std.mem.eql(u8, cmd, entry[0])) {
             const wm = window_mod.WindowManager.global orelse return null;

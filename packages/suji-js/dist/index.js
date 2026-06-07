@@ -312,6 +312,38 @@ export const windows = {
         const r = await coreCall({ cmd: "get_maximum_size", windowId });
         return [r.width, r.height];
     },
+    /** Electron BrowserWindow.setResizable(resizable). false 면 사용자 리사이즈 불가. */
+    setResizable(windowId, resizable) {
+        return coreCall({ cmd: "set_resizable", windowId, resizable });
+    },
+    /** Electron BrowserWindow.isResizable(). */
+    isResizable(windowId) {
+        return coreCall({ cmd: "is_resizable", windowId });
+    },
+    /** Electron BrowserWindow.setMinimizable(minimizable). */
+    setMinimizable(windowId, minimizable) {
+        return coreCall({ cmd: "set_minimizable", windowId, minimizable });
+    },
+    /** Electron BrowserWindow.isMinimizable(). */
+    isMinimizable(windowId) {
+        return coreCall({ cmd: "is_minimizable", windowId });
+    },
+    /** Electron BrowserWindow.setMaximizable(maximizable). */
+    setMaximizable(windowId, maximizable) {
+        return coreCall({ cmd: "set_maximizable", windowId, maximizable });
+    },
+    /** Electron BrowserWindow.isMaximizable(). */
+    isMaximizable(windowId) {
+        return coreCall({ cmd: "is_maximizable", windowId });
+    },
+    /** Electron BrowserWindow.setClosable(closable). false 면 닫기 불가. */
+    setClosable(windowId, closable) {
+        return coreCall({ cmd: "set_closable", windowId, closable });
+    },
+    /** Electron BrowserWindow.isClosable(). */
+    isClosable(windowId) {
+        return coreCall({ cmd: "is_closable", windowId });
+    },
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId) {
         return coreCall({ cmd: "blur", windowId });
@@ -635,6 +667,30 @@ export class BrowserWindow {
     }
     getMaximumSize() {
         return windows.getMaximumSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setResizable(resizable) {
+        return windows.setResizable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), resizable);
+    }
+    isResizable() {
+        return windows.isResizable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setMinimizable(minimizable) {
+        return windows.setMinimizable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), minimizable);
+    }
+    isMinimizable() {
+        return windows.isMinimizable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setMaximizable(maximizable) {
+        return windows.setMaximizable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), maximizable);
+    }
+    isMaximizable() {
+        return windows.isMaximizable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setClosable(closable) {
+        return windows.setClosable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), closable);
+    }
+    isClosable() {
+        return windows.isClosable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     blur() {
         return windows.blur(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
