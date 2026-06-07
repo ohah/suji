@@ -914,6 +914,16 @@ net-control 이라 데이터 유출 sink 아님 → 범위 제외. 모바일은 
   콜백 수명 관리(issue #16 가 leak 이던 표면)를 재도입하므로 비용 대비 가치 낮아
   미수정. **서로 다른 종류**(print↔capture)의 같은-path 교차충돌은 `kind`
   디스크리미네이터로 해소됨(PR #54 review #3). UAF/슬롯 고갈/타임아웃은 모두 수정.
+- **`session.setSSLConfig` / `session.cookies` `'changed'` 이벤트 — CEF 본질적 제약으로
+  지원 우선 보류**: Electron 은 Chromium network service 에 직접 접근하지만 suji 는 CEF
+  (Chromium 의 부분집합만 노출) 위라, 두 기능이 의존하는 Chromium-deep 인터페이스가
+  CEF 에 없다. (1) **setSSLConfig**: Electron 은 `network::mojom::SSLConfig` 로 런타임
+  TLS 버전/cipher 제어 — CEF 엔 런타임 SSL 설정 API 부재(시작-시 `--ssl-version-min`
+  플래그 정도만). (2) **cookies 'changed'**: Electron 은 `CookieManager.AddCookieChange
+  Listener`(변경 옵저버) 래핑 — CEF `cef_cookie_manager_t` 는 set/delete/visit/flush 만,
+  변경 옵저버 부재(폴링 흉내만 가능). 깔끔한 런타임 동등 불가라 **보류**(CEF 가 해당
+  인터페이스를 노출하면 재개). 같은 패턴: cross-origin `protocol.handle` 보류,
+  isolated-world contextBridge 부재. 상세: docs/electron-parity-audit.md `[보류]` 항목.
 
 ## 구현 노트
 
