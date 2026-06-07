@@ -117,7 +117,7 @@
 ### menu
 
 - ~~**[medium]** `Menu.getApplicationMenu()`~~ ✅ (Menu PR-4) — set 성공 시 items 배열 raw 스냅샷 저장(main.zig g_app_menu_buf, util.extractJsonArrayRaw), menu_get_application_menu cmd 에코, reset 시 클리어. 전 6개 언어. 정직 경계: 스냅샷(라이브 mutation 아님 — fire-and-forget).
-- **[medium]** `Menu.sendActionToFirstResponder` — Add menu.sendActionToFirstResponder(action: string): Promise<boolean> as a macOS-only API across all SDKs. In Zig core (cef.zig), implement a new cmd handler invoking NSApplication.sendAction(selector
+- ~~**[medium]** `Menu.sendActionToFirstResponder`~~ ✅ (Menu PR) — menu_send_action_to_first_responder cmd → cef_menu.sendActionToFirstResponder(NSApp `sendAction:to:from:` 로 셀렉터를 first responder 전달). 전 6개 언어. macOS only(Win/Linux no-op). 정직 경계: 결과는 responder chain(포커스) 의존이라 e2e 는 success boolean(무crash)만 검증.
 - ~~**[medium]** `menu.items / menu.getApplicationMenu()`~~ ✅ (Menu PR-4) — #119 와 동일(getApplicationMenu 전 SDK). menu.items 는 getApplicationMenu() 반환 배열.
 - **[medium]** `menu-will-close event` — Add `menu:will-close` (and ideally `menu:will-show` for parity) event emissions around the NSMenu modal popup lifecycle in cef.zig. Specifically: (1) Emit menu:will-show before line 3097's popUpMenuPo
 - **[medium]** `Menu.insert(pos: Integer, menuItem: MenuItem)` — Add Menu.insert(pos: number, menuItem: MenuItem) method to both @suji/api and @suji/node packages. Implementation: new IPC cmd menu_insert with pos + menuItem args, routed to cef.zig's menu handler (N
