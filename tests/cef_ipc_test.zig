@@ -2013,6 +2013,39 @@ test "window min/max size IPC + native wire" {
     }
 }
 
+test "window mode flags IPC + CEF wire" {
+    const mode_main_src = try readMainSource();
+    defer std.testing.allocator.free(mode_main_src);
+    inline for (.{
+        "\"set_movable\"",        "\"is_movable\"",
+        "\"set_focusable\"",      "\"is_focusable\"",
+        "\"set_enabled\"",        "\"is_enabled\"",
+        "\"set_fullscreenable\"", "\"is_fullscreenable\"",
+        "\"set_kiosk\"",          "\"is_kiosk\"",
+        "handleSetMovable",       "handleIsKiosk",
+        "handleSetEnabled",       "handleSetFullscreenable",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, mode_main_src, needle) != null);
+    }
+
+    const mode_cef_src = try readCefSource();
+    defer std.testing.allocator.free(mode_cef_src);
+    inline for (.{
+        "pub fn setMovableImpl",        "pub fn isMovableImpl",
+        "pub fn setFocusableImpl",      "pub fn isFocusableImpl",
+        "pub fn setEnabledImpl",        "pub fn isEnabledImpl",
+        "pub fn setFullscreenableImpl", "pub fn isFullscreenableImpl",
+        "pub fn setKioskImpl",          "pub fn isKioskImpl",
+        ".set_movable = cef_window_runtime.setMovableImpl", // vtable 배선
+        "pub fn setMacMovable",
+        "pub fn setMacIgnoresMouseEvents", // setEnabled macOS 근사
+        "pub fn setMacCollectionBehaviorBit", // setFullscreenable macOS
+        "win_enable.EnableWindow", // setEnabled Win32 정확
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, mode_cef_src, needle) != null);
+    }
+}
+
 test "window capability flags IPC + CEF wire" {
     const cap_main_src = try readMainSource();
     defer std.testing.allocator.free(cap_main_src);

@@ -1065,6 +1065,38 @@ pub fn handleIsClosable(window_id: u32, response_buf: []u8, wm: *window.WindowMa
     return handleStateGet("is_closable", "closable", &window.WindowManager.isClosable, window_id, response_buf, wm);
 }
 
+// 창 모드 토글 (Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk).
+pub fn handleSetMovable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_movable", &window.WindowManager.setMovable, window_id, value, response_buf, wm);
+}
+pub fn handleIsMovable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_movable", "movable", &window.WindowManager.isMovable, window_id, response_buf, wm);
+}
+pub fn handleSetFocusable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_focusable", &window.WindowManager.setFocusable, window_id, value, response_buf, wm);
+}
+pub fn handleIsFocusable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_focusable", "focusable", &window.WindowManager.isFocusable, window_id, response_buf, wm);
+}
+pub fn handleSetEnabled(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_enabled", &window.WindowManager.setEnabled, window_id, value, response_buf, wm);
+}
+pub fn handleIsEnabled(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_enabled", "enabled", &window.WindowManager.isEnabled, window_id, response_buf, wm);
+}
+pub fn handleSetFullscreenable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_fullscreenable", &window.WindowManager.setFullscreenable, window_id, value, response_buf, wm);
+}
+pub fn handleIsFullscreenable(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_fullscreenable", "fullscreenable", &window.WindowManager.isFullscreenable, window_id, response_buf, wm);
+}
+pub fn handleSetKiosk(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_kiosk", &window.WindowManager.setKiosk, window_id, value, response_buf, wm);
+}
+pub fn handleIsKiosk(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_kiosk", "kiosk", &window.WindowManager.isKiosk, window_id, response_buf, wm);
+}
+
 // Electron BrowserWindow.getAllWindows() — 살아있는 top-level 창 id 배열(.view 제외).
 // windowId 입력 없음 → main.zig 가 전용 분기로 호출.
 pub fn handleGetAllWindows(response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

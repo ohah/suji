@@ -198,6 +198,26 @@ export interface IsClosableResponse extends WindowOpResponse {
     cmd: "is_closable";
     closable: boolean;
 }
+export interface IsMovableResponse extends WindowOpResponse {
+    cmd: "is_movable";
+    movable: boolean;
+}
+export interface IsFocusableResponse extends WindowOpResponse {
+    cmd: "is_focusable";
+    focusable: boolean;
+}
+export interface IsEnabledResponse extends WindowOpResponse {
+    cmd: "is_enabled";
+    enabled: boolean;
+}
+export interface IsFullScreenableResponse extends WindowOpResponse {
+    cmd: "is_fullscreenable";
+    fullscreenable: boolean;
+}
+export interface IsKioskResponse extends WindowOpResponse {
+    cmd: "is_kiosk";
+    kiosk: boolean;
+}
 export interface IsFullScreenResponse extends WindowOpResponse {
     cmd: "is_fullscreen";
     fullscreen: boolean;
@@ -392,6 +412,26 @@ export declare const windows: {
     setClosable(windowId: number, closable: boolean): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isClosable(). */
     isClosable(windowId: number): Promise<IsClosableResponse>;
+    /** Electron BrowserWindow.setMovable(movable). macOS NSWindow.movable, 그 외 tracked. */
+    setMovable(windowId: number, movable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isMovable(). */
+    isMovable(windowId: number): Promise<IsMovableResponse>;
+    /** Electron BrowserWindow.setFocusable(focusable). tracked(best-effort). */
+    setFocusable(windowId: number, focusable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isFocusable(). */
+    isFocusable(windowId: number): Promise<IsFocusableResponse>;
+    /** Electron BrowserWindow.setEnabled(enable). Win32 EnableWindow / macOS ignoresMouseEvents(마우스). */
+    setEnabled(windowId: number, enabled: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isEnabled(). */
+    isEnabled(windowId: number): Promise<IsEnabledResponse>;
+    /** Electron BrowserWindow.setFullScreenable(fullscreenable). macOS collectionBehavior, 그 외 tracked. */
+    setFullScreenable(windowId: number, fullscreenable: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isFullScreenable(). */
+    isFullScreenable(windowId: number): Promise<IsFullScreenableResponse>;
+    /** Electron BrowserWindow.setKiosk(flag). best-effort: 전체화면(presentation-options 미포함). */
+    setKiosk(windowId: number, flag: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.isKiosk(). */
+    isKiosk(windowId: number): Promise<IsKioskResponse>;
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId: number): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isFocused(). */
@@ -546,6 +586,16 @@ export declare class BrowserWindow {
     isMaximizable(): Promise<IsMaximizableResponse>;
     setClosable(closable: boolean): Promise<WindowOpResponse>;
     isClosable(): Promise<IsClosableResponse>;
+    setMovable(movable: boolean): Promise<WindowOpResponse>;
+    isMovable(): Promise<IsMovableResponse>;
+    setFocusable(focusable: boolean): Promise<WindowOpResponse>;
+    isFocusable(): Promise<IsFocusableResponse>;
+    setEnabled(enabled: boolean): Promise<WindowOpResponse>;
+    isEnabled(): Promise<IsEnabledResponse>;
+    setFullScreenable(fullscreenable: boolean): Promise<WindowOpResponse>;
+    isFullScreenable(): Promise<IsFullScreenableResponse>;
+    setKiosk(flag: boolean): Promise<WindowOpResponse>;
+    isKiosk(): Promise<IsKioskResponse>;
     blur(): Promise<WindowOpResponse>;
     isFocused(): Promise<IsFocusedResponse>;
     isVisible(): Promise<IsVisibleResponse>;

@@ -67,6 +67,11 @@ pub const TestNative = struct {
     stub_minimizable: bool = true,
     stub_maximizable: bool = true,
     stub_closable: bool = true,
+    stub_movable: bool = true,
+    stub_focusable: bool = true,
+    stub_enabled: bool = true,
+    stub_fullscreenable: bool = true,
+    stub_kiosk: bool = false,
 
     // Phase 4-E: 편집/검색 캡처. named struct — 인덱스 매핑 mismatch 회귀 차단
     // (이전엔 [6]usize + 인덱스로 호출자/검증자가 분리. 위치 바뀌면 silent 잘못 카운트).
@@ -179,6 +184,16 @@ pub const TestNative = struct {
         .is_maximizable = isMaximizable,
         .set_closable = setClosable,
         .is_closable = isClosable,
+        .set_movable = setMovable,
+        .is_movable = isMovable,
+        .set_focusable = setFocusable,
+        .is_focusable = isFocusable,
+        .set_enabled = setEnabled,
+        .is_enabled = isEnabled,
+        .set_fullscreenable = setFullscreenable,
+        .is_fullscreenable = isFullscreenable,
+        .set_kiosk = setKiosk,
+        .is_kiosk = isKiosk,
         .undo = makeEditFn("undo"),
         .redo = makeEditFn("redo"),
         .cut = makeEditFn("cut"),
@@ -420,6 +435,36 @@ pub const TestNative = struct {
     }
     fn isClosable(ctx: ?*anyopaque, _: u64) bool {
         return fromCtx(ctx).stub_closable;
+    }
+    fn setMovable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_movable = on;
+    }
+    fn isMovable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_movable;
+    }
+    fn setFocusable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_focusable = on;
+    }
+    fn isFocusable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_focusable;
+    }
+    fn setEnabled(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_enabled = on;
+    }
+    fn isEnabled(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_enabled;
+    }
+    fn setFullscreenable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_fullscreenable = on;
+    }
+    fn isFullscreenable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_fullscreenable;
+    }
+    fn setKiosk(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_kiosk = on;
+    }
+    fn isKiosk(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_kiosk;
     }
 
     fn findInPage(ctx: ?*anyopaque, _: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {

@@ -344,6 +344,46 @@ export const windows = {
     isClosable(windowId) {
         return coreCall({ cmd: "is_closable", windowId });
     },
+    /** Electron BrowserWindow.setMovable(movable). macOS NSWindow.movable, 그 외 tracked. */
+    setMovable(windowId, movable) {
+        return coreCall({ cmd: "set_movable", windowId, movable });
+    },
+    /** Electron BrowserWindow.isMovable(). */
+    isMovable(windowId) {
+        return coreCall({ cmd: "is_movable", windowId });
+    },
+    /** Electron BrowserWindow.setFocusable(focusable). tracked(best-effort). */
+    setFocusable(windowId, focusable) {
+        return coreCall({ cmd: "set_focusable", windowId, focusable });
+    },
+    /** Electron BrowserWindow.isFocusable(). */
+    isFocusable(windowId) {
+        return coreCall({ cmd: "is_focusable", windowId });
+    },
+    /** Electron BrowserWindow.setEnabled(enable). Win32 EnableWindow / macOS ignoresMouseEvents(마우스). */
+    setEnabled(windowId, enabled) {
+        return coreCall({ cmd: "set_enabled", windowId, enabled });
+    },
+    /** Electron BrowserWindow.isEnabled(). */
+    isEnabled(windowId) {
+        return coreCall({ cmd: "is_enabled", windowId });
+    },
+    /** Electron BrowserWindow.setFullScreenable(fullscreenable). macOS collectionBehavior, 그 외 tracked. */
+    setFullScreenable(windowId, fullscreenable) {
+        return coreCall({ cmd: "set_fullscreenable", windowId, fullscreenable });
+    },
+    /** Electron BrowserWindow.isFullScreenable(). */
+    isFullScreenable(windowId) {
+        return coreCall({ cmd: "is_fullscreenable", windowId });
+    },
+    /** Electron BrowserWindow.setKiosk(flag). best-effort: 전체화면(presentation-options 미포함). */
+    setKiosk(windowId, flag) {
+        return coreCall({ cmd: "set_kiosk", windowId, kiosk: flag });
+    },
+    /** Electron BrowserWindow.isKiosk(). */
+    isKiosk(windowId) {
+        return coreCall({ cmd: "is_kiosk", windowId });
+    },
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId) {
         return coreCall({ cmd: "blur", windowId });
@@ -691,6 +731,36 @@ export class BrowserWindow {
     }
     isClosable() {
         return windows.isClosable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setMovable(movable) {
+        return windows.setMovable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), movable);
+    }
+    isMovable() {
+        return windows.isMovable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setFocusable(focusable) {
+        return windows.setFocusable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), focusable);
+    }
+    isFocusable() {
+        return windows.isFocusable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setEnabled(enabled) {
+        return windows.setEnabled(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), enabled);
+    }
+    isEnabled() {
+        return windows.isEnabled(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setFullScreenable(fullscreenable) {
+        return windows.setFullScreenable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), fullscreenable);
+    }
+    isFullScreenable() {
+        return windows.isFullScreenable(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setKiosk(flag) {
+        return windows.setKiosk(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), flag);
+    }
+    isKiosk() {
+        return windows.isKiosk(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     blur() {
         return windows.blur(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));

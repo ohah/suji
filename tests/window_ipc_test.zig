@@ -227,6 +227,41 @@ test "capability set/get handlers: JSON shape + native round-trip" {
     try std.testing.expect(!native.stub_maximizable);
 }
 
+test "mode set/get handlers: JSON shape + native round-trip" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .bounds = .{ .width = 100, .height = 100 } });
+    var buf: [256]u8 = undefined;
+
+    const sr = ipc.handleSetMovable(1, false, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, sr, "\"cmd\":\"set_movable\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, sr, "\"ok\":true") != null);
+    try std.testing.expect(!native.stub_movable);
+
+    var buf2: [256]u8 = undefined;
+    const gr = ipc.handleIsEnabled(1, &buf2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, gr, "\"cmd\":\"is_enabled\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, gr, "\"enabled\":true") != null);
+
+    // kiosk setter forwards + getter reflects.
+    var buf3: [256]u8 = undefined;
+    _ = ipc.handleSetKiosk(1, true, &buf3, &wm).?;
+    try std.testing.expect(native.stub_kiosk);
+    const kr = ipc.handleIsKiosk(1, &buf3, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, kr, "\"kiosk\":true") != null);
+
+    // focusable/enabled/fullscreenable setters forward.
+    var buf5: [256]u8 = undefined;
+    _ = ipc.handleSetFocusable(1, false, &buf5, &wm).?;
+    try std.testing.expect(!native.stub_focusable);
+    _ = ipc.handleSetEnabled(1, false, &buf5, &wm).?;
+    try std.testing.expect(!native.stub_enabled);
+    _ = ipc.handleSetFullscreenable(1, false, &buf5, &wm).?;
+    try std.testing.expect(!native.stub_fullscreenable);
+}
+
 test "handleSetBounds rejects small buffer" {
     var native = TestNative{};
     var wm = newWm(&native);

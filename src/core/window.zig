@@ -111,6 +111,16 @@ pub const Constraints = struct {
     maximizable: bool = true,
     /// false면 닫기 불가 (NSWindowStyleMaskClosable / delegate can_close).
     closable: bool = true,
+    /// false면 사용자가 창을 드래그 이동 불가 (macOS NSWindow.movable).
+    movable: bool = true,
+    /// false면 창 포커스 비활성(best-effort; tracked). macOS/Win/Linux 한계.
+    focusable: bool = true,
+    /// false면 입력 비활성(macOS ignoresMouseEvents / Win32 EnableWindow).
+    enabled: bool = true,
+    /// false면 전체화면 진입 불가 (macOS collectionBehavior FullScreenPrimary).
+    fullscreenable: bool = true,
+    /// true면 kiosk 모드(best-effort: 전체화면 + presentation; tracked).
+    kiosk: bool = false,
     /// true면 일반 창 위.
     always_on_top: bool = false,
     /// 최소/최대 콘텐츠 크기 (0이면 제한 없음).
@@ -292,6 +302,19 @@ pub const Native = struct {
         is_maximizable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         set_closable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
         is_closable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        // 창 모드 토글 (Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk).
+        // tracked constraints 단일 출처 + best-effort 네이티브(macOS movable/collectionBehavior/
+        // ignoresMouseEvents, Win32 EnableWindow). getter = 추적값.
+        set_movable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_movable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_focusable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_focusable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_enabled: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_enabled: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_fullscreenable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_fullscreenable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_kiosk: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_kiosk: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
         undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
         redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -462,6 +485,36 @@ pub const Native = struct {
     }
     pub fn isClosable(self: Native, handle: u64) bool {
         return self.vtable.is_closable(self.ctx, handle);
+    }
+    pub fn setMovable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_movable(self.ctx, handle, on);
+    }
+    pub fn isMovable(self: Native, handle: u64) bool {
+        return self.vtable.is_movable(self.ctx, handle);
+    }
+    pub fn setFocusable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_focusable(self.ctx, handle, on);
+    }
+    pub fn isFocusable(self: Native, handle: u64) bool {
+        return self.vtable.is_focusable(self.ctx, handle);
+    }
+    pub fn setEnabled(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_enabled(self.ctx, handle, on);
+    }
+    pub fn isEnabled(self: Native, handle: u64) bool {
+        return self.vtable.is_enabled(self.ctx, handle);
+    }
+    pub fn setFullscreenable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_fullscreenable(self.ctx, handle, on);
+    }
+    pub fn isFullscreenable(self: Native, handle: u64) bool {
+        return self.vtable.is_fullscreenable(self.ctx, handle);
+    }
+    pub fn setKiosk(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_kiosk(self.ctx, handle, on);
+    }
+    pub fn isKiosk(self: Native, handle: u64) bool {
+        return self.vtable.is_kiosk(self.ctx, handle);
     }
     pub fn undo(self: Native, handle: u64) void {
         self.vtable.undo(self.ctx, handle);
@@ -1551,6 +1604,68 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveWindowLocked(id);
         return self.native.isClosable(win.native_handle);
+    }
+
+    // Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk (+ getters). .window 전용.
+    pub fn setMovable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setMovable(win.native_handle, on);
+    }
+    pub fn isMovable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isMovable(win.native_handle);
+    }
+    pub fn setFocusable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setFocusable(win.native_handle, on);
+    }
+    pub fn isFocusable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isFocusable(win.native_handle);
+    }
+    pub fn setEnabled(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setEnabled(win.native_handle, on);
+    }
+    pub fn isEnabled(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isEnabled(win.native_handle);
+    }
+    pub fn setFullscreenable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setFullscreenable(win.native_handle, on);
+    }
+    pub fn isFullscreenable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isFullscreenable(win.native_handle);
+    }
+    pub fn setKiosk(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setKiosk(win.native_handle, on);
+    }
+    pub fn isKiosk(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isKiosk(win.native_handle);
     }
 
     /// Electron 호환 zoom factor↔level 변환 base. `pow(ZOOM_BASE, level) == factor`,

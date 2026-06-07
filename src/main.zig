@@ -1879,6 +1879,32 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleSetClosable(win_id, util.extractJsonBool(req_clean, "closable") orelse false, response_buf, wm);
     }
+    // 창 모드 토글 (Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk).
+    if (std.mem.eql(u8, cmd, "set_movable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetMovable(win_id, util.extractJsonBool(req_clean, "movable") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_focusable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetFocusable(win_id, util.extractJsonBool(req_clean, "focusable") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_enabled")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetEnabled(win_id, util.extractJsonBool(req_clean, "enabled") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_fullscreenable")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetFullscreenable(win_id, util.extractJsonBool(req_clean, "fullscreenable") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_kiosk")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetKiosk(win_id, util.extractJsonBool(req_clean, "kiosk") orelse false, response_buf, wm);
+    }
     // getAllWindows/getFocusedWindow 는 windowId 입력이 없어 전용 분기.
     if (std.mem.eql(u8, cmd, "get_all_windows")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1910,6 +1936,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "is_minimizable", &window_ipc.handleIsMinimizable },
         .{ "is_maximizable", &window_ipc.handleIsMaximizable },
         .{ "is_closable", &window_ipc.handleIsClosable },
+        .{ "is_movable", &window_ipc.handleIsMovable },
+        .{ "is_focusable", &window_ipc.handleIsFocusable },
+        .{ "is_enabled", &window_ipc.handleIsEnabled },
+        .{ "is_fullscreenable", &window_ipc.handleIsFullscreenable },
+        .{ "is_kiosk", &window_ipc.handleIsKiosk },
     }) |entry| {
         if (std.mem.eql(u8, cmd, entry[0])) {
             const wm = window_mod.WindowManager.global orelse return null;
