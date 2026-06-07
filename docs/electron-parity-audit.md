@@ -19,19 +19,19 @@
 - ~~**[high]** `BrowserWindow.hide()`~~ ✅ — Add windows.show(windowId: number) and windows.hide(windowId: number) to the windows namespace in packages/suji-js/src/index.ts (calling coreCall with cmd "set_visible" like setViewVisible does for vi
 - ~~**[high]** `BrowserWindow.close()`~~ ✅ — Add windows.close(windowId: number) method in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts that calls coreCall with cmd: "destroy_window". Add BrowserWindow.close() instance metho
 - **[high]** `destroy()` — Add `windows.destroy(windowId: number): Promise<WindowOpResponse>` to the windows namespace in packages/suji-js/src/index.ts (around line 400, after setBounds). Add corresponding `destroy()` method to
-- **[high]** `BrowserWindow.focus()` — Add windows.focus(windowId: number) method to the windows namespace in packages/suji-js/src/index.ts (around line 300-310, following the pattern of setTitle/setBounds). The method should call coreCall
-- **[high]** `BrowserWindow.blur() / BrowserWindow.focus()` — Add two IPC command handlers in window_ipc.zig (following the pattern of `handleSetTitle`, `handleSetBounds`): `handleFocus(windowId)` and `handleBlur(windowId)`. These should call `wm.focus(id)` and 
-- **[high]** `BrowserWindow.isFocused()` — Add isFocused(windowId) query method: (1) Add fn to window.zig Native vtable returning bool, implement in CEF with native window focus check, (2) add handleIsFocused in window_ipc.zig returning {cmd, 
-- **[high]** `BrowserWindow.isVisible()` — Add isVisible() getter by: (1) Implement WindowManager.isVisible(id: u32) in window.zig (lines ~1115-1125, mirror isLoading pattern); (2) Add window_ipc.handleIsVisible() in window_ipc.zig following h
+- ~~**[high]** `BrowserWindow.focus()`~~ ✅ — Add windows.focus(windowId: number) method to the windows namespace in packages/suji-js/src/index.ts (around line 300-310, following the pattern of setTitle/setBounds). The method should call coreCall
+- ~~**[high]** `BrowserWindow.blur() / BrowserWindow.focus()`~~ ✅ — Add two IPC command handlers in window_ipc.zig (following the pattern of `handleSetTitle`, `handleSetBounds`): `handleFocus(windowId)` and `handleBlur(windowId)`. These should call `wm.focus(id)` and 
+- ~~**[high]** `BrowserWindow.isFocused()`~~ ✅ — Add isFocused(windowId) query method: (1) Add fn to window.zig Native vtable returning bool, implement in CEF with native window focus check, (2) add handleIsFocused in window_ipc.zig returning {cmd, 
+- ~~**[high]** `BrowserWindow.isVisible()`~~ ✅ — Add isVisible() getter by: (1) Implement WindowManager.isVisible(id: u32) in window.zig (lines ~1115-1125, mirror isLoading pattern); (2) Add window_ipc.handleIsVisible() in window_ipc.zig following h
 - ~~**[high]** `BrowserWindow.isMaximized()`~~ ✅ — Add three getter methods to windows namespace and BrowserWindow class in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts: (1) Define IsMinimizedResponse, IsMaximizedResponse, IsFulls
 - ~~**[high]** `BrowserWindow.isMinimized()`~~ ✅ — Add isMinimized, isMaximized, isFullscreen to suji-js and suji-node packages using existing coreCall pattern.
-- **[high]** `isNormal()` — 1. Add `handleIsNormal` to /src/core/window_ipc.zig (use handleStateGet pattern like isMinimized, check !minimized && !maximized && !fullscreen). 2. Wire cmd 'is_normal' through main.zig dispatcher. 3
+- ~~**[high]** `isNormal()`~~ ✅ — 1. Add `handleIsNormal` to /src/core/window_ipc.zig (use handleStateGet pattern like isMinimized, check !minimized && !maximized && !fullscreen). 2. Wire cmd 'is_normal' through main.zig dispatcher. 3
 - ~~**[high]** `BrowserWindow.isFullScreen()`~~ ✅ — Add isFullScreen() method to windows namespace and BrowserWindow class in both packages/suji-js/src/index.ts and packages/suji-node/src/index.ts, mirroring the pattern of existing query methods like i
-- **[high]** `BrowserWindow.getSize()` — Add windows.getSize(windowId: number) method to @suji/api and @suji/node returning Promise<{width: number; height: number}>. Implement corresponding get_bounds IPC handler in Zig WindowManager (src/co
-- **[high]** `BrowserWindow.getPosition() / BrowserWindow.getBounds()` — Add `handleGetBounds(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8` and convenience `handleGetPosition(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]co
-- **[high]** `BrowserWindow.isAlwaysOnTop()` — Add handleSetAlwaysOnTop and handleIsAlwaysOnTop to window_ipc.zig following the pattern of setHasShadow/hasShadow. Add routing in main.zig for set_always_on_top and is_always_on_top commands. Add set
-- **[high]** `BrowserWindow.getAllWindows()` — Add `static async getAllWindows(): Promise<BrowserWindow[]>` method to the `BrowserWindow` class in both `packages/suji-js/src/index.ts` (around line 578-600) and `packages/suji-node/src/index.ts` (ar
-- **[high]** `BrowserWindow.getFocusedWindow()` — Add focused window tracking to Suji: (1) Add optional_u32 focused_window_id field to WindowManager, initialized to null. (2) Update focus/blur handlers in cef.zig to set/clear this field. (3) Add pub 
+- ~~**[high]** `BrowserWindow.getSize()`~~ ✅ — Add windows.getSize(windowId: number) method to @suji/api and @suji/node returning Promise<{width: number; height: number}>. Implement corresponding get_bounds IPC handler in Zig WindowManager (src/co
+- ~~**[high]** `BrowserWindow.getPosition() / BrowserWindow.getBounds()`~~ ✅ — Add `handleGetBounds(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8` and convenience `handleGetPosition(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]co
+- ~~**[high]** `BrowserWindow.isAlwaysOnTop()`~~ ✅ — Add handleSetAlwaysOnTop and handleIsAlwaysOnTop to window_ipc.zig following the pattern of setHasShadow/hasShadow. Add routing in main.zig for set_always_on_top and is_always_on_top commands. Add set
+- ~~**[high]** `BrowserWindow.getAllWindows()`~~ ✅ — Add `static async getAllWindows(): Promise<BrowserWindow[]>` method to the `BrowserWindow` class in both `packages/suji-js/src/index.ts` (around line 578-600) and `packages/suji-node/src/index.ts` (ar
+- ~~**[high]** `BrowserWindow.getFocusedWindow()`~~ ✅ — Add focused window tracking to Suji: (1) Add optional_u32 focused_window_id field to WindowManager, initialized to null. (2) Update focus/blur handlers in cef.zig to set/clear this field. (3) Add pub 
 - ~~**[high]** `minimize event: window:minimize`~~ ✅ — Add minimize() and restore() methods to the windows object in packages/suji-js/src/index.ts (lines 293-569) and packages/suji-node/src/index.ts (lines 453-623), following the same pattern as other win
 
 ### app
@@ -40,19 +40,19 @@
 
 ### nativeTheme
 
-- **[high]** `nativeTheme.themeSource (getter)` — Add getThemeSource() async method to @suji/api and @suji/node that returns Promise<ThemeSource>. Implement new IPC command `native_theme_get_source` in src/main.zig (lines 1855+) dispatching to cef.na
+- ~~**[high]** `nativeTheme.themeSource (getter)`~~ ✅ — Add getThemeSource() async method to @suji/api and @suji/node that returns Promise<ThemeSource>. Implement new IPC command `native_theme_get_source` in src/main.zig (lines 1855+) dispatching to cef.na
 
 ### notification
 
-- **[high]** `Notification.removeAll()` — Add notification.removeAll() method: (1) Zig: add notification_remove_all command handler in src/main.zig/cef.zig that calls cef.notificationRemoveAll() wrapping UNUserNotificationCenter.removeAllDeli
+- ~~**[high]** `Notification.removeAll()`~~ ✅ — Add notification.removeAll() method: (1) Zig: add notification_remove_all command handler in src/main.zig/cef.zig that calls cef.notificationRemoveAll() wrapping UNUserNotificationCenter.removeAllDeli
 
 ### powerMonitor
 
-- **[high]** `powerMonitor.isOnBatteryPower()` — Add isOnBatteryPower() method to powerMonitor API: (1) Extend src/platform/power_monitor.m with IOPowerSources-based battery detection function querying kIOPSNameKey and kIOPSPowerSourceStateKey; (2) 
+- ~~**[high]** `powerMonitor.isOnBatteryPower()`~~ ✅ — Add isOnBatteryPower() method to powerMonitor API: (1) Extend src/platform/power_monitor.m with IOPowerSources-based battery detection function querying kIOPSNameKey and kIOPSPowerSourceStateKey; (2) 
 
 ### screen
 
-- **[high]** `screen.getDisplayMatching(rect)` — Add getDisplayMatching(rect: {x, y, width, height}): Promise<Display> to both suji-js and suji-node. Implement backend IPC handler screen_get_display_matching in src/main.zig that passes rect to cef.s
+- ~~**[high]** `screen.getDisplayMatching(rect)`~~ ✅ — Add getDisplayMatching(rect: {x, y, width, height}): Promise<Display> to both suji-js and suji-node. Implement backend IPC handler screen_get_display_matching in src/main.zig that passes rect to cef.s
 
 ### session
 
@@ -63,7 +63,7 @@
 
 ### shell
 
-- **[high]** `shell.openPath` — Update packages/suji-js and packages/suji-node openPath implementations: change return type to Promise<string>, return r.error || "" instead of boolean
+- ~~**[high]** `shell.openPath`~~ ✅ — Update packages/suji-js and packages/suji-node openPath implementations: change return type to Promise<string>, return r.error || "" instead of boolean
 
 ### BrowserWindow
 
@@ -76,7 +76,7 @@
 - **[medium]** `BrowserWindow.setResizable(resizable: boolean)` — Add windows.setResizable(windowId: number, resizable: boolean) to packages/suji-js/src/index.ts (matching pattern of setOpacity/setAudioMuted). Implement set_resizable command handler in src/main.zig 
 - **[medium]** `BrowserWindow.setMovable(movable: boolean)` — Add windows.setMovable(windowId: number, movable: boolean) by: (1) Adding a movable boolean field to WindowManager's window properties (src/core/window.zig); (2) Implementing platform-specific setters
 - **[medium]** `BrowserWindow.setMaximizable(maximizable: boolean)` — Add set_minimizable and set_maximizable handlers to src/core/window_ipc.zig, wire them to WindowManager method vtable, and expose via windows.setMaximizable(windowId, maximizable) in packages/suji-js/
-- ~~**[medium]** `BrowserWindow.setFullScreenable`~~ ✅ — Add windows.setFullScreenable(windowId: number, fullscreenable: boolean) and windows.isFullScreenable(windowId: number) to packages/suji-js/src/index.ts, plus corresponding setFullScreenable and isFul
+- **[medium]** `BrowserWindow.setFullScreenable` — Add windows.setFullScreenable(windowId: number, fullscreenable: boolean) and windows.isFullScreenable(windowId: number) to packages/suji-js/src/index.ts, plus corresponding setFullScreenable and isFul
 - **[medium]** `BrowserWindow.setClosable(closable: boolean)` — Add three-part implementation following sibling methods (setResizable pattern): (1) Add handleSetClosable and handleIsClosable in src/core/window_ipc.zig with JSON parsing and WindowManager delegation
 - **[medium]** `isClosable()` — Add window constraint query/setter APIs for closable/minimizable/maximizable parity with Electron. Implementation incomplete: C ABI vtable designed (WINDOW_API.md) but Constraints struct (window.zig) 
 - **[medium]** `BrowserWindow.setFocusable(focusable: boolean)` — Add `setFocusable(windowId: number, focusable: boolean): Promise<WindowOpResponse>` to the `windows` namespace in packages/suji-js/src/index.ts (following the pattern of `setHasShadow`), and add a cor
@@ -105,7 +105,7 @@
 ### globalShortcut
 
 - **[medium]** `globalShortcut.registerAll` — Add `registerAll(accelerators: string[], click: string): Promise<boolean>` method to: (1) packages/suji-js/src/index.ts—loop through accelerators calling existing register() or make single IPC call wi
-- **[medium]** `globalShortcut.unregisterAll` — Change return type of unregisterAll from Promise<boolean> to Promise<void> in: (1) packages/suji-js/src/index.ts lines 1001-1003, and (2) packages/suji-node/src/index.ts lines 1141-1144. This matches 
+- ~~**[medium]** `globalShortcut.unregisterAll`~~ ✅ — Change return type of unregisterAll from Promise<boolean> to Promise<void> in: (1) packages/suji-js/src/index.ts lines 1001-1003, and (2) packages/suji-node/src/index.ts lines 1141-1144. This matches 
 - **[medium]** `globalShortcut.setSuspended` — Add setSuspended(suspended: boolean) and isSuspended() to Suji's globalShortcut. 1) Zig/main.zig: add global_shortcut_set_suspended and global_shortcut_is_suspended IPC handlers that toggle a module-l
 - **[medium]** `globalShortcut.isSuspended` — Add globalShortcut.isSuspended() and globalShortcut.setSuspended(bool). Implementation: (1) Add static bool g_suspended in src/platform/global_shortcut.m with getter/setter C functions, (2) Wire "glob
 
@@ -140,14 +140,14 @@
 
 ### notification
 
-- **[medium]** `notification.show()` — Create a `Notification` class mirroring Electron's pattern. Signature: `class Notification { constructor(opts: NotificationOptions); async show(): Promise<{notificationId: string; success: boolean}>; 
+- ~~**[medium]** `notification.show()`~~ ✅ — Create a `Notification` class mirroring Electron's pattern. Signature: `class Notification { constructor(opts: NotificationOptions); async show(): Promise<{notificationId: string; success: boolean}>; 
 - **[medium]** `Notification.removeGroup(groupId)` — Add notification.removeGroup(groupId: string) → Promise<boolean>. Steps: (1) Extend NotificationOptions with optional groupId: string; (2) Pass groupId through show() IPC to native layer (modify src/m
 - **[medium]** `NotificationOptions.id` — Add `id?: string` to NotificationOptions interface in packages/suji-js/src/index.ts (line 835). In src/main.zig notification_show handler (line 2472), extract the optional id field using util.extractJ
 - **[medium]** `notification.id (readonly getter)` — Introduce a Notification class (similar to BrowserWindow) with: constructor(options: NotificationOptions & {id?: string}), readonly id property (exposed post-construction), and async show()/close() me
 
 ### powerMonitor
 
-- **[medium]** `powerMonitor.getSystemIdleState(threshold: number)` — Update TypeScript return type in packages/suji-js/src/index.ts:724 from Promise<'active' | 'idle'> to Promise<'active' | 'idle' | 'locked'> and the coreCall generic from { state: 'active' | 'idle' } t
+- ~~**[medium]** `powerMonitor.getSystemIdleState(threshold: number)`~~ ✅ — Update TypeScript return type in packages/suji-js/src/index.ts:724 from Promise<'active' | 'idle'> to Promise<'active' | 'idle' | 'locked'> and the coreCall generic from { state: 'active' | 'idle' } t
 - **[medium]** `powerMonitor.onBatteryPower (property)` — Implement isOnBatteryPower() method first (platform-specific: macOS via IOKit or IOPowerSources, fetch AC adapter status). Then add onBatteryPower as a getter property delegating to isOnBatteryPower()
 - **[medium]** `powerMonitor.on('on-battery') event` — Extend src/platform/power_monitor.m to use IOPowerSources.framework for battery state detection. Add 'power:on-battery' and 'power:on-ac' event emissions via existing NSWorkspace observer callback pat
 - **[medium]** `powerMonitor 'shutdown' event` — Add NSWorkspaceWillPowerOffNotification observer to power_monitor.m. Add onPowerOff method to SujiPowerObserver that calls callback with shutdown string. Register notification with NSWorkspace notific
@@ -164,8 +164,8 @@
 
 ### session
 
-- **[medium]** `session.cookies.set() / setCookie(details)` — Add sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict' to CookieDescriptor in packages/suji-js/src/index.ts (line 1254) and packages/suji-node/src/index.ts (line 1359). Update src/main.zig
-- **[medium]** `cookies.remove(url, name) and cookies.set(details)` — Change removeCookies and setCookie in packages/suji-js/src/index.ts (lines 1312-1335) to return Promise<void> instead of Promise<boolean>. On success:false from IPC, throw an Error instead of returnin
+- ~~**[medium]** `session.cookies.set() / setCookie(details)`~~ ✅ — Add sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict' to CookieDescriptor in packages/suji-js/src/index.ts (line 1254) and packages/suji-node/src/index.ts (line 1359). Update src/main.zig
+- ~~**[medium]** `cookies.remove(url, name) and cookies.set(details)`~~ ✅ — Change removeCookies and setCookie in packages/suji-js/src/index.ts (lines 1312-1335) to return Promise<void> instead of Promise<boolean>. On success:false from IPC, throw an Error instead of returnin
 - **[medium]** `session.will-download event` — To implement parity: (1) Expose CEF's cef_download_handler_t in src/platform/cef.zig with OnBeforeDownload callback; (2) Fire session:will-download event from IPC with {url, suggestedFilename, mimeTyp
 - **[medium]** `session.setDownloadPath(path)` — Add session.setDownloadPath(path) method across all 5 SDKs. Implementation requires: (1) CEF download_handler integration in cef.zig (OnBeforeDownload callback), (2) Zig SDK method in app.zig, (3) IPC
 - **[medium]** `session.setCertificateVerifyProc(proc)` — Implement custom certificate verification callback via CEF RequestHandler.on_certificate_error. Add session.setCertificateVerifyProc(proc: (request) => verificationResult) method to: (1) cef.zig: regi
@@ -181,8 +181,8 @@
 - **[medium]** `webContents.insertCSS(css[, options])` — Add insertCSS(windowId: number, css: string, options?: {cssOrigin?: 'user'|'author'}): Promise<string> to windows.* API (both @suji/api frontend and @suji/node backend). Implementation: create a style
 - **[medium]** `webContents.removeInsertedCSS(key)` — Add insertCSS(css: string) → Promise&lt;string&gt; and removeInsertedCSS(key: string) → Promise&lt;void&gt; to windows object in packages/suji-js/src/index.ts (lines ~320–330). Backend track CSS keys 
 - **[medium]** `webContents.setWindowOpenHandler(handler)` — Implement setWindowOpenHandler(handler) in all 5 SDKs (Frontend @suji/api + Zig/Rust/Go/Node backends). Backend implementation: (1) Add CEF on_before_popup callback in cef.zig to intercept window.open
-- **[medium]** `stopFindInPage(windowId, action)` — Change Suji's stopFindInPage signature from boolean clearSelection to string action enum. Update /packages/suji-js/src/index.ts:463 and /packages/suji-node/src/index.ts:581 to accept action: 'clearSel
-- **[medium]** `webContents.openDevTools([options])` — Add optional options parameter to openDevTools across all SDKs (JS/Node/Zig/Rust/Go). Extend the IPC request in main.zig to accept optional mode/activate/title, parse them in window_ipc.handleOpenDevT
+- ~~**[medium]** `stopFindInPage(windowId, action)`~~ ✅ — Change Suji's stopFindInPage signature from boolean clearSelection to string action enum. Update /packages/suji-js/src/index.ts:463 and /packages/suji-node/src/index.ts:581 to accept action: 'clearSel
+- ~~**[medium]** `webContents.openDevTools([options])`~~ ✅ — Add optional options parameter to openDevTools across all SDKs (JS/Node/Zig/Rust/Go). Extend the IPC request in main.zig to accept optional mode/activate/title, parse them in window_ipc.handleOpenDevT
 
 ### webRequest
 
@@ -194,7 +194,7 @@
 - **[low]** `getMaximumSize()` — Add windows.getMaximumSize(windowId): Promise<{width,height}> and windows.setMaximumSize(windowId, width, height): Promise<WindowOpResponse> methods. Mirror existing setZoomLevel/getZoomLevel pattern 
 - **[low]** `BrowserWindow.isMovable()` — Add windows.isMovable(windowId: number): Promise<{ok: boolean; movable: boolean}> following the pattern of existing query methods (hasShadow, getOpacity). Implementation: (1) Add is_movable handler in
 - **[low]** `isMaximizable()` — Add `isMaximizable(windowId: number)` query method to the `windows` namespace in packages/suji-js/src/index.ts (lines ~293-570), following the pattern of isAudioMuted(). Create an IsMaximizableRespons
-- ~~**[low]** `BrowserWindow.isFullScreenable()`~~ ✅ — Add windows.setFullScreenable(windowId, fullscreenable) and windows.isFullScreenable(windowId) to suji-js and suji-node SDKs, mirroring the existing setFullscreen/isFullscreen implementation. Add Zig 
+- **[low]** `BrowserWindow.isFullScreenable()` — Add windows.setFullScreenable(windowId, fullscreenable) and windows.isFullScreenable(windowId) to suji-js and suji-node SDKs, mirroring the existing setFullscreen/isFullscreen implementation. Add Zig 
 - **[low]** `BrowserWindow.isFocusable()` — Add isFocusable() query method (and optionally setFocusable() setter). Implementation mirrors existing query patterns: (1) add native vtable getter is_focusable in WINDOW_API.md design, (2) implement 
 - **[low]** `BrowserWindow.isEnabled()` — Add window enabled-state query/setter following the existing pattern: (1) Add `isEnabled()` method to packages/suji-js/src/index.ts `windows` namespace and BrowserWindow class, routing to `is_enabled`
 - **[low]** `BrowserWindow.isKiosk()` — Add setKiosk(windowId, flag) and isKiosk(windowId) to the Windows API. Implementation: (1) add handleSetKiosk/handleIsKiosk to window_ipc.zig (request/response structs + JSON serialization); (2) deleg
@@ -205,7 +205,7 @@
 
 ### WebContentsView
 
-- **[low]** `View.setBounds(bounds, animate?)` — Add optional animate parameter to setViewBounds across the stack: (1) Update Zig Bounds struct or create AnimatedBounds variant with animate field; (2) Update window_ipc.zig SetViewBoundsReq to parse 
+- ~~**[low]** `View.setBounds(bounds, animate?)`~~ ✅ — Add optional animate parameter to setViewBounds across the stack: (1) Update Zig Bounds struct or create AnimatedBounds variant with animate field; (2) Update window_ipc.zig SetViewBoundsReq to parse 
 
 ### app
 
@@ -245,7 +245,7 @@
 ### clipboard
 
 - **[low]** `clipboard.readFindText()` — Add readFindText(): Promise<string> to clipboard module. Implement in Zig core (src/main.zig): add clipboard_read_find_text command handler that calls new cef.clipboardReadFindText() function. In cef.
-- **[low]** `clipboard.has(format[, type])` — Add optional `type?: 'clipboard' | 'selection'` parameter to `clipboard.has()` in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts. Update Zig handler at src/main.zig:2204 to extract 
+- ~~**[low]** `clipboard.has(format[, type])`~~ ✅ — Add optional `type?: 'clipboard' | 'selection'` parameter to `clipboard.has()` in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts. Update Zig handler at src/main.zig:2204 to extract 
 
 ### dialog
 
@@ -264,7 +264,7 @@
 - **[low]** `MenuItem.sublabel property` — Add optional `sublabel?: string` field to MenuCommandItem and MenuCheckboxItem TypeScript interfaces. Add `sublabel: []const u8 = ""` to Zig's ApplicationMenuItem.item and .checkbox structs. In cef.zi
 - **[low]** `MenuItem.toolTip property` — Add optional `toolTip?: string` field to MenuCommandItem and MenuCheckboxItem interfaces in packages/suji-js/src/index.ts (lines 934-947). Update Zig ApplicationMenuItem union in src/platform/cef.zig 
 - **[low]** `MenuItem.before/after positioning` — Add optional `before?: string[]` and `after?: string[]` fields to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts
-- **[low]** `menu.click event payload` — Enhance menu:click payload from {click: string} to {click: string, windowId?: number}. Implementation: (1) Store window ID when menu is set, or emit currently active window ID at click time via Window
+- ~~**[low]** `menu.click event payload`~~ ✅ — Enhance menu:click payload from {click: string} to {click: string, windowId?: number}. Implementation: (1) Store window ID when menu is set, or emit currently active window ID at click time via Window
 - **[low]** `menu.click event — window context` — Add windowId tracking to menu:click event: (1) extend menu_popup API to accept optional windowId parameter, (2) store windowId context in g_menu_context or similar, (3) emit menu:click as {click, wind
 
 ### nativeImage
