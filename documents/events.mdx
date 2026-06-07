@@ -69,6 +69,30 @@ if (!gotLock) {
 }
 ```
 
+### session 권한 요청 (permission-request)
+
+| 채널 | payload | 발화 시점 |
+|---|---|---|
+| `session:permission-request` | `{permissionId, origin, permissions: string[]}` | 렌더러가 권한(geolocation/notifications 등)을 요청했을 때 |
+| `session:permission-dismissed` | `{permissionId}` | 요청이 외부 이유(navigation/창 닫힘)로 취소됐을 때 |
+
+대개는 직접 이벤트를 듣지 않고 `session.setPermissionRequestHandler(handler)`
+(Electron 동등)를 쓴다 — SDK 가 `session:permission-request` 를 구독해 핸들러의
+`true`(허용)/`false`(거부) 결정을 `session_permission_response` 로 응답한다(CEF
+`cef_permission_handler_t` deferred-callback). 핸들러는 async 가능(커스텀 UI 등).
+throw/비-bool 반환은 거부(안전 기본). `null` 전달 시 해제. ⚠️ camera/mic
+(getUserMedia)은 별도 CEF media-access 경로라 미포함.
+
+```js
+import { session } from '@suji/api';
+
+session.setPermissionRequestHandler((details) => {
+  // details = {permissionId, origin, permissions}
+  if (details.permissions.includes('geolocation')) return false; // 거부
+  return true; // 그 외 허용
+});
+```
+
 ## Electron API 대응표
 
 | Electron | Suji |

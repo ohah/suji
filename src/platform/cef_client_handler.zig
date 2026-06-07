@@ -4,6 +4,7 @@ const cef_drag_handler = @import("cef_drag_handler.zig");
 const cef_keyboard_handler = @import("cef_keyboard_handler.zig");
 const cef_life_span_handler = @import("cef_life_span_handler.zig");
 const cef_request_handler = @import("cef_request_handler.zig");
+const cef_session_permission = @import("cef_session_permission.zig");
 const cef_window_display = @import("cef_window_display.zig");
 
 const c = cef.c;
@@ -19,6 +20,7 @@ pub fn initClient(client_ptr: *c.cef_client_t) void {
     client_ptr.get_find_handler = &getFindHandler;
     client_ptr.get_print_handler = &getPrintHandler;
     client_ptr.get_request_handler = &getRequestHandler;
+    client_ptr.get_permission_handler = &getPermissionHandler;
     client_ptr.on_process_message_received = &cef_browser_ipc.onBrowserProcessMessageReceived;
 }
 
@@ -40,4 +42,8 @@ fn getPrintHandler(client: ?*c._cef_client_t) callconv(.c) ?*c._cef_print_handle
 
 fn getRequestHandler(client: ?*c._cef_client_t) callconv(.c) ?*c._cef_request_handler_t {
     return cef_request_handler.getRequestHandler(client);
+}
+
+fn getPermissionHandler(client: ?*c._cef_client_t) callconv(.c) ?*c._cef_permission_handler_t {
+    return cef_session_permission.getPermissionHandler(client);
 }

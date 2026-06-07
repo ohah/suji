@@ -694,6 +694,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.nativeThemeInstall(&nativeThemeEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
+    cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -883,6 +884,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.nativeThemeInstall(&nativeThemeEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
+    cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -2464,6 +2466,20 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const pac_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "pacScript") orelse "", &pac_buf) orelse 0;
         const ok = cef.sessionSetProxy(mode_buf[0..mode_n], rules_buf[0..rules_n], bypass_buf[0..bypass_n], pac_buf[0..pac_n]);
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_proxy\",\"success\":{}}}", .{ok}) catch null;
+    }
+    // Electron session.setPermissionRequestHandler — enabled=true 면 네이티브 권한 prompt 를
+    // hold 후 session:permission-request 이벤트로 위임(app 이 session_permission_response 응답).
+    if (std.mem.eql(u8, cmd, "session_set_permission_handler")) {
+        const enabled = util.extractJsonBool(req_clean, "enabled") orelse true;
+        cef.permissionSetHandlerEnabled(enabled);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_permission_handler\",\"success\":true}}", .{}) catch null;
+    }
+    // 권한 결정 응답 — permissionId 로 hold 콜백을 찾아 grant/deny. 없는 id → success:false.
+    if (std.mem.eql(u8, cmd, "session_permission_response")) {
+        const id_i = util.extractJsonInt(req_clean, "permissionId") orelse -1;
+        const granted = util.extractJsonBool(req_clean, "granted") orelse false;
+        const ok = if (id_i < 0) false else cef.permissionRespond(@intCast(id_i), granted);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_permission_response\",\"success\":{}}}", .{ok}) catch null;
     }
     if (std.mem.eql(u8, cmd, "session_clear_storage_data")) {
         var origin_buf: [2048]u8 = undefined;
@@ -4443,6 +4459,12 @@ fn webRequestEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callcon
     const ch = std.mem.span(channel);
     const data = std.mem.span(payload);
     emitBusRaw(ch, data);
+}
+
+/// session.setPermissionRequestHandler: on_show/on_dismiss_permission_prompt(UI 스레드)가
+/// 발신. EventBus.emit 이 mutex 로 thread-safe 하므로 그대로 dispatch(webRequest 동형).
+fn permissionEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void {
+    emitBusRaw(std.mem.span(channel), std.mem.span(payload));
 }
 
 fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {

@@ -52,3 +52,14 @@ end)
 suji.handle("core-set-proxy", function(_)
   return suji.invoke("__core__", cjson.encode({ cmd = "session_set_proxy", mode = "direct" }))
 end)
+
+-- session.setPermissionRequestHandler 등록(enable)도 __core__ 로 도달.
+suji.handle("core-set-permission-handler", function(_)
+  return suji.invoke("__core__", cjson.encode({ cmd = "session_set_permission_handler", enabled = true }))
+end)
+
+-- 권한 응답도 __core__ 로 도달(워커 스레드). 없는 permissionId → success:false 지만
+-- cmd 라우팅 + (pendingTake 실패가 호출 스레드에서 끝나 post 없이) 무크래시 검증.
+suji.handle("core-permission-response", function(_)
+  return suji.invoke("__core__", cjson.encode({ cmd = "session_permission_response", permissionId = 999999, granted = true }))
+end)

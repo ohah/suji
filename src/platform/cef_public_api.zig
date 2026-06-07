@@ -38,6 +38,7 @@ const cef_screen = @import("cef_screen.zig");
 const cef_scheme = @import("cef_scheme.zig");
 const cef_security_scoped_bookmark = @import("cef_security_scoped_bookmark.zig");
 const cef_session_cookies = @import("cef_session_cookies.zig");
+const cef_session_permission = @import("cef_session_permission.zig");
 const cef_session_proxy = @import("cef_session_proxy.zig");
 const cef_shell = @import("cef_shell.zig");
 const cef_single_instance = @import("cef_single_instance.zig");
@@ -290,6 +291,13 @@ pub const sessionSetCookie = cef_session_cookies.sessionSetCookie;
 pub const sessionRemoveCookies = cef_session_cookies.sessionRemoveCookies;
 pub const sessionGetCookies = cef_session_cookies.sessionGetCookies;
 pub const sessionSetProxy = cef_session_proxy.sessionSetProxy;
+
+// session.setPermissionRequestHandler — cef_session_permission.zig
+pub const PermissionEmitFn = cef_session_permission.PermissionEmitFn;
+pub const setPermissionEmitHandler = cef_session_permission.setPermissionEmitHandler;
+pub const permissionSetHandlerEnabled = cef_session_permission.permissionSetHandlerEnabled;
+pub const permissionRespond = cef_session_permission.permissionRespond;
+pub const getPermissionHandler = cef_session_permission.getPermissionHandler;
 
 pub const ApplicationMenuItem = cef_menu.ApplicationMenuItem;
 pub const MenuEmitHandler = cef_menu.MenuEmitHandler;
