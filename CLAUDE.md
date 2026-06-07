@@ -402,6 +402,8 @@ suji.platform                                                // "macos" | "linux
 // await windows.minimize(id) / maximize(id) / unmaximize(id) / restore(id) / show(id) / hide(id)
 //   / close(id) / setFullScreen(id, true) / isMinimized(id) / isMaximized(id) / isFullScreen(id)
 //   — Electron BrowserWindow 생명주기 (Zig 백엔드 기존 구현을 SDK 노출, 전수조사 후속). BrowserWindow 클래스 동형
+// await windows.destroy(id)  — Electron BrowserWindow.destroy() 강제 파괴. close 와 달리
+//   window:close(취소 hook) 스킵, window:closed 만 발화(listener 가 막을 수 없음). 전 6개 언어
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
 // await windows.createView({hostId, url, bounds}) → {viewId}              (Phase 17-B WebContentsView)
 // await windows.addChildView(host, view, index?) / setTopView / removeChildView
