@@ -227,6 +227,11 @@ export const windows = {
     close(windowId) {
         return coreCall({ cmd: "destroy_window", windowId });
     },
+    /** 강제 파괴 (Electron `BrowserWindow.destroy`). close 와 달리 `window:close`
+     *  (취소 hook)를 스킵하고 `window:closed` 만 발화 — listener 가 막을 수 없음. */
+    destroy(windowId) {
+        return coreCall({ cmd: "destroy_window_force", windowId });
+    },
     setFullScreen(windowId, flag) {
         return coreCall({ cmd: "set_fullscreen", windowId, flag });
     },
@@ -539,6 +544,10 @@ export class BrowserWindow {
     }
     close() {
         return windows.close(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    /** 강제 파괴 (Electron `BrowserWindow.destroy`) — `window:close` 스킵, `window:closed` 만. */
+    destroy() {
+        return windows.destroy(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     setFullScreen(flag) {
         return windows.setFullScreen(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), flag);

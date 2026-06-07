@@ -739,6 +739,18 @@ pub fn handleDestroyWindow(window_id: u32, response_buf: []u8, wm: *window.Windo
     ) catch null;
 }
 
+/// 강제 destroy (Electron BrowserWindow.destroy) — `window:close`(취소 hook) 스킵,
+/// `window:closed` 만 발화. 미존재 windowId 는 success=false.
+pub fn handleForceDestroyWindow(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.destroyWithClosedEvent(window_id)) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"destroy_window_force\",\"windowId\":{d},\"success\":{}}}",
+        .{ window_id, ok },
+    ) catch null;
+}
+
 pub const AddChildViewReq = struct {
     host_id: u32,
     view_id: u32,

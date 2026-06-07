@@ -510,6 +510,11 @@ export const windows = {
   close(windowId: number): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "destroy_window", windowId });
   },
+  /** 강제 파괴 (Electron `BrowserWindow.destroy`). close 와 달리 `window:close`
+   *  (취소 hook)를 스킵하고 `window:closed` 만 발화 — listener 가 막을 수 없음. */
+  destroy(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "destroy_window_force", windowId });
+  },
   setFullScreen(windowId: number, flag: boolean): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "set_fullscreen", windowId, flag });
   },
@@ -854,6 +859,10 @@ export class BrowserWindow {
   }
   close() {
     return windows.close(this.#id);
+  }
+  /** 강제 파괴 (Electron `BrowserWindow.destroy`) — `window:close` 스킵, `window:closed` 만. */
+  destroy() {
+    return windows.destroy(this.#id);
   }
   setFullScreen(flag: boolean) {
     return windows.setFullScreen(this.#id, flag);
