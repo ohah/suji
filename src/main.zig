@@ -1542,6 +1542,20 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .height = @intCast(util.extractJsonInt(req_clean, "height") orelse 0),
         }, response_buf, wm);
     }
+    // Electron BrowserWindow.setMinimumSize / setMaximumSize. width/height=0 = 제한 없음.
+    if (std.mem.eql(u8, cmd, "set_minimum_size") or std.mem.eql(u8, cmd, "set_maximum_size")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = @intCast(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        const sreq: window_ipc.SetSizeReq = .{
+            .window_id = win_id,
+            .width = @intCast(util.extractJsonInt(req_clean, "width") orelse 0),
+            .height = @intCast(util.extractJsonInt(req_clean, "height") orelse 0),
+        };
+        return if (std.mem.eql(u8, cmd, "set_minimum_size"))
+            window_ipc.handleSetMinimumSize(sreq, response_buf, wm)
+        else
+            window_ipc.handleSetMaximumSize(sreq, response_buf, wm);
+    }
     // Electron BrowserWindow.setContentBounds() — set_bounds 와 동일 인자(콘텐츠 영역).
     if (std.mem.eql(u8, cmd, "set_content_bounds")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -1863,6 +1877,8 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "focus", &window_ipc.handleFocus },
         .{ "is_normal", &window_ipc.handleIsNormal },
         .{ "get_bounds", &window_ipc.handleGetBounds },
+        .{ "get_minimum_size", &window_ipc.handleGetMinimumSize },
+        .{ "get_maximum_size", &window_ipc.handleGetMaximumSize },
         .{ "get_content_bounds", &window_ipc.handleGetContentBounds },
         .{ "blur", &window_ipc.handleBlur },
         .{ "is_focused", &window_ipc.handleIsFocused },

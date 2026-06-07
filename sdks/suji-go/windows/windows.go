@@ -222,6 +222,61 @@ func SetBounds(windowID uint32, b SetBoundsArgs) string {
 	))
 }
 
+// SetSize sets the window size keeping its position (Electron
+// BrowserWindow.setSize). animate is accepted and ignored (CEF Views set_bounds
+// is not animated). Derives current x/y from GetBounds.
+func SetSize(windowID uint32, width, height uint32) string {
+	raw := GetBounds(windowID)
+	var b struct {
+		X  int32 `json:"x"`
+		Y  int32 `json:"y"`
+		OK bool  `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(raw), &b); err != nil || !b.OK {
+		return raw // getBounds 실패(창 없음) → 0,0 이동 방지
+	}
+	return SetBounds(windowID, SetBoundsArgs{X: b.X, Y: b.Y, Width: width, Height: height})
+}
+
+// SetPosition moves the window keeping its size (Electron BrowserWindow.setPosition).
+func SetPosition(windowID uint32, x, y int32) string {
+	raw := GetBounds(windowID)
+	var b struct {
+		W  uint32 `json:"width"`
+		H  uint32 `json:"height"`
+		OK bool   `json:"ok"`
+	}
+	if err := json.Unmarshal([]byte(raw), &b); err != nil || !b.OK {
+		return raw // getBounds 실패 → 0 크기 collapse 방지
+	}
+	return SetBounds(windowID, SetBoundsArgs{X: x, Y: y, Width: b.W, Height: b.H})
+}
+
+// SetMinimumSize / SetMaximumSize (Electron parity). 0 = no limit.
+func SetMinimumSize(windowID uint32, width, height uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"set_minimum_size","windowId":%d,"width":%d,"height":%d}`,
+		windowID, width, height,
+	))
+}
+
+// GetMinimumSize returns raw JSON {"width","height","ok"} (tracked constraint, 0=none).
+func GetMinimumSize(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("get_minimum_size", windowID))
+}
+
+func SetMaximumSize(windowID uint32, width, height uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"set_maximum_size","windowId":%d,"width":%d,"height":%d}`,
+		windowID, width, height,
+	))
+}
+
+// GetMaximumSize returns raw JSON {"width","height","ok"} (tracked constraint, 0=none).
+func GetMaximumSize(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("get_maximum_size", windowID))
+}
+
 type CreateViewArgs struct {
 	HostID uint32
 	Name   string
@@ -485,6 +540,16 @@ func (w *BrowserWindow) SetTitle(title string) string { return SetTitle(w.ID, ti
 func (w *BrowserWindow) SetBounds(b SetBoundsArgs) string {
 	return SetBounds(w.ID, b)
 }
+func (w *BrowserWindow) SetSize(width, height uint32) string  { return SetSize(w.ID, width, height) }
+func (w *BrowserWindow) SetPosition(x, y int32) string        { return SetPosition(w.ID, x, y) }
+func (w *BrowserWindow) SetMinimumSize(width, height uint32) string {
+	return SetMinimumSize(w.ID, width, height)
+}
+func (w *BrowserWindow) GetMinimumSize() string { return GetMinimumSize(w.ID) }
+func (w *BrowserWindow) SetMaximumSize(width, height uint32) string {
+	return SetMaximumSize(w.ID, width, height)
+}
+func (w *BrowserWindow) GetMaximumSize() string { return GetMaximumSize(w.ID) }
 func (w *BrowserWindow) CreateView(args CreateViewArgs) string {
 	args.HostID = w.ID
 	return CreateView(args)

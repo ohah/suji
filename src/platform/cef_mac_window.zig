@@ -279,23 +279,31 @@ fn setAlwaysOnTop(window: ?*anyopaque) void {
     fn_ptr(window, @ptrCast(sel), 3);
 }
 
+// 생성 시 제약 적용 — 지정된(>0) 차원만 설정(0=미지정 유지). 런타임 변경은
+// setMacContentMinSize/setMacContentMaxSize 가 0 포함 항상 적용(제한 해제 가능).
 fn setMacContentSizeLimits(window: ?*anyopaque, min_w: u32, min_h: u32, max_w: u32, max_h: u32) void {
-    const SetSizeFn = *const fn (?*anyopaque, ?*anyopaque, NSSize) callconv(.c) void;
+    if (min_w > 0 or min_h > 0) setMacContentMinSize(window, min_w, min_h);
+    if (max_w > 0 or max_h > 0) setMacContentMaxSize(window, max_w, max_h);
+}
 
-    if (min_w > 0 or min_h > 0) {
-        const sel = objc.sel_registerName("setContentMinSize:");
-        const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
-        fn_ptr(window, @ptrCast(sel), .{ .width = @floatFromInt(min_w), .height = @floatFromInt(min_h) });
-    }
-    if (max_w > 0 or max_h > 0) {
-        const huge: f64 = std.math.floatMax(f64);
-        const sel = objc.sel_registerName("setContentMaxSize:");
-        const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
-        fn_ptr(window, @ptrCast(sel), .{
-            .width = if (max_w > 0) @floatFromInt(max_w) else huge,
-            .height = if (max_h > 0) @floatFromInt(max_h) else huge,
-        });
-    }
+/// 런타임 min/max 콘텐츠 크기 설정 — setMacContentSizeLimits 와 달리 0 도 항상 적용
+/// (Electron setMinimumSize(0,0) = 제한 해제 가능). w/h=0 → min 은 (0,0), max 는 무제한.
+pub fn setMacContentMinSize(window: ?*anyopaque, w: u32, h: u32) void {
+    const SetSizeFn = *const fn (?*anyopaque, ?*anyopaque, NSSize) callconv(.c) void;
+    const sel = objc.sel_registerName("setContentMinSize:");
+    const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
+    fn_ptr(window, @ptrCast(sel), .{ .width = @floatFromInt(w), .height = @floatFromInt(h) });
+}
+
+pub fn setMacContentMaxSize(window: ?*anyopaque, w: u32, h: u32) void {
+    const SetSizeFn = *const fn (?*anyopaque, ?*anyopaque, NSSize) callconv(.c) void;
+    const huge: f64 = std.math.floatMax(f64);
+    const sel = objc.sel_registerName("setContentMaxSize:");
+    const fn_ptr: SetSizeFn = @ptrCast(&objc.objc_msgSend);
+    fn_ptr(window, @ptrCast(sel), .{
+        .width = if (w > 0) @floatFromInt(w) else huge,
+        .height = if (h > 0) @floatFromInt(h) else huge,
+    });
 }
 
 pub fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {

@@ -265,6 +265,33 @@ test "getBounds returns native-reported bounds (vtable wiring)" {
     try std.testing.expectError(error.WindowNotFound, wm.getBounds(99999));
 }
 
+test "min/max size set/get round-trip (vtable wiring)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "M" });
+    // TestNative.getMinimumSize/getMaximumSize 는 마지막 set 값 반환 → WM→native 왕복.
+    try wm.setMinimumSize(id, 300, 200);
+    const mn = try wm.getMinimumSize(id);
+    try std.testing.expectEqual(@as(u32, 300), mn.width);
+    try std.testing.expectEqual(@as(u32, 200), mn.height);
+
+    try wm.setMaximumSize(id, 1280, 960);
+    const mx = try wm.getMaximumSize(id);
+    try std.testing.expectEqual(@as(u32, 1280), mx.width);
+    try std.testing.expectEqual(@as(u32, 960), mx.height);
+
+    // 0 = 제한 해제 라운드트립.
+    try wm.setMinimumSize(id, 0, 0);
+    const cleared = try wm.getMinimumSize(id);
+    try std.testing.expectEqual(@as(u32, 0), cleared.width);
+
+    // 미존재 창 → WindowNotFound (.window 전용 getLiveWindowLocked).
+    try std.testing.expectError(error.WindowNotFound, wm.setMinimumSize(99999, 1, 1));
+    try std.testing.expectError(error.WindowNotFound, wm.getMaximumSize(99999));
+}
+
 test "getContentBounds returns native content bounds (vtable wiring)" {
     var native = TestNative{};
     var wm = newManager(&native);

@@ -1981,6 +1981,38 @@ test "app.exit + session.clearCookies/flushStore IPC" {
     }
 }
 
+test "window min/max size IPC + native wire" {
+    const min_main_src = try readMainSource();
+    defer std.testing.allocator.free(min_main_src);
+    inline for (.{
+        "\"set_minimum_size\"",
+        "\"set_maximum_size\"",
+        "\"get_minimum_size\"",
+        "\"get_maximum_size\"",
+        "handleSetMinimumSize",
+        "handleGetMinimumSize",
+        "handleSetMaximumSize",
+        "handleGetMaximumSize",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, min_main_src, needle) != null);
+    }
+
+    const min_cef_src = try readCefSource();
+    defer std.testing.allocator.free(min_cef_src);
+    inline for (.{
+        "pub fn setMinimumSizeImpl",
+        "pub fn getMinimumSizeImpl",
+        "pub fn setMaximumSizeImpl",
+        "pub fn getMaximumSizeImpl",
+        ".set_minimum_size = cef_window_runtime.setMinimumSizeImpl", // vtable 배선
+        "pub fn setMacContentMinSize", // macOS NSWindow setContentMinSize 헬퍼
+        "pub fn setMacContentMaxSize",
+        "invalidate_layout", // CEF Views 재-layout 유도
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, min_cef_src, needle) != null);
+    }
+}
+
 test "session.setPermissionRequestHandler IPC + CEF wire" {
     // main.zig: cmd 디스패치 + emit 핸들러 등록.
     const main_src = try readMainSource();

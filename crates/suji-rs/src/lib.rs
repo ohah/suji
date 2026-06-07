@@ -771,6 +771,63 @@ pub mod windows {
         invoke("__core__", &req)
     }
 
+    /// Electron BrowserWindow.setSize(width, height) — 위치 유지(get_bounds→set_bounds).
+    /// animate 무시(CEF Views 비애니메이션). get_bounds 파싱 실패 시 None, ok:false(창 없음)
+    /// 시 0,0 이동 방지로 그 응답 그대로 반환.
+    pub fn set_size(window_id: u32, width: u32, height: u32) -> Option<String> {
+        let raw = get_bounds(window_id)?;
+        let v: crate::serde_json::Value = crate::serde_json::from_str(&raw).ok()?;
+        if !v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) {
+            return Some(raw);
+        }
+        let x = v.get("x")?.as_i64()? as i32;
+        let y = v.get("y")?.as_i64()? as i32;
+        set_bounds(window_id, SetBoundsArgs { x, y, width, height })
+    }
+
+    /// Electron BrowserWindow.setPosition(x, y) — 크기 유지(get_bounds→set_bounds).
+    pub fn set_position(window_id: u32, x: i32, y: i32) -> Option<String> {
+        let raw = get_bounds(window_id)?;
+        let v: crate::serde_json::Value = crate::serde_json::from_str(&raw).ok()?;
+        if !v.get("ok").and_then(|o| o.as_bool()).unwrap_or(false) {
+            return Some(raw);
+        }
+        let width = v.get("width")?.as_u64()? as u32;
+        let height = v.get("height")?.as_u64()? as u32;
+        set_bounds(window_id, SetBoundsArgs { x, y, width, height })
+    }
+
+    /// Electron BrowserWindow.setMinimumSize/setMaximumSize. 0 = 제한 없음.
+    pub fn set_minimum_size(window_id: u32, width: u32, height: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_minimum_size","windowId":{},"width":{},"height":{}}}"#,
+                window_id, width, height,
+            ),
+        )
+    }
+
+    /// 최소 크기 raw JSON `{"width","height","ok"}` (추적된 제약값, 0=없음).
+    pub fn get_minimum_size(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("get_minimum_size", window_id))
+    }
+
+    pub fn set_maximum_size(window_id: u32, width: u32, height: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"set_maximum_size","windowId":{},"width":{},"height":{}}}"#,
+                window_id, width, height,
+            ),
+        )
+    }
+
+    /// 최대 크기 raw JSON `{"width","height","ok"}` (추적된 제약값, 0=없음).
+    pub fn get_maximum_size(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("get_maximum_size", window_id))
+    }
+
     // ── Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티) ──
     // 대부분 `{"cmd":"X","windowId":N}` 동형 → window_op 로 DRY. 응답은 raw JSON.
     fn window_op_request(cmd: &str, window_id: u32) -> String {
@@ -1143,6 +1200,24 @@ pub mod windows {
         }
         pub fn set_bounds(&self, b: SetBoundsArgs) -> Option<String> {
             set_bounds(self.id, b)
+        }
+        pub fn set_size(&self, width: u32, height: u32) -> Option<String> {
+            set_size(self.id, width, height)
+        }
+        pub fn set_position(&self, x: i32, y: i32) -> Option<String> {
+            set_position(self.id, x, y)
+        }
+        pub fn set_minimum_size(&self, width: u32, height: u32) -> Option<String> {
+            set_minimum_size(self.id, width, height)
+        }
+        pub fn get_minimum_size(&self) -> Option<String> {
+            get_minimum_size(self.id)
+        }
+        pub fn set_maximum_size(&self, width: u32, height: u32) -> Option<String> {
+            set_maximum_size(self.id, width, height)
+        }
+        pub fn get_maximum_size(&self) -> Option<String> {
+            get_maximum_size(self.id)
         }
         // Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티).
         pub fn minimize(&self) -> Option<String> {

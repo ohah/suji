@@ -296,6 +296,51 @@ pub fn handleSetBounds(
     return respondWindowOp(response_buf, "set_bounds", req.window_id, ok);
 }
 
+pub const SetSizeReq = struct {
+    window_id: u32,
+    width: u32 = 0,
+    height: u32 = 0,
+};
+
+/// set_minimum_size / set_maximum_size 요청. w/h=0 = 제한 없음.
+pub fn handleSetMinimumSize(req: SetSizeReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setMinimumSize(req.window_id, req.width, req.height)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_minimum_size", req.window_id, ok);
+}
+
+pub fn handleSetMaximumSize(req: SetSizeReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setMaximumSize(req.window_id, req.width, req.height)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "set_maximum_size", req.window_id, ok);
+}
+
+/// get_minimum_size / get_maximum_size 응답 — `{...,ok,width,height}`. 실패 시 ok:false+0.
+fn respondSizeGet(buf: []u8, cmd: []const u8, window_id: u32, b: ?window.Bounds) ?[]const u8 {
+    const sz = b orelse return std.fmt.bufPrint(
+        buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":false,\"width\":0,\"height\":0}}",
+        .{ cmd, window_id },
+    ) catch null;
+    return std.fmt.bufPrint(
+        buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"windowId\":{d},\"ok\":true,\"width\":{d},\"height\":{d}}}",
+        .{ cmd, window_id, sz.width, sz.height },
+    ) catch null;
+}
+
+pub fn handleGetMinimumSize(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const b = wm.getMinimumSize(window_id) catch null;
+    return respondSizeGet(response_buf, "get_minimum_size", window_id, b);
+}
+
+pub fn handleGetMaximumSize(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const b = wm.getMaximumSize(window_id) catch null;
+    return respondSizeGet(response_buf, "get_maximum_size", window_id, b);
+}
+
 // ============================================
 // Phase 4-A: webContents (네비 / JS)
 // 모든 핸들러는 windowId 기반. 응답은 set_title/set_bounds와 동일 패턴

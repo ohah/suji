@@ -268,6 +268,13 @@ pub const Native = struct {
         set_background_color: *const fn (ctx: ?*anyopaque, handle: u64, hex: []const u8) void,
         set_has_shadow: *const fn (ctx: ?*anyopaque, handle: u64, has: bool) void,
         has_shadow: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        // 최소/최대 콘텐츠 크기 (Electron BrowserWindow.setMinimumSize/setMaximumSize).
+        // 0 = 제한 없음. getter 는 추적된 constraints 값 반환(Bounds 의 width/height 사용,
+        // x/y 무시 — 새 struct 회피, getBounds 와 동일 타입).
+        set_minimum_size: *const fn (ctx: ?*anyopaque, handle: u64, w: u32, h: u32) void,
+        get_minimum_size: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
+        set_maximum_size: *const fn (ctx: ?*anyopaque, handle: u64, w: u32, h: u32) void,
+        get_maximum_size: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
         // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
         undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
         redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -402,6 +409,18 @@ pub const Native = struct {
     }
     pub fn hasShadow(self: Native, handle: u64) bool {
         return self.vtable.has_shadow(self.ctx, handle);
+    }
+    pub fn setMinimumSize(self: Native, handle: u64, w: u32, h: u32) void {
+        self.vtable.set_minimum_size(self.ctx, handle, w, h);
+    }
+    pub fn getMinimumSize(self: Native, handle: u64) Bounds {
+        return self.vtable.get_minimum_size(self.ctx, handle);
+    }
+    pub fn setMaximumSize(self: Native, handle: u64, w: u32, h: u32) void {
+        self.vtable.set_maximum_size(self.ctx, handle, w, h);
+    }
+    pub fn getMaximumSize(self: Native, handle: u64) Bounds {
+        return self.vtable.get_maximum_size(self.ctx, handle);
     }
     pub fn undo(self: Native, handle: u64) void {
         self.vtable.undo(self.ctx, handle);
@@ -1411,6 +1430,36 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         return self.native.hasShadow(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.setMinimumSize/getMinimumSize, setMaximumSize/getMaximumSize.
+    /// w/h=0 = 제한 없음. getter 는 추적된 constraints 값(Bounds.width/height; x/y=0). .window 전용.
+    pub fn setMinimumSize(self: *WindowManager, id: u32, w: u32, h: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setMinimumSize(win.native_handle, w, h);
+    }
+
+    pub fn getMinimumSize(self: *WindowManager, id: u32) Error!Bounds {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.getMinimumSize(win.native_handle);
+    }
+
+    pub fn setMaximumSize(self: *WindowManager, id: u32, w: u32, h: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setMaximumSize(win.native_handle, w, h);
+    }
+
+    pub fn getMaximumSize(self: *WindowManager, id: u32) Error!Bounds {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.getMaximumSize(win.native_handle);
     }
 
     /// Electron 호환 zoom factor↔level 변환 base. `pow(ZOOM_BASE, level) == factor`,
