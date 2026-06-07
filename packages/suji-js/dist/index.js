@@ -960,6 +960,21 @@ export const session = {
         return r.success === true;
     },
     /**
+     * Electron `session.setProxy(config)` — Chromium "proxy" preference 설정.
+     * mode 미지정/`"direct"` → 프록시 해제. `proxyRules`: `"host:port"` 또는
+     * `"http=foo:80;https=bar:80"`. 이후 요청에 적용. fire-and-forget(설정 성공 bool).
+     */
+    async setProxy(config) {
+        const r = await coreCall({
+            cmd: "session_set_proxy",
+            mode: config.mode ?? "",
+            proxyRules: config.proxyRules ?? "",
+            proxyBypassRules: config.proxyBypassRules ?? "",
+            pacScript: config.pacScript ?? "",
+        });
+        return r.success === true;
+    },
+    /**
      * IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
      * origin 미지정 → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
      * 삭제 불가 — 호출부가 자기 앱 origin 전달 시 그 origin storage 삭제).

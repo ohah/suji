@@ -18,6 +18,16 @@ func FlushStore() string {
 	return suji.Invoke("__core__", `{"cmd":"session_flush_store"}`)
 }
 
+// SetProxy sets the network proxy (Electron `session.setProxy`). mode "" → "direct"
+// (프록시 해제). proxyRules: "host:port". Response: `{"success":bool}`.
+func SetProxy(mode, proxyRules, proxyBypassRules, pacScript string) string {
+	req, _ := json.Marshal(map[string]any{
+		"cmd": "session_set_proxy", "mode": mode, "proxyRules": proxyRules,
+		"proxyBypassRules": proxyBypassRules, "pacScript": pacScript,
+	})
+	return suji.Invoke("__core__", string(req))
+}
+
 // ClearStorageData removes IndexedDB/localStorage/cache (Electron
 // `session.clearStorageData`). origin "" → 전역 HTTP 캐시만(웹 플랫폼상
 // origin 없이 storage 일괄 삭제 불가). storageTypes "" → "all".

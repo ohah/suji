@@ -2034,6 +2034,26 @@ export const session = {
   },
 
   /**
+   * Electron `session.setProxy(config)` — Chromium "proxy" preference 설정.
+   * mode 미지정/`"direct"` → 프록시 해제. `proxyRules`: `"host:port"`. 이후 요청에 적용.
+   */
+  async setProxy(config: {
+    mode?: 'direct' | 'auto_detect' | 'pac_script' | 'fixed_servers' | 'system';
+    proxyRules?: string;
+    proxyBypassRules?: string;
+    pacScript?: string;
+  }): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', {
+      cmd: 'session_set_proxy',
+      mode: config.mode ?? '',
+      proxyRules: config.proxyRules ?? '',
+      proxyBypassRules: config.proxyBypassRules ?? '',
+      pacScript: config.pacScript ?? '',
+    });
+    return r.success === true;
+  },
+
+  /**
    * IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
    * origin 미지정 → 전역 HTTP 캐시만(웹 플랫폼상 origin 없이 storage 일괄
    * 삭제 불가). storageTypes 기본 "all" (CDP 콤마구분).

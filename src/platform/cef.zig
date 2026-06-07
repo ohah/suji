@@ -107,6 +107,7 @@ pub const sessionClearStorageData = cef_public_api.sessionClearStorageData;
 pub const sessionSetCookie = cef_public_api.sessionSetCookie;
 pub const sessionRemoveCookies = cef_public_api.sessionRemoveCookies;
 pub const sessionGetCookies = cef_public_api.sessionGetCookies;
+pub const sessionSetProxy = cef_public_api.sessionSetProxy;
 pub const ApplicationMenuItem = cef_public_api.ApplicationMenuItem;
 pub const MenuEmitHandler = cef_public_api.MenuEmitHandler;
 pub const setMenuEmitHandler = cef_public_api.setMenuEmitHandler;

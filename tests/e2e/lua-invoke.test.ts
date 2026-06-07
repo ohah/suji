@@ -57,6 +57,13 @@ describe("Lua backend invoke (vendored Lua 5.4 + cjson)", () => {
     expect(typeof r.locked).toBe("boolean");
   });
 
+  test("backend → __core__ 도달: session.setProxy (워커 스레드 → UI post)", async () => {
+    // Lua 워커 스레드에서 호출 → UI 스레드로 post 되어 크래시 없이 success.
+    const r: any = await invoke("core-set-proxy", {});
+    expect(r.cmd).toBe("session_set_proxy");
+    expect(r.success).toBe(true);
+  });
+
   test("echo: cjson decode/encode roundtrip", async () => {
     const r: any = await invoke("echo", { message: "hello from frontend", value: 42 });
     expect(r.runtime).toBe("lua");

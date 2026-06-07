@@ -818,6 +818,7 @@ fn readCefSource() ![]u8 {
         "src/platform/cef_power_save_blocker.zig",
         "src/platform/cef_desktop_capturer.zig",
         "src/platform/cef_session_cookies.zig",
+        "src/platform/cef_session_proxy.zig",
         "src/platform/cef_security_scoped_bookmark.zig",
         "src/platform/cef_request_user_attention.zig",
         "src/platform/cef_menu.zig",
@@ -1954,9 +1955,11 @@ test "app.exit + session.clearCookies/flushStore IPC" {
         "\"session_clear_cookies\"",
         "\"session_flush_store\"",
         "\"session_clear_storage_data\"",
+        "\"session_set_proxy\"",
         "cef.sessionClearCookies",
         "cef.sessionFlushStore",
         "cef.sessionClearStorageData",
+        "cef.sessionSetProxy",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
@@ -1967,9 +1970,11 @@ test "app.exit + session.clearCookies/flushStore IPC" {
         "pub fn sessionClearCookies",
         "pub fn sessionFlushStore",
         "pub fn sessionClearStorageData",
+        "pub fn sessionSetProxy",
         "Storage.clearDataForOrigin",
         "Network.clearBrowserCache",
         "cef_cookie_manager_get_global_manager",
+        "cef_request_context_get_global_context",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }

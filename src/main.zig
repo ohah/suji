@@ -2446,6 +2446,20 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = cef.sessionFlushStore();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_flush_store\",\"success\":{}}}", .{ok}) catch null;
     }
+    // Electron session.setProxy — Chromium "proxy" pref 설정(mode/proxyRules/
+    // proxyBypassRules/pacScript). 빈 mode → "direct"(프록시 해제).
+    if (std.mem.eql(u8, cmd, "session_set_proxy")) {
+        var mode_buf: [64]u8 = undefined;
+        var rules_buf: [2048]u8 = undefined;
+        var bypass_buf: [2048]u8 = undefined;
+        var pac_buf: [2048]u8 = undefined;
+        const mode_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "mode") orelse "", &mode_buf) orelse 0;
+        const rules_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "proxyRules") orelse "", &rules_buf) orelse 0;
+        const bypass_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "proxyBypassRules") orelse "", &bypass_buf) orelse 0;
+        const pac_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "pacScript") orelse "", &pac_buf) orelse 0;
+        const ok = cef.sessionSetProxy(mode_buf[0..mode_n], rules_buf[0..rules_n], bypass_buf[0..bypass_n], pac_buf[0..pac_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_proxy\",\"success\":{}}}", .{ok}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "session_clear_storage_data")) {
         var origin_buf: [2048]u8 = undefined;
         var types_buf: [256]u8 = undefined;
