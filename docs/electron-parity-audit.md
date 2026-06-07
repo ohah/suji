@@ -116,12 +116,12 @@
 
 ### menu
 
-- **[medium]** `Menu.getApplicationMenu()` — Add Menu.getApplicationMenu() getter across all SDKs. Implementation: (1) In cef.zig, add a global variable to store the current menu items when setApplicationMenu succeeds. (2) Add a new IPC handler 
+- ~~**[medium]** `Menu.getApplicationMenu()`~~ ✅ (Menu PR-4) — set 성공 시 items 배열 raw 스냅샷 저장(main.zig g_app_menu_buf, util.extractJsonArrayRaw), menu_get_application_menu cmd 에코, reset 시 클리어. 전 6개 언어. 정직 경계: 스냅샷(라이브 mutation 아님 — fire-and-forget).
 - **[medium]** `Menu.sendActionToFirstResponder` — Add menu.sendActionToFirstResponder(action: string): Promise<boolean> as a macOS-only API across all SDKs. In Zig core (cef.zig), implement a new cmd handler invoking NSApplication.sendAction(selector
-- **[medium]** `menu.items / menu.getApplicationMenu()` — Add menu.getApplicationMenu(): Promise<MenuItem[] | null> to both @suji/api (frontend) and @suji/node (backend) SDKs. Backend implementation: Store the current menu items in Suji core when setApplicat
+- ~~**[medium]** `menu.items / menu.getApplicationMenu()`~~ ✅ (Menu PR-4) — #119 와 동일(getApplicationMenu 전 SDK). menu.items 는 getApplicationMenu() 반환 배열.
 - **[medium]** `menu-will-close event` — Add `menu:will-close` (and ideally `menu:will-show` for parity) event emissions around the NSMenu modal popup lifecycle in cef.zig. Specifically: (1) Emit menu:will-show before line 3097's popUpMenuPo
 - **[medium]** `Menu.insert(pos: Integer, menuItem: MenuItem)` — Add Menu.insert(pos: number, menuItem: MenuItem) method to both @suji/api and @suji/node packages. Implementation: new IPC cmd menu_insert with pos + menuItem args, routed to cef.zig's menu handler (N
-- **[medium]** `Menu.getMenuItemById(id: string)` — Add optional `id?: string` field to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem types across all SDKs (packages/suji-js/src/index.ts, packages/suji-node/src/index.ts, crates/suji-rs, sdks/s
+- ~~**[medium]** `Menu.getMenuItemById(id)`~~ ✅ (Menu PR-4 + id 필드 PR-1) — getApplicationMenu 스냅샷에서 id 재귀 탐색(submenu 포함). JS/Node/Rust(serde_json)/Go(json) 전부 구현. 없으면 null. 정직 경계: 스냅샷 항목(라이브 객체 아님).
 - ~~**[medium]** `MenuItem.role property`~~ ✅ (Menu PR-3) — role?:string(item) 전 6개 언어 + cef_menu role_table(undo/redo/cut/copy/paste/pasteAndMatchStyle/selectAll/delete/minimize/zoom/close/togglefullscreen/quit) → macOS NSMenuItem 네이티브 selector(first responder, 기본 메뉴 copy:/paste: 동형 검증 메커니즘) + quit=sujiQuit: 타깃(terminate: SIGTRAP 회피). 설정 시 click 무시. 정직 경계: macOS only(Win/Linux no-op), 실 동작 발화는 destructive/real-runner 경계(menu:click 동일).
 - ~~**[medium]** `MenuItem.accelerator property`~~ ✅ (Menu PR-2) — accelerator?:string(item/checkbox) 전 6개 언어 필드 + main.zig 파싱 + macOS NSMenuItem keyEquivalent + setKeyEquivalentModifierMask(cef_menu parseAccelerator: Cmd 1<<20/Shift 1<<17/Alt 1<<19/Ctrl 1<<18). 정직 경계: 단일 문자 키만(특수키 F1/Enter best-effort 미지원), Win/Linux no-op.
 - **[medium]** `MenuItem.icon property` — Add optional `icon?: string` field to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts. Update Zig ApplicationMenuItem union in src/platform/cef.zig t

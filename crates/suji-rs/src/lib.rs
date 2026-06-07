@@ -2268,6 +2268,34 @@ pub mod menu {
     pub fn reset_application_menu() -> Option<String> {
         invoke("__core__", r#"{"cmd":"menu_reset_application_menu"}"#)
     }
+
+    /// Electron Menu.getApplicationMenu — 마지막 set 한 메뉴 스냅샷 raw JSON
+    /// (`{"items":[...]}`). 라이브 mutation 아님(fire-and-forget). 없으면 items=[].
+    pub fn get_application_menu() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"menu_get_application_menu"}"#)
+    }
+
+    /// Electron Menu.getMenuItemById — getApplicationMenu 스냅샷에서 id 로 재귀 탐색,
+    /// 매칭 항목의 raw JSON 반환(없으면 None). 라이브 객체 아님.
+    pub fn get_menu_item_by_id(id: &str) -> Option<String> {
+        let resp = get_application_menu()?;
+        let v: serde_json::Value = serde_json::from_str(&resp).ok()?;
+        let items = v.get("items")?.as_array()?;
+        fn find(items: &[serde_json::Value], id: &str) -> Option<serde_json::Value> {
+            for it in items {
+                if it.get("id").and_then(|x| x.as_str()) == Some(id) {
+                    return Some(it.clone());
+                }
+                if let Some(sub) = it.get("submenu").and_then(|x| x.as_array()) {
+                    if let Some(hit) = find(sub, id) {
+                        return Some(hit);
+                    }
+                }
+            }
+            None
+        }
+        find(items, id).map(|x| x.to_string())
+    }
 }
 
 /// macOS Carbon Hot Key wrapper. Accelerator syntax: `"Cmd+Shift+K"`,

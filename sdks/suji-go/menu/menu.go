@@ -61,3 +61,35 @@ func buildSetApplicationMenuRequest(items []MenuItem) string {
 func ResetApplicationMenu() string {
 	return suji.Invoke("__core__", `{"cmd":"menu_reset_application_menu"}`)
 }
+
+// GetApplicationMenu returns the last-set menu snapshot (Electron Menu.getApplicationMenu).
+// Response raw JSON: `{"items":[...]}` (empty [] if none). Not a live object
+// (suji menus are fire-and-forget).
+func GetApplicationMenu() string {
+	return suji.Invoke("__core__", `{"cmd":"menu_get_application_menu"}`)
+}
+
+// GetMenuItemByID searches the getApplicationMenu snapshot for an item with the given
+// id (recursing into submenus) and returns it, or nil if not found (Electron
+// Menu.getMenuItemById). Not a live object.
+func GetMenuItemByID(id string) *MenuItem {
+	var resp struct {
+		Items []MenuItem `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(GetApplicationMenu()), &resp); err != nil {
+		return nil
+	}
+	return findMenuItemByID(resp.Items, id)
+}
+
+func findMenuItemByID(items []MenuItem, id string) *MenuItem {
+	for i := range items {
+		if items[i].ID == id {
+			return &items[i]
+		}
+		if hit := findMenuItemByID(items[i].Submenu, id); hit != nil {
+			return hit
+		}
+	}
+	return nil
+}

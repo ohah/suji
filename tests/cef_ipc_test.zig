@@ -2049,6 +2049,20 @@ test "MenuItem id + visible + accelerator + role fields wired (types + parse + n
     }
 }
 
+test "Menu.getApplicationMenu IPC + items 스냅샷 저장/에코" {
+    const gm_main_src = try readMainSource();
+    defer std.testing.allocator.free(gm_main_src);
+    inline for (.{
+        "\"menu_get_application_menu\"", // cmd 디스패치
+        "fn handleMenuGetApplicationMenu",
+        "fn storeAppMenuItems", // set 성공 시 items 스냅샷 저장
+        "util.extractJsonArrayRaw(req_clean, \"items\")",
+        "g_app_menu_len = 0", // reset 시 클리어
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, gm_main_src, needle) != null);
+    }
+}
+
 test "window mode flags IPC + CEF wire" {
     const mode_main_src = try readMainSource();
     defer std.testing.allocator.free(mode_main_src);

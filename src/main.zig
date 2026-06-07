@@ -2951,7 +2951,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     }
     if (std.mem.eql(u8, cmd, "menu_reset_application_menu")) {
         const ok = cef.resetApplicationMenu();
+        if (ok) g_app_menu_len = 0; // 스냅샷 클리어(기본 메뉴로 복귀)
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_reset_application_menu\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "menu_get_application_menu")) {
+        return handleMenuGetApplicationMenu(response_buf);
     }
     if (std.mem.eql(u8, cmd, "menu_popup")) {
         return handleMenuPopup(req_clean, response_buf);
@@ -4369,6 +4373,21 @@ fn handleGlobalShortcutIsRegistered(req_clean: []const u8, response_buf: []u8) ?
 // Application menu handlers — std.json.Value로 재귀 submenu 파싱
 // ============================================
 
+// getApplicationMenu(Electron Menu.getApplicationMenu) 용 — 마지막 set 한 items 배열 raw
+// JSON 스냅샷. set 성공 시 저장, reset 시 클리어. SDK 가 getMenuItemById 를 이 위에 구현.
+var g_app_menu_buf: [8192]u8 = undefined;
+var g_app_menu_len: usize = 0;
+
+fn storeAppMenuItems(req_clean: []const u8) void {
+    const items = util.extractJsonArrayRaw(req_clean, "items") orelse "[]";
+    if (items.len > g_app_menu_buf.len) {
+        g_app_menu_len = 0; // 너무 큰 메뉴 — 스냅샷 미저장(getApplicationMenu 는 [])
+        return;
+    }
+    @memcpy(g_app_menu_buf[0..items.len], items);
+    g_app_menu_len = items.len;
+}
+
 fn handleMenuSetApplicationMenu(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
     // submenu 깊이가 깊어질 수 있어 dialog 대비 2배 arena.
     var arena_buf: [DIALOG_PARSE_ARENA * 2]u8 = undefined;
@@ -4377,7 +4396,16 @@ fn handleMenuSetApplicationMenu(req_clean: []const u8, response_buf: []u8) ?[]co
 
     const items = parseMenuItemsFromRequest(arena, req_clean) catch return coreError(response_buf, "menu_set_application_menu", "parse");
     const ok = cef.setApplicationMenu(items);
+    if (ok) storeAppMenuItems(req_clean);
     return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_set_application_menu\",\"success\":{}}}", .{ok}) catch null;
+}
+
+/// Electron Menu.getApplicationMenu — 마지막 set 한 메뉴의 items 배열 스냅샷(없으면 []).
+/// 라이브 mutation 아님(suji 메뉴는 fire-and-forget) — 정직 경계. getMenuItemById 는 SDK 가
+/// 이 스냅샷을 파싱해 id 로 재귀 탐색.
+fn handleMenuGetApplicationMenu(response_buf: []u8) ?[]const u8 {
+    const items: []const u8 = if (g_app_menu_len > 0) g_app_menu_buf[0..g_app_menu_len] else "[]";
+    return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_get_application_menu\",\"items\":{s}}}", .{items}) catch null;
 }
 
 /// Electron `Menu.popup({x?,y?})` — 임의 위치 컨텍스트 메뉴. items 파싱은

@@ -1754,6 +1754,29 @@ export const menu = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'menu_reset_application_menu' });
     return r.success === true;
   },
+
+  /** Electron `Menu.getApplicationMenu()` — 마지막 setApplicationMenu items 스냅샷(없으면 []).
+   *  라이브 mutation 아님(fire-and-forget). */
+  async getApplicationMenu(): Promise<MenuItem[]> {
+    const r = await invoke<{ items: MenuItem[] }>('__core__', { cmd: 'menu_get_application_menu' });
+    return Array.isArray(r.items) ? r.items : [];
+  },
+
+  /** Electron `Menu.getMenuItemById(id)` — getApplicationMenu 스냅샷에서 id 재귀 탐색(없으면 null). */
+  async getMenuItemById(id: string): Promise<MenuItem | null> {
+    const find = (items: MenuItem[]): MenuItem | null => {
+      for (const it of items) {
+        if ((it as { id?: string }).id === id) return it;
+        const sub = (it as MenuSubmenuItem).submenu;
+        if (Array.isArray(sub)) {
+          const hit = find(sub);
+          if (hit) return hit;
+        }
+      }
+      return null;
+    };
+    return find(await menu.getApplicationMenu());
+  },
 };
 
 // ============================================
