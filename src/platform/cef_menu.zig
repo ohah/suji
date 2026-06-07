@@ -23,6 +23,7 @@ const addDefaultAppMenu = cef.addDefaultAppMenu;
 const addSubmenuItem = cef.addSubmenuItem;
 const allocNSMenuItem = cef.allocNSMenuItem;
 const setMenuItemEnabled = cef.setMenuItemEnabled;
+const setMenuItemHidden = cef.setMenuItemHidden;
 const setMenuItemState = cef.setMenuItemState;
 const setMenuItemTag = cef.setMenuItemTag;
 const setupMainMenu = cef.setupMainMenu;
@@ -79,6 +80,7 @@ pub fn setApplicationMenu(items: []const ApplicationMenuItem) bool {
         const menu = createMenuFromItems(sub.label, sub.items) orelse continue;
         const top = addSubmenuItem(menubar, sub.label, menu) orelse continue;
         setMenuItemEnabled(top, sub.enabled);
+        if (!sub.visible) setMenuItemHidden(top, true);
     }
 
     msgSendVoid1(app, "setMainMenu:", menubar);
@@ -126,17 +128,18 @@ fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
             const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
             msgSendVoid1(menu, "addItem:", sep);
         },
-        .item => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, null),
-        .checkbox => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, it.checked),
+        .item => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, null, it.visible),
+        .checkbox => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, it.checked, it.visible),
         .submenu => |sub| {
             const sub_menu = createMenuFromItems(sub.label, sub.items) orelse return;
             const m = addSubmenuItem(menu, sub.label, sub_menu) orelse return;
             setMenuItemEnabled(m, sub.enabled);
+            if (!sub.visible) setMenuItemHidden(m, true);
         },
     }
 }
 
-fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool) void {
+fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool, visible: bool) void {
     const target = ensureAppMenuTarget() orelse return;
     const ns_label = nsStringFromSlice(label) orelse return;
     const ns_click = nsStringFromSlice(click) orelse return;
@@ -148,5 +151,6 @@ fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, e
         setMenuItemState(m, state);
     }
     setMenuItemEnabled(m, enabled);
+    if (!visible) setMenuItemHidden(m, true);
     msgSendVoid1(menu, "addItem:", m);
 }

@@ -34,6 +34,8 @@ const impl = if (builtin.os.tag == .linux) struct {
     extern "c" fn gtk_menu_item_set_submenu(menu_item: ?*anyopaque, submenu: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_menu_shell_append(menu_shell: ?*anyopaque, child: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_widget_set_sensitive(widget: ?*anyopaque, sensitive: c_int) callconv(.c) void;
+    extern "c" fn gtk_widget_set_visible(widget: ?*anyopaque, visible: c_int) callconv(.c) void;
+    extern "c" fn gtk_widget_set_no_show_all(widget: ?*anyopaque, no_show_all: c_int) callconv(.c) void;
     extern "c" fn gtk_widget_show_all(widget: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_widget_destroy(widget: ?*anyopaque) callconv(.c) void;
     extern "c" fn gtk_get_current_event_time() callconv(.c) u32;
@@ -131,8 +133,8 @@ const impl = if (builtin.os.tag == .linux) struct {
                 const sep = gtk_separator_menu_item_new() orelse return;
                 gtk_menu_shell_append(menu, sep);
             },
-            .item => |it| addClickable(menu, it.label, it.click, it.enabled, null),
-            .checkbox => |it| addClickable(menu, it.label, it.click, it.enabled, it.checked),
+            .item => |it| addClickable(menu, it.label, it.click, it.enabled, null, it.visible),
+            .checkbox => |it| addClickable(menu, it.label, it.click, it.enabled, it.checked, it.visible),
             .submenu => |sub| {
                 var label_buf: [256]u8 = undefined;
                 const label_z = nullTerminateOrTruncate(sub.label, &label_buf) orelse return;
@@ -140,12 +142,20 @@ const impl = if (builtin.os.tag == .linux) struct {
                 const submenu = createGtkMenuFromItems(sub.items) orelse return;
                 gtk_menu_item_set_submenu(item_widget, submenu);
                 gtk_widget_set_sensitive(item_widget, if (sub.enabled) 1 else 0);
+                applyGtkVisible(item_widget, sub.visible);
                 gtk_menu_shell_append(menu, item_widget);
             },
         }
     }
 
-    fn addClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool) void {
+    // visible=false → no_show_all 로 gtk_widget_show_all 의 강제표시를 막고 hidden 처리.
+    fn applyGtkVisible(widget: *anyopaque, visible: bool) void {
+        if (visible) return;
+        gtk_widget_set_no_show_all(widget, 1);
+        gtk_widget_set_visible(widget, 0);
+    }
+
+    fn addClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool, visible: bool) void {
         var label_buf: [256]u8 = undefined;
         const label_z = nullTerminateOrTruncate(label, &label_buf) orelse return;
         const cb = firstFreeCallback() orelse return;
@@ -157,6 +167,7 @@ const impl = if (builtin.os.tag == .linux) struct {
         } else gtk_menu_item_new_with_label(label_z.ptr) orelse return;
 
         gtk_widget_set_sensitive(item_widget, if (enabled) 1 else 0);
+        applyGtkVisible(item_widget, visible);
         _ = g_signal_connect_data(item_widget, "activate", @ptrCast(&menuItemActivateC), cb, null, 0);
         gtk_menu_shell_append(menu, item_widget);
     }

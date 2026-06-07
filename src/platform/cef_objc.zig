@@ -227,6 +227,12 @@ pub fn setMenuItemEnabled(item: *anyopaque, enabled: bool) void {
     f(item, @ptrCast(objc.sel_registerName("setEnabled:")), if (enabled) 1 else 0);
 }
 
+/// Electron MenuItem.visible=false → NSMenuItem.setHidden:(메뉴에 존재하되 숨김).
+pub fn setMenuItemHidden(item: *anyopaque, hidden: bool) void {
+    const f: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(item, @ptrCast(objc.sel_registerName("setHidden:")), if (hidden) 1 else 0);
+}
+
 pub fn setMenuItemState(item: *anyopaque, checked: bool) void {
     const f: *const fn (?*anyopaque, ?*anyopaque, i64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     f(item, @ptrCast(objc.sel_registerName("setState:")), if (checked) 1 else 0);

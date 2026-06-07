@@ -6,10 +6,14 @@ import (
 )
 
 func TestBuildSetApplicationMenuRequest(t *testing.T) {
+	hidden := false
+	runItem := Item("Run", "run")
+	runItem.ID = "run-item"
+	runItem.Visible = &hidden // visible:false 직렬화
 	req := buildSetApplicationMenuRequest([]MenuItem{
 		Submenu("Tools", []MenuItem{
-			Item("Run", "run"),
-			Checkbox("Flag", "flag", true),
+			runItem,
+			Checkbox("Flag", "flag", true), // Visible nil → omitempty 로 키 생략(기본 true)
 			Separator(),
 		}),
 	})
@@ -27,11 +31,22 @@ func TestBuildSetApplicationMenuRequest(t *testing.T) {
 		t.Fatalf("top item = %#v", top)
 	}
 	sub := top["submenu"].([]any)
-	if sub[0].(map[string]any)["click"] != "run" {
+	item0 := sub[0].(map[string]any)
+	if item0["click"] != "run" {
 		t.Fatalf("first submenu item = %#v", sub[0])
 	}
-	if sub[1].(map[string]any)["checked"] != true {
+	if item0["id"] != "run-item" {
+		t.Fatalf("id = %v", item0["id"])
+	}
+	if item0["visible"] != false {
+		t.Fatalf("visible = %v", item0["visible"])
+	}
+	cb := sub[1].(map[string]any)
+	if cb["checked"] != true {
 		t.Fatalf("checkbox item = %#v", sub[1])
+	}
+	if _, present := cb["visible"]; present {
+		t.Fatalf("nil Visible should be omitted, got %#v", cb["visible"])
 	}
 	if sub[2].(map[string]any)["type"] != "separator" {
 		t.Fatalf("separator item = %#v", sub[2])

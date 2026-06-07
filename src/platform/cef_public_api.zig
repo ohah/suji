@@ -70,6 +70,7 @@ pub const representedObjectUtf8 = cef_objc.representedObjectUtf8;
 pub const nsFileUrlIfExists = cef_objc.nsFileUrlIfExists;
 pub const ensureSimpleObjcTarget = cef_objc.ensureSimpleObjcTarget;
 pub const setMenuItemEnabled = cef_objc.setMenuItemEnabled;
+pub const setMenuItemHidden = cef_objc.setMenuItemHidden;
 pub const setMenuItemState = cef_objc.setMenuItemState;
 pub const setMenuItemTag = cef_objc.setMenuItemTag;
 

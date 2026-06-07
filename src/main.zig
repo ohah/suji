@@ -4422,6 +4422,8 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
     const label = util.jsonObjectGetString(obj, "label") orelse "";
     const click = util.jsonObjectGetString(obj, "click") orelse "";
     const enabled = util.jsonObjectGetBool(obj, "enabled") orelse true;
+    const id = util.jsonObjectGetString(obj, "id") orelse "";
+    const visible = util.jsonObjectGetBool(obj, "visible") orelse true;
 
     if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
         const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
@@ -4430,6 +4432,8 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
             .label = label,
             .enabled = enabled,
             .items = try parseApplicationMenuItems(arena, sub_val.array.items),
+            .id = id,
+            .visible = visible,
         } };
     }
     if (std.mem.eql(u8, typ, "checkbox")) {
@@ -4438,12 +4442,16 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
             .click = click,
             .checked = util.jsonObjectGetBool(obj, "checked") orelse false,
             .enabled = enabled,
+            .id = id,
+            .visible = visible,
         } };
     }
     return .{ .item = .{
         .label = label,
         .click = click,
         .enabled = enabled,
+        .id = id,
+        .visible = visible,
     } };
 }
 
