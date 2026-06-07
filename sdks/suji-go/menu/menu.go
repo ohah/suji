@@ -21,6 +21,9 @@ type MenuItem struct {
 	// Visible — Electron MenuItem.visible. nil=기본 true; false 면 항목 숨김. 포인터로
 	// 기본-true 보존(omitempty 가 nil 드롭 → 미지정 시 네이티브 기본 true).
 	Visible *bool `json:"visible,omitempty"`
+	// Accelerator — Electron MenuItem.accelerator (예 "Cmd+Shift+K"). macOS keyEquivalent
+	// (단일 문자), Win/Linux no-op.
+	Accelerator string `json:"accelerator,omitempty"`
 }
 
 func Item(label, click string) MenuItem {

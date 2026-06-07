@@ -571,8 +571,10 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //                              — suji.on('notification:click', ({notificationId}) => ...)
 // await menu.setApplicationMenu([{label:"Tools",submenu:[{label:"Run",click:"run"}]}])
 //   MenuItem 옵션: enabled, checked(checkbox), id(getMenuItemById 식별자 — UI 효과 없음),
-//   visible(false=항목 숨김; macOS NSMenuItem.setHidden / GTK set_visible 실효, Win no-op).
-//   전 6개 언어(JS/Node optional, Rust enum 필드, Go *bool omitempty, lua/python raw).
+//   visible(false=항목 숨김; macOS NSMenuItem.setHidden / GTK set_visible 실효, Win no-op),
+//   accelerator("Cmd+Shift+K" — macOS NSMenuItem keyEquivalent 단일 문자 키; 특수키
+//   best-effort, Win/Linux no-op).
+//   전 6개 언어(JS/Node optional, Rust enum 필드, Go omitempty, lua/python raw).
 // await menu.resetApplicationMenu()
 // await menu.popup([{label:"Run",click:"run"}], {x:10,y:10}) — suji.on('menu:click', ({click}) => ...)
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, session, crashReporter, autoUpdater } from '@suji/node'

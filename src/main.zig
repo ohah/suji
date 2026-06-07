@@ -4424,6 +4424,7 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
     const enabled = util.jsonObjectGetBool(obj, "enabled") orelse true;
     const id = util.jsonObjectGetString(obj, "id") orelse "";
     const visible = util.jsonObjectGetBool(obj, "visible") orelse true;
+    const accelerator = util.jsonObjectGetString(obj, "accelerator") orelse "";
 
     if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
         const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
@@ -4444,6 +4445,7 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
             .enabled = enabled,
             .id = id,
             .visible = visible,
+            .accelerator = accelerator,
         } };
     }
     return .{ .item = .{
@@ -4452,6 +4454,7 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
         .enabled = enabled,
         .id = id,
         .visible = visible,
+        .accelerator = accelerator,
     } };
 }
 

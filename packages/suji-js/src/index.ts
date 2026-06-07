@@ -1443,6 +1443,9 @@ export interface MenuCommandItem {
   id?: string;
   /** Electron MenuItem.visible — false 면 항목 숨김(기본 true). macOS 실효, Win/Linux best-effort. */
   visible?: boolean;
+  /** Electron MenuItem.accelerator — 예 "Cmd+Shift+K". macOS NSMenuItem keyEquivalent
+   *  (단일 문자 키만; 특수키 best-effort). Win/Linux no-op. */
+  accelerator?: string;
 }
 
 export interface MenuCheckboxItem {
@@ -1453,6 +1456,7 @@ export interface MenuCheckboxItem {
   enabled?: boolean;
   id?: string;
   visible?: boolean;
+  accelerator?: string;
 }
 
 export interface MenuSubmenuItem {

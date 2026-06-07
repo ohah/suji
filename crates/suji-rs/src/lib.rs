@@ -2171,6 +2171,8 @@ pub mod menu {
             enabled: bool,
             id: &'a str,
             visible: bool,
+            /// Electron MenuItem.accelerator (예 "Cmd+Shift+K"). 미사용 시 "".
+            accelerator: &'a str,
         },
         Checkbox {
             label: &'a str,
@@ -2179,6 +2181,7 @@ pub mod menu {
             enabled: bool,
             id: &'a str,
             visible: bool,
+            accelerator: &'a str,
         },
         Separator,
         Submenu {
@@ -2198,6 +2201,7 @@ pub mod menu {
                 enabled,
                 id,
                 visible,
+                accelerator,
             } => serde_json::json!({
                 "type": "item",
                 "label": label,
@@ -2205,6 +2209,7 @@ pub mod menu {
                 "enabled": enabled,
                 "id": id,
                 "visible": visible,
+                "accelerator": accelerator,
             }),
             MenuItem::Checkbox {
                 label,
@@ -2213,6 +2218,7 @@ pub mod menu {
                 enabled,
                 id,
                 visible,
+                accelerator,
             } => serde_json::json!({
                 "type": "checkbox",
                 "label": label,
@@ -2221,6 +2227,7 @@ pub mod menu {
                 "enabled": enabled,
                 "id": id,
                 "visible": visible,
+                "accelerator": accelerator,
             }),
             MenuItem::Separator => serde_json::json!({"type": "separator"}),
             MenuItem::Submenu {
@@ -3073,6 +3080,7 @@ mod tests {
                     enabled: true,
                     id: "run-item",
                     visible: false,
+                    accelerator: "Cmd+R",
                 },
                 crate::menu::MenuItem::Checkbox {
                     label: "Flag",
@@ -3081,6 +3089,7 @@ mod tests {
                     enabled: false,
                     id: "",
                     visible: true,
+                    accelerator: "",
                 },
                 crate::menu::MenuItem::Separator,
             ],
@@ -3094,6 +3103,7 @@ mod tests {
         assert_eq!(v["items"][0]["submenu"][0]["click"], "run");
         assert_eq!(v["items"][0]["submenu"][0]["id"], "run-item");
         assert_eq!(v["items"][0]["submenu"][0]["visible"], false);
+        assert_eq!(v["items"][0]["submenu"][0]["accelerator"], "Cmd+R");
         assert_eq!(v["items"][0]["submenu"][1]["checked"], true);
         assert_eq!(v["items"][0]["submenu"][1]["enabled"], false);
         assert_eq!(v["items"][0]["submenu"][1]["visible"], true);
@@ -3111,6 +3121,7 @@ mod tests {
                 enabled: true,
                 id: "",
                 visible: true,
+                accelerator: "",
             }],
             id: "",
             visible: true,

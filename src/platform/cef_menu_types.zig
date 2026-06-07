@@ -9,6 +9,8 @@ pub const ApplicationMenuItem = union(enum) {
         id: []const u8 = "",
         /// Electron MenuItem.visible — false 면 메뉴에 존재하되 숨김(setHidden:).
         visible: bool = true,
+        /// Electron MenuItem.accelerator — "Cmd+Shift+K" 등. macOS NSMenuItem keyEquivalent.
+        accelerator: []const u8 = "",
     },
     checkbox: struct {
         label: []const u8,
@@ -17,6 +19,7 @@ pub const ApplicationMenuItem = union(enum) {
         enabled: bool = true,
         id: []const u8 = "",
         visible: bool = true,
+        accelerator: []const u8 = "",
     },
     separator,
     submenu: struct {
