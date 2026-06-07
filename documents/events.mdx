@@ -46,6 +46,29 @@ fn onAllClosed(_: suji.Event) void {
 
 macOS는 창이 모두 닫혀도 앱은 dock에 유지 (Electron과 동일). 나머지 플랫폼은 종료.
 
+### app 단일 인스턴스 (second-instance)
+
+| 채널 | payload | 발화 시점 |
+|---|---|---|
+| `app:second-instance` | `{argv: string[]}` | 두 번째 인스턴스가 실행돼 argv 를 primary 로 전달했을 때 |
+
+`app.requestSingleInstanceLock()`(Electron 동등)으로 primary 를 정하고, 두 번째
+인스턴스는 자기 argv 를 primary 로 보낸 뒤 종료 → primary 가 `app:second-instance`
+로 수신. 락은 macOS/Linux flock + Windows named mutex, argv 전달 IPC 는
+macOS/Linux Unix 소켓 + Windows named pipe. 전 6개 언어 동일 채널로 수신.
+
+```js
+const gotLock = await app.requestSingleInstanceLock();
+if (!gotLock) {
+  await app.exit();           // 두 번째 인스턴스는 종료(argv 는 이미 primary 로 전달됨)
+} else {
+  suji.on('app:second-instance', ({ argv }) => {
+    myWindow.focus();         // 기존 창을 앞으로
+    // argv 로 열려던 파일/딥링크 처리
+  });
+}
+```
+
 ## Electron API 대응표
 
 | Electron | Suji |
@@ -59,6 +82,8 @@ macOS는 창이 모두 닫혀도 앱은 dock에 유지 (Electron과 동일). 나
 | `win.webContents.send(ch, data)` | `suji.send(ch, data, {to: winId})` / Zig `suji.sendTo(id, ch, data)` |
 | `BrowserWindow.getAllWindows()` | (roadmap) `suji.windows.all()` |
 | `app.quit()` | `suji.quit()` |
+| `app.requestSingleInstanceLock()` | `app.requestSingleInstanceLock()` (mac/Linux flock, Win mutex) |
+| `app.on('second-instance', (e, argv) => {})` | `suji.on('app:second-instance', ({argv}) => {})` |
 | `process.platform` | `suji.platform` — **"macos"** (not "darwin") |
 | `MessageChannelMain` | **미지원 (V1)** |
 | `remote` 모듈 | **미지원** (Electron도 deprecated) |
