@@ -11,6 +11,9 @@ pub const ApplicationMenuItem = union(enum) {
         visible: bool = true,
         /// Electron MenuItem.accelerator — "Cmd+Shift+K" 등. macOS NSMenuItem keyEquivalent.
         accelerator: []const u8 = "",
+        /// Electron MenuItem.role — copy/paste/quit 등 표준 동작. macOS NSMenuItem 네이티브
+        /// selector(first responder). 설정 시 click 무시(role 이 동작). macOS only.
+        role: []const u8 = "",
     },
     checkbox: struct {
         label: []const u8,

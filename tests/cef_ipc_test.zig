@@ -2013,14 +2013,15 @@ test "window min/max size IPC + native wire" {
     }
 }
 
-test "MenuItem id + visible + accelerator fields wired (types + parse + native apply)" {
+test "MenuItem id + visible + accelerator + role fields wired (types + parse + native apply)" {
     const menu_main_src = try readMainSource();
     defer std.testing.allocator.free(menu_main_src);
-    // main.zig parseApplicationMenuItem 가 id/visible/accelerator 파싱.
+    // main.zig parseApplicationMenuItem 가 id/visible/accelerator/role 파싱.
     inline for (.{
         "util.jsonObjectGetString(obj, \"id\")",
         "util.jsonObjectGetBool(obj, \"visible\")",
         "util.jsonObjectGetString(obj, \"accelerator\")",
+        "util.jsonObjectGetString(obj, \"role\")",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, menu_main_src, needle) != null);
     }
@@ -2031,6 +2032,7 @@ test "MenuItem id + visible + accelerator fields wired (types + parse + native a
         "id: []const u8 = \"\"", // cef_menu_types 새 필드
         "visible: bool = true",
         "accelerator: []const u8 = \"\"",
+        "role: []const u8 = \"\"",
         "pub fn setMenuItemHidden", // cef_objc 네이티브 헬퍼
         "setMenuItemHidden(top, true)", // setApplicationMenu top-level 적용
         "if (!visible) setMenuItemHidden(m, true)", // addAppMenuClickable 적용
@@ -2038,6 +2040,10 @@ test "MenuItem id + visible + accelerator fields wired (types + parse + native a
         "fn parseAccelerator", // accelerator 파서
         "setKeyEquivalent:", // macOS keyEquivalent 적용
         "setKeyEquivalentModifierMask:", // 수정자 마스크
+        "fn lookupRole", // role 매핑
+        "fn addRoleMenuItem", // role 네이티브 selector 항목
+        "pub fn ensureQuitTarget", // quit role 타깃 export
+        "cef.ensureQuitTarget()", // quit role 사용
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, menu_cef_src, needle) != null);
     }

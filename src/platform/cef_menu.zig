@@ -129,7 +129,13 @@ fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
             const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
             msgSendVoid1(menu, "addItem:", sep);
         },
-        .item => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, null, it.visible, it.accelerator),
+        .item => |it| {
+            // role 매핑 시 네이티브 selector 항목(first responder); 아니면 click 항목.
+            if (lookupRole(it.role)) |entry|
+                addRoleMenuItem(menu, it.label, entry, it.enabled, it.visible, it.accelerator)
+            else
+                addAppMenuClickable(menu, it.label, it.click, it.enabled, null, it.visible, it.accelerator);
+        },
         .checkbox => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, it.checked, it.visible, it.accelerator),
         .submenu => |sub| {
             const sub_menu = createMenuFromItems(sub.label, sub.items) orelse return;
@@ -151,6 +157,47 @@ fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, e
         setMenuItemTag(m, MENU_ITEM_CHECKBOX_TAG);
         setMenuItemState(m, state);
     }
+    setMenuItemEnabled(m, enabled);
+    if (!visible) setMenuItemHidden(m, true);
+    applyAccelerator(m, accelerator);
+    msgSendVoid1(menu, "addItem:", m);
+}
+
+// Electron MenuItem.role → macOS NSMenuItem 네이티브 selector. 대부분 nil target(first
+// responder 라우팅 — 기본 메뉴 copy:/paste: 와 동일 검증된 메커니즘), quit 만 sujiQuit:
+// 특수 타깃(terminate: 는 CEF 에서 SIGTRAP). 정직 경계: macOS only(Win/Linux no-op).
+const RoleEntry = struct { role: []const u8, sel: [:0]const u8, quit: bool = false };
+const role_table = [_]RoleEntry{
+    .{ .role = "undo", .sel = "undo:" },
+    .{ .role = "redo", .sel = "redo:" },
+    .{ .role = "cut", .sel = "cut:" },
+    .{ .role = "copy", .sel = "copy:" },
+    .{ .role = "paste", .sel = "paste:" },
+    .{ .role = "pasteandmatchstyle", .sel = "pasteAsPlainText:" },
+    .{ .role = "selectall", .sel = "selectAll:" },
+    .{ .role = "delete", .sel = "delete:" },
+    .{ .role = "minimize", .sel = "performMiniaturize:" },
+    .{ .role = "zoom", .sel = "performZoom:" },
+    .{ .role = "close", .sel = "performClose:" },
+    .{ .role = "togglefullscreen", .sel = "toggleFullScreen:" },
+    .{ .role = "quit", .sel = "sujiQuit:", .quit = true },
+};
+
+fn lookupRole(role: []const u8) ?RoleEntry {
+    if (role.len == 0) return null;
+    for (role_table) |e| if (std.ascii.eqlIgnoreCase(role, e.role)) return e;
+    return null;
+}
+
+/// role 항목 — 네이티브 selector 로 표준 동작 수행(menu:click 미발화). edit/window role 은
+/// nil target(first responder), quit 은 sujiQuit: 타깃.
+fn addRoleMenuItem(menu: *anyopaque, label: []const u8, entry: RoleEntry, enabled: bool, visible: bool, accelerator: []const u8) void {
+    const ns_label = nsStringFromSlice(label) orelse return;
+    const m = allocNSMenuItem(ns_label, entry.sel.ptr, emptyNSString() orelse return) orelse return;
+    if (entry.quit) {
+        if (cef.ensureQuitTarget()) |t| msgSendVoid1(m, "setTarget:", t);
+    }
+    // else: target nil → first responder(기본 메뉴 copy:/paste: 동형, 검증됨)
     setMenuItemEnabled(m, enabled);
     if (!visible) setMenuItemHidden(m, true);
     applyAccelerator(m, accelerator);

@@ -234,7 +234,7 @@ fn sujiQuitImpl(_: ?*anyopaque, _: ?*anyopaque, _: ?*anyopaque) callconv(.c) voi
     quit();
 }
 
-fn ensureQuitTarget() ?*anyopaque {
+pub fn ensureQuitTarget() ?*anyopaque {
     if (g_quit_target) |existing| return existing;
     const NSObject = getClass("NSObject") orelse return null;
     const cls = objc.objc_allocateClassPair(NSObject, "SujiQuitTarget", 0) orelse

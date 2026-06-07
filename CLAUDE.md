@@ -573,7 +573,9 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //   MenuItem 옵션: enabled, checked(checkbox), id(getMenuItemById 식별자 — UI 효과 없음),
 //   visible(false=항목 숨김; macOS NSMenuItem.setHidden / GTK set_visible 실효, Win no-op),
 //   accelerator("Cmd+Shift+K" — macOS NSMenuItem keyEquivalent 단일 문자 키; 특수키
-//   best-effort, Win/Linux no-op).
+//   best-effort, Win/Linux no-op),
+//   role(copy/paste/quit 등 표준 동작 — 설정 시 click 무시, macOS NSMenuItem 네이티브
+//   selector/first responder, quit=sujiQuit:; macOS only, Win/Linux no-op).
 //   전 6개 언어(JS/Node optional, Rust enum 필드, Go omitempty, lua/python raw).
 // await menu.resetApplicationMenu()
 // await menu.popup([{label:"Run",click:"run"}], {x:10,y:10}) — suji.on('menu:click', ({click}) => ...)

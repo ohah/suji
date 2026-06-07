@@ -140,6 +140,7 @@ pub const addDefaultAppMenu = cef_mac_app_menu.addDefaultAppMenu;
 pub const createMenu = cef_mac_app_menu.createMenu;
 pub const addSubmenuItem = cef_mac_app_menu.addSubmenuItem;
 pub const allocNSMenuItem = cef_mac_app_menu.allocNSMenuItem;
+pub const ensureQuitTarget = cef_mac_app_menu.ensureQuitTarget;
 
 pub const win_pump = cef_win_pump.win_pump;
 

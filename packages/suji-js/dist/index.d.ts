@@ -750,6 +750,10 @@ export interface MenuCommandItem {
     /** Electron MenuItem.accelerator — 예 "Cmd+Shift+K". macOS NSMenuItem keyEquivalent
      *  (단일 문자 키만; 특수키 best-effort). Win/Linux no-op. */
     accelerator?: string;
+    /** Electron MenuItem.role — copy/paste/quit 등 표준 동작(설정 시 click 무시, 네이티브
+     *  수행). macOS only(undo/redo/cut/copy/paste/pasteAndMatchStyle/selectAll/delete/
+     *  minimize/zoom/close/togglefullscreen/quit). Win/Linux no-op. */
+    role?: string;
 }
 export interface MenuCheckboxItem {
     type: "checkbox";
