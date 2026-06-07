@@ -125,8 +125,8 @@
 - **[medium]** `MenuItem.role property` — Add optional `role?: string` field to MenuCommandItem interface in packages/suji-js/src/index.ts (line 934-939) and packages/suji-node/src/index.ts (line 1093-1098). Extend cef.ApplicationMenuItem.ite
 - **[medium]** `MenuItem.accelerator property` — Add optional `accelerator?: string` field to MenuCommandItem and MenuCheckboxItem types in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts. Parse accelerator in src/platform/cef.zig 
 - **[medium]** `MenuItem.icon property` — Add optional `icon?: string` field to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts. Update Zig ApplicationMenuItem union in src/platform/cef.zig t
-- **[medium]** `MenuItem.visible property` — Add optional visible?: boolean (default true) field to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts. Update JSON parsing in src/main.zig's parseAp
-- **[medium]** `MenuItem constructor options completeness` — Add support for high-value MenuItem fields in phases: (1) Phase A (trivial): `id` (string identifier, no UI side-effect), `visible` (boolean flag, reuse enabled logic pattern). (2) Phase B (moderate):
+- ~~**[medium]** `MenuItem.visible property`~~ ✅ (Menu PR-1) — visible?:boolean(기본 true) 전 SDK 필드 + main.zig parseApplicationMenuItem 파싱 + 네이티브(macOS NSMenuItem.setHidden: / GTK set_no_show_all+set_visible 실효, Win no-op). ApplicationMenuItem(item/checkbox/submenu)에 적용.
+- **[medium]** `MenuItem constructor options completeness` — **Phase A(id, visible) 완료** (Menu PR-1 — id/visible 전 6개 언어 필드 + 파싱 + 네이티브). 잔여 Phase B(role/accelerator/icon)는 Menu PR-2. Add support for high-value MenuItem fields in phases: (1) Phase A (trivial): `id` (string identifier, no UI side-effect), `visible` (boolean flag, reuse enabled logic pattern). (2) Phase B (moderate):
 
 ### nativeImage
 

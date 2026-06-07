@@ -2162,23 +2162,31 @@ pub mod menu {
     use crate::{invoke, serde_json};
 
     /// Application menu item — top-level entries should be Submenu.
+    /// `id`(getMenuItemById 식별자, UI 효과 없음) / `visible`(false=숨김; Electron MenuItem).
+    /// 미사용 시 `id: ""`, `visible: true` 전달.
     pub enum MenuItem<'a> {
         Item {
             label: &'a str,
             click: &'a str,
             enabled: bool,
+            id: &'a str,
+            visible: bool,
         },
         Checkbox {
             label: &'a str,
             click: &'a str,
             checked: bool,
             enabled: bool,
+            id: &'a str,
+            visible: bool,
         },
         Separator,
         Submenu {
             label: &'a str,
             enabled: bool,
             submenu: Vec<MenuItem<'a>>,
+            id: &'a str,
+            visible: bool,
         },
     }
 
@@ -2188,34 +2196,46 @@ pub mod menu {
                 label,
                 click,
                 enabled,
+                id,
+                visible,
             } => serde_json::json!({
                 "type": "item",
                 "label": label,
                 "click": click,
                 "enabled": enabled,
+                "id": id,
+                "visible": visible,
             }),
             MenuItem::Checkbox {
                 label,
                 click,
                 checked,
                 enabled,
+                id,
+                visible,
             } => serde_json::json!({
                 "type": "checkbox",
                 "label": label,
                 "click": click,
                 "checked": checked,
                 "enabled": enabled,
+                "id": id,
+                "visible": visible,
             }),
             MenuItem::Separator => serde_json::json!({"type": "separator"}),
             MenuItem::Submenu {
                 label,
                 enabled,
                 submenu,
+                id,
+                visible,
             } => serde_json::json!({
                 "type": "submenu",
                 "label": label,
                 "enabled": enabled,
                 "submenu": submenu.iter().map(item_to_json).collect::<Vec<_>>(),
+                "id": id,
+                "visible": visible,
             }),
         }
     }
@@ -3051,23 +3071,32 @@ mod tests {
                     label: "Run",
                     click: "run",
                     enabled: true,
+                    id: "run-item",
+                    visible: false,
                 },
                 crate::menu::MenuItem::Checkbox {
                     label: "Flag",
                     click: "flag",
                     checked: true,
                     enabled: false,
+                    id: "",
+                    visible: true,
                 },
                 crate::menu::MenuItem::Separator,
             ],
+            id: "",
+            visible: true,
         }]);
         let v: serde_json::Value = serde_json::from_str(&req).unwrap();
         assert_eq!(v["cmd"], "menu_set_application_menu");
         assert_eq!(v["items"][0]["type"], "submenu");
         assert_eq!(v["items"][0]["label"], "Tools");
         assert_eq!(v["items"][0]["submenu"][0]["click"], "run");
+        assert_eq!(v["items"][0]["submenu"][0]["id"], "run-item");
+        assert_eq!(v["items"][0]["submenu"][0]["visible"], false);
         assert_eq!(v["items"][0]["submenu"][1]["checked"], true);
         assert_eq!(v["items"][0]["submenu"][1]["enabled"], false);
+        assert_eq!(v["items"][0]["submenu"][1]["visible"], true);
         assert_eq!(v["items"][0]["submenu"][2]["type"], "separator");
     }
 
@@ -3080,7 +3109,11 @@ mod tests {
                 label: "Run \\ now",
                 click: "run\nnow",
                 enabled: true,
+                id: "",
+                visible: true,
             }],
+            id: "",
+            visible: true,
         }]);
         let v: serde_json::Value = serde_json::from_str(&req).unwrap();
         assert_eq!(v["items"][0]["label"], "도구 \"Tools\"");

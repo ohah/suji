@@ -71,6 +71,28 @@ describe("menu_set_application_menu — wiring + 응답", () => {
     expect(r.success).toBe(true);
   });
 
+  test.skipIf(!isDarwin)("id + visible:false 항목 — 파싱/네이티브 적용 무crash(success)", async () => {
+    // id 는 UI 효과 없음(라운드트립), visible:false 는 NSMenuItem.setHidden:. 네이티브가
+    // 새 필드로 거부/crash 하지 않고 success:true 면 통과(네이티브 메뉴는 DOM 부재라
+    // 가시 상태는 단언 불가 — enabled 와 동일 관측 경계).
+    const r = await core<{ success: boolean }>({
+      cmd: "menu_set_application_menu",
+      items: [
+        {
+          type: "submenu",
+          label: "Tools",
+          id: "tools-menu",
+          submenu: [
+            { label: "Hidden Item", click: "hidden", id: "hidden-item", visible: false },
+            { label: "Shown Item", click: "shown", visible: true },
+            { type: "checkbox", label: "Hidden Check", click: "hc", checked: true, visible: false },
+          ],
+        },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+
   test.skipIf(!isDarwin)("Unicode 라벨 + click", async () => {
     const r = await core<{ success: boolean }>({
       cmd: "menu_set_application_menu",

@@ -16,6 +16,11 @@ type MenuItem struct {
 	Enabled *bool      `json:"enabled,omitempty"`
 	Checked bool       `json:"checked,omitempty"`
 	Submenu []MenuItem `json:"submenu,omitempty"`
+	// ID — Electron MenuItem.id (getMenuItemById 식별자; UI 효과 없음).
+	ID string `json:"id,omitempty"`
+	// Visible — Electron MenuItem.visible. nil=기본 true; false 면 항목 숨김. 포인터로
+	// 기본-true 보존(omitempty 가 nil 드롭 → 미지정 시 네이티브 기본 true).
+	Visible *bool `json:"visible,omitempty"`
 }
 
 func Item(label, click string) MenuItem {

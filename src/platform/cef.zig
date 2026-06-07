@@ -24,6 +24,7 @@ pub const representedObjectUtf8 = cef_public_api.representedObjectUtf8;
 pub const nsFileUrlIfExists = cef_public_api.nsFileUrlIfExists;
 pub const ensureSimpleObjcTarget = cef_public_api.ensureSimpleObjcTarget;
 pub const setMenuItemEnabled = cef_public_api.setMenuItemEnabled;
+pub const setMenuItemHidden = cef_public_api.setMenuItemHidden;
 pub const setMenuItemState = cef_public_api.setMenuItemState;
 pub const setMenuItemTag = cef_public_api.setMenuItemTag;
 

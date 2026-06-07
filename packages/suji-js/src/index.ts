@@ -1439,6 +1439,10 @@ export interface MenuCommandItem {
   label: string;
   click: string;
   enabled?: boolean;
+  /** Electron MenuItem.id — getMenuItemById 식별자(UI 효과 없음). */
+  id?: string;
+  /** Electron MenuItem.visible — false 면 항목 숨김(기본 true). macOS 실효, Win/Linux best-effort. */
+  visible?: boolean;
 }
 
 export interface MenuCheckboxItem {
@@ -1447,6 +1451,8 @@ export interface MenuCheckboxItem {
   click: string;
   checked?: boolean;
   enabled?: boolean;
+  id?: string;
+  visible?: boolean;
 }
 
 export interface MenuSubmenuItem {
@@ -1454,6 +1460,8 @@ export interface MenuSubmenuItem {
   label: string;
   enabled?: boolean;
   submenu: MenuItem[];
+  id?: string;
+  visible?: boolean;
 }
 
 export type MenuItem = MenuCommandItem | MenuCheckboxItem | MenuSeparator | MenuSubmenuItem;
