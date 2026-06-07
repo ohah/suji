@@ -3,6 +3,10 @@
 zig-out/
 zig-pkg/
 
+# 루트 임시 검증 바이너리 (코드리뷰/simplify 에이전트가 만드는 standalone 컴파일 산출물 —
+# 프로젝트 테스트는 tests/ 에 있음; 루트 test_* 는 항상 스트레이). git add -A 혼입 방지.
+/test_*
+
 # Rust
 **/target/
 
