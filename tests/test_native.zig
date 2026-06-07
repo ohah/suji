@@ -22,6 +22,8 @@ pub const TestNative = struct {
     stub_always_on_top: bool = false,
     last_title: ?[]const u8 = null,
     last_bounds: ?window.Bounds = null,
+    last_min_size: ?window.Bounds = null,
+    last_max_size: ?window.Bounds = null,
     last_content_bounds: ?window.Bounds = null,
     /// 마지막 createWindow에 전달된 옵션의 sub-struct/parent_id 캡처 (Phase 3 매핑 검증용).
     /// 슬라이스 멤버(title/url/background_color)는 얕은 복사 — caller가 src 수명 보장.
@@ -161,6 +163,10 @@ pub const TestNative = struct {
         .set_background_color = setBackgroundColor,
         .set_has_shadow = setHasShadow,
         .has_shadow = hasShadow,
+        .set_minimum_size = setMinimumSize,
+        .get_minimum_size = getMinimumSize,
+        .set_maximum_size = setMaximumSize,
+        .get_maximum_size = getMaximumSize,
         .undo = makeEditFn("undo"),
         .redo = makeEditFn("redo"),
         .cut = makeEditFn("cut"),
@@ -366,6 +372,18 @@ pub const TestNative = struct {
     }
     fn hasShadow(ctx: ?*anyopaque, _: u64) bool {
         return fromCtx(ctx).stub_has_shadow;
+    }
+    fn setMinimumSize(ctx: ?*anyopaque, _: u64, w: u32, h: u32) void {
+        fromCtx(ctx).last_min_size = .{ .width = w, .height = h };
+    }
+    fn getMinimumSize(ctx: ?*anyopaque, _: u64) window.Bounds {
+        return fromCtx(ctx).last_min_size orelse .{};
+    }
+    fn setMaximumSize(ctx: ?*anyopaque, _: u64, w: u32, h: u32) void {
+        fromCtx(ctx).last_max_size = .{ .width = w, .height = h };
+    }
+    fn getMaximumSize(ctx: ?*anyopaque, _: u64) window.Bounds {
+        return fromCtx(ctx).last_max_size orelse .{};
     }
 
     fn findInPage(ctx: ?*anyopaque, _: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {

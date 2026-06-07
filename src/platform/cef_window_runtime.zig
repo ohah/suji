@@ -151,6 +151,62 @@ pub fn getBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
     return .{};
 }
 
+// ── min/max 콘텐츠 크기 (Electron setMinimumSize/setMaximumSize) ──
+// 단일 출처 = delegate.constraints (CEF Views can_resize/get_minimum_size 콜백이 읽는 값).
+// 런타임 setter 는 ① delegate.constraints 갱신 → ② macOS NSWindow 즉시 적용 →
+// ③ invalidate_layout 으로 CEF 재-layout 유도(전 플랫폼). getter 는 delegate 값 반환
+// (결정적 — getBounds 의 live OS 질의와 달리 추적값. Electron 도 설정값 반환).
+
+pub fn setMinimumSizeImpl(ctx: ?*anyopaque, handle: u64, w: u32, h: u32) void {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |delegate| {
+        delegate.constraints.min_width = w;
+        delegate.constraints.min_height = h;
+    }
+    if (is_macos) {
+        if (entry.ns_window) |ns| cef.setMacContentMinSize(ns, w, h);
+    }
+    if (entry.views_window) |vw| {
+        if (vw.base.base.invalidate_layout) |inv| inv(&vw.base.base);
+    }
+}
+
+pub fn getMinimumSizeImpl(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return .{};
+    if (entry.views_window_delegate) |delegate| {
+        return .{ .width = delegate.constraints.min_width, .height = delegate.constraints.min_height };
+    }
+    return .{};
+}
+
+pub fn setMaximumSizeImpl(ctx: ?*anyopaque, handle: u64, w: u32, h: u32) void {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |delegate| {
+        delegate.constraints.max_width = w;
+        delegate.constraints.max_height = h;
+    }
+    if (is_macos) {
+        if (entry.ns_window) |ns| cef.setMacContentMaxSize(ns, w, h);
+    }
+    if (entry.views_window) |vw| {
+        if (vw.base.base.invalidate_layout) |inv| inv(&vw.base.base);
+    }
+}
+
+pub fn getMaximumSizeImpl(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
+    const self = fromCtx(ctx);
+    const entry = self.browsers.getPtr(handle) orelse return .{};
+    if (entry.views_window_delegate) |delegate| {
+        return .{ .width = delegate.constraints.max_width, .height = delegate.constraints.max_height };
+    }
+    return .{};
+}
+
 // Electron getContentBounds() — 콘텐츠 영역(타이틀바/프레임 제외). CEF Views 는
 // get_client_area_bounds_in_screen(top-left) 직접 제공, 아니면 macOS NSWindow 변환.
 pub fn getContentBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {

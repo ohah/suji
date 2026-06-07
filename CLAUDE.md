@@ -414,6 +414,12 @@ suji.platform                                                // "macos" | "linux
 // await windows.minimize(id) / maximize(id) / unmaximize(id) / restore(id) / show(id) / hide(id)
 //   / close(id) / setFullScreen(id, true) / isMinimized(id) / isMaximized(id) / isFullScreen(id)
 //   — Electron BrowserWindow 생명주기 (Zig 백엔드 기존 구현을 SDK 노출, 전수조사 후속). BrowserWindow 클래스 동형
+// await windows.setSize(id, w, h, animate?) / setPosition(id, x, y, animate?)  — Electron
+//   BrowserWindow.setSize/setPosition. getBounds→setBounds 파생(위치/크기 유지). animate 무시(CEF Views 비애니메이션)
+// await windows.setMinimumSize(id, w, h) / getMinimumSize(id) → [w,h]
+//   / setMaximumSize(id, w, h) / getMaximumSize(id) → [w,h]  — Electron BrowserWindow.setMinimumSize 등.
+//   w/h=0=제한 없음. 네이티브: delegate constraints(CEF Views get_minimum_size 콜백) + macOS
+//   NSWindow setContentMinSize/MaxSize + invalidate_layout. getter=추적값(결정적). 전 6개 언어 + BrowserWindow 클래스
 // await windows.destroy(id)  — Electron BrowserWindow.destroy() 강제 파괴. close 와 달리
 //   window:close(취소 hook) 스킵, window:closed 만 발화(listener 가 막을 수 없음). 전 6개 언어
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)

@@ -199,6 +199,11 @@ export interface BoundsResponse extends WindowOpResponse {
     width: number;
     height: number;
 }
+/** get_minimum_size / get_maximum_size 응답 — 추적된 제약 크기(0 = 제한 없음). */
+export interface SizeResponse extends WindowOpResponse {
+    width: number;
+    height: number;
+}
 export interface IsFocusedResponse extends WindowOpResponse {
     cmd: "is_focused";
     focused: boolean;
@@ -342,6 +347,19 @@ export declare const windows: {
     setContentBounds(windowId: number, bounds: SetBoundsArgs): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.getContentSize() — [width, height]. getContentBounds 에서 파생. */
     getContentSize(windowId: number): Promise<[number, number]>;
+    /** Electron BrowserWindow.setSize(width, height) — 위치 유지(getBounds→setBounds 파생).
+     *  `animate` 는 받되 무시(CEF Views set_bounds 비애니메이션 — 정직). */
+    setSize(windowId: number, width: number, height: number, _animate?: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.setPosition(x, y) — 크기 유지(getBounds→setBounds 파생). `animate` 무시. */
+    setPosition(windowId: number, x: number, y: number, _animate?: boolean): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.setMinimumSize(width, height). 0 = 제한 없음. */
+    setMinimumSize(windowId: number, width: number, height: number): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.getMinimumSize() — [width, height] (추적된 제약값, 0=없음). */
+    getMinimumSize(windowId: number): Promise<[number, number]>;
+    /** Electron BrowserWindow.setMaximumSize(width, height). 0 = 제한 없음. */
+    setMaximumSize(windowId: number, width: number, height: number): Promise<WindowOpResponse>;
+    /** Electron BrowserWindow.getMaximumSize() — [width, height] (추적된 제약값, 0=없음). */
+    getMaximumSize(windowId: number): Promise<[number, number]>;
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId: number): Promise<WindowOpResponse>;
     /** Electron BrowserWindow.isFocused(). */
@@ -482,6 +500,12 @@ export declare class BrowserWindow {
     getContentBounds(): Promise<BoundsResponse>;
     setContentBounds(bounds: SetBoundsArgs): Promise<WindowOpResponse>;
     getContentSize(): Promise<[number, number]>;
+    setSize(width: number, height: number, animate?: boolean): Promise<WindowOpResponse>;
+    setPosition(x: number, y: number, animate?: boolean): Promise<WindowOpResponse>;
+    setMinimumSize(width: number, height: number): Promise<WindowOpResponse>;
+    getMinimumSize(): Promise<[number, number]>;
+    setMaximumSize(width: number, height: number): Promise<WindowOpResponse>;
+    getMaximumSize(): Promise<[number, number]>;
     blur(): Promise<WindowOpResponse>;
     isFocused(): Promise<IsFocusedResponse>;
     isVisible(): Promise<IsVisibleResponse>;

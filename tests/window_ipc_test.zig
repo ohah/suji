@@ -157,6 +157,44 @@ test "handleSetBounds forwards bounds to native.setBounds" {
     try std.testing.expect(std.mem.indexOf(u8, resp, "\"ok\":true") != null);
 }
 
+test "handleSetMinimumSize/handleGetMinimumSize round-trip + JSON shape" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .bounds = .{ .width = 100, .height = 100 } });
+    var buf: [256]u8 = undefined;
+
+    const set_resp = ipc.handleSetMinimumSize(.{ .window_id = 1, .width = 320, .height = 240 }, &buf, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, set_resp, "\"cmd\":\"set_minimum_size\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, set_resp, "\"ok\":true") != null);
+    try std.testing.expectEqual(@as(u32, 320), native.last_min_size.?.width);
+
+    var buf2: [256]u8 = undefined;
+    const get_resp = ipc.handleGetMinimumSize(1, &buf2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"cmd\":\"get_minimum_size\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"ok\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"width\":320") != null);
+    try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"height\":240") != null);
+}
+
+test "handleSetMaximumSize forwards + handleGetMaximumSize on unknown id → ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+
+    _ = try wm.create(.{ .bounds = .{ .width = 100, .height = 100 } });
+    var buf: [256]u8 = undefined;
+    _ = ipc.handleSetMaximumSize(.{ .window_id = 1, .width = 1600, .height = 900 }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(u32, 1600), native.last_max_size.?.width);
+
+    // 미존재 창 getter → ok:false + 0.
+    var buf2: [256]u8 = undefined;
+    const get_resp = ipc.handleGetMaximumSize(99999, &buf2, &wm).?;
+    try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"ok\":false") != null);
+    try std.testing.expect(std.mem.indexOf(u8, get_resp, "\"width\":0") != null);
+}
+
 test "handleSetBounds rejects small buffer" {
     var native = TestNative{};
     var wm = newWm(&native);

@@ -387,6 +387,68 @@ describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
     expect(r.ok).toBe(false);
   });
 
+  // Electron 패리티: setMinimumSize/getMinimumSize, setMaximumSize/getMaximumSize.
+  // getter 는 추적된 constraints 값을 결정적으로 반환(실기기 의존 없음) → 정확 round-trip.
+  test("min/max size: set 후 get roundtrip — 정확값", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "minmax", url: "about:blank" });
+    const sMin: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_minimum_size", windowId: c.windowId, width: 320, height: 240 },
+    );
+    expect(sMin.cmd).toBe("set_minimum_size");
+    expect(sMin.ok).toBe(true);
+    const sMax: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_maximum_size", windowId: c.windowId, width: 1280, height: 960 },
+    );
+    expect(sMax.ok).toBe(true);
+
+    const gMin: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "get_minimum_size", windowId: c.windowId },
+    );
+    expect(gMin.ok).toBe(true);
+    expect(gMin.width).toBe(320);
+    expect(gMin.height).toBe(240);
+
+    const gMax: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "get_maximum_size", windowId: c.windowId },
+    );
+    expect(gMax.width).toBe(1280);
+    expect(gMax.height).toBe(960);
+  });
+
+  test("min size enforcement: min 보다 작게 set_bounds → get_bounds 가 min 으로 clamp (macOS)", async () => {
+    if (!isDesktopCefViewsRun()) return;
+    const c = await coreCall({ cmd: "create_window", title: "minclamp", url: "about:blank" });
+    await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_minimum_size", windowId: c.windowId, width: 500, height: 400 },
+    );
+    // min 보다 작게 리사이즈 시도 → OS(NSWindow setContentMinSize)가 clamp.
+    await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_bounds", windowId: c.windowId, x: 80, y: 80, width: 120, height: 100 },
+    );
+    await new Promise((r) => setTimeout(r, 300));
+    const b: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "get_bounds", windowId: c.windowId },
+    );
+    expect(b.ok).toBe(true);
+    // clamp 됐으면 width/height >= min. (정직 경계: macOS contentMinSize 실효 검증.)
+    expect(b.width).toBeGreaterThanOrEqual(500 - 4);
+    expect(b.height).toBeGreaterThanOrEqual(400 - 4);
+  });
+
+  test("min/max size: 알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "get_minimum_size", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+
   // Electron 패리티: set_content_bounds → get_content_bounds (콘텐츠 영역).
   test("content_bounds: set 후 get roundtrip — 크기 정확", async () => {
     const c = await coreCall({ cmd: "create_window", title: "contentbounds", url: "about:blank" });

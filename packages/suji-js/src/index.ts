@@ -270,6 +270,11 @@ export interface BoundsResponse extends WindowOpResponse {
   width: number;
   height: number;
 }
+/** get_minimum_size / get_maximum_size 응답 — 추적된 제약 크기(0 = 제한 없음). */
+export interface SizeResponse extends WindowOpResponse {
+  width: number;
+  height: number;
+}
 export interface IsFocusedResponse extends WindowOpResponse {
   cmd: "is_focused";
   focused: boolean;
@@ -561,6 +566,47 @@ export const windows = {
   async getContentSize(windowId: number): Promise<[number, number]> {
     const b = await windows.getContentBounds(windowId);
     return [b.width, b.height];
+  },
+  /** Electron BrowserWindow.setSize(width, height) — 위치 유지(getBounds→setBounds 파생).
+   *  `animate` 는 받되 무시(CEF Views set_bounds 비애니메이션 — 정직). */
+  async setSize(
+    windowId: number,
+    width: number,
+    height: number,
+    _animate?: boolean,
+  ): Promise<WindowOpResponse> {
+    const b = await windows.getBounds(windowId);
+    if (!b.ok) return b; // getBounds 실패(창 없음) → 0,0 으로 이동 방지
+    return windows.setBounds(windowId, { x: b.x, y: b.y, width, height });
+  },
+  /** Electron BrowserWindow.setPosition(x, y) — 크기 유지(getBounds→setBounds 파생). `animate` 무시. */
+  async setPosition(
+    windowId: number,
+    x: number,
+    y: number,
+    _animate?: boolean,
+  ): Promise<WindowOpResponse> {
+    const b = await windows.getBounds(windowId);
+    if (!b.ok) return b; // getBounds 실패 → 0 크기로 collapse 방지
+    return windows.setBounds(windowId, { x, y, width: b.width, height: b.height });
+  },
+  /** Electron BrowserWindow.setMinimumSize(width, height). 0 = 제한 없음. */
+  setMinimumSize(windowId: number, width: number, height: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_minimum_size", windowId, width, height });
+  },
+  /** Electron BrowserWindow.getMinimumSize() — [width, height] (추적된 제약값, 0=없음). */
+  async getMinimumSize(windowId: number): Promise<[number, number]> {
+    const r = await coreCall<SizeResponse>({ cmd: "get_minimum_size", windowId });
+    return [r.width, r.height];
+  },
+  /** Electron BrowserWindow.setMaximumSize(width, height). 0 = 제한 없음. */
+  setMaximumSize(windowId: number, width: number, height: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_maximum_size", windowId, width, height });
+  },
+  /** Electron BrowserWindow.getMaximumSize() — [width, height] (추적된 제약값, 0=없음). */
+  async getMaximumSize(windowId: number): Promise<[number, number]> {
+    const r = await coreCall<SizeResponse>({ cmd: "get_maximum_size", windowId });
+    return [r.width, r.height];
   },
   /** Electron BrowserWindow.blur() — 창 포커스 해제. */
   blur(windowId: number): Promise<WindowOpResponse> {
@@ -899,6 +945,24 @@ export class BrowserWindow {
   }
   getContentSize() {
     return windows.getContentSize(this.#id);
+  }
+  setSize(width: number, height: number, animate?: boolean) {
+    return windows.setSize(this.#id, width, height, animate);
+  }
+  setPosition(x: number, y: number, animate?: boolean) {
+    return windows.setPosition(this.#id, x, y, animate);
+  }
+  setMinimumSize(width: number, height: number) {
+    return windows.setMinimumSize(this.#id, width, height);
+  }
+  getMinimumSize() {
+    return windows.getMinimumSize(this.#id);
+  }
+  setMaximumSize(width: number, height: number) {
+    return windows.setMaximumSize(this.#id, width, height);
+  }
+  getMaximumSize() {
+    return windows.getMaximumSize(this.#id);
   }
   blur() {
     return windows.blur(this.#id);

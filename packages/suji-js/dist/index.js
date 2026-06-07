@@ -279,6 +279,39 @@ export const windows = {
         const b = await windows.getContentBounds(windowId);
         return [b.width, b.height];
     },
+    /** Electron BrowserWindow.setSize(width, height) — 위치 유지(getBounds→setBounds 파생).
+     *  `animate` 는 받되 무시(CEF Views set_bounds 비애니메이션 — 정직). */
+    async setSize(windowId, width, height, _animate) {
+        const b = await windows.getBounds(windowId);
+        if (!b.ok)
+            return b; // getBounds 실패(창 없음) → 0,0 으로 이동 방지
+        return windows.setBounds(windowId, { x: b.x, y: b.y, width, height });
+    },
+    /** Electron BrowserWindow.setPosition(x, y) — 크기 유지(getBounds→setBounds 파생). `animate` 무시. */
+    async setPosition(windowId, x, y, _animate) {
+        const b = await windows.getBounds(windowId);
+        if (!b.ok)
+            return b; // getBounds 실패 → 0 크기로 collapse 방지
+        return windows.setBounds(windowId, { x, y, width: b.width, height: b.height });
+    },
+    /** Electron BrowserWindow.setMinimumSize(width, height). 0 = 제한 없음. */
+    setMinimumSize(windowId, width, height) {
+        return coreCall({ cmd: "set_minimum_size", windowId, width, height });
+    },
+    /** Electron BrowserWindow.getMinimumSize() — [width, height] (추적된 제약값, 0=없음). */
+    async getMinimumSize(windowId) {
+        const r = await coreCall({ cmd: "get_minimum_size", windowId });
+        return [r.width, r.height];
+    },
+    /** Electron BrowserWindow.setMaximumSize(width, height). 0 = 제한 없음. */
+    setMaximumSize(windowId, width, height) {
+        return coreCall({ cmd: "set_maximum_size", windowId, width, height });
+    },
+    /** Electron BrowserWindow.getMaximumSize() — [width, height] (추적된 제약값, 0=없음). */
+    async getMaximumSize(windowId) {
+        const r = await coreCall({ cmd: "get_maximum_size", windowId });
+        return [r.width, r.height];
+    },
     /** Electron BrowserWindow.blur() — 창 포커스 해제. */
     blur(windowId) {
         return coreCall({ cmd: "blur", windowId });
@@ -584,6 +617,24 @@ export class BrowserWindow {
     }
     getContentSize() {
         return windows.getContentSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setSize(width, height, animate) {
+        return windows.setSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), width, height, animate);
+    }
+    setPosition(x, y, animate) {
+        return windows.setPosition(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), x, y, animate);
+    }
+    setMinimumSize(width, height) {
+        return windows.setMinimumSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), width, height);
+    }
+    getMinimumSize() {
+        return windows.getMinimumSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    setMaximumSize(width, height) {
+        return windows.setMaximumSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), width, height);
+    }
+    getMaximumSize() {
+        return windows.getMaximumSize(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
     blur() {
         return windows.blur(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
