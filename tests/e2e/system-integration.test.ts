@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as http from "node:http";
+import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1648,5 +1649,40 @@ describe("app.requestSingleInstanceLock", () => {
     expect(await sdk<boolean>("app.hasSingleInstanceLock")).toBe(true);
     expect(await sdk<boolean>("app.releaseSingleInstanceLock")).toBe(true);
     expect(await sdk<boolean>("app.hasSingleInstanceLock")).toBe(false);
+  });
+
+  // 실 크로스프로세스 second-instance: 외부 프로세스(이 bun 테스트)가 primary 의
+  // Unix 소켓에 connect 해 argv 를 전송 → primary 가 app:second-instance EventBus
+  // 이벤트로 emit → 프론트 suji.on 이 수신(Electron second-instance 동등).
+  test("second-instance: 외부 소켓 연결 argv 가 app:second-instance 이벤트로 전달", async () => {
+    // primary listener 보장(멱등).
+    expect((await core<{ locked: boolean }>({ cmd: "app_request_single_instance_lock" })).locked).toBe(true);
+    const ud = (await core<{ path: string }>({ cmd: "app_get_path", name: "userData" })).path;
+    const sockPath = `${ud}/.suji-si.sock`;
+
+    // 프론트에서 다음 app:second-instance 이벤트를 잡는 promise 설치.
+    await page.evaluate(() => {
+      (window as any).__siEvt = new Promise((resolve) => {
+        (window as any).__suji__.on("app:second-instance", (data: any) => {
+          resolve(typeof data === "string" ? JSON.parse(data) : data);
+        });
+      });
+    });
+
+    // 외부 프로세스가 소켓에 connect + argv(JSON 배열) 전송.
+    await new Promise<void>((resolve, reject) => {
+      const c = net.connect({ path: sockPath }, () => {
+        c.write('["suji","dev","--opened-file","/tmp/x.txt"]', () => c.end());
+      });
+      c.on("close", () => resolve());
+      c.on("error", reject);
+    });
+
+    // 프론트가 이벤트를 수신했는지 + argv 페이로드 확인.
+    const evt = await page.evaluate(() => (window as any).__siEvt);
+    expect(evt).toBeTruthy();
+    expect(Array.isArray(evt.argv)).toBe(true);
+    expect(evt.argv).toContain("--opened-file");
+    expect(evt.argv).toContain("/tmp/x.txt");
   });
 });

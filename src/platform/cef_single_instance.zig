@@ -97,6 +97,117 @@ const win_impl = if (is_windows) struct {
     }
 } else struct {};
 
+// ============================================================
+// second-instance IPC (PR-B) — macOS/Linux Unix 도메인 소켓.
+// primary(락 보유)는 <userData>/.suji-si.sock 에 listen 하며 두 번째 인스턴스가
+// 보낸 argv 를 받아 호스트 콜백(→ app:second-instance EventBus emit)으로 넘기고,
+// secondary(락 실패)는 그 소켓에 connect 해 자기 argv 를 보낸 뒤 종료(Electron
+// second-instance 동등). 락은 flock(PR-A)이 담당 — 소켓은 순수 argv 전달 채널.
+// listener 는 프로세스 수명 동안 유지(release 는 flock 만 해제; 소켓 teardown 은
+// blocked accept unblock 이 POSIX 상 비결정적이라 생략 — 종료 시 OS 가 회수).
+// Windows named pipe 는 후속(PR-B2) — Windows 는 락만(second-instance 이벤트 미발).
+// ============================================================
+
+// 호스트가 등록하는 수신 콜백(받은 argv JSON → EventBus emit) + 이 프로세스가
+// secondary 로 보낼 자기 argv(JSON 배열, 호스트가 setLaunchArgv 로 주입).
+// 둘 다 startup 에서 1회 설정 후 runtime read → 별도 락 불요(startup-before-runtime).
+var g_si_cb: ?*const fn (argv: [*:0]const u8) callconv(.c) void = null;
+var g_argv_buf: [4096]u8 = undefined;
+var g_argv_len: usize = 0;
+
+/// 호스트(main)가 second-instance 수신 콜백 등록. argv 는 null-terminated JSON 배열.
+pub fn setSecondInstanceHandler(cb: *const fn (argv: [*:0]const u8) callconv(.c) void) void {
+    g_si_cb = cb;
+}
+
+/// 이 프로세스가 secondary 가 될 때 primary 로 보낼 argv(JSON 배열 문자열) 저장.
+pub fn setLaunchArgv(argv_json: []const u8) void {
+    const n = @min(argv_json.len, g_argv_buf.len);
+    @memcpy(g_argv_buf[0..n], argv_json[0..n]);
+    g_argv_len = n;
+}
+
+const posix_si = if (!is_windows) struct {
+    var listen_fd: c_int = -1;
+    // startListener 멱등 가드. release 가 소켓 teardown 을 하지 않아 listener 는 1회
+    // spawn 후 프로세스 수명 유지 → 단일 플래그면 충분(shutdown 분기/atomic 불요).
+    // requestSingleInstanceLock(spinLock) 하에서만 접근하므로 평이 bool.
+    var started: bool = false;
+
+    // sun_path(per-platform: macOS 104 / Linux 108)에 path 채우기. 과길이면 false →
+    // IPC 비활성(락은 유효). userData 경로가 sun_path 한도를 넘으면 second-instance
+    // 만 비활성(드묾 — deep userData). 길이는 addr.path.len 으로 OS 정확.
+    fn fillAddr(addr: *std.c.sockaddr.un, path: []const u8) bool {
+        if (path.len >= addr.path.len) return false;
+        addr.* = .{ .family = std.c.AF.UNIX, .path = undefined };
+        @memset(&addr.path, 0);
+        @memcpy(addr.path[0..path.len], path);
+        return true;
+    }
+
+    fn startListener(sock_path: [:0]const u8) void {
+        if (started) return; // 이미 listen 중(멱등)
+        var addr: std.c.sockaddr.un = undefined;
+        if (!fillAddr(&addr, sock_path)) return;
+        const fd = std.c.socket(std.c.AF.UNIX, std.c.SOCK.STREAM, 0);
+        if (fd < 0) return;
+        _ = std.c.unlink(sock_path.ptr); // flock 으로 primary 확정 → 기존 .sock 은 stale
+        if (std.c.bind(fd, @ptrCast(&addr), @sizeOf(std.c.sockaddr.un)) != 0) {
+            _ = std.c.close(fd);
+            return;
+        }
+        if (std.c.listen(fd, 4) != 0) {
+            _ = std.c.close(fd);
+            return;
+        }
+        listen_fd = fd;
+        const t = std.Thread.spawn(.{}, acceptLoop, .{}) catch {
+            _ = std.c.close(fd);
+            listen_fd = -1;
+            return;
+        };
+        t.detach(); // 프로세스 수명 동안 listen — 종료 시 OS 가 fd 회수.
+        started = true;
+    }
+
+    fn acceptLoop() void {
+        while (true) {
+            const cfd = std.c.accept(listen_fd, null, null);
+            if (cfd < 0) {
+                const e = std.c._errno().*;
+                // EINTR(시그널)/ECONNABORTED(클라 중도 abort)는 재시도. 그 외 영구
+                // 에러(EBADF 등)는 break — busy-spin 방지(listener 종료, 락은 유효).
+                if (e == @intFromEnum(std.c.E.INTR) or e == @intFromEnum(std.c.E.CONNABORTED)) continue;
+                break;
+            }
+            // SOCK_STREAM 은 write 가 분할 도착할 수 있어 EOF(secondary 의 close)까지
+            // 누적 read. buf[4097] → 송신 최대 g_argv_buf.len(4096) 전부 수용 + null term.
+            var buf: [4097]u8 = undefined;
+            var total: usize = 0;
+            while (total < buf.len - 1) {
+                const n = std.c.read(cfd, buf[total..].ptr, buf.len - 1 - total);
+                if (n <= 0) break; // EOF(0) 또는 에러(<0)
+                total += @intCast(n);
+            }
+            _ = std.c.close(cfd);
+            if (total > 0) {
+                buf[total] = 0;
+                if (g_si_cb) |cb| cb(@ptrCast(&buf));
+            }
+        }
+    }
+
+    fn forward(sock_path: [:0]const u8) void {
+        var addr: std.c.sockaddr.un = undefined;
+        if (!fillAddr(&addr, sock_path)) return;
+        const fd = std.c.socket(std.c.AF.UNIX, std.c.SOCK.STREAM, 0);
+        if (fd < 0) return;
+        defer _ = std.c.close(fd);
+        if (std.c.connect(fd, @ptrCast(&addr), @sizeOf(std.c.sockaddr.un)) != 0) return;
+        if (g_argv_len > 0) _ = std.c.write(fd, &g_argv_buf, g_argv_len);
+    }
+} else struct {};
+
 /// Electron app.requestSingleInstanceLock() — primary 면 true, 다른 인스턴스가
 /// 이미 보유 중이면 false. 이미 보유 중이면(멱등) true.
 /// `user_data_dir` = appGetPath("userData") 결과(POSIX lockfile 위치).
@@ -131,6 +242,11 @@ pub fn requestSingleInstanceLock(user_data_dir: []const u8, app_name: []const u8
         var buf: [1100]u8 = undefined;
         const path = std.fmt.bufPrintZ(&buf, "{s}/.suji-single-instance.lock", .{user_data_dir}) catch return false;
         g_has_lock = posix_impl.request(path.ptr);
+        // second-instance: primary 는 소켓 listen, secondary 는 자기 argv 전달.
+        var sock_buf: [1100]u8 = undefined;
+        if (std.fmt.bufPrintZ(&sock_buf, "{s}/.suji-si.sock", .{user_data_dir})) |sock| {
+            if (g_has_lock) posix_si.startListener(sock) else posix_si.forward(sock);
+        } else |_| {}
     }
     return g_has_lock;
 }
@@ -203,4 +319,39 @@ test "single instance: acquire / idempotent / release / re-acquire + cross-fd bl
     // 6) 재획득 → true.
     try testing.expect(requestSingleInstanceLock(dir, "test-app"));
     releaseSingleInstanceLock(); // 테스트 정리
+}
+
+test "second-instance: forward → listener → callback (argv 전달)" {
+    if (is_windows) return error.SkipZigTest; // POSIX 소켓 (Windows 후속 PR-B2)
+
+    // 수신 콜백 — 받은 argv 를 캡처(다른 스레드에서 발화 → atomic 가시성).
+    const Cap = struct {
+        var buf: [256]u8 = undefined;
+        var len: usize = 0;
+        var fired = std.atomic.Value(bool).init(false);
+        fn cb(argv: [*:0]const u8) callconv(.c) void {
+            const s = std.mem.span(argv);
+            const n = @min(s.len, buf.len);
+            @memcpy(buf[0..n], s[0..n]);
+            len = n;
+            fired.store(true, .release);
+        }
+    };
+    setSecondInstanceHandler(&Cap.cb);
+
+    var dir_buf: [64]u8 = undefined;
+    const dir = std.fmt.bufPrintZ(&dir_buf, "/tmp/suji-si-test-{d}", .{std.c.getpid()}) catch return error.SkipZigTest;
+    _ = std.c.mkdir(dir.ptr, @as(std.c.mode_t, 0o700));
+    var sock_buf: [128]u8 = undefined;
+    const sock = try std.fmt.bufPrintZ(&sock_buf, "{s}/.suji-si.sock", .{dir});
+
+    posix_si.startListener(sock); // 멱등 — 이미 떠있으면 재사용
+    setLaunchArgv("[\"suji\",\"file.txt\"]");
+    posix_si.forward(sock); // secondary 시뮬: connect + argv 전송
+
+    // accept 스레드가 읽어 cb 발화할 때까지 스핀 대기(bounded).
+    var i: usize = 0;
+    while (!Cap.fired.load(.acquire) and i < 50_000_000) : (i += 1) std.atomic.spinLoopHint();
+    try testing.expect(Cap.fired.load(.acquire));
+    try testing.expectEqualStrings("[\"suji\",\"file.txt\"]", Cap.buf[0..Cap.len]);
 }

@@ -155,6 +155,28 @@ fn runHost(init: std.process.Init) !void {
     }
     const args = filtered_buf[0..filtered_len];
 
+    // second-instance(Electron app:second-instance): 이 프로세스가 secondary 가 될 때
+    // primary 로 보낼 argv(JSON 배열)와 primary 가 수신 시 emit 할 콜백 등록. 둘 다
+    // 저장만 — 실제 listen/forward 는 requestSingleInstanceLock 가 수행. CLI 전용
+    // 명령(init/build/types)에선 사용되지 않음(무해).
+    cef.setSecondInstanceHandler(&secondInstanceEmitHandler);
+    {
+        var argv_buf: [4096]u8 = undefined;
+        argv_buf[0] = '[';
+        var off: usize = 1;
+        for (args) |a| {
+            var esc: [512]u8 = undefined;
+            const en = util.escapeJsonStrFull(a, &esc) orelse continue;
+            const sep: []const u8 = if (off > 1) "," else "";
+            // 마지막 1바이트는 닫는 ']' 용으로 예약 → bufPrint 대상에서 제외.
+            const chunk = std.fmt.bufPrint(argv_buf[off .. argv_buf.len - 1], "{s}\"{s}\"", .{ sep, esc[0..en] }) catch break;
+            off += chunk.len;
+        }
+        argv_buf[off] = ']'; // 예약분에 항상 들어맞음
+        off += 1;
+        cef.setLaunchArgv(argv_buf[0..off]);
+    }
+
     // 번들에서 실행 시 자동으로 run (macOS .app / Linux AppImage / Windows packaged exe).
     // Windows packaging 은 `<name>.exe` 옆에 `.suji-packaged` sentinel 을 둔다.
     if (args.len < 2) {
@@ -4375,6 +4397,17 @@ fn powerMonitorEmitHandler(event: [*:0]const u8) callconv(.c) void {
     var ch_buf: [64]u8 = undefined;
     const channel = std.fmt.bufPrint(&ch_buf, "power:{s}", .{event_slice}) catch return;
     emitBusRaw(channel, "{}");
+}
+
+/// second-instance: 두 번째 인스턴스가 보낸 argv(JSON 배열)를 받아 `app:second-instance`
+/// 채널로 emit. argv 는 secondary 가 setLaunchArgv 로 넣은 JSON 배열 문자열(escape 완료).
+/// accept 스레드(임의 스레드)에서 호출되지만 emitBusRaw 가 EventBus mutex 로 thread-safe.
+fn secondInstanceEmitHandler(argv: [*:0]const u8) callconv(.c) void {
+    const argv_json = std.mem.span(argv);
+    const aj: []const u8 = if (argv_json.len == 0) "[]" else argv_json;
+    var buf: [4160]u8 = undefined;
+    const payload = std.fmt.bufPrint(&buf, "{{\"argv\":{s}}}", .{aj}) catch return;
+    emitBusRaw("app:second-instance", payload);
 }
 
 /// nativeTheme: NSAppearance KVO가 fire되면 현재 dark 여부를 payload로 emit.
