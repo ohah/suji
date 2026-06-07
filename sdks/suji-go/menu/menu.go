@@ -69,6 +69,16 @@ func GetApplicationMenu() string {
 	return suji.Invoke("__core__", `{"cmd":"menu_get_application_menu"}`)
 }
 
+// SendActionToFirstResponder sends a standard selector (e.g. "copy:") to the macOS
+// first responder (Electron Menu.sendActionToFirstResponder). macOS only; Win/Linux no-op.
+func SendActionToFirstResponder(action string) string {
+	req, _ := json.Marshal(map[string]any{
+		"cmd":    "menu_send_action_to_first_responder",
+		"action": action,
+	})
+	return suji.Invoke("__core__", string(req))
+}
+
 // GetMenuItemByID searches the getApplicationMenu snapshot for an item with the given
 // id (recursing into submenus) and returns it, or nil if not found (Electron
 // Menu.getMenuItemById). Not a live object.

@@ -784,6 +784,9 @@ export declare const menu: {
     /** Electron `Menu.getMenuItemById(id)` — getApplicationMenu 스냅샷에서 id 로 재귀 탐색.
      *  없으면 null. (submenu 까지 깊이 탐색.) */
     getMenuItemById(id: string): Promise<MenuItem | null>;
+    /** Electron `Menu.sendActionToFirstResponder(action)` — macOS first responder(포커스된
+     *  web view)에 표준 셀렉터 전달(예 "copy:", "selectAll:"). macOS only, Win/Linux no-op. */
+    sendActionToFirstResponder(action: string): Promise<boolean>;
     /** 임의 위치 컨텍스트 메뉴 (Electron `Menu.popup({x?,y?})`). x/y 미지정 시
      *  현재 커서(화면 좌표, macOS bottom-up). 선택은 `suji.on('menu:click',
      *  ({click}) => ...)` 로 수신 (setApplicationMenu 와 동일). macOS NSMenu

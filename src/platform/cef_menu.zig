@@ -96,6 +96,24 @@ pub fn resetApplicationMenu() bool {
     return true;
 }
 
+/// Electron `Menu.sendActionToFirstResponder(action)` — macOS `[NSApp sendAction:to:from:]`
+/// 로 표준 셀렉터(예 "copy:", "selectAll:")를 first responder(포커스된 web view)에 전달.
+/// macOS only(Win/Linux no-op). action 은 ObjC 셀렉터명. 전달 성공 시 true.
+pub fn sendActionToFirstResponder(action: []const u8) bool {
+    if (!comptime is_macos) return false;
+    if (action.len == 0 or action.len >= 255) return false;
+    var buf: [256]u8 = undefined;
+    @memcpy(buf[0..action.len], action);
+    buf[action.len] = 0;
+    const NSApplication = getClass("NSApplication") orelse return false;
+    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const action_sel = objc.sel_registerName(@ptrCast(&buf));
+    const send_sel = objc.sel_registerName("sendAction:to:from:");
+    const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return f(app, @ptrCast(send_sel), @ptrCast(action_sel), null, null) != 0;
+}
+
 /// Electron `Menu.popup({x?,y?})` 대응 — 임의 위치 컨텍스트 메뉴.
 /// NSMenu `popUpMenuPositioningItem:atLocation:inView:` (item=nil →
 /// 메뉴 좌상단이 location, view=nil → location 을 화면 좌표로 해석).

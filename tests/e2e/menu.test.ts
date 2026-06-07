@@ -148,6 +148,24 @@ describe("menu_set_application_menu — wiring + 응답", () => {
     expect(got.items).toEqual([]);
   });
 
+  test.skipIf(!isDarwin)("sendActionToFirstResponder: 셀렉터 전달 → success boolean", async () => {
+    // NSApp.sendAction:to:from: 결과는 responder chain(포커스) 의존이라 값 단언 불가 —
+    // 무crash + success boolean(wire/네이티브 호출 정상)만 검증.
+    const r = await core<{ success: boolean }>({
+      cmd: "menu_send_action_to_first_responder",
+      action: "selectAll:",
+    });
+    expect(typeof r.success).toBe("boolean");
+  });
+
+  test.skipIf(isDarwin)("sendActionToFirstResponder non-darwin → success:false", async () => {
+    const r = await core<{ success: boolean }>({
+      cmd: "menu_send_action_to_first_responder",
+      action: "selectAll:",
+    });
+    expect(r.success).toBe(false);
+  });
+
   test.skipIf(!isDarwin)("resetApplicationMenu 정상", async () => {
     const r = await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
     expect(r.success).toBe(true);

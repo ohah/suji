@@ -583,6 +583,8 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await menu.getMenuItemById(id) → MenuItem | null  — 스냅샷에서 id 재귀 탐색(submenu 포함).
 //   네이티브: set 성공 시 items 배열 raw 저장(g_app_menu_buf), reset 시 클리어. getMenuItemById
 //   는 SDK 가 getApplicationMenu 위에 구현(JS/Node/Rust/Go). 전 6개 언어.
+// await menu.sendActionToFirstResponder("copy:")  — macOS first responder(포커스된 web view)에
+//   표준 셀렉터 전달(NSApp.sendAction:to:from:). macOS only, Win/Linux no-op. 전 6개 언어.
 // await menu.popup([{label:"Run",click:"run"}], {x:10,y:10}) — suji.on('menu:click', ({click}) => ...)
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, session, crashReporter, autoUpdater } from '@suji/node'
 // const displays = await screen.getAllDisplays()                         (macOS NSScreen / Linux X11 screen)

@@ -1777,6 +1777,13 @@ export const menu = {
     };
     return find(await menu.getApplicationMenu());
   },
+
+  /** Electron `Menu.sendActionToFirstResponder(action)` — macOS first responder 에 표준
+   *  셀렉터 전달(예 "copy:"). macOS only, Win/Linux no-op. */
+  async sendActionToFirstResponder(action: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'menu_send_action_to_first_responder', action });
+    return r.success === true;
+  },
 };
 
 // ============================================

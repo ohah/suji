@@ -119,6 +119,7 @@ pub const MenuEmitHandler = cef_public_api.MenuEmitHandler;
 pub const setMenuEmitHandler = cef_public_api.setMenuEmitHandler;
 pub const setApplicationMenu = cef_public_api.setApplicationMenu;
 pub const resetApplicationMenu = cef_public_api.resetApplicationMenu;
+pub const sendActionToFirstResponder = cef_public_api.sendActionToFirstResponder;
 pub const popupContextMenu = cef_public_api.popupContextMenu;
 pub const TrayMenuItem = cef_public_api.TrayMenuItem;
 pub const TrayEmitHandler = cef_public_api.TrayEmitHandler;

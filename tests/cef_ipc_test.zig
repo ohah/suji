@@ -2063,6 +2063,25 @@ test "Menu.getApplicationMenu IPC + items 스냅샷 저장/에코" {
     }
 }
 
+test "Menu.sendActionToFirstResponder IPC + CEF wire" {
+    const sa_main_src = try readMainSource();
+    defer std.testing.allocator.free(sa_main_src);
+    inline for (.{
+        "\"menu_send_action_to_first_responder\"",
+        "cef.sendActionToFirstResponder",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, sa_main_src, needle) != null);
+    }
+    const sa_cef_src = try readCefSource();
+    defer std.testing.allocator.free(sa_cef_src);
+    inline for (.{
+        "pub fn sendActionToFirstResponder",
+        "sendAction:to:from:", // NSApp 셀렉터 전달
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, sa_cef_src, needle) != null);
+    }
+}
+
 test "window mode flags IPC + CEF wire" {
     const mode_main_src = try readMainSource();
     defer std.testing.allocator.free(mode_main_src);

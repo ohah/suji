@@ -313,6 +313,7 @@ pub const MenuEmitHandler = cef_menu.MenuEmitHandler;
 pub const setMenuEmitHandler = cef_menu.setMenuEmitHandler;
 pub const setApplicationMenu = cef_menu.setApplicationMenu;
 pub const resetApplicationMenu = cef_menu.resetApplicationMenu;
+pub const sendActionToFirstResponder = cef_menu.sendActionToFirstResponder;
 pub const popupContextMenu = cef_menu.popupContextMenu;
 
 pub const TrayMenuItem = cef_tray.TrayMenuItem;

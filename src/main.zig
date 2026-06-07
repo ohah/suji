@@ -2957,6 +2957,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "menu_get_application_menu")) {
         return handleMenuGetApplicationMenu(response_buf);
     }
+    if (std.mem.eql(u8, cmd, "menu_send_action_to_first_responder")) {
+        const action = util.extractJsonString(req_clean, "action") orelse "";
+        const ok = cef.sendActionToFirstResponder(action);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"menu_send_action_to_first_responder\",\"success\":{}}}", .{ok}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "menu_popup")) {
         return handleMenuPopup(req_clean, response_buf);
     }

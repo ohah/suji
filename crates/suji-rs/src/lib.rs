@@ -2275,6 +2275,17 @@ pub mod menu {
         invoke("__core__", r#"{"cmd":"menu_get_application_menu"}"#)
     }
 
+    /// Electron Menu.sendActionToFirstResponder — macOS first responder 에 표준 셀렉터
+    /// (예 "copy:") 전달. macOS only(Win/Linux no-op). raw `{"success":bool}`.
+    pub fn send_action_to_first_responder(action: &str) -> Option<String> {
+        let req = serde_json::json!({
+            "cmd": "menu_send_action_to_first_responder",
+            "action": action,
+        })
+        .to_string();
+        invoke("__core__", &req)
+    }
+
     /// Electron Menu.getMenuItemById — getApplicationMenu 스냅샷에서 id 로 재귀 탐색,
     /// 매칭 항목의 raw JSON 반환(없으면 None). 라이브 객체 아님.
     pub fn get_menu_item_by_id(id: &str) -> Option<String> {
