@@ -296,6 +296,9 @@ suji::export_handlers!(ping);
 // suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::exit()                 — 앱 강제 종료 (Electron app.exit, code 무시)
+// suji::request_single_instance_lock() / has_single_instance_lock() / release_single_instance_lock()
+//   — 단일 인스턴스 락 (raw Option<String>; {"locked":bool}/{"success":bool}). second-instance
+//     argv 는 suji::on("app:second-instance", ...) 로 수신
 // suji::session::{clear_cookies(), flush_store()}  — CEF cookie_manager fire-and-forget
 // suji::platform()             — "macos" | "linux" | "windows"
 // suji::typescript::SujiHandlers::new()
@@ -348,6 +351,10 @@ var _ = suji.Bind(&App{})
 // attention.RequestUser(true) / attention.CancelUserRequest(id)
 // import "github.com/ohah/suji-go/webrequest"
 // webrequest.SetBlockedUrls([]string{"https://*.ad/*"})
+// import "github.com/ohah/suji-go/app"
+// app.RequestSingleInstanceLock() / HasSingleInstanceLock() / ReleaseSingleInstanceLock()
+//   — 단일 인스턴스 락 (raw {"locked":bool}/{"success":bool}). second-instance argv 는
+//     suji.On("app:second-instance", ...) 로 수신
 // suji.Quit()                   — 앱 종료
 // suji.Platform()               — "macos" | "linux" | "windows"
 // suji.NewTSHandlers().Handler("greet", GreetReq{}, GreetRes{}).Export()
@@ -443,6 +450,13 @@ suji.platform                                                // "macos" | "linux
 // const bm = await app.createSecurityScopedBookmark(path)                 — App Sandbox 영속 파일 접근
 // const acc = await app.startAccessingSecurityScopedResource(bm)          → {id,path,stale}
 // await app.stopAccessingSecurityScopedResource(acc.id)                   (NSURL bookmark; 비-sandbox=일반)
+// const ok = await app.requestSingleInstanceLock()                        — Electron 단일 인스턴스 락
+//   primary 면 true, 다른 인스턴스가 이미 보유 중이면 false(보통 앱 quit). 멱등.
+//   (macOS/Linux <userData> flock, Windows named mutex)
+// await app.hasSingleInstanceLock() / app.releaseSingleInstanceLock()
+//   → 두 번째 인스턴스는 자기 argv 를 primary 로 전달 →
+//     suji.on('app:second-instance', ({argv}) => myWindow.focus())       (Electron second-instance;
+//     argv 전달 IPC: macOS/Linux Unix 소켓, Windows named pipe)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])                     (CEF ResourceRequestHandler)
 //   → suji.on('webRequest:completed', ({url, statusCode, ...}) => ...)
 // await webRequest.onBeforeRequest({urls:["https://*.tracker/*"]}, (details, cb) => cb({cancel:true}))
@@ -532,6 +546,9 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 // await app.getPath("userData") — Electron app.getPath
 // await app.exit()                                                       — 앱 강제 종료 (code 무시)
 // const reqId = await app.requestUserAttention(true) / cancelUserAttentionRequest(reqId)
+// await app.requestSingleInstanceLock() / hasSingleInstanceLock() / releaseSingleInstanceLock()
+//   — Electron 단일 인스턴스 락 (primary=true, 중복=false). second-instance argv 는
+//     suji.on('app:second-instance', ({argv}) => ...) 로 수신 (전 6개 언어 동일 채널)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])
 // await session.clearCookies() / session.flushStore()                    — CEF cookie_manager
 

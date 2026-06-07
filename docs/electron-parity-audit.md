@@ -36,7 +36,7 @@
 
 ### app
 
-- **[high]** `app.releaseSingleInstanceLock()` — Implement three companion methods alongside existing app.* APIs: (1) app.requestSingleInstanceLock() → IPC handler in /src/main.zig + JS/Node SDK wrappers, (2) app.releaseSingleInstanceLock() → same p
+- ~~**[high]** `app.releaseSingleInstanceLock()`~~ ✅ (#94/#95/#96) — Implement three companion methods alongside existing app.* APIs: (1) app.requestSingleInstanceLock() → IPC handler in /src/main.zig + JS/Node SDK wrappers, (2) app.releaseSingleInstanceLock() → same p
 
 ### nativeTheme
 
@@ -93,8 +93,8 @@
 
 - **[medium]** `app.before-quit event` — Add app:before-quit event hook to Suji quit() path. Modify the quit flow in Zig core to emit a 'app:before-quit' event before termination begins, allowing handlers to call an event.preventDefault() eq
 - **[medium]** `app.removeAsDefaultProtocolClient(protocol: string, path?: string, args?: string[]) : boolean` — Add app.setAsDefaultProtocolClient(protocol: string, path?: string, args?: string[]): Promise<boolean> and app.removeAsDefaultProtocolClient(protocol: string, path?: string, args?: string[]): Promise<
-- **[medium]** `app.requestSingleInstanceLock()` — Add app.requestSingleInstanceLock(additionalData?) method across all SDKs. Zig: implement with temp file lock or NSFileManager (macOS). JS/Node: expose as async method returning boolean. Rust/Go: wrap
-- **[medium]** `hasSingleInstanceLock() method` — Implement three methods in the app object across both suji-js and suji-node SDKs: (1) app.requestSingleInstanceLock() → Promise<boolean> indicating lock acquisition success, (2) app.hasSingleInstanceL
+- ~~**[medium]** `app.requestSingleInstanceLock()`~~ ✅ (#94) — Add app.requestSingleInstanceLock(additionalData?) method across all SDKs. Zig: implement with temp file lock or NSFileManager (macOS). JS/Node: expose as async method returning boolean. Rust/Go: wrap
+- ~~**[medium]** `hasSingleInstanceLock() method`~~ ✅ (#94) — Implement three methods in the app object across both suji-js and suji-node SDKs: (1) app.requestSingleInstanceLock() → Promise<boolean> indicating lock acquisition success, (2) app.hasSingleInstanceL
 
 ### clipboard
 
@@ -214,7 +214,7 @@
 - **[low]** `certificate-error event` — Expose app:certificate-error event on TLS cert verification failure. (1) Hook CEF's certificate verification callback in cef.zig (if not already wired). (2) Fire app:certificate-error IPC event with p
 - **[low]** `select-client-certificate event` — To add select-client-certificate parity: (1) Design an app-level event listener API in Suji's core (e.g., core emitting 'app:select-client-certificate' events). (2) Hook CEF's cef_request_handler_t.on
 - **[low]** `app.on('login') — HTTP basic auth event` — Wire cef_auth_callback_t into request handler (src/platform/cef.zig line 4739-4780). Register on_auth callback, emit app:login or webRequest:auth-required event following webRequest:before-request pat
-- **[low]** `second-instance event + requestSingleInstanceLock` — Add requestSingleInstanceLock() to @suji/node app module and @suji/api app module (macOS only, via lock file in app data dir or NSRunningApplication scan). Fire 'app:second-instance' event when second
+- ~~**[low]** `second-instance event + requestSingleInstanceLock`~~ ✅ (#95/#96) — Add requestSingleInstanceLock() to @suji/node app module and @suji/api app module (macOS only, via lock file in app data dir or NSRunningApplication scan). Fire 'app:second-instance' event when second
 - **[low]** `app.relaunch(options?) method` — Add app.relaunch(options?: {args?: string[], execPath?: string}) method to Suji:  1. **Frontend (@suji/api)**: Add method to app object in packages/suji-js/src/index.ts (around line 1751-1870). Signat
 - **[low]** `app.isActive()` — Add app.isActive() method: (1) Zig handler in src/main.zig: new case "app_is_active" → `NSApplication.sharedApplication.isActive` (macOS) / false (other platforms), returns {success:true, active:bool}
 - **[low]** `app.isHidden()` — Add app.isHidden() (macOS only, return false on other platforms) to all SDKs. Implementation: (1) Zig core handler app_is_hidden → NSApplication.isHidden query; (2) expose via __core__ IPC cmd; (3) ad
