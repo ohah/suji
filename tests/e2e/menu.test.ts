@@ -84,7 +84,7 @@ describe("menu_set_application_menu — wiring + 응답", () => {
           id: "tools-menu",
           submenu: [
             { label: "Hidden Item", click: "hidden", id: "hidden-item", visible: false },
-            { label: "Shown Item", click: "shown", visible: true },
+            { label: "Shown Item", click: "shown", visible: true, accelerator: "Cmd+Shift+K" },
             { type: "checkbox", label: "Hidden Check", click: "hc", checked: true, visible: false },
           ],
         },

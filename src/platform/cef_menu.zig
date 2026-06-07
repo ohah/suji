@@ -1,5 +1,6 @@
 //! Application Menu API — cef.zig 에서 분리(동작 무변경). macOS NSMenu
 //! application/context menu + Linux GTK context menu backend.
+const std = @import("std");
 const builtin = @import("builtin");
 const linux_context_menu = @import("cef_menu_linux.zig");
 const menu_types = @import("cef_menu_types.zig");
@@ -128,8 +129,8 @@ fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
             const sep = msgSend(NSMenuItem, "separatorItem") orelse return;
             msgSendVoid1(menu, "addItem:", sep);
         },
-        .item => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, null, it.visible),
-        .checkbox => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, it.checked, it.visible),
+        .item => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, null, it.visible, it.accelerator),
+        .checkbox => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, it.checked, it.visible, it.accelerator),
         .submenu => |sub| {
             const sub_menu = createMenuFromItems(sub.label, sub.items) orelse return;
             const m = addSubmenuItem(menu, sub.label, sub_menu) orelse return;
@@ -139,7 +140,7 @@ fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
     }
 }
 
-fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool, visible: bool) void {
+fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool, visible: bool, accelerator: []const u8) void {
     const target = ensureAppMenuTarget() orelse return;
     const ns_label = nsStringFromSlice(label) orelse return;
     const ns_click = nsStringFromSlice(click) orelse return;
@@ -152,5 +153,47 @@ fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, e
     }
     setMenuItemEnabled(m, enabled);
     if (!visible) setMenuItemHidden(m, true);
+    applyAccelerator(m, accelerator);
     msgSendVoid1(menu, "addItem:", m);
+}
+
+const AccelParsed = struct {
+    key: u8 = 0, // 단일 문자 keyEquivalent(소문자). 0=없음.
+    mask: u64 = 0, // NSEventModifierFlags (Cmd=1<<20, Shift=1<<17, Alt=1<<19, Ctrl=1<<18).
+};
+
+/// "Cmd+Shift+K" → {key:'k', mask}. 단일 문자 키만(letters/digits/symbols). 특수키
+/// (F1/Enter/Tab/arrows)는 best-effort 미지원(정직 경계 — keyEquivalent 빈 채로 click 만 동작).
+fn parseAccelerator(accel: []const u8) AccelParsed {
+    var out: AccelParsed = .{};
+    if (accel.len == 0) return out;
+    var key_tok: []const u8 = "";
+    var it = std.mem.tokenizeScalar(u8, accel, '+');
+    while (it.next()) |tok| {
+        if (std.ascii.eqlIgnoreCase(tok, "cmd") or std.ascii.eqlIgnoreCase(tok, "command") or
+            std.ascii.eqlIgnoreCase(tok, "cmdorctrl") or std.ascii.eqlIgnoreCase(tok, "commandorcontrol"))
+        {
+            out.mask |= 1 << 20;
+        } else if (std.ascii.eqlIgnoreCase(tok, "shift")) {
+            out.mask |= 1 << 17;
+        } else if (std.ascii.eqlIgnoreCase(tok, "alt") or std.ascii.eqlIgnoreCase(tok, "option")) {
+            out.mask |= 1 << 19;
+        } else if (std.ascii.eqlIgnoreCase(tok, "ctrl") or std.ascii.eqlIgnoreCase(tok, "control")) {
+            out.mask |= 1 << 18;
+        } else {
+            key_tok = tok; // 마지막 비-수정자 토큰 = key
+        }
+    }
+    if (key_tok.len == 1) out.key = std.ascii.toLower(key_tok[0]);
+    return out;
+}
+
+fn applyAccelerator(item: *anyopaque, accelerator: []const u8) void {
+    const p = parseAccelerator(accelerator);
+    if (p.key == 0) return; // 단일 문자 키 미파싱 → keyEquivalent 미설정(click 만 동작)
+    const key_slice = [_]u8{p.key};
+    const ns_key = nsStringFromSlice(&key_slice) orelse return;
+    msgSendVoid1(item, "setKeyEquivalent:", ns_key);
+    const setMod: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setMod(item, @ptrCast(objc.sel_registerName("setKeyEquivalentModifierMask:")), p.mask);
 }

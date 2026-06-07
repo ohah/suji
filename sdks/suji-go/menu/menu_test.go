@@ -10,6 +10,7 @@ func TestBuildSetApplicationMenuRequest(t *testing.T) {
 	runItem := Item("Run", "run")
 	runItem.ID = "run-item"
 	runItem.Visible = &hidden // visible:false 직렬화
+	runItem.Accelerator = "Cmd+R"
 	req := buildSetApplicationMenuRequest([]MenuItem{
 		Submenu("Tools", []MenuItem{
 			runItem,
@@ -40,6 +41,9 @@ func TestBuildSetApplicationMenuRequest(t *testing.T) {
 	}
 	if item0["visible"] != false {
 		t.Fatalf("visible = %v", item0["visible"])
+	}
+	if item0["accelerator"] != "Cmd+R" {
+		t.Fatalf("accelerator = %v", item0["accelerator"])
 	}
 	cb := sub[1].(map[string]any)
 	if cb["checked"] != true {
