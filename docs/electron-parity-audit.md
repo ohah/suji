@@ -57,7 +57,7 @@
 ### session
 
 - **[high]** `session.cookies.changed event` — Add session:cookies-changed event emission on cookie modifications. Implementation: (1) Register a CEF cookie visitor/observer with CEF's cookie manager via cef_cookie_manager_t callbacks (if CEF expo
-- **[high]** `session.setProxy(config)` — Add session.setProxy(config) to all SDKs. Define ProxyConfig interface (proxyRules, pacScript, etc.). Backend: implement session_set_proxy Zig command in cef.zig, wired to CEF proxy API. Pattern: sync
+- ~~**[high]** `session.setProxy(config)`~~ ✅ (#99) — Add session.setProxy(config) to all SDKs. Define ProxyConfig interface (proxyRules, pacScript, etc.). Backend: implement session_set_proxy Zig command in cef.zig, wired to CEF proxy API. Pattern: sync
 - **[high]** `session.setSSLConfig(config)` — Add session.setSSLConfig(config) implementation: (1) Extend Zig session handler in src/main.zig to accept "session_set_ssl_config" command with minVersion/maxVersion/disabledCipherSuites parameters. (
 - **[high]** `session.setPermissionRequestHandler` — Implement permission handler in Zig, CEF, and all SDKs
 

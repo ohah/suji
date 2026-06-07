@@ -300,6 +300,7 @@ suji::export_handlers!(ping);
 //   — 단일 인스턴스 락 (raw Option<String>; {"locked":bool}/{"success":bool}). second-instance
 //     argv 는 suji::on("app:second-instance", ...) 로 수신
 // suji::session::{clear_cookies(), flush_store()}  — CEF cookie_manager fire-and-forget
+// suji::session::set_proxy(mode, proxy_rules, proxy_bypass_rules, pac_script)  — Electron session.setProxy
 // suji::platform()             — "macos" | "linux" | "windows"
 // suji::typescript::SujiHandlers::new()
 //   .handler::<GreetReq, GreetRes>("greet")
@@ -347,6 +348,7 @@ var _ = suji.Bind(&App{})
 // app.GetPath("userData") / app.Exit()
 // import "github.com/ohah/suji-go/session"
 // session.ClearCookies() / session.FlushStore()
+// session.SetProxy(mode, proxyRules, proxyBypassRules, pacScript)  — Electron session.setProxy
 // import "github.com/ohah/suji-go/attention"
 // attention.RequestUser(true) / attention.CancelUserRequest(id)
 // import "github.com/ohah/suji-go/webrequest"
@@ -373,6 +375,9 @@ suji.platform                                                // "macos" | "linux
 // import { app, session } from '@suji/api';
 // await app.exit()                                           // Electron app.exit() (code 무시)
 // await session.clearCookies() / session.flushStore()        // CEF cookie_manager fire-and-forget
+// await session.setProxy({ mode:"fixed_servers", proxyRules:"host:port", proxyBypassRules, pacScript })
+//   — Electron session.setProxy. Chromium "proxy" pref(전역 request context). mode:"direct"=해제.
+//     프론트=UI 스레드 직접, 백엔드 SDK=UI 스레드로 post(워커 스레드)
 
 // TypeScript type-safe invoke — `SujiHandlers` interface를 augment하면 cmd/req/res 추론.
 // declare module '@suji/api' {
@@ -551,6 +556,7 @@ suji.send('my-event', JSON.stringify({ msg: 'hello' }))
 //     suji.on('app:second-instance', ({argv}) => ...) 로 수신 (전 6개 언어 동일 채널)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])
 // await session.clearCookies() / session.flushStore()                    — CEF cookie_manager
+// await session.setProxy({ mode, proxyRules, proxyBypassRules, pacScript }) — Electron session.setProxy
 
 // 공식 플러그인 backend 래퍼 (renderer @suji/plugin-* 의 Node 백엔드 변형)
 // const { state } = require('@suji/plugin-state-node')
