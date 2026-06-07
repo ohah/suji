@@ -221,6 +221,56 @@ pub fn extractJsonString(json: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
+/// `"key":[...]` 의 균형 잡힌 JSON 배열 raw 슬라이스(문자열/이스케이프 인지) 추출.
+/// 없거나 배열이 아니면 null. 메뉴 items 저장/에코(getApplicationMenu) 등에 사용.
+pub fn extractJsonArrayRaw(json: []const u8, key: []const u8) ?[]const u8 {
+    const after_colon = findKey(json, key) orelse return null;
+    var i = after_colon;
+    while (i < json.len and std.ascii.isWhitespace(json[i])) : (i += 1) {}
+    if (i >= json.len or json[i] != '[') return null;
+    const start = i;
+    var depth: i32 = 0;
+    var in_str = false;
+    var esc = false;
+    while (i < json.len) : (i += 1) {
+        const c = json[i];
+        if (in_str) {
+            if (esc) {
+                esc = false;
+            } else if (c == '\\') {
+                esc = true;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        switch (c) {
+            '"' => in_str = true,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if (depth == 0) return json[start .. i + 1];
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+test "extractJsonArrayRaw: 균형 배열 + 중첩/문자열 내 bracket" {
+    try std.testing.expectEqualStrings(
+        "[1,2,3]",
+        extractJsonArrayRaw("{\"items\":[1,2,3],\"x\":5}", "items").?,
+    );
+    // 중첩 배열 + 문자열 안의 `]` 무시.
+    try std.testing.expectEqualStrings(
+        "[{\"a\":[1]},\"x]y\"]",
+        extractJsonArrayRaw("{\"items\":[{\"a\":[1]},\"x]y\"]}", "items").?,
+    );
+    try std.testing.expect(extractJsonArrayRaw("{\"items\":5}", "items") == null); // 배열 아님
+    try std.testing.expect(extractJsonArrayRaw("{\"x\":[1]}", "items") == null); // 키 없음
+}
+
 /// JSON에서 `"key":123`의 정수 추출. 공백/음수 허용.
 pub fn extractJsonInt(json: []const u8, key: []const u8) ?i64 {
     const after_colon = findKey(json, key) orelse return null;

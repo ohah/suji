@@ -111,6 +111,43 @@ describe("menu_set_application_menu — wiring + 응답", () => {
     expect(r.success).toBe(true);
   });
 
+  test.skipIf(!isDarwin)("getApplicationMenu: set → get items 스냅샷 → reset → []", async () => {
+    await core<{ success: boolean }>({
+      cmd: "menu_set_application_menu",
+      items: [
+        {
+          type: "submenu",
+          label: "Tools",
+          id: "tools",
+          submenu: [
+            { label: "Run", click: "run", id: "run-item" },
+            { type: "checkbox", label: "Flag", click: "flag", checked: true, id: "flag-item" },
+          ],
+        },
+      ],
+    });
+    const got = await core<{ items: any[] }>({ cmd: "menu_get_application_menu" });
+    expect(Array.isArray(got.items)).toBe(true);
+    expect(got.items[0].id).toBe("tools");
+    expect(got.items[0].submenu[0].id).toBe("run-item");
+    expect(got.items[0].submenu[0].click).toBe("run");
+    expect(got.items[0].submenu[1].checked).toBe(true);
+    // reset → 스냅샷 클리어 → 빈 배열.
+    await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
+    const afterReset = await core<{ items: any[] }>({ cmd: "menu_get_application_menu" });
+    expect(afterReset.items).toEqual([]);
+  });
+
+  test.skipIf(isDarwin)("getApplicationMenu non-darwin: set 실패 → 스냅샷 미저장([])", async () => {
+    await core<{ success: boolean }>({
+      cmd: "menu_set_application_menu",
+      items: [{ label: "Tools", submenu: [{ label: "Run", click: "run" }] }],
+    });
+    // 비-macOS 는 setApplicationMenu 가 false → 스냅샷 저장 안 함.
+    const got = await core<{ items: any[] }>({ cmd: "menu_get_application_menu" });
+    expect(got.items).toEqual([]);
+  });
+
   test.skipIf(!isDarwin)("resetApplicationMenu 정상", async () => {
     const r = await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
     expect(r.success).toBe(true);

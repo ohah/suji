@@ -57,6 +57,29 @@ func TestBuildSetApplicationMenuRequest(t *testing.T) {
 	}
 }
 
+func TestFindMenuItemByID(t *testing.T) {
+	items := []MenuItem{
+		Submenu("Tools", []MenuItem{
+			{Type: "item", Label: "Run", Click: "run", ID: "run-item"},
+			Submenu("Nested", []MenuItem{
+				{Type: "item", Label: "Deep", Click: "deep", ID: "deep-item"},
+			}),
+		}),
+	}
+	items[0].ID = "tools"
+
+	if got := findMenuItemByID(items, "tools"); got == nil || got.Label != "Tools" {
+		t.Fatalf("tools = %#v", got)
+	}
+	// 중첩 submenu 재귀 탐색.
+	if got := findMenuItemByID(items, "deep-item"); got == nil || got.Click != "deep" {
+		t.Fatalf("deep-item = %#v", got)
+	}
+	if got := findMenuItemByID(items, "missing"); got != nil {
+		t.Fatalf("missing should be nil, got %#v", got)
+	}
+}
+
 func TestBuildSetApplicationMenuRequestEscapesStrings(t *testing.T) {
 	req := buildSetApplicationMenuRequest([]MenuItem{
 		Submenu(`도구 "Tools"`, []MenuItem{Item(`Run \ now`, "run\nnow")}),

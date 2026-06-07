@@ -976,6 +976,31 @@ export const menu = {
         const r = await coreCall({ cmd: "menu_reset_application_menu" });
         return r.success === true;
     },
+    /** Electron `Menu.getApplicationMenu()` — 마지막 setApplicationMenu 의 items 스냅샷
+     *  (없으면 []). 정직 경계: 라이브 mutation 아님(suji 메뉴는 fire-and-forget) — 변경하려면
+     *  setApplicationMenu 로 전체 재설정. */
+    async getApplicationMenu() {
+        const r = await coreCall({ cmd: "menu_get_application_menu" });
+        return Array.isArray(r.items) ? r.items : [];
+    },
+    /** Electron `Menu.getMenuItemById(id)` — getApplicationMenu 스냅샷에서 id 로 재귀 탐색.
+     *  없으면 null. (submenu 까지 깊이 탐색.) */
+    async getMenuItemById(id) {
+        const find = (items) => {
+            for (const it of items) {
+                if (it.id === id)
+                    return it;
+                const sub = it.submenu;
+                if (Array.isArray(sub)) {
+                    const hit = find(sub);
+                    if (hit)
+                        return hit;
+                }
+            }
+            return null;
+        };
+        return find(await menu.getApplicationMenu());
+    },
     /** 임의 위치 컨텍스트 메뉴 (Electron `Menu.popup({x?,y?})`). x/y 미지정 시
      *  현재 커서(화면 좌표, macOS bottom-up). 선택은 `suji.on('menu:click',
      *  ({click}) => ...)` 로 수신 (setApplicationMenu 와 동일). macOS NSMenu
