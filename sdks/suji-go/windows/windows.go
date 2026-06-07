@@ -277,6 +277,37 @@ func GetMaximumSize(windowID uint32) string {
 	return suji.Invoke("__core__", windowOpRequest("get_maximum_size", windowID))
 }
 
+// ── 창 capability 토글 (Electron setResizable/setMinimizable/setMaximizable/setClosable) ──
+// setter: {"cmd","windowId","<prop>":bool}. getter: raw JSON {"<prop>":bool,"ok"}.
+func setBoolRequest(cmd string, windowID uint32, prop string, value bool) string {
+	return fmt.Sprintf(`{"cmd":"%s","windowId":%d,"%s":%t}`, cmd, windowID, prop, value)
+}
+
+func SetResizable(windowID uint32, resizable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_resizable", windowID, "resizable", resizable))
+}
+func IsResizable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_resizable", windowID))
+}
+func SetMinimizable(windowID uint32, minimizable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_minimizable", windowID, "minimizable", minimizable))
+}
+func IsMinimizable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_minimizable", windowID))
+}
+func SetMaximizable(windowID uint32, maximizable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_maximizable", windowID, "maximizable", maximizable))
+}
+func IsMaximizable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_maximizable", windowID))
+}
+func SetClosable(windowID uint32, closable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_closable", windowID, "closable", closable))
+}
+func IsClosable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_closable", windowID))
+}
+
 type CreateViewArgs struct {
 	HostID uint32
 	Name   string
@@ -540,8 +571,8 @@ func (w *BrowserWindow) SetTitle(title string) string { return SetTitle(w.ID, ti
 func (w *BrowserWindow) SetBounds(b SetBoundsArgs) string {
 	return SetBounds(w.ID, b)
 }
-func (w *BrowserWindow) SetSize(width, height uint32) string  { return SetSize(w.ID, width, height) }
-func (w *BrowserWindow) SetPosition(x, y int32) string        { return SetPosition(w.ID, x, y) }
+func (w *BrowserWindow) SetSize(width, height uint32) string { return SetSize(w.ID, width, height) }
+func (w *BrowserWindow) SetPosition(x, y int32) string       { return SetPosition(w.ID, x, y) }
 func (w *BrowserWindow) SetMinimumSize(width, height uint32) string {
 	return SetMinimumSize(w.ID, width, height)
 }
@@ -549,7 +580,19 @@ func (w *BrowserWindow) GetMinimumSize() string { return GetMinimumSize(w.ID) }
 func (w *BrowserWindow) SetMaximumSize(width, height uint32) string {
 	return SetMaximumSize(w.ID, width, height)
 }
-func (w *BrowserWindow) GetMaximumSize() string { return GetMaximumSize(w.ID) }
+func (w *BrowserWindow) GetMaximumSize() string             { return GetMaximumSize(w.ID) }
+func (w *BrowserWindow) SetResizable(resizable bool) string { return SetResizable(w.ID, resizable) }
+func (w *BrowserWindow) IsResizable() string                { return IsResizable(w.ID) }
+func (w *BrowserWindow) SetMinimizable(minimizable bool) string {
+	return SetMinimizable(w.ID, minimizable)
+}
+func (w *BrowserWindow) IsMinimizable() string { return IsMinimizable(w.ID) }
+func (w *BrowserWindow) SetMaximizable(maximizable bool) string {
+	return SetMaximizable(w.ID, maximizable)
+}
+func (w *BrowserWindow) IsMaximizable() string            { return IsMaximizable(w.ID) }
+func (w *BrowserWindow) SetClosable(closable bool) string { return SetClosable(w.ID, closable) }
+func (w *BrowserWindow) IsClosable() string               { return IsClosable(w.ID) }
 func (w *BrowserWindow) CreateView(args CreateViewArgs) string {
 	args.HostID = w.ID
 	return CreateView(args)

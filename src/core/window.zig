@@ -105,6 +105,12 @@ pub const Appearance = struct {
 pub const Constraints = struct {
     /// false면 사용자 리사이즈 불가 (frame=true일 때만 의미; frameless는 이미 핸들 없음).
     resizable: bool = true,
+    /// false면 최소화 불가 (NSWindowStyleMaskMiniaturizable / delegate can_minimize).
+    minimizable: bool = true,
+    /// false면 최대화(zoom) 불가 (zoom 버튼 disable / delegate can_maximize).
+    maximizable: bool = true,
+    /// false면 닫기 불가 (NSWindowStyleMaskClosable / delegate can_close).
+    closable: bool = true,
     /// true면 일반 창 위.
     always_on_top: bool = false,
     /// 최소/최대 콘텐츠 크기 (0이면 제한 없음).
@@ -275,6 +281,17 @@ pub const Native = struct {
         get_minimum_size: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
         set_maximum_size: *const fn (ctx: ?*anyopaque, handle: u64, w: u32, h: u32) void,
         get_maximum_size: *const fn (ctx: ?*anyopaque, handle: u64) Bounds,
+        // 창 capability 토글 (Electron BrowserWindow.setResizable 등). delegate constraints
+        // 단일 출처(CEF Views can_resize/can_minimize/can_maximize/can_close 콜백) + macOS
+        // NSWindow styleMask/zoom 버튼 즉시 적용. getter 는 추적된 constraints 값.
+        set_resizable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_resizable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_minimizable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_minimizable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_maximizable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_maximizable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_closable: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_closable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
         undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
         redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -421,6 +438,30 @@ pub const Native = struct {
     }
     pub fn getMaximumSize(self: Native, handle: u64) Bounds {
         return self.vtable.get_maximum_size(self.ctx, handle);
+    }
+    pub fn setResizable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_resizable(self.ctx, handle, on);
+    }
+    pub fn isResizable(self: Native, handle: u64) bool {
+        return self.vtable.is_resizable(self.ctx, handle);
+    }
+    pub fn setMinimizable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_minimizable(self.ctx, handle, on);
+    }
+    pub fn isMinimizable(self: Native, handle: u64) bool {
+        return self.vtable.is_minimizable(self.ctx, handle);
+    }
+    pub fn setMaximizable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_maximizable(self.ctx, handle, on);
+    }
+    pub fn isMaximizable(self: Native, handle: u64) bool {
+        return self.vtable.is_maximizable(self.ctx, handle);
+    }
+    pub fn setClosable(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_closable(self.ctx, handle, on);
+    }
+    pub fn isClosable(self: Native, handle: u64) bool {
+        return self.vtable.is_closable(self.ctx, handle);
     }
     pub fn undo(self: Native, handle: u64) void {
         self.vtable.undo(self.ctx, handle);
@@ -1460,6 +1501,56 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveWindowLocked(id);
         return self.native.getMaximumSize(win.native_handle);
+    }
+
+    /// Electron BrowserWindow.setResizable/isResizable 등 capability 토글. .window 전용.
+    pub fn setResizable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setResizable(win.native_handle, on);
+    }
+    pub fn isResizable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isResizable(win.native_handle);
+    }
+    pub fn setMinimizable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setMinimizable(win.native_handle, on);
+    }
+    pub fn isMinimizable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isMinimizable(win.native_handle);
+    }
+    pub fn setMaximizable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setMaximizable(win.native_handle, on);
+    }
+    pub fn isMaximizable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isMaximizable(win.native_handle);
+    }
+    pub fn setClosable(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setClosable(win.native_handle, on);
+    }
+    pub fn isClosable(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isClosable(win.native_handle);
     }
 
     /// Electron 호환 zoom factor↔level 변환 base. `pow(ZOOM_BASE, level) == factor`,

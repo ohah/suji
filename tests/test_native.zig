@@ -63,6 +63,10 @@ pub const TestNative = struct {
     last_background_color: []const u8 = "",
     set_background_color_calls: usize = 0,
     stub_has_shadow: bool = true,
+    stub_resizable: bool = true,
+    stub_minimizable: bool = true,
+    stub_maximizable: bool = true,
+    stub_closable: bool = true,
 
     // Phase 4-E: 편집/검색 캡처. named struct — 인덱스 매핑 mismatch 회귀 차단
     // (이전엔 [6]usize + 인덱스로 호출자/검증자가 분리. 위치 바뀌면 silent 잘못 카운트).
@@ -167,6 +171,14 @@ pub const TestNative = struct {
         .get_minimum_size = getMinimumSize,
         .set_maximum_size = setMaximumSize,
         .get_maximum_size = getMaximumSize,
+        .set_resizable = setResizable,
+        .is_resizable = isResizable,
+        .set_minimizable = setMinimizable,
+        .is_minimizable = isMinimizable,
+        .set_maximizable = setMaximizable,
+        .is_maximizable = isMaximizable,
+        .set_closable = setClosable,
+        .is_closable = isClosable,
         .undo = makeEditFn("undo"),
         .redo = makeEditFn("redo"),
         .cut = makeEditFn("cut"),
@@ -384,6 +396,30 @@ pub const TestNative = struct {
     }
     fn getMaximumSize(ctx: ?*anyopaque, _: u64) window.Bounds {
         return fromCtx(ctx).last_max_size orelse .{};
+    }
+    fn setResizable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_resizable = on;
+    }
+    fn isResizable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_resizable;
+    }
+    fn setMinimizable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_minimizable = on;
+    }
+    fn isMinimizable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_minimizable;
+    }
+    fn setMaximizable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_maximizable = on;
+    }
+    fn isMaximizable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_maximizable;
+    }
+    fn setClosable(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_closable = on;
+    }
+    fn isClosable(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_closable;
     }
 
     fn findInPage(ctx: ?*anyopaque, _: u64, text: []const u8, forward: bool, match_case: bool, find_next: bool) void {

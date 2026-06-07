@@ -150,12 +150,17 @@ fn viewsWindowCanMaximize(
 ) callconv(.c) i32 {
     const d = viewsWindowFromSelf(self) orelse return 1;
     releaseWindowRef(@ptrCast(window));
-    return if (d.constraints.resizable) 1 else 0;
+    // resizable AND maximizable — 둘 다 만족해야 zoom 허용(리사이즈 불가 창은 최대화도 무의미).
+    return if (d.constraints.resizable and d.constraints.maximizable) 1 else 0;
 }
 
-fn viewsWindowCanMinimize(_: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) i32 {
+fn viewsWindowCanMinimize(self: ?*c._cef_window_delegate_t, window: ?*c._cef_window_t) callconv(.c) i32 {
+    const d = viewsWindowFromSelf(self) orelse {
+        releaseWindowRef(@ptrCast(window));
+        return 1;
+    };
     releaseWindowRef(@ptrCast(window));
-    return 1;
+    return if (d.constraints.minimizable) 1 else 0;
 }
 
 fn viewsWindowGetParentWindow(
@@ -194,6 +199,11 @@ fn viewsWindowCanClose(
         releaseWindowRef(@ptrCast(window));
         return 1;
     };
+    // closable=false 면 사용자/OS 닫기 차단(try_close_browser 거치지 않음). Electron setClosable.
+    if (!d.constraints.closable) {
+        releaseWindowRef(@ptrCast(window));
+        return 0;
+    }
     var can_close: i32 = 1;
     if (d.browser_view) |bv| {
         if (bv.get_browser) |get_browser| {

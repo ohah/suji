@@ -306,6 +306,27 @@ pub fn setMacContentMaxSize(window: ?*anyopaque, w: u32, h: u32) void {
     });
 }
 
+/// NSWindow styleMask 비트 런타임 토글. bit: NSWindowStyleMask*(Resizable=1<<3,
+/// Closable=1<<1, Miniaturizable=1<<2). on=true 면 set, false 면 clear.
+pub fn setMacStyleMaskBit(window: ?*anyopaque, bit: u64, on: bool) void {
+    const getMaskSel = objc.sel_registerName("styleMask");
+    const getMaskFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
+    const cur = getMaskFn(window, @ptrCast(getMaskSel));
+    const next = if (on) cur | bit else cur & ~bit;
+    const setMaskSel = objc.sel_registerName("setStyleMask:");
+    const setMaskFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setMaskFn(window, @ptrCast(setMaskSel), next);
+}
+
+/// maximizable: macOS 는 styleMask 비트가 없어 zoom(green) 버튼을 enable/disable.
+/// NSWindowZoomButton = 2 (standardWindowButton:).
+pub fn setMacZoomButtonEnabled(window: ?*anyopaque, on: bool) void {
+    const btnSel = objc.sel_registerName("standardWindowButton:");
+    const btnFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const button = btnFn(window, @ptrCast(btnSel), 2) orelse return;
+    cef.msgSendVoidBool(button, "setEnabled:", on);
+}
+
 pub fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {
     if (hex.len < 7 or hex[0] != '#' or (hex.len != 7 and hex.len != 9)) {
         log.warn("backgroundColor: invalid format '{s}' (expected #RRGGBB or #RRGGBBAA)", .{hex});
@@ -343,14 +364,8 @@ fn toggleMacFullScreen(window: ?*anyopaque) void {
 fn applyTitleBarStyle(window: ?*anyopaque, style: window_mod.TitleBarStyle) void {
     if (style == .default) return;
     cef.msgSendVoidBool(window, "setTitlebarAppearsTransparent:", true);
-
-    const getMaskSel = objc.sel_registerName("styleMask");
-    const getMaskFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
-    const current_mask = getMaskFn(window, @ptrCast(getMaskSel));
-
-    const setMaskSel = objc.sel_registerName("setStyleMask:");
-    const setMaskFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-    setMaskFn(window, @ptrCast(setMaskSel), current_mask | (1 << 15));
+    // NSWindowStyleMaskFullSizeContentView = 1<<15 (콘텐츠가 타이틀바 영역까지).
+    setMacStyleMaskBit(window, 1 << 15, true);
 }
 
 pub fn closeMacWindow(ns_window: ?*anyopaque) void {

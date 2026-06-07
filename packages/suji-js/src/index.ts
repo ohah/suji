@@ -253,6 +253,22 @@ export interface IsMaximizedResponse extends WindowOpResponse {
   cmd: "is_maximized";
   maximized: boolean;
 }
+export interface IsResizableResponse extends WindowOpResponse {
+  cmd: "is_resizable";
+  resizable: boolean;
+}
+export interface IsMinimizableResponse extends WindowOpResponse {
+  cmd: "is_minimizable";
+  minimizable: boolean;
+}
+export interface IsMaximizableResponse extends WindowOpResponse {
+  cmd: "is_maximizable";
+  maximizable: boolean;
+}
+export interface IsClosableResponse extends WindowOpResponse {
+  cmd: "is_closable";
+  closable: boolean;
+}
 export interface IsFullScreenResponse extends WindowOpResponse {
   cmd: "is_fullscreen";
   fullscreen: boolean;
@@ -607,6 +623,38 @@ export const windows = {
   async getMaximumSize(windowId: number): Promise<[number, number]> {
     const r = await coreCall<SizeResponse>({ cmd: "get_maximum_size", windowId });
     return [r.width, r.height];
+  },
+  /** Electron BrowserWindow.setResizable(resizable). false 면 사용자 리사이즈 불가. */
+  setResizable(windowId: number, resizable: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_resizable", windowId, resizable });
+  },
+  /** Electron BrowserWindow.isResizable(). */
+  isResizable(windowId: number): Promise<IsResizableResponse> {
+    return coreCall<IsResizableResponse>({ cmd: "is_resizable", windowId });
+  },
+  /** Electron BrowserWindow.setMinimizable(minimizable). */
+  setMinimizable(windowId: number, minimizable: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_minimizable", windowId, minimizable });
+  },
+  /** Electron BrowserWindow.isMinimizable(). */
+  isMinimizable(windowId: number): Promise<IsMinimizableResponse> {
+    return coreCall<IsMinimizableResponse>({ cmd: "is_minimizable", windowId });
+  },
+  /** Electron BrowserWindow.setMaximizable(maximizable). */
+  setMaximizable(windowId: number, maximizable: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_maximizable", windowId, maximizable });
+  },
+  /** Electron BrowserWindow.isMaximizable(). */
+  isMaximizable(windowId: number): Promise<IsMaximizableResponse> {
+    return coreCall<IsMaximizableResponse>({ cmd: "is_maximizable", windowId });
+  },
+  /** Electron BrowserWindow.setClosable(closable). false 면 닫기 불가. */
+  setClosable(windowId: number, closable: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_closable", windowId, closable });
+  },
+  /** Electron BrowserWindow.isClosable(). */
+  isClosable(windowId: number): Promise<IsClosableResponse> {
+    return coreCall<IsClosableResponse>({ cmd: "is_closable", windowId });
   },
   /** Electron BrowserWindow.blur() — 창 포커스 해제. */
   blur(windowId: number): Promise<WindowOpResponse> {
@@ -963,6 +1011,30 @@ export class BrowserWindow {
   }
   getMaximumSize() {
     return windows.getMaximumSize(this.#id);
+  }
+  setResizable(resizable: boolean) {
+    return windows.setResizable(this.#id, resizable);
+  }
+  isResizable() {
+    return windows.isResizable(this.#id);
+  }
+  setMinimizable(minimizable: boolean) {
+    return windows.setMinimizable(this.#id, minimizable);
+  }
+  isMinimizable() {
+    return windows.isMinimizable(this.#id);
+  }
+  setMaximizable(maximizable: boolean) {
+    return windows.setMaximizable(this.#id, maximizable);
+  }
+  isMaximizable() {
+    return windows.isMaximizable(this.#id);
+  }
+  setClosable(closable: boolean) {
+    return windows.setClosable(this.#id, closable);
+  }
+  isClosable() {
+    return windows.isClosable(this.#id);
   }
   blur() {
     return windows.blur(this.#id);

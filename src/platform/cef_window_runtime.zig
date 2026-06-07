@@ -207,6 +207,75 @@ pub fn getMaximumSizeImpl(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
     return .{};
 }
 
+// ── 창 capability 토글 (Electron setResizable/setMinimizable/setMaximizable/setClosable) ──
+// 단일 출처 = delegate.constraints (CEF Views can_resize/can_minimize/can_maximize/can_close
+// 콜백이 읽음). setter: ① delegate constraints 갱신 ② macOS NSWindow styleMask 비트/zoom 버튼
+// 즉시 적용(min/max 동일 belt-and-suspenders) ③ invalidate_layout. getter: delegate 값(결정적).
+// macOS styleMask 비트: Resizable=1<<3, Closable=1<<1, Miniaturizable=1<<2.
+
+fn invalidateLayout(entry: *cef.CefNative.BrowserEntry) void {
+    if (entry.views_window) |vw| {
+        if (vw.base.base.invalidate_layout) |inv| inv(&vw.base.base);
+    }
+}
+
+pub fn setResizableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.resizable = on;
+    if (is_macos) {
+        if (entry.ns_window) |ns| cef.setMacStyleMaskBit(ns, 1 << 3, on);
+    }
+    invalidateLayout(entry);
+}
+pub fn isResizableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.resizable else true;
+}
+
+pub fn setMinimizableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.minimizable = on;
+    if (is_macos) {
+        if (entry.ns_window) |ns| cef.setMacStyleMaskBit(ns, 1 << 2, on);
+    }
+    invalidateLayout(entry);
+}
+pub fn isMinimizableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.minimizable else true;
+}
+
+pub fn setMaximizableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.maximizable = on;
+    if (is_macos) {
+        // macOS 는 maximizable styleMask 비트 없음 → zoom(green) 버튼 enable/disable.
+        if (entry.ns_window) |ns| cef.setMacZoomButtonEnabled(ns, on);
+    }
+    invalidateLayout(entry);
+}
+pub fn isMaximizableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.maximizable else true;
+}
+
+pub fn setClosableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.closable = on;
+    if (is_macos) {
+        if (entry.ns_window) |ns| cef.setMacStyleMaskBit(ns, 1 << 1, on);
+    }
+    invalidateLayout(entry);
+}
+pub fn isClosableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.closable else true;
+}
+
 // Electron getContentBounds() — 콘텐츠 영역(타이틀바/프레임 제외). CEF Views 는
 // get_client_area_bounds_in_screen(top-left) 직접 제공, 아니면 macOS NSWindow 변환.
 pub fn getContentBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {
