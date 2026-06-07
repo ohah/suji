@@ -505,6 +505,26 @@ export interface IsClosableResponse extends WindowOpResponse {
   cmd: 'is_closable';
   closable: boolean;
 }
+export interface IsMovableResponse extends WindowOpResponse {
+  cmd: 'is_movable';
+  movable: boolean;
+}
+export interface IsFocusableResponse extends WindowOpResponse {
+  cmd: 'is_focusable';
+  focusable: boolean;
+}
+export interface IsEnabledResponse extends WindowOpResponse {
+  cmd: 'is_enabled';
+  enabled: boolean;
+}
+export interface IsFullScreenableResponse extends WindowOpResponse {
+  cmd: 'is_fullscreenable';
+  fullscreenable: boolean;
+}
+export interface IsKioskResponse extends WindowOpResponse {
+  cmd: 'is_kiosk';
+  kiosk: boolean;
+}
 export interface IsFullScreenResponse extends WindowOpResponse {
   cmd: 'is_fullscreen';
   fullscreen: boolean;
@@ -867,6 +887,41 @@ export const windows = {
   isClosable(windowId: number): Promise<IsClosableResponse> {
     return invoke<IsClosableResponse>('__core__', { cmd: 'is_closable', windowId });
   },
+  /** Electron BrowserWindow.setMovable(movable). macOS NSWindow.movable, 그 외 tracked. */
+  setMovable(windowId: number, movable: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_movable', windowId, movable });
+  },
+  isMovable(windowId: number): Promise<IsMovableResponse> {
+    return invoke<IsMovableResponse>('__core__', { cmd: 'is_movable', windowId });
+  },
+  /** Electron BrowserWindow.setFocusable(focusable). tracked(best-effort). */
+  setFocusable(windowId: number, focusable: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_focusable', windowId, focusable });
+  },
+  isFocusable(windowId: number): Promise<IsFocusableResponse> {
+    return invoke<IsFocusableResponse>('__core__', { cmd: 'is_focusable', windowId });
+  },
+  /** Electron BrowserWindow.setEnabled(enable). Win32 EnableWindow / macOS ignoresMouseEvents(마우스). */
+  setEnabled(windowId: number, enabled: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_enabled', windowId, enabled });
+  },
+  isEnabled(windowId: number): Promise<IsEnabledResponse> {
+    return invoke<IsEnabledResponse>('__core__', { cmd: 'is_enabled', windowId });
+  },
+  /** Electron BrowserWindow.setFullScreenable(flag). macOS collectionBehavior, 그 외 tracked. */
+  setFullScreenable(windowId: number, fullscreenable: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_fullscreenable', windowId, fullscreenable });
+  },
+  isFullScreenable(windowId: number): Promise<IsFullScreenableResponse> {
+    return invoke<IsFullScreenableResponse>('__core__', { cmd: 'is_fullscreenable', windowId });
+  },
+  /** Electron BrowserWindow.setKiosk(flag). best-effort: 전체화면(presentation-options 미포함). */
+  setKiosk(windowId: number, flag: boolean): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'set_kiosk', windowId, kiosk: flag });
+  },
+  isKiosk(windowId: number): Promise<IsKioskResponse> {
+    return invoke<IsKioskResponse>('__core__', { cmd: 'is_kiosk', windowId });
+  },
   /** Electron BrowserWindow.blur() — 창 포커스 해제. */
   blur(windowId: number): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'blur', windowId });
@@ -1201,6 +1256,36 @@ export class BrowserWindow {
   }
   isClosable() {
     return windows.isClosable(this.#id);
+  }
+  setMovable(movable: boolean) {
+    return windows.setMovable(this.#id, movable);
+  }
+  isMovable() {
+    return windows.isMovable(this.#id);
+  }
+  setFocusable(focusable: boolean) {
+    return windows.setFocusable(this.#id, focusable);
+  }
+  isFocusable() {
+    return windows.isFocusable(this.#id);
+  }
+  setEnabled(enabled: boolean) {
+    return windows.setEnabled(this.#id, enabled);
+  }
+  isEnabled() {
+    return windows.isEnabled(this.#id);
+  }
+  setFullScreenable(fullscreenable: boolean) {
+    return windows.setFullScreenable(this.#id, fullscreenable);
+  }
+  isFullScreenable() {
+    return windows.isFullScreenable(this.#id);
+  }
+  setKiosk(flag: boolean) {
+    return windows.setKiosk(this.#id, flag);
+  }
+  isKiosk() {
+    return windows.isKiosk(this.#id);
   }
   blur() {
     return windows.blur(this.#id);

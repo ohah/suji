@@ -276,6 +276,88 @@ pub fn isClosableImpl(ctx: ?*anyopaque, handle: u64) bool {
     return if (entry.views_window_delegate) |d| d.constraints.closable else true;
 }
 
+// ── 창 모드 토글 (Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk) ──
+// tracked constraints 단일 출처(getter 결정적) + best-effort 네이티브. movable/focusable/
+// enabled/fullscreenable/kiosk 는 layout 무관이라 invalidate_layout 불필요.
+// 정직 경계: focusable=tracked-only(클린 네이티브 토글 부재), enabled=macOS ignoresMouseEvents
+// (마우스만)/Win32 EnableWindow(정확)/Linux tracked, fullscreenable=macOS collectionBehavior
+// (실효)/그 외 tracked, kiosk=CEF Views fullscreen best-effort(presentation-options 미포함).
+
+const is_windows = builtin.os.tag == .windows;
+const win_enable = if (is_windows) struct {
+    extern "user32" fn EnableWindow(hWnd: ?*anyopaque, bEnable: i32) callconv(.winapi) i32;
+} else struct {};
+
+pub fn setMovableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.movable = on;
+    if (is_macos) {
+        if (entry.ns_window) |ns| cef.setMacMovable(ns, on);
+    }
+}
+pub fn isMovableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.movable else true;
+}
+
+pub fn setFocusableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    // tracked-only — macOS/Win/Linux 모두 런타임 focusable 토글의 클린 API 부재(정직 경계).
+    if (entry.views_window_delegate) |d| d.constraints.focusable = on;
+}
+pub fn isFocusableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.focusable else true;
+}
+
+pub fn setEnabledImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.enabled = on;
+    if (is_macos) {
+        // enabled=true → ignoresMouseEvents=false (입력 허용). 마우스만(키보드 미포함, 정직).
+        if (entry.ns_window) |ns| cef.setMacIgnoresMouseEvents(ns, !on);
+    } else if (is_windows) {
+        if (cef.windowsEntryHwnd(entry)) |hwnd| _ = win_enable.EnableWindow(hwnd, if (on) 1 else 0);
+    }
+}
+pub fn isEnabledImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.enabled else true;
+}
+
+pub fn setFullscreenableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.fullscreenable = on;
+    if (is_macos) {
+        // NSWindowCollectionBehaviorFullScreenPrimary = 1<<7.
+        if (entry.ns_window) |ns| cef.setMacCollectionBehaviorBit(ns, 1 << 7, on);
+    }
+}
+pub fn isFullscreenableImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
+    return if (entry.views_window_delegate) |d| d.constraints.fullscreenable else true;
+}
+
+pub fn setKioskImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.kiosk = on;
+    // best-effort: CEF Views 전체화면 flag-set(presentation-options=dock/menu 숨김은 follow-up).
+    // 현재 상태와 같으면 redundant 전환 skip(setFullscreenImpl 동일 가드).
+    if (entry.views_window) |vw| {
+        if (cef_views_delegate.viewsWindowIsFullscreen(vw) == on) return;
+        if (vw.set_fullscreen) |set_fs| set_fs(vw, @intFromBool(on));
+    }
+}
+pub fn isKioskImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return false;
+    return if (entry.views_window_delegate) |d| d.constraints.kiosk else false;
+}
+
 // Electron getContentBounds() — 콘텐츠 영역(타이틀바/프레임 제외). CEF Views 는
 // get_client_area_bounds_in_screen(top-left) 직접 제공, 아니면 macOS NSWindow 변환.
 pub fn getContentBounds(ctx: ?*anyopaque, handle: u64) window_mod.Bounds {

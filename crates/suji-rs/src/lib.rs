@@ -858,6 +858,40 @@ pub mod windows {
         invoke("__core__", &window_op_request("is_closable", window_id))
     }
 
+    // ── 창 모드 토글 (Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk) ──
+    // tracked + best-effort 네이티브(정직 경계: focusable=tracked, enabled=Win EnableWindow/
+    // macOS 마우스만, kiosk=fullscreen best-effort). getter=추적값 raw JSON.
+    pub fn set_movable(window_id: u32, movable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_movable", window_id, "movable", movable))
+    }
+    pub fn is_movable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_movable", window_id))
+    }
+    pub fn set_focusable(window_id: u32, focusable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_focusable", window_id, "focusable", focusable))
+    }
+    pub fn is_focusable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_focusable", window_id))
+    }
+    pub fn set_enabled(window_id: u32, enabled: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_enabled", window_id, "enabled", enabled))
+    }
+    pub fn is_enabled(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_enabled", window_id))
+    }
+    pub fn set_fullscreenable(window_id: u32, fullscreenable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_fullscreenable", window_id, "fullscreenable", fullscreenable))
+    }
+    pub fn is_fullscreenable(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_fullscreenable", window_id))
+    }
+    pub fn set_kiosk(window_id: u32, kiosk: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_kiosk", window_id, "kiosk", kiosk))
+    }
+    pub fn is_kiosk(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_kiosk", window_id))
+    }
+
     // ── Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티) ──
     // 대부분 `{"cmd":"X","windowId":N}` 동형 → window_op 로 DRY. 응답은 raw JSON.
     fn window_op_request(cmd: &str, window_id: u32) -> String {
@@ -1272,6 +1306,36 @@ pub mod windows {
         }
         pub fn is_closable(&self) -> Option<String> {
             is_closable(self.id)
+        }
+        pub fn set_movable(&self, movable: bool) -> Option<String> {
+            set_movable(self.id, movable)
+        }
+        pub fn is_movable(&self) -> Option<String> {
+            is_movable(self.id)
+        }
+        pub fn set_focusable(&self, focusable: bool) -> Option<String> {
+            set_focusable(self.id, focusable)
+        }
+        pub fn is_focusable(&self) -> Option<String> {
+            is_focusable(self.id)
+        }
+        pub fn set_enabled(&self, enabled: bool) -> Option<String> {
+            set_enabled(self.id, enabled)
+        }
+        pub fn is_enabled(&self) -> Option<String> {
+            is_enabled(self.id)
+        }
+        pub fn set_fullscreenable(&self, fullscreenable: bool) -> Option<String> {
+            set_fullscreenable(self.id, fullscreenable)
+        }
+        pub fn is_fullscreenable(&self) -> Option<String> {
+            is_fullscreenable(self.id)
+        }
+        pub fn set_kiosk(&self, kiosk: bool) -> Option<String> {
+            set_kiosk(self.id, kiosk)
+        }
+        pub fn is_kiosk(&self) -> Option<String> {
+            is_kiosk(self.id)
         }
         // Electron BrowserWindow 생명주기/상태 (JS @suji/api 패리티).
         pub fn minimize(&self) -> Option<String> {

@@ -308,6 +308,39 @@ func IsClosable(windowID uint32) string {
 	return suji.Invoke("__core__", windowOpRequest("is_closable", windowID))
 }
 
+// ── 창 모드 토글 (Electron setMovable/setFocusable/setEnabled/setFullScreenable/setKiosk) ──
+// tracked + best-effort 네이티브. getter: raw JSON {"<prop>":bool,"ok"}.
+func SetMovable(windowID uint32, movable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_movable", windowID, "movable", movable))
+}
+func IsMovable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_movable", windowID))
+}
+func SetFocusable(windowID uint32, focusable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_focusable", windowID, "focusable", focusable))
+}
+func IsFocusable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_focusable", windowID))
+}
+func SetEnabled(windowID uint32, enabled bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_enabled", windowID, "enabled", enabled))
+}
+func IsEnabled(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_enabled", windowID))
+}
+func SetFullScreenable(windowID uint32, fullscreenable bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_fullscreenable", windowID, "fullscreenable", fullscreenable))
+}
+func IsFullScreenable(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_fullscreenable", windowID))
+}
+func SetKiosk(windowID uint32, kiosk bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_kiosk", windowID, "kiosk", kiosk))
+}
+func IsKiosk(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_kiosk", windowID))
+}
+
 type CreateViewArgs struct {
 	HostID uint32
 	Name   string
@@ -593,6 +626,20 @@ func (w *BrowserWindow) SetMaximizable(maximizable bool) string {
 func (w *BrowserWindow) IsMaximizable() string            { return IsMaximizable(w.ID) }
 func (w *BrowserWindow) SetClosable(closable bool) string { return SetClosable(w.ID, closable) }
 func (w *BrowserWindow) IsClosable() string               { return IsClosable(w.ID) }
+func (w *BrowserWindow) SetMovable(movable bool) string   { return SetMovable(w.ID, movable) }
+func (w *BrowserWindow) IsMovable() string                { return IsMovable(w.ID) }
+func (w *BrowserWindow) SetFocusable(focusable bool) string {
+	return SetFocusable(w.ID, focusable)
+}
+func (w *BrowserWindow) IsFocusable() string            { return IsFocusable(w.ID) }
+func (w *BrowserWindow) SetEnabled(enabled bool) string { return SetEnabled(w.ID, enabled) }
+func (w *BrowserWindow) IsEnabled() string              { return IsEnabled(w.ID) }
+func (w *BrowserWindow) SetFullScreenable(fullscreenable bool) string {
+	return SetFullScreenable(w.ID, fullscreenable)
+}
+func (w *BrowserWindow) IsFullScreenable() string   { return IsFullScreenable(w.ID) }
+func (w *BrowserWindow) SetKiosk(kiosk bool) string { return SetKiosk(w.ID, kiosk) }
+func (w *BrowserWindow) IsKiosk() string            { return IsKiosk(w.ID) }
 func (w *BrowserWindow) CreateView(args CreateViewArgs) string {
 	args.HostID = w.ID
 	return CreateView(args)

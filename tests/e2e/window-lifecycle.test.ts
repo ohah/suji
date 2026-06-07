@@ -492,6 +492,59 @@ describe("Phase 2 — set_title / set_bounds 런타임 변경", () => {
     expect(r.ok).toBe(false);
   });
 
+  // Electron 패리티: setMovable/setFocusable/setEnabled/setFullScreenable.
+  // getter 는 tracked constraints(결정적) → round-trip. enforcement(드래그/입력 차단)은
+  // best-effort 정직 경계(headless 미검증).
+  // ⚠️ kiosk 는 제외 — set_kiosk(true) 가 실제 CEF Views 전체화면(macOS Space 전환)을
+  // 유발해 CI 에서 비동기·파괴적이라 후속 창 geometry 테스트를 오염시킨다. kiosk flag
+  // round-trip 은 window_manager_test/window_ipc_test(결정적 mock)로 커버. 실 전체화면
+  // enforcement 는 real-runner 천장(정직 경계).
+  test("mode flags: set → get round-trip (movable/focusable/enabled/fullscreenable)", async () => {
+    const c = await coreCall({ cmd: "create_window", title: "modes", url: "about:blank" });
+    const cases: Array<[string, string, string]> = [
+      ["set_movable", "is_movable", "movable"],
+      ["set_focusable", "is_focusable", "focusable"],
+      ["set_enabled", "is_enabled", "enabled"],
+      ["set_fullscreenable", "is_fullscreenable", "fullscreenable"],
+    ];
+    for (const [setCmd, getCmd, prop] of cases) {
+      const sr: any = await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: setCmd, windowId: c.windowId, [prop]: false },
+      );
+      expect(sr.ok).toBe(true);
+      const gr: any = await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: getCmd, windowId: c.windowId },
+      );
+      expect(gr.ok).toBe(true);
+      expect(gr[prop]).toBe(false);
+      // 다시 true 토글.
+      await page.evaluate(
+        (req) => (window as any).__suji__.core(JSON.stringify(req)),
+        { cmd: setCmd, windowId: c.windowId, [prop]: true },
+      );
+    }
+    // kiosk 는 전체화면 미유발로 flag round-trip 만(전체화면 진입 X — set_kiosk(false)).
+    const kr: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "set_kiosk", windowId: c.windowId, kiosk: false },
+    );
+    expect(kr.ok).toBe(true);
+    const kg: any = await page.evaluate(
+      (req) => (window as any).__suji__.core(JSON.stringify(req)),
+      { cmd: "is_kiosk", windowId: c.windowId },
+    );
+    expect(kg.kiosk).toBe(false);
+  });
+
+  test("mode flags: 알 수 없는 windowId — ok:false", async () => {
+    const r: any = await page.evaluate(() =>
+      (window as any).__suji__.core(JSON.stringify({ cmd: "is_enabled", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+
   // Electron 패리티: set_content_bounds → get_content_bounds (콘텐츠 영역).
   test("content_bounds: set 후 get roundtrip — 크기 정확", async () => {
     const c = await coreCall({ cmd: "create_window", title: "contentbounds", url: "about:blank" });

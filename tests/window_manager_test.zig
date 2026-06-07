@@ -316,6 +316,29 @@ test "capability flags set/get round-trip (resizable/minimizable/maximizable/clo
     try std.testing.expectError(error.WindowNotFound, wm.isMaximizable(99999));
 }
 
+test "mode flags set/get round-trip (movable/focusable/enabled/fullscreenable/kiosk)" {
+    var native = TestNative{};
+    var wm = newManager(&native);
+    defer wm.deinit();
+
+    const id = try wm.create(.{ .title = "T" });
+    try wm.setMovable(id, false);
+    try std.testing.expect(!(try wm.isMovable(id)));
+    try wm.setFocusable(id, false);
+    try std.testing.expect(!(try wm.isFocusable(id)));
+    try wm.setEnabled(id, false);
+    try std.testing.expect(!(try wm.isEnabled(id)));
+    try wm.setFullscreenable(id, false);
+    try std.testing.expect(!(try wm.isFullscreenable(id)));
+    // kiosk 기본 false → true.
+    try std.testing.expect(!(try wm.isKiosk(id)));
+    try wm.setKiosk(id, true);
+    try std.testing.expect(try wm.isKiosk(id));
+
+    try std.testing.expectError(error.WindowNotFound, wm.setEnabled(99999, false));
+    try std.testing.expectError(error.WindowNotFound, wm.isKiosk(99999));
+}
+
 test "getContentBounds returns native content bounds (vtable wiring)" {
     var native = TestNative{};
     var wm = newManager(&native);

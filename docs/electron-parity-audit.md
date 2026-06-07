@@ -74,14 +74,14 @@
 - ~~**[medium]** `getMinimumSize()` (min/max getter/setter chain)~~ ✅ (PR-1 Geometry) — WindowManager setMinimumSize/getMinimumSize/setMaximumSize/getMaximumSize + Native.VTable + cef_window_runtime 네이티브(delegate constraints + macOS setContentMin/MaxSize + invalidate_layout). getter=추적값(결정적). 실 e2e: set→get 정확 round-trip + macOS min clamp 실효.
 - ~~**[medium]** `BrowserWindow.setMinimumSize(width, height)`~~ ✅ (PR-1 Geometry) — 전 6개 언어(JS/Node/Rust/Go + lua/python __core__) + BrowserWindow/OO facade.
 - ~~**[medium]** `BrowserWindow.setResizable(resizable)` / `isResizable()`~~ ✅ (PR-2 capability) — delegate constraints(can_resize) + macOS styleMask(1<<3) + invalidate_layout. 전 6개 언어 + BrowserWindow.
-- **[medium]** `BrowserWindow.setMovable(movable: boolean)` — Add windows.setMovable(windowId: number, movable: boolean) by: (1) Adding a movable boolean field to WindowManager's window properties (src/core/window.zig); (2) Implementing platform-specific setters
+- ~~**[medium]** `BrowserWindow.setMovable(movable)` / `isMovable()`~~ ✅ (PR-3 mode) — macOS NSWindow.movable + tracked constraints. 그 외 tracked(정직 경계). 전 6개 언어.
 - ~~**[medium]** `BrowserWindow.setMaximizable`/`setMinimizable` (+ `isMaximizable`/`isMinimizable`)~~ ✅ (PR-2 capability) — delegate can_maximize(=resizable AND maximizable)/can_minimize + macOS zoom 버튼 / styleMask(1<<2). 전 6개 언어.
-- **[medium]** `BrowserWindow.setFullScreenable` — Add windows.setFullScreenable(windowId: number, fullscreenable: boolean) and windows.isFullScreenable(windowId: number) to packages/suji-js/src/index.ts, plus corresponding setFullScreenable and isFul
+- ~~**[medium]** `BrowserWindow.setFullScreenable` / `isFullScreenable`~~ ✅ (PR-3 mode) — macOS collectionBehavior FullScreenPrimary(1<<7) + tracked. 그 외 tracked. 전 6개 언어.
 - ~~**[medium]** `BrowserWindow.setClosable(closable)`~~ ✅ (PR-2 capability) — delegate can_close(closable=false→0, try_close 스킵) + macOS styleMask(1<<1). 전 6개 언어 + BrowserWindow.
 - ~~**[medium]** `isClosable()` (closable/minimizable/maximizable query/setter chain)~~ ✅ (PR-2 capability) — Constraints 에 minimizable/maximizable/closable 필드 + VTable+WindowManager+ipc+네이티브 풀스택. getter=추적값(결정적, e2e set→get round-trip). enforcement=macOS 확인/Win·Linux CEF Views can_* 의존(정직 경계).
-- **[medium]** `BrowserWindow.setFocusable(focusable: boolean)` — Add `setFocusable(windowId: number, focusable: boolean): Promise<WindowOpResponse>` to the `windows` namespace in packages/suji-js/src/index.ts (following the pattern of `setHasShadow`), and add a cor
-- **[medium]** `BrowserWindow.setEnabled(enable: boolean): void` — 1. Add `set_enabled: *const fn (id: u32, enabled: i32) callconv(.c) void` to `SujiWindowAPI` in `WINDOW_API.md` and `src/core/window.zig`. 2. Add `enabled: bool = true` field to `Window` struct. 3. Im
-- **[medium]** `BrowserWindow.prototype.setKiosk(flag: boolean)` — Add `setKiosk(windowId: number, flag: boolean)` and `isKiosk(windowId: number)` to the `windows` namespace in /packages/suji-js/src/index.ts (lines 293-569) and /packages/suji-node/src/index.ts (lines
+- ~~**[medium]** `BrowserWindow.setFocusable(focusable)` / `isFocusable()`~~ ✅ (PR-3 mode) — tracked-only(런타임 focusable 토글 클린 API 부재, 정직 경계) + getter 결정적. 전 6개 언어.
+- ~~**[medium]** `BrowserWindow.setEnabled(enable)` / `isEnabled()`~~ ✅ (PR-3 mode) — Win32 EnableWindow(정확) / macOS ignoresMouseEvents(마우스만, 근사) / Linux tracked + tracked constraints. 전 6개 언어.
+- ~~**[medium]** `BrowserWindow.setKiosk(flag)` / `isKiosk()`~~ ✅ (PR-3 mode) — CEF Views fullscreen best-effort(presentation-options=dock/menu 숨김 follow-up) + tracked. 전 6개 언어.
 
 ### WebContentsView
 
@@ -197,7 +197,7 @@
 - **[low]** `BrowserWindow.isFullScreenable()` — Add windows.setFullScreenable(windowId, fullscreenable) and windows.isFullScreenable(windowId) to suji-js and suji-node SDKs, mirroring the existing setFullscreen/isFullscreen implementation. Add Zig 
 - **[low]** `BrowserWindow.isFocusable()` — Add isFocusable() query method (and optionally setFocusable() setter). Implementation mirrors existing query patterns: (1) add native vtable getter is_focusable in WINDOW_API.md design, (2) implement 
 - **[low]** `BrowserWindow.isEnabled()` — Add window enabled-state query/setter following the existing pattern: (1) Add `isEnabled()` method to packages/suji-js/src/index.ts `windows` namespace and BrowserWindow class, routing to `is_enabled`
-- **[low]** `BrowserWindow.isKiosk()` — Add setKiosk(windowId, flag) and isKiosk(windowId) to the Windows API. Implementation: (1) add handleSetKiosk/handleIsKiosk to window_ipc.zig (request/response structs + JSON serialization); (2) deleg
+- ~~**[low]** `BrowserWindow.isKiosk()`~~ ✅ (PR-3 mode) — setKiosk/isKiosk full stack(window_ipc handleSetKiosk/handleIsKiosk + WindowManager + 네이티브 + 전 6개 언어). #84 와 동일 PR.
 - **[low]** `BrowserWindow.flashFrame(flag: boolean)` — Implement windows.flashFrame(windowId: number, flag: boolean) following the pattern of adjacent taskbar methods (setSkipTaskbar, setProgressBar): (1) Add handler in src/platform/cef.zig dispatching to
 - **[low]** `BrowserWindow.setSkipTaskbar(skip: boolean)` — Add handleSetSkipTaskbar in src/core/window_ipc.zig (pattern: SetSkipTaskbarReq struct + handler function calling wm.setSkipTaskbar(windowId, skip)), add corresponding setSkipTaskbar(windowId, skip) m
 - **[low]** `BrowserWindow.isContentProtected()` — Add windows.isContentProtected(windowId: number) method to packages/suji-js/src/index.ts and packages/suji-node/src/index.ts, mirroring the pattern of isAudioMuted (queryable boolean, e.g. lines 396-3

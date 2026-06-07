@@ -327,6 +327,29 @@ pub fn setMacZoomButtonEnabled(window: ?*anyopaque, on: bool) void {
     cef.msgSendVoidBool(button, "setEnabled:", on);
 }
 
+/// 사용자 드래그 이동 가능 여부 (Electron setMovable). NSWindow.movable.
+pub fn setMacMovable(window: ?*anyopaque, on: bool) void {
+    cef.msgSendVoidBool(window, "setMovable:", on);
+}
+
+/// 입력 비활성 근사 (Electron setEnabled, macOS 는 whole-window EnableWindow 부재).
+/// enabled=false → ignoresMouseEvents=true (마우스 입력 무시). 정직 경계: 키보드 미포함.
+pub fn setMacIgnoresMouseEvents(window: ?*anyopaque, ignore: bool) void {
+    cef.msgSendVoidBool(window, "setIgnoresMouseEvents:", ignore);
+}
+
+/// collectionBehavior 비트 토글. fullscreenable: NSWindowCollectionBehaviorFullScreenPrimary
+/// = 1<<7. on=true 면 set(전체화면 가능), false 면 clear.
+pub fn setMacCollectionBehaviorBit(window: ?*anyopaque, bit: u64, on: bool) void {
+    const getSel = objc.sel_registerName("collectionBehavior");
+    const getFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
+    const cur = getFn(window, @ptrCast(getSel));
+    const next = if (on) cur | bit else cur & ~bit;
+    const setSel = objc.sel_registerName("setCollectionBehavior:");
+    const setFn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    setFn(window, @ptrCast(setSel), next);
+}
+
 pub fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {
     if (hex.len < 7 or hex[0] != '#' or (hex.len != 7 and hex.len != 9)) {
         log.warn("backgroundColor: invalid format '{s}' (expected #RRGGBB or #RRGGBBAA)", .{hex});

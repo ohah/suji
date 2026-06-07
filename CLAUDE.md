@@ -427,6 +427,14 @@ suji.platform                                                // "macos" | "linux
 //   styleMask 비트(Resizable/Closable/Miniaturizable)/zoom 버튼(maximizable) + invalidate_layout.
 //   getter=추적값(결정적). 전 6개 언어 + BrowserWindow 클래스. ⚠️ 실제 enforcement(사용자
 //   drag/zoom/close 차단)은 macOS 확인, Win/Linux 는 CEF Views can_* 의존(real-runner 천장)
+// await windows.setMovable(id, bool) / isMovable(id) / setFocusable(id, bool) / isFocusable(id)
+//   / setEnabled(id, bool) / isEnabled(id) / setFullScreenable(id, bool) / isFullScreenable(id)
+//   / setKiosk(id, bool) / isKiosk(id)  — Electron BrowserWindow 모드 토글. tracked constraints
+//   단일 출처(getter 결정적) + best-effort 네이티브: movable=macOS NSWindow.movable, enabled=
+//   Win32 EnableWindow(정확)/macOS ignoresMouseEvents(마우스만), fullscreenable=macOS
+//   collectionBehavior, kiosk=CEF Views fullscreen(presentation-options 미포함). 전 6개 언어 +
+//   BrowserWindow 클래스. ⚠️ 정직 경계: focusable=tracked-only, Win/Linux 다수 tracked, 실
+//   enforcement 은 real-runner 천장
 // await windows.destroy(id)  — Electron BrowserWindow.destroy() 강제 파괴. close 와 달리
 //   window:close(취소 hook) 스킵, window:closed 만 발화(listener 가 막을 수 없음). 전 6개 언어
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
