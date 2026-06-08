@@ -131,6 +131,16 @@ describe("setTitle / setTooltip / setMenu — 응답", () => {
     expect(r.success).toBe(true);
   });
 
+  test("getBounds → x/y/width/height 숫자 (macOS 는 실 rect)", async () => {
+    const r = await core<{ x: number; y: number; width: number; height: number }>({ cmd: "tray_get_bounds", trayId });
+    expect(typeof r.x).toBe("number");
+    expect(typeof r.y).toBe("number");
+    expect(typeof r.width).toBe("number");
+    expect(typeof r.height).toBe("number");
+    // macOS 메뉴바 status item 은 width > 0(실 아이콘 폭). 비-macOS 는 0.
+    if (process.platform === "darwin") expect(r.width).toBeGreaterThan(0);
+  });
+
   test("setMenu separator + 일반 항목 혼합", async () => {
     const r = await core<{ success: boolean }>({
       cmd: "tray_set_menu", trayId,

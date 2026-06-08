@@ -172,8 +172,8 @@
 
 ### tray
 
-- **[medium]** `setToolTip(toolTip)` — Add setToolTip method alongside setTooltip in tray export (packages/suji-js/src/index.ts line 906), packages/suji-node/src/index.ts, and all language SDKs. Alternatively, rename setTooltip → setToolTi
-- **[medium]** `tray.getBounds()` — Add getBounds(trayId: number): Promise<{x: number, y: number, width: number, height: number}> to the tray API in packages/suji-js/src/index.ts (and equivalent methods in suji-node and backend SDKs). I
+- ~~**[medium]** `setToolTip(toolTip)`~~ ✅ (tray PR) — setToolTip 별칭(Electron 명명) 전 5 SDK — 기존 setTooltip 위임(동일 `tray_set_tooltip` cmd). 네이티브 setToolTip: 이미 존재.
+- ~~**[medium]** `tray.getBounds()`~~ ✅ (tray PR) — getBounds(trayId) 전 5 SDK. `tray_get_bounds` cmd → cef.trayGetBounds(macOS NSStatusItem.button.window.frame, g_trays 룩업). 정직 경계: macOS only(Win/Linux 0 rect — Shell_NotifyIconGetRect/GTK geometry 후속).
 
 ### webContents
 

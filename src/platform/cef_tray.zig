@@ -178,6 +178,29 @@ pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
     return true;
 }
 
+/// Electron `tray.getBounds()` — 트레이 아이콘 화면 좌표 rect. macOS: NSStatusItem.button.
+/// window.frame 을 **top-left origin** 으로 변환(Electron/getMacWindowBounds 동일 — Cocoa
+/// bottom-left → top-left: y = screenH - frame.y - frame.height). 미존재/비-macOS 는 0 rect.
+/// 정직 경계: macOS only(Win/Linux 는 0 — Shell_NotifyIconGetRect/GTK geometry 후속).
+pub fn trayGetBounds(tray_id: u32) cef.NSRect {
+    const empty = cef.NSRect{ .x = 0, .y = 0, .width = 0, .height = 0 };
+    if (!comptime is_macos) return empty;
+    if (!g_trays_initialized) return empty;
+    const entry = g_trays.get(tray_id) orelse return empty;
+    const button = msgSend(entry.status_item, "button") orelse return empty;
+    const window = msgSend(button, "window") orelse return empty;
+    const frameFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) cef.NSRect = @ptrCast(&objc.objc_msgSend);
+    const frame = frameFn(window, @ptrCast(objc.sel_registerName("frame")));
+    // Cocoa bottom-left → Electron top-left.
+    const top_y: f64 = blk: {
+        const NSScreen = getClass("NSScreen") orelse break :blk frame.y;
+        const mainScreen = msgSend(NSScreen, "mainScreen") orelse break :blk frame.y;
+        const screen_frame = frameFn(mainScreen, @ptrCast(objc.sel_registerName("frame")));
+        break :blk screen_frame.height - frame.y - frame.height;
+    };
+    return .{ .x = frame.x, .y = top_y, .width = frame.width, .height = frame.height };
+}
+
 /// items 배열로 NSMenu 빌드 + tray에 attach. 기존 menu가 있으면 NSMenuItem.representedObject
 /// (NSString) 자동 release (NSMenu deinit 연쇄).
 pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {

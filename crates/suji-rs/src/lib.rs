@@ -2155,6 +2155,20 @@ pub mod tray {
         )
     }
 
+    /// Electron 명명(`tray.setToolTip`) 별칭 — set_tooltip 과 동일.
+    pub fn set_tool_tip(tray_id: u32, tool_tip: &str) -> Option<String> {
+        set_tooltip(tray_id, tool_tip)
+    }
+
+    /// 트레이 아이콘 화면 좌표 rect(Electron tray.getBounds). raw JSON: `{"x","y","width","height"}`.
+    /// macOS only(Win/Linux 0 rect).
+    pub fn get_bounds(tray_id: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"tray_get_bounds","trayId":{}}}"#, tray_id),
+        )
+    }
+
     /// 메뉴 설정 — items 배열을 serde_json으로 안전하게 직렬화.
     /// 클릭 시 `tray:menu-click {trayId, click}` 이벤트 발화.
     pub fn set_menu(tray_id: u32, items: &[MenuItem]) -> Option<String> {

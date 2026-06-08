@@ -199,6 +199,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.dialog.showErrorBox("Title", "content")
 // suji.tray.createWithIcon("App", "tooltip", "/tmp/tray.png")
 //   / setMenuRaw(id, "...items with submenu/checkbox...") / destroy(id)
+//   / setToolTip(id, tip) (setTooltip Electron 별칭) / getBounds(id) → {x,y,width,height}
+//     (getBounds=macOS NSStatusItem.button window frame, Win/Linux 0 rect)
 //                                                                       (macOS NSStatusItem / Linux GTK StatusIcon / Windows Shell_NotifyIconW)
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus / Windows Shell_NotifyIcon balloon)

@@ -1438,6 +1438,18 @@ export const tray = {
     return r.success === true;
   },
 
+  /** Electron 명명(`tray.setToolTip`) 별칭 — setTooltip 과 동일. */
+  async setToolTip(trayId: number, toolTip: string): Promise<boolean> {
+    return tray.setTooltip(trayId, toolTip);
+  },
+
+  /** 트레이 아이콘 화면 좌표 rect (Electron `tray.getBounds()`). macOS NSStatusItem.button
+   *  window frame. macOS only — Win/Linux 는 0 rect(미지원). */
+  async getBounds(trayId: number): Promise<{ x: number; y: number; width: number; height: number }> {
+    const r = await coreCall<{ x: number; y: number; width: number; height: number }>({ cmd: "tray_get_bounds", trayId });
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  },
+
   /** 트레이 클릭 시 표시될 컨텍스트 메뉴 설정. macOS/Linux는 submenu/checkbox도 지원.
    *  메뉴 항목 클릭은 `suji.on('tray:menu-click', ({trayId, click}) => ...)` 로 수신. */
   async setMenu(trayId: number, items: TrayMenuItem[]): Promise<boolean> {

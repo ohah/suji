@@ -139,6 +139,7 @@ pub const setTrayEmitHandler = cef_public_api.setTrayEmitHandler;
 pub const createTray = cef_public_api.createTray;
 pub const setTrayTitle = cef_public_api.setTrayTitle;
 pub const setTrayTooltip = cef_public_api.setTrayTooltip;
+pub const trayGetBounds = cef_public_api.trayGetBounds;
 pub const setTrayMenu = cef_public_api.setTrayMenu;
 pub const destroyTray = cef_public_api.destroyTray;
 pub const NotificationEmitHandler = cef_public_api.NotificationEmitHandler;
