@@ -1246,6 +1246,74 @@ describe("webContents 네비/JS (Phase 4-A)", () => {
 });
 
 // ============================================
+// 4.5 session.setDownloadPath + session:will-download
+// ============================================
+
+describe("session.setDownloadPath / will-download (Electron 패리티)", () => {
+  test("session_set_download_path 왕복 success:true", async () => {
+    const r: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "session_set_download_path", path: "/tmp/suji-dl-e2e" })),
+    );
+    expect(r.cmd).toBe("session_set_download_path");
+    expect(r.success).toBe(true);
+  });
+
+  test("다운로드 트리거 → will-download 이벤트 + setDownloadPath 경로에 파일 생성", async () => {
+    const { mkdtempSync, existsSync, readFileSync: rfs, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const dir = mkdtempSync(join(tmpdir(), "suji-dl-"));
+    const filename = "suji-e2e-dl.txt";
+
+    // 1) 다운로드 경로 지정 + will-download 리스너 등록.
+    await page.evaluate((d) => {
+      (window as any).__test_dl = [];
+      (window as any).__suji__.on("session:will-download", (data: any) => (window as any).__test_dl.push(data));
+      return (window as any).__suji__.core(JSON.stringify({ cmd: "session_set_download_path", path: d }));
+    }, dir);
+
+    // 2) anchor[download] 클릭으로 다운로드 트리거(data: URL = "hi suji").
+    await page.evaluate((fn) => {
+      const a = document.createElement("a");
+      a.href = "data:text/plain;base64,aGkgc3VqaQ=="; // "hi suji"
+      a.download = fn;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }, filename);
+
+    // 3) will-download 이벤트 폴링(on_before_download = 파일 쓰기 전 발화).
+    let evt: any = null;
+    for (let i = 0; i < 60; i++) {
+      const got: any[] = await page.evaluate(() => (window as any).__test_dl);
+      if (got && got.length > 0) {
+        evt = got[0];
+        break;
+      }
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    expect(evt).not.toBeNull();
+    expect(evt.filename).toBe(filename);
+
+    // 4) 파일이 지정 경로에 실제 생성됐는지 폴링(다운로드 완료는 비동기).
+    const target = join(dir, filename);
+    let onDisk = false;
+    for (let i = 0; i < 60; i++) {
+      if (existsSync(target)) {
+        onDisk = true;
+        break;
+      }
+      await new Promise((res) => setTimeout(res, 100));
+    }
+    expect(onDisk).toBe(true);
+    expect(rfs(target, "utf8")).toBe("hi suji");
+
+    // cleanup: 경로 해제 + temp dir 제거.
+    await page.evaluate(() => (window as any).__suji__.core(JSON.stringify({ cmd: "session_set_download_path", path: "" })));
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// ============================================
 // 5. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
 // ============================================
 

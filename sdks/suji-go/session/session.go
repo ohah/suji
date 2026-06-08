@@ -18,6 +18,15 @@ func FlushStore() string {
 	return suji.Invoke("__core__", `{"cmd":"session_flush_store"}`)
 }
 
+// SetDownloadPath sets the download save directory (Electron `session.setDownloadPath`).
+// After set, downloads save to `<path>/<filename>` without the OS save dialog.
+// Empty string clears (back to OS dialog). All downloads emit `session:will-download`.
+// Response: `{"success":bool}`.
+func SetDownloadPath(path string) string {
+	req, _ := json.Marshal(map[string]any{"cmd": "session_set_download_path", "path": path})
+	return suji.Invoke("__core__", string(req))
+}
+
 // SetProxy sets the network proxy (Electron `session.setProxy`). mode "" → "direct"
 // (프록시 해제). proxyRules: "host:port". Response: `{"success":bool}`.
 func SetProxy(mode, proxyRules, proxyBypassRules, pacScript string) string {
