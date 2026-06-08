@@ -20,7 +20,7 @@ const bridge = {
 (globalThis as any).suji = bridge;
 
 // bridge가 globalThis에 세팅된 뒤에 import
-import { handle, invoke, invokeSync, send, sendTo, tray, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, type InvokeEvent } from './index';
+import { handle, invoke, invokeSync, send, sendTo, tray, menu, fs as sujiFs, globalShortcut, screen, desktopCapturer, powerSaveBlocker, safeStorage, app, shell, webRequest, crashReporter, autoUpdater, windows, session, type InvokeEvent } from './index';
 
 beforeEach(() => {
   registered = {};
@@ -529,5 +529,50 @@ describe('app', () => {
   it('dock.getBadge returns text', async () => {
     bridge.invoke.mockResolvedValueOnce('{"text":"9"}');
     expect(await app.dock.getBadge()).toBe('9');
+  });
+});
+
+// 신규 코어 메서드 wire-contract — bridge.invoke('__core__', '<exact JSON>') 검증.
+// frontend e2e 가 코어 핸들러를 검증하지만, 백엔드 SDK 가 보내는 cmd/필드명 drift 는
+// 이 behavioral 테스트가 잡는다(필드명 오타 = 빌드 통과 + e2e 못잡음).
+describe('webContents wire-contract (stop/insertCSS/setWindowOpenHandler)', () => {
+  it('windows.stop', async () => {
+    await windows.stop(2);
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"stop","windowId":2}');
+  });
+  it('windows.insertCSS', async () => {
+    await windows.insertCSS(2, 'body{color:red}');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"insert_css","windowId":2,"css":"body{color:red}"}');
+  });
+  it('windows.removeInsertedCSS', async () => {
+    await windows.removeInsertedCSS(2, 'suji-css-3');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"remove_inserted_css","windowId":2,"key":"suji-css-3"}');
+  });
+  it('windows.setWindowOpenHandler', async () => {
+    await windows.setWindowOpenHandler('deny');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"web_contents_set_window_open_handler","action":"deny"}');
+  });
+});
+
+describe('session/webRequest/app wire-contract (신규 코어 메서드)', () => {
+  it('session.setDownloadPath', async () => {
+    await session.setDownloadPath('/tmp/dl');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"session_set_download_path","path":"/tmp/dl"}');
+  });
+  it('webRequest.setRequestHeaders', async () => {
+    await webRequest.setRequestHeaders({ urls: ['https://api.x/*'] }, { Authorization: 'Bearer t' });
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"web_request_set_request_headers","patterns":["https://api.x/*"],"requestHeaders":{"Authorization":"Bearer t"}}');
+  });
+  it('app.setAsDefaultProtocolClient', async () => {
+    await app.setAsDefaultProtocolClient('myapp');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_set_as_default_protocol_client","protocol":"myapp"}');
+  });
+  it('app.isDefaultProtocolClient', async () => {
+    await app.isDefaultProtocolClient('myapp');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_is_default_protocol_client","protocol":"myapp"}');
+  });
+  it('app.removeAsDefaultProtocolClient', async () => {
+    await app.removeAsDefaultProtocolClient('myapp');
+    expect(bridge.invoke).toHaveBeenCalledWith('__core__', '{"cmd":"app_remove_as_default_protocol_client","protocol":"myapp"}');
   });
 });
