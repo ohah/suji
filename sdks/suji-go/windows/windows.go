@@ -53,6 +53,28 @@ func ExecuteJavaScript(windowID uint32, code string) string {
 	))
 }
 
+// Stop은 진행 중 로드/네비게이션을 중단 (Electron webContents.stop).
+func Stop(windowID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"stop","windowId":%d}`, windowID))
+}
+
+// InsertCSS는 author-origin <style>을 주입 (Electron webContents.insertCSS). 응답 JSON의
+// key로 RemoveInsertedCSS 제거 (raw JSON 반환 — caller가 key 파싱).
+func InsertCSS(windowID uint32, css string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"insert_css","windowId":%d,"css":"%s"}`,
+		windowID, jsonesc.Full(css),
+	))
+}
+
+// RemoveInsertedCSS는 InsertCSS가 반환한 key의 주입 CSS를 제거 (Electron webContents.removeInsertedCSS).
+func RemoveInsertedCSS(windowID uint32, key string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"remove_inserted_css","windowId":%d,"key":"%s"}`,
+		windowID, jsonesc.Full(key),
+	))
+}
+
 func GetURL(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_url","windowId":%d}`, windowID))
 }
@@ -557,6 +579,11 @@ func (w *BrowserWindow) Reload(ignoreCache bool) string {
 }
 func (w *BrowserWindow) ExecuteJavaScript(code string) string {
 	return ExecuteJavaScript(w.ID, code)
+}
+func (w *BrowserWindow) Stop() string                { return Stop(w.ID) }
+func (w *BrowserWindow) InsertCSS(css string) string { return InsertCSS(w.ID, css) }
+func (w *BrowserWindow) RemoveInsertedCSS(key string) string {
+	return RemoveInsertedCSS(w.ID, key)
 }
 func (w *BrowserWindow) GetURL() string { return GetURL(w.ID) }
 func (w *BrowserWindow) SetUserAgent(ua string) string {

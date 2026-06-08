@@ -127,6 +127,33 @@ const r = await windows.isLoading(2);
 // r = { ok: true, loading: true | false }
 ```
 
+### `windows.stop(id)` — 진행 중 로드 중단
+
+Electron `webContents.stop()` 대응. CEF `cef_browser_t.stop_load`.
+
+```ts
+await windows.stop(2);   // { ok: true }
+```
+
+### `windows.insertCSS(id, css, options?)` / `removeInsertedCSS(id, key)` — CSS 주입/제거
+
+Electron `webContents.insertCSS / removeInsertedCSS` 대응. 페이지에 `<style>` 를
+주입(author-origin)하고, 반환된 `key` 로 나중에 제거한다.
+
+```ts
+const key = await windows.insertCSS(2, 'body { background: #202020; color: #eee; }');
+// key = "suji-css-0" — 이후 제거에 사용
+await windows.removeInsertedCSS(2, key);
+```
+
+CSS 문자열은 코어에서 base64 인코딩 후 렌더러에서 `atob` + `TextDecoder` 로 복원해
+주입한다 — 따옴표/백슬래시/유니코드가 들어간 CSS 도 깨지지 않는다(executeJavaScript
+의 문자열 escape 한계를 우회).
+
+> **정직 경계**: `options.cssOrigin: 'user'` 는 미지원이다. 주입 방식이 `<style>`
+> 엘리먼트라 항상 author-origin 이다(user-origin = `!important` 우선순위는 CEF 에
+> 런타임 API 가 없어 보류). `options` 인자는 시그니처 패리티로만 받고 무시한다.
+
 ### 백엔드 SDK 미러
 
 같은 4-A API가 백엔드 4언어 SDK에도 노출되어 있어, **handler 안에서 다른 창을 조작**할 수 있다 (예: 메인 창의 핸들러가 settings 창을 reload).

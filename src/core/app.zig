@@ -640,6 +640,37 @@ pub const windows = struct {
         return windowCoreCmd("execute_javascript", fields);
     }
 
+    /// Electron `webContents.stop()` — 진행 중 로드/네비게이션 중단.
+    pub fn stop(id: u32) ?[]const u8 {
+        return windowIdCmd("stop", id);
+    }
+
+    /// Electron `webContents.insertCSS()` — author-origin `<style>` 주입. 응답 JSON 의
+    /// `key` 로 removeInsertedCSS 제거. css 가 4KB 미만이면 stack(executeJavaScript 동일 임계),
+    /// 그 이상은 stderr warn 후 null.
+    pub fn insertCSS(id: u32, css: []const u8) ?[]const u8 {
+        var c_buf: [JS_CODE_STACK_BUF]u8 = undefined;
+        const c_n = util.escapeJsonStr(css, &c_buf) orelse {
+            std.debug.print(
+                "[suji] warning: insertCSS css too large ({d} bytes after escape > {d} stack buf) — dropped\n",
+                .{ css.len, JS_CODE_STACK_BUF },
+            );
+            return null;
+        };
+        var fields_buf: [JS_CODE_STACK_BUF + 128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"css\":\"{s}\"", .{ id, c_buf[0..c_n] }) catch return null;
+        return windowCoreCmd("insert_css", fields);
+    }
+
+    /// Electron `webContents.removeInsertedCSS()` — insertCSS 가 반환한 key 의 style 제거.
+    pub fn removeInsertedCSS(id: u32, key: []const u8) ?[]const u8 {
+        var k_buf: [256]u8 = undefined;
+        const k_n = util.escapeJsonStr(key, &k_buf) orelse return null;
+        var fields_buf: [384]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"windowId\":{d},\"key\":\"{s}\"", .{ id, k_buf[0..k_n] }) catch return null;
+        return windowCoreCmd("remove_inserted_css", fields);
+    }
+
     pub fn getURL(id: u32) ?[]const u8 {
         return windowIdCmd("get_url", id);
     }

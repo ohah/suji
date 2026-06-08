@@ -195,6 +195,11 @@ export interface WindowOpResponse {
   ok: boolean;
 }
 
+/** insert_css 응답 — 주입된 style 의 key(removeInsertedCSS 로 제거). */
+export interface InsertCssResponse extends WindowOpResponse {
+  key: string;
+}
+
 export interface SetBoundsArgs {
   x?: number;
   y?: number;
@@ -440,6 +445,23 @@ export const windows = {
    *  결과 회신은 미지원 — fire-and-forget. 결과가 필요하면 JS 측에서 `suji.send`로 회신. */
   executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "execute_javascript", windowId, code });
+  },
+
+  /** 진행 중 로드/네비게이션 중단 (Electron `webContents.stop`). */
+  stop(windowId: number): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "stop", windowId });
+  },
+
+  /** CSS 주입 (Electron `webContents.insertCSS`). 반환된 key 로 `removeInsertedCSS` 제거.
+   *  `<style>` 엘리먼트 주입(author-origin) — `options.cssOrigin`('user')은 미지원(정직 경계). */
+  async insertCSS(windowId: number, css: string, _options?: { cssOrigin?: "user" | "author" }): Promise<string> {
+    const r = await coreCall<InsertCssResponse>({ cmd: "insert_css", windowId, css });
+    return r.key ?? "";
+  },
+
+  /** insertCSS 가 반환한 key 의 주입 CSS 제거 (Electron `webContents.removeInsertedCSS`). */
+  removeInsertedCSS(windowId: number, key: string): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "remove_inserted_css", windowId, key });
   },
 
   /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
@@ -954,6 +976,15 @@ export class BrowserWindow {
   executeJavaScript(code: string) {
     return windows.executeJavaScript(this.#id, code);
   }
+  stop() {
+    return windows.stop(this.#id);
+  }
+  insertCSS(css: string, options?: { cssOrigin?: "user" | "author" }) {
+    return windows.insertCSS(this.#id, css, options);
+  }
+  removeInsertedCSS(key: string) {
+    return windows.removeInsertedCSS(this.#id, key);
+  }
   getURL() {
     return windows.getURL(this.#id);
   }
@@ -1244,6 +1275,15 @@ export class WebContentsView {
   }
   executeJavaScript(code: string) {
     return windows.executeJavaScript(this.#id, code);
+  }
+  stop() {
+    return windows.stop(this.#id);
+  }
+  insertCSS(css: string, options?: { cssOrigin?: "user" | "author" }) {
+    return windows.insertCSS(this.#id, css, options);
+  }
+  removeInsertedCSS(key: string) {
+    return windows.removeInsertedCSS(this.#id, key);
   }
   openDevTools() {
     return windows.openDevTools(this.#id);

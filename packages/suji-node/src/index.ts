@@ -460,6 +460,11 @@ export interface WindowOpResponse {
   ok: boolean;
 }
 
+/** insert_css 응답 — 주입된 style 의 key(removeInsertedCSS 로 제거). */
+export interface InsertCssResponse extends WindowOpResponse {
+  key: string;
+}
+
 export interface GetUrlResponse extends WindowOpResponse {
   cmd: 'get_url';
   url: string | null;
@@ -663,6 +668,20 @@ export const windows = {
   /** fire-and-forget — 결과 회신 없음. 결과 필요 시 JS에서 `suji.send`로 회신. */
   executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'execute_javascript', windowId, code });
+  },
+  /** 진행 중 로드/네비게이션 중단 (Electron `webContents.stop`). */
+  stop(windowId: number): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'stop', windowId });
+  },
+  /** CSS 주입 (Electron `webContents.insertCSS`). 반환 key 로 removeInsertedCSS 제거.
+   *  author-origin `<style>` 주입 — `options.cssOrigin`('user')은 미지원(정직 경계). */
+  async insertCSS(windowId: number, css: string, _options?: { cssOrigin?: 'user' | 'author' }): Promise<string> {
+    const r = await invoke<InsertCssResponse>('__core__', { cmd: 'insert_css', windowId, css });
+    return r.key ?? '';
+  },
+  /** insertCSS 가 반환한 key 의 주입 CSS 제거 (Electron `webContents.removeInsertedCSS`). */
+  removeInsertedCSS(windowId: number, key: string): Promise<WindowOpResponse> {
+    return invoke<WindowOpResponse>('__core__', { cmd: 'remove_inserted_css', windowId, key });
   },
   getURL(windowId: number): Promise<GetUrlResponse> {
     return invoke<GetUrlResponse>('__core__', { cmd: 'get_url', windowId });
@@ -1105,6 +1124,15 @@ export class BrowserWindow {
   executeJavaScript(code: string) {
     return windows.executeJavaScript(this.#id, code);
   }
+  stop() {
+    return windows.stop(this.#id);
+  }
+  insertCSS(css: string, options?: { cssOrigin?: 'user' | 'author' }) {
+    return windows.insertCSS(this.#id, css, options);
+  }
+  removeInsertedCSS(key: string) {
+    return windows.removeInsertedCSS(this.#id, key);
+  }
   getURL() {
     return windows.getURL(this.#id);
   }
@@ -1415,6 +1443,15 @@ export class WebContentsView {
   }
   executeJavaScript(code: string) {
     return windows.executeJavaScript(this.#id, code);
+  }
+  stop() {
+    return windows.stop(this.#id);
+  }
+  insertCSS(css: string, options?: { cssOrigin?: 'user' | 'author' }) {
+    return windows.insertCSS(this.#id, css, options);
+  }
+  removeInsertedCSS(key: string) {
+    return windows.removeInsertedCSS(this.#id, key);
   }
   openDevTools() {
     return windows.openDevTools(this.#id);

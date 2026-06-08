@@ -1167,6 +1167,82 @@ describe("webContents 네비/JS (Phase 4-A)", () => {
     // 결과(eval value)는 응답에 없음 — 이게 의도된 fire-and-forget 정책
     expect(r.result).toBeUndefined();
   });
+
+  test("stop — 진행 중 로드 중단, ok:true", async () => {
+    const r: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "stop", windowId: 1 })),
+    );
+    expect(r.cmd).toBe("stop");
+    expect(r.ok).toBe(true);
+  });
+
+  test("stop — 알 수 없는 windowId ok:false", async () => {
+    const r: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "stop", windowId: 99999 })),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  test("insertCSS → style 실주입 + key 반환, removeInsertedCSS → 실제 제거", async () => {
+    const ins: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "insert_css", windowId: 1, css: "body{--suji-e2e:42}" })),
+    );
+    expect(ins.cmd).toBe("insert_css");
+    expect(ins.ok).toBe(true);
+    expect(ins.key).toMatch(/^suji-css-\d+$/);
+
+    // frame eval 은 비동기 — 주입 완료까지 폴링(style 엘리먼트 + computed custom prop).
+    const applied = await page.evaluate(async (key) => {
+      for (let i = 0; i < 40; i++) {
+        const el = document.querySelector(`style[data-suji-css="${key}"]`);
+        const v = getComputedStyle(document.body).getPropertyValue("--suji-e2e").trim();
+        if (el && v === "42") return true;
+        await new Promise((res) => setTimeout(res, 50));
+      }
+      return false;
+    }, ins.key);
+    expect(applied).toBe(true);
+
+    const rem: any = await page.evaluate(
+      (key) => (window as any).__suji__.core(JSON.stringify({ cmd: "remove_inserted_css", windowId: 1, key })),
+      ins.key,
+    );
+    expect(rem.cmd).toBe("remove_inserted_css");
+    expect(rem.ok).toBe(true);
+
+    const removed = await page.evaluate(async (key) => {
+      for (let i = 0; i < 40; i++) {
+        const el = document.querySelector(`style[data-suji-css="${key}"]`);
+        const v = getComputedStyle(document.body).getPropertyValue("--suji-e2e").trim();
+        if (!el && v === "") return true;
+        await new Promise((res) => setTimeout(res, 50));
+      }
+      return false;
+    }, ins.key);
+    expect(removed).toBe(true);
+  });
+
+  test("insertCSS — 따옴표/백슬래시 포함 CSS 안전(base64 경로, executeJavascript escape 한계 회피)", async () => {
+    const ins: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "insert_css", windowId: 1, css: 'body::after{content:"a\\"b"}' })),
+    );
+    expect(ins.ok).toBe(true);
+    expect(ins.key).toMatch(/^suji-css-\d+$/);
+    // 주입된 style 의 textContent 가 원본 CSS 와 정확히 일치(unescape→base64→atob 라운드트립).
+    const matched = await page.evaluate(async (key) => {
+      for (let i = 0; i < 40; i++) {
+        const el = document.querySelector(`style[data-suji-css="${key}"]`);
+        if (el && el.textContent === 'body::after{content:"a\\"b"}') return true;
+        await new Promise((res) => setTimeout(res, 50));
+      }
+      return false;
+    }, ins.key);
+    expect(matched).toBe(true);
+    await page.evaluate(
+      (key) => (window as any).__suji__.core(JSON.stringify({ cmd: "remove_inserted_css", windowId: 1, key })),
+      ins.key,
+    );
+  });
 });
 
 // ============================================

@@ -428,6 +428,12 @@ suji.platform                                                // "macos" | "linux
 // import { windows } from '@suji/api';
 // await windows.create({ title:"Settings", url:"...", frame:false }) — 새 창
 // await windows.loadURL(id, url) / reload(id, true) / executeJavaScript(id, code)  (Phase 4-A)
+// await windows.stop(id)  — 진행 중 로드/네비게이션 중단 (Electron webContents.stop, cef_browser_t.stop_load)
+// const key = await windows.insertCSS(id, "body{color:red}")  — author-origin <style> 주입
+//   (Electron webContents.insertCSS). CSS 는 base64→atob+TextDecoder 복원이라 따옴표/백슬래시/
+//   유니코드 안전. 반환 key 로 제거. ⚠️ options.cssOrigin:'user'는 미지원(style=author, 정직 경계)
+// await windows.removeInsertedCSS(id, key)  — insertCSS 가 반환한 key 의 주입 CSS 제거
+//   (전 5 SDK + BrowserWindow/WebContentsView 클래스. viewId 도 동작 — id 풀 공유)
 // await windows.getURL(id) / isLoading(id) / setTitle(id, t) / setBounds(id, {...})
 // await windows.setUserAgent(id, ua) / getUserAgent(id)  — 동적 UA(CDP override)
 //   ※ class BrowserWindow OO 래퍼: BrowserWindow.create(opts)/fromId(id) +

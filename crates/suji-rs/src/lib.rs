@@ -464,6 +464,35 @@ pub mod windows {
         invoke("__core__", &req)
     }
 
+    /// Electron `webContents.stop()` — 진행 중 로드/네비게이션 중단.
+    pub fn stop(window_id: u32) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"stop","windowId":{}}}"#, window_id),
+        )
+    }
+
+    /// Electron `webContents.insertCSS()` — author-origin `<style>` 주입. 응답 JSON 의
+    /// `key` 로 `remove_inserted_css` 제거(raw JSON 반환 — caller 가 key 파싱).
+    pub fn insert_css(window_id: u32, css: &str) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"insert_css","windowId":{},"css":"{}"}}"#,
+            window_id,
+            escape_json(css),
+        );
+        invoke("__core__", &req)
+    }
+
+    /// Electron `webContents.removeInsertedCSS()` — insert_css 가 반환한 key 의 style 제거.
+    pub fn remove_inserted_css(window_id: u32, key: &str) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"remove_inserted_css","windowId":{},"key":"{}"}}"#,
+            window_id,
+            escape_json(key),
+        );
+        invoke("__core__", &req)
+    }
+
     pub fn get_url(window_id: u32) -> Option<String> {
         invoke(
             "__core__",
@@ -1161,6 +1190,15 @@ pub mod windows {
         }
         pub fn execute_javascript(&self, code: &str) -> Option<String> {
             execute_javascript(self.id, code)
+        }
+        pub fn stop(&self) -> Option<String> {
+            stop(self.id)
+        }
+        pub fn insert_css(&self, css: &str) -> Option<String> {
+            insert_css(self.id, css)
+        }
+        pub fn remove_inserted_css(&self, key: &str) -> Option<String> {
+            remove_inserted_css(self.id, key)
         }
         pub fn get_url(&self) -> Option<String> {
             get_url(self.id)

@@ -266,6 +266,12 @@ pub const Native = struct {
         set_user_agent: *const fn (ctx: ?*anyopaque, handle: u64, ua: []const u8) void,
         get_user_agent: *const fn (ctx: ?*anyopaque, handle: u64) ?[]const u8,
         is_loading: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        // webContents 콘텐츠 제어 (Electron webContents.stop/insertCSS/removeInsertedCSS).
+        // insert_css: css 는 raw 바이트(window_ipc 가 이미 JSON-unescape), native 가 base64+style
+        // 엘리먼트 주입. key 는 caller 생성('suji-css-N'), removeInsertedCss 가 동일 key 로 제거.
+        stop: *const fn (ctx: ?*anyopaque, handle: u64) void,
+        insert_css: *const fn (ctx: ?*anyopaque, handle: u64, css: []const u8, key: []const u8) void,
+        remove_inserted_css: *const fn (ctx: ?*anyopaque, handle: u64, key: []const u8) void,
         // Phase 4-C: DevTools
         open_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
         close_dev_tools: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -400,6 +406,15 @@ pub const Native = struct {
     }
     pub fn executeJavascript(self: Native, handle: u64, code: []const u8) void {
         self.vtable.execute_javascript(self.ctx, handle, code);
+    }
+    pub fn stop(self: Native, handle: u64) void {
+        self.vtable.stop(self.ctx, handle);
+    }
+    pub fn insertCss(self: Native, handle: u64, css: []const u8, key: []const u8) void {
+        self.vtable.insert_css(self.ctx, handle, css, key);
+    }
+    pub fn removeInsertedCss(self: Native, handle: u64, key: []const u8) void {
+        self.vtable.remove_inserted_css(self.ctx, handle, key);
     }
     pub fn getUrl(self: Native, handle: u64) ?[]const u8 {
         return self.vtable.get_url(self.ctx, handle);
@@ -1379,6 +1394,31 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveLocked(id);
         self.native.executeJavascript(win.native_handle, code);
+    }
+
+    /// Electron webContents.stop() — 진행 중 네비게이션/로드 중단(CEF stop_load).
+    pub fn stop(self: *WindowManager, id: u32) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.stop(win.native_handle);
+    }
+
+    /// Electron webContents.insertCSS() — `<style data-suji-css=key>` 주입(author-origin).
+    /// css 는 JSON-unescape 된 raw 바이트(window_ipc 책임), key 는 caller 생성.
+    pub fn insertCss(self: *WindowManager, id: u32, css: []const u8, key: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.insertCss(win.native_handle, css, key);
+    }
+
+    /// Electron webContents.removeInsertedCSS() — insertCSS 가 반환한 key 의 style 제거.
+    pub fn removeInsertedCss(self: *WindowManager, id: u32, key: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveLocked(id);
+        self.native.removeInsertedCss(win.native_handle, key);
     }
 
     /// 현재 main frame URL을 반환. 캐시되어 있지 않으면 null.

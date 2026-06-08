@@ -380,6 +380,53 @@ pub fn handleExecuteJavascript(req: ExecuteJavascriptReq, response_buf: []u8, wm
     return respondWindowOp(response_buf, "execute_javascript", req.window_id, ok);
 }
 
+/// Electron webContents.stop() — 진행 중 로드 중단.
+pub fn handleStop(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.stop(window_id)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "stop", window_id, ok);
+}
+
+/// insertCSS key 시퀀스. removeInsertedCSS 가 동일 key 로 제거하므로 프로세스-전역 단조 증가면 충분.
+var g_css_key_seq: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
+
+pub const InsertCssReq = struct {
+    window_id: u32,
+    /// extractJsonString 결과(아직 JSON-escaped). 핸들러가 unescape 후 native 로 전달.
+    css_escaped: []const u8,
+};
+
+/// Electron webContents.insertCSS() — 생성한 key('suji-css-N')를 응답에 echo(SDK 가 반환).
+/// CSS 는 임의 길이라 고정 버퍼 대신 heap 으로 JSON-unescape(executeJavascript 의 escape
+/// 한계와 달리 insertCSS 는 따옴표/백슬래시 CSS 가 흔해 unescape 필수).
+pub fn handleInsertCss(req: InsertCssReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const seq = g_css_key_seq.fetchAdd(1, .monotonic);
+    var key_buf: [32]u8 = undefined;
+    const key = std.fmt.bufPrint(&key_buf, "suji-css-{d}", .{seq}) catch return null;
+    const raw = wm.allocator.alloc(u8, req.css_escaped.len) catch return null;
+    defer wm.allocator.free(raw);
+    const raw_len = util.unescapeJsonStr(req.css_escaped, raw) orelse return null;
+    const ok = if (wm.insertCss(req.window_id, raw[0..raw_len], key)) |_| true else |_| false;
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"insert_css\",\"windowId\":{d},\"ok\":{},\"key\":\"{s}\"}}",
+        .{ req.window_id, ok, key },
+    ) catch null;
+}
+
+pub const RemoveInsertedCssReq = struct {
+    window_id: u32,
+    key: []const u8,
+};
+
+/// Electron webContents.removeInsertedCSS() — insertCSS 가 반환한 key 의 style 제거.
+pub fn handleRemoveInsertedCss(req: RemoveInsertedCssReq, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.removeInsertedCss(req.window_id, req.key)) |_| true else |_| false;
+    return respondWindowOp(response_buf, "remove_inserted_css", req.window_id, ok);
+}
+
 /// get_url 응답 — JSON-safe하지 않은 URL(`"`, `\\`, control char)은 escape 처리.
 /// 캐시 미스(URL 없음) 또는 escape 버퍼 부족 시 `url:null` + ok 분기.
 pub fn handleGetUrl(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {

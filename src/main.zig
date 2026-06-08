@@ -1597,6 +1597,27 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .code = util.extractJsonString(req_clean, "code") orelse "",
         }, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "stop")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleStop(win_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "insert_css")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleInsertCss(.{
+            .window_id = win_id,
+            .css_escaped = util.extractJsonString(req_clean, "css") orelse "",
+        }, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "remove_inserted_css")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleRemoveInsertedCss(.{
+            .window_id = win_id,
+            .key = util.extractJsonString(req_clean, "key") orelse "",
+        }, response_buf, wm);
+    }
     if (std.mem.eql(u8, cmd, "get_url")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
