@@ -25,3 +25,15 @@ func SetThemeSource(source string) string {
 func GetThemeSource() string {
 	return suji.Invoke("__core__", `{"cmd":"native_theme_get_source"}`)
 }
+
+// ShouldUseHighContrastColors returns raw JSON: `{"highContrast":bool}`.
+// macOS NSWorkspace.accessibilityDisplayShouldIncreaseContrast / Windows SPI_GETHIGHCONTRAST. Linux false.
+func ShouldUseHighContrastColors() string {
+	return suji.Invoke("__core__", `{"cmd":"native_theme_high_contrast"}`)
+}
+
+// PrefersReducedTransparency returns raw JSON: `{"reducedTransparency":bool}`.
+// macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency. Win/Linux false.
+func PrefersReducedTransparency() string {
+	return suji.Invoke("__core__", `{"cmd":"native_theme_reduced_transparency"}`)
+}

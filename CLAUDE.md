@@ -184,8 +184,12 @@ fn onAllClosed(_: suji.Event) void {
 //   / openPath("/Users/me/file.pdf")     — 로컬 파일 기본 앱으로 (URL이 아닌 path)
 // suji.nativeTheme.shouldUseDarkColors() / setThemeSource("light"|"dark"|"system")
 //   → suji.on("nativeTheme:updated", ({dark}) => ...) — NSAppearance KVO 자동 발신
+//   / shouldUseHighContrastColors() / prefersReducedTransparency()  — macOS NSWorkspace
+//     accessibilityDisplayShouldIncreaseContrast / ShouldReduceTransparency,
+//     Windows SPI_GETHIGHCONTRAST / EnableTransparency==0 (Linux false)
 // suji.nativeImage.getSize("/path/to/img.png")  — {width, height} (NSImage)
 //   / toPng(path) / toJpeg(path, quality)        — base64 인코딩 (raw ~8KB)
+//   / isEmpty(path) / isTemplateImage(path)       — 빈 이미지/template 여부 (macOS NSImage)
 // suji.screen.getCursorScreenPoint()      — 플랫폼 native cursor point
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields

@@ -130,13 +130,13 @@
 
 ### nativeImage
 
-- **[medium]** `image.isEmpty()` — Add nativeImage.isEmpty(path: string) → Promise<boolean> to packages/suji-js/src/index.ts (lines 1070+) and packages/suji-node/src/index.ts. Implementation: async function calling getSize() internally
-- **[medium]** `nativeImage.isTemplateImage()` — Add isTemplateImage() instance method to nativeImage in both @suji/api (packages/suji-js/src/index.ts) and @suji/node (packages/suji-node/src/index.ts). Return type: Promise<boolean>. Implementation m
+- ~~**[medium]** `image.isEmpty()`~~ ✅ (nativeImage PR) — nativeImage.isEmpty(path) @suji/api + @suji/node. `native_image_is_empty` cmd → cef.nativeImageIsEmpty(nativeImageGetSize 재사용 — 로드 실패/크기 0=true). 렌더러 경로 rendererPathFsGate.
+- ~~**[medium]** `nativeImage.isTemplateImage()`~~ ✅ (nativeImage PR) — nativeImage.isTemplateImage(path) @suji/api + @suji/node. `native_image_is_template` cmd → cef.nativeImageIsTemplate(macOS NSImage.isTemplate). 렌더러 경로 rendererPathFsGate. 정직 경계: macOS only(Win/Linux false). CEF feasibility 분석은 cef_image_t 기준 BLOCKED 라 봤으나 suji 는 NSImage 직접 사용이라 NATIVE-OK.
 
 ### nativeTheme
 
-- **[medium]** `nativeTheme.shouldUseHighContrastColors` — Add shouldUseHighContrastColors() async method to nativeTheme export in both @suji/api (packages/suji-js/src/index.ts:1090+) and @suji/node (packages/suji-node/src/index.ts:937+), following the existi
-- **[medium]** `nativeTheme.prefersReducedTransparency` — Add prefersReducedTransparency() method to nativeTheme in both packages/suji-js/src/index.ts and packages/suji-node/src/index.ts. Implement native accessor in src/platform/nativetheme.m via NSWorkspac
+- ~~**[medium]** `nativeTheme.shouldUseHighContrastColors`~~ ✅ (nativeTheme PR) — shouldUseHighContrastColors() 전 4 SDK(@suji/api + @suji/node + Rust + Go). macOS NSWorkspace.accessibilityDisplayShouldIncreaseContrast(workspaceBool→msgSendBool 공용 헬퍼) + **Windows SystemParametersInfo(SPI_GETHIGHCONTRAST) HCF_HIGHCONTRASTON**(win_theme.highContrast). `native_theme_high_contrast` cmd. 정직 경계: Linux false(미지원).
+- ~~**[medium]** `nativeTheme.prefersReducedTransparency`~~ ✅ (nativeTheme PR) — prefersReducedTransparency() 전 4 SDK. macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency + **Windows HKCU EnableTransparency==0**(win_theme.reducedTransparency). `native_theme_reduced_transparency` cmd. 정직 경계: Linux false(미지원).
 
 ### notification
 

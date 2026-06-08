@@ -1768,6 +1768,30 @@ test "nativeImage.getSize IPC + cef.zig 함수" {
     }
 }
 
+test "nativeImage.isEmpty/isTemplateImage IPC + cef.zig 함수 (fs-gate)" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"native_image_is_empty\"",
+        "\"native_image_is_template\"",
+        "cef.nativeImageIsTemplate",
+        "cef.nativeImageIsEmpty",
+        "rendererPathFsGate(response_buf, cmd, p)", // 렌더러 경로 게이트
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn nativeImageIsEmpty",
+        "pub fn nativeImageIsTemplate",
+        "cef.msgSendBool(img, \"isTemplate\")", // NSImage.isTemplate 셀렉터 호출 핀
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "nativeImage.toPNG/toJPEG IPC + cef.zig encoder" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
@@ -1852,6 +1876,36 @@ test "nativeTheme.setThemeSource IPC + cef.zig 함수" {
         "NSAppearanceNameDarkAqua",
         "NSAppearanceNameAqua",
         "setAppearance:",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "nativeTheme.shouldUseHighContrastColors / prefersReducedTransparency IPC + cef.zig 함수" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"native_theme_high_contrast\"",
+        "\"native_theme_reduced_transparency\"",
+        "cef.nativeThemeHighContrast",
+        "cef.nativeThemeReducedTransparency",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn nativeThemeHighContrast",
+        "pub fn nativeThemeReducedTransparency",
+        "accessibilityDisplayShouldIncreaseContrast",
+        "accessibilityDisplayShouldReduceTransparency",
+        // Windows 경로(comptime-pruned, macOS 빌드 미분석 — 소스 가드로 제거 방지).
+        "win_theme.highContrast()",
+        "win_theme.reducedTransparency()",
+        "SPI_GETHIGHCONTRAST",
+        "HCF_HIGHCONTRASTON",
+        "EnableTransparency",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }

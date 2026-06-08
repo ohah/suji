@@ -2197,6 +2197,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{cef.nativeThemeIsDark()},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "native_theme_high_contrast") or std.mem.eql(u8, cmd, "native_theme_reduced_transparency")) {
+        const high_contrast = std.mem.eql(u8, cmd, "native_theme_high_contrast");
+        const val = if (high_contrast) cef.nativeThemeHighContrast() else cef.nativeThemeReducedTransparency();
+        const field = if (high_contrast) "highContrast" else "reducedTransparency";
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"{s}\":{}}}",
+            .{ cmd, field, val },
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "native_theme_set_source")) {
         const source = util.extractJsonString(req_clean, "source") orelse "system";
         const ok = cef.nativeThemeSetSource(source);
@@ -2501,6 +2511,24 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"native_image_get_size\",\"width\":{d},\"height\":{d}}}",
             .{ sz.width, sz.height },
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "native_image_is_empty") or std.mem.eql(u8, cmd, "native_image_is_template")) {
+        const is_template = std.mem.eql(u8, cmd, "native_image_is_template");
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const result = blk: {
+            // 빈/디코드 실패 경로: isEmpty=true, isTemplate=false(Electron 동등).
+            const unesc_n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk !is_template;
+            const p = unesc_buf[0..unesc_n];
+            if (rendererPathFsGate(response_buf, cmd, p)) |e| return e;
+            break :blk if (is_template) cef.nativeImageIsTemplate(p) else cef.nativeImageIsEmpty(p);
+        };
+        const field = if (is_template) "isTemplate" else "isEmpty";
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"{s}\":{}}}",
+            .{ cmd, field, result },
         ) catch null;
     }
     // nativeImage 인코딩 — clipboard image와 같은 16KB response 한도. raw ~8KB까지.
@@ -3795,7 +3823,8 @@ fn rendererPathAllowed(path: []const u8) bool {
 /// fs 샌드박스를 우회하던 갭 보완(보안 점검 지적·후속). 대상:
 ///  - 쓰기: print_to_pdf / capture_page / desktop_capturer_capture_thumbnail
 ///  - 읽기: native_image_get_size / native_image_to_png|jpeg (임의 파일을
-///    base64 로 인코딩해 렌더러로 반환 = 파일내용 유출)
+///    base64 로 인코딩해 렌더러로 반환 = 파일내용 유출) /
+///    native_image_is_empty|is_template (파일 존재·디코드·메타 유출)
 ///  - 파일 probe/read sink: tray_create.iconPath
 /// (menu_set_application_menu 의 MenuItem.icon 은 per-item drop 이라 menuIconPathAllowed 로 별도 게이트)
 /// **opt-in**: fs.allowedRoots 미설정/빈이면 레거시 무제한(비파괴 — 이 API

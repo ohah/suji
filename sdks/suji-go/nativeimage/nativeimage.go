@@ -23,3 +23,14 @@ func ToPNG(path string) string {
 func ToJPEG(path string, quality float64) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"native_image_to_jpeg","path":"%s","quality":%g}`, jsonesc.Full(path), quality))
 }
+
+// IsEmpty returns whether the image is empty (load fail / size 0). raw JSON: `{"isEmpty":bool}`.
+func IsEmpty(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"native_image_is_empty","path":"%s"}`, jsonesc.Full(path)))
+}
+
+// IsTemplateImage returns whether the image is a template image (macOS NSImage.isTemplate).
+// raw JSON: `{"isTemplate":bool}`. macOS only; Win/Linux false.
+func IsTemplateImage(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"native_image_is_template","path":"%s"}`, jsonesc.Full(path)))
+}
