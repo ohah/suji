@@ -2679,6 +2679,39 @@ test "notification Linux D-Bus wiring + runtime E2E" {
     try std.testing.expect(std.mem.indexOf(u8, plan_src, "Linux freedesktop D-Bus") != null);
 }
 
+test "notification id override + groupId/removeGroup IPC + cef threadIdentifier" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "util.extractJsonString(req_clean, \"id\")", // caller-supplied id
+        "util.extractJsonString(req_clean, \"groupId\")", // groupId 추출
+        "\"notification_remove_group\"",
+        "cef.notificationRemoveGroup",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn notificationRemoveGroup",
+        "suji_notification_remove_group", // extern
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    // notification.m — threadIdentifier(그룹) + remove_group(getDelivered 필터).
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(std_io, "src/platform/notification.m", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(m_src);
+    inline for (.{
+        "content.threadIdentifier",
+        "void suji_notification_remove_group",
+        "getDeliveredNotificationsWithCompletionHandler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, m_src, needle) != null);
+    }
+}
+
 test "app.requestUserAttention IPC — NSApp request/cancel" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

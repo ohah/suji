@@ -149,6 +149,7 @@ pub const notificationRequestPermission = cef_public_api.notificationRequestPerm
 pub const notificationShow = cef_public_api.notificationShow;
 pub const notificationClose = cef_public_api.notificationClose;
 pub const notificationRemoveAll = cef_public_api.notificationRemoveAll;
+pub const notificationRemoveGroup = cef_public_api.notificationRemoveGroup;
 pub const GlobalShortcutEmitHandler = cef_public_api.GlobalShortcutEmitHandler;
 pub const GlobalShortcutStatus = cef_public_api.GlobalShortcutStatus;
 pub const setGlobalShortcutEmitHandler = cef_public_api.setGlobalShortcutEmitHandler;

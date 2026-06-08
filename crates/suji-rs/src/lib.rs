@@ -2085,6 +2085,34 @@ pub mod notification {
     pub fn remove_all() -> Option<String> {
         invoke("__core__", r#"{"cmd":"notification_remove_all"}"#)
     }
+
+    /// 그룹 식별자(macOS threadIdentifier) + caller-id 를 지정해 표시 — removeGroup 대상.
+    /// 응답: `{"notificationId":"...","success":bool}`. id 빈 문자열이면 자동 생성.
+    pub fn show_grouped(id: &str, title: &str, body: &str, silent: bool, group_id: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"notification_show","id":"{}","title":"{}","body":"{}","silent":{},"groupId":"{}"}}"#,
+                escape_json_full(id),
+                escape_json_full(title),
+                escape_json_full(body),
+                silent,
+                escape_json_full(group_id),
+            ),
+        )
+    }
+
+    /// 그룹(groupId=macOS threadIdentifier) 알림 제거 (Electron `Notification.removeGroup`).
+    /// macOS only(Win/Linux false). 응답: `{"success":bool}`.
+    pub fn remove_group(group_id: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"notification_remove_group","groupId":"{}"}}"#,
+                escape_json_full(group_id),
+            ),
+        )
+    }
 }
 
 pub mod tray {

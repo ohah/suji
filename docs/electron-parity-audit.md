@@ -141,9 +141,9 @@
 ### notification
 
 - ~~**[medium]** `notification.show()`~~ ✅ — Create a `Notification` class mirroring Electron's pattern. Signature: `class Notification { constructor(opts: NotificationOptions); async show(): Promise<{notificationId: string; success: boolean}>; 
-- **[medium]** `Notification.removeGroup(groupId)` — Add notification.removeGroup(groupId: string) → Promise<boolean>. Steps: (1) Extend NotificationOptions with optional groupId: string; (2) Pass groupId through show() IPC to native layer (modify src/m
-- **[medium]** `NotificationOptions.id` — Add `id?: string` to NotificationOptions interface in packages/suji-js/src/index.ts (line 835). In src/main.zig notification_show handler (line 2472), extract the optional id field using util.extractJ
-- **[medium]** `notification.id (readonly getter)` — Introduce a Notification class (similar to BrowserWindow) with: constructor(options: NotificationOptions & {id?: string}), readonly id property (exposed post-construction), and async show()/close() me
+- ~~**[medium]** `Notification.removeGroup(groupId)`~~ ✅ (notification PR) — removeGroup(groupId) 전 5 SDK. `notification_remove_group` cmd → cef.notificationRemoveGroup → notification.m getDeliveredNotifications 필터 후 removeDelivered. groupId 는 show 시 macOS UNMutableNotificationContent.threadIdentifier 로 설정. 정직 경계: macOS only(Win/Linux false — threadIdentifier 그룹 개념 없음).
+- ~~**[medium]** `NotificationOptions.id`~~ ✅ (notification PR) — id? 옵션. main.zig notification_show 가 caller-supplied id 사용(없으면 자동 생성). JS/Node 는 NotificationOptions.id, Rust/Go/Zig 는 show_grouped/ShowGrouped/showGrouped 의 id 파라미터.
+- ~~**[medium]** `notification.id (readonly getter)`~~ ✅ (notification PR) — `class Notification`(JS/Node, BrowserWindow 동형 OO 래퍼): constructor(opts) + readonly `id`(show 후 채워짐) + show()/close(). Rust/Go/Zig 는 함수형이라 클래스 대신 show 반환 notificationId 직접 사용(정직 경계).
 
 ### powerMonitor
 

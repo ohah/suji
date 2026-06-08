@@ -1342,6 +1342,10 @@ export interface NotificationOptions {
   body: string;
   /** 사운드 묻음 */
   silent?: boolean;
+  /** caller-supplied 식별자 (Electron NotificationOptions). 생략 시 자동 생성. */
+  id?: string;
+  /** 그룹 식별자 — macOS threadIdentifier(그룹화 + removeGroup 대상). Win/Linux 무시. */
+  groupId?: string;
 }
 
 export const notification = {
@@ -1375,7 +1379,38 @@ export const notification = {
     const r = await coreCall<{ success: boolean }>({ cmd: "notification_remove_all" });
     return r.success === true;
   },
+
+  /** 그룹(groupId=macOS threadIdentifier) 알림 제거 (Electron `Notification.removeGroup`).
+   *  macOS only — Win/Linux false(그룹 개념 미지원). */
+  async removeGroup(groupId: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "notification_remove_group", groupId });
+    return r.success === true;
+  },
 };
+
+/** Electron `Notification` 클래스 동등 — OO 래퍼. show() 후 `id` 로 식별자 조회 가능. */
+export class Notification {
+  #id: string | null = null;
+  constructor(private readonly options: NotificationOptions) {}
+
+  /** show() 이후의 알림 식별자(생성 전 null). Electron `notification.id` readonly. */
+  get id(): string | null {
+    return this.#id;
+  }
+
+  /** 알림 표시 — 성공 시 id 가 채워진다. */
+  async show(): Promise<boolean> {
+    const r = await notification.show(this.options);
+    this.#id = r.notificationId;
+    return r.success;
+  }
+
+  /** 이 알림 닫기 (show 전이면 false). */
+  async close(): Promise<boolean> {
+    if (!this.#id) return false;
+    return notification.close(this.#id);
+  }
+}
 
 // ============================================
 // tray — 시스템 트레이 아이콘 (Electron `Tray`)

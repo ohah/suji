@@ -203,6 +203,9 @@ fn onAllClosed(_: suji.Event) void {
 //     (getBounds=macOS NSStatusItem.button window frame, Win/Linux 0 rect)
 //                                                                       (macOS NSStatusItem / Linux GTK StatusIcon / Windows Shell_NotifyIconW)
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
+//   / removeAll() / removeGroup(groupId)  — groupId=macOS threadIdentifier (Win/Linux false)
+//   NotificationOptions {id?, groupId?} — caller-id + 그룹화. Notification 클래스(JS/Node):
+//   new Notification(opts); await n.show(); n.id (readonly) / n.close()
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus / Windows Shell_NotifyIcon balloon)
 // suji.menu.setApplicationMenuRaw("\"items\":[...]") / resetApplicationMenu()
 //   / popup(items, {x?,y?})  — 임의 위치 컨텍스트 메뉴(macOS NSMenu

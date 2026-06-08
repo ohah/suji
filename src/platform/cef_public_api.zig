@@ -345,6 +345,7 @@ pub const notificationRequestPermission = cef_notification.notificationRequestPe
 pub const notificationShow = cef_notification.notificationShow;
 pub const notificationClose = cef_notification.notificationClose;
 pub const notificationRemoveAll = cef_notification.notificationRemoveAll;
+pub const notificationRemoveGroup = cef_notification.notificationRemoveGroup;
 
 pub const GlobalShortcutEmitHandler = cef_global_shortcut.GlobalShortcutEmitHandler;
 pub const GlobalShortcutStatus = cef_global_shortcut.GlobalShortcutStatus;
