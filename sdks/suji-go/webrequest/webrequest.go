@@ -30,6 +30,22 @@ func Resolve(id uint64, cancel bool) string {
 	return suji.Invoke("__core__", string(body))
 }
 
+// SetRequestHeaders injects headers into requests matching the URL globs (Electron
+// session.webRequest.onBeforeSendHeaders, declarative variant). Empty patterns clears.
+// Response: `{"count":N}`. ⚠️ per-request JS callback is unsupported (CEF ignores request
+// edits after async resolve) — declarative rule only.
+func SetRequestHeaders(patterns []string, requestHeaders map[string]string) string {
+	if patterns == nil {
+		patterns = []string{}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"cmd":            "web_request_set_request_headers",
+		"patterns":       patterns,
+		"requestHeaders": requestHeaders,
+	})
+	return suji.Invoke("__core__", string(body))
+}
+
 func buildPatternsRequest(cmd string, patterns []string) string {
 	if patterns == nil {
 		patterns = []string{}
@@ -43,4 +59,3 @@ func buildPatternsRequest(cmd string, patterns []string) string {
 	}
 	return string(body)
 }
-

@@ -2912,6 +2912,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ok},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "web_request_set_request_headers")) {
+        return handleWebRequestSetRequestHeaders(req_clean, response_buf);
+    }
 
     if (std.mem.eql(u8, cmd, "app_attention_cancel")) {
         const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
@@ -4510,6 +4513,33 @@ fn handleWebRequestSetListenerFilter(req_clean: []const u8, response_buf: []u8) 
     return std.fmt.bufPrint(
         response_buf,
         "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_listener_filter\",\"count\":{d}}}",
+        .{n},
+    ) catch null;
+}
+
+/// Electron onBeforeSendHeaders (declarative) — urls glob + requestHeaders 객체.
+/// patterns 는 std.json 파싱, requestHeaders 는 임의-키라 raw object 추출(네이티브가 unescape).
+fn handleWebRequestSetRequestHeaders(req_clean: []const u8, response_buf: []u8) ?[]const u8 {
+    var arena_buf: [DIALOG_PARSE_ARENA]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&arena_buf);
+    const arena = fba.allocator();
+
+    const parsed = std.json.parseFromSlice(WebRequestSetBlockedUrlsJson, arena, req_clean, .{
+        .ignore_unknown_fields = true,
+    }) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_request_headers\",\"success\":false,\"error\":\"parse\"}}",
+            .{},
+        ) catch null;
+    };
+    defer parsed.deinit();
+
+    const headers = util.extractJsonObjectRaw(req_clean, "requestHeaders") orelse "{}";
+    const n = cef.webRequestSetRequestHeaders(parsed.value.patterns, headers);
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"web_request_set_request_headers\",\"count\":{d}}}",
         .{n},
     ) catch null;
 }

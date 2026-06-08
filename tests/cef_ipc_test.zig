@@ -1574,6 +1574,9 @@ test "webRequest — CefRequestHandler wiring + URL glob blocklist + 2 이벤트
         "cef.webRequestSetBlockedUrls",
         "cef.setWebRequestEmitHandler",
         "webRequestEmitHandler",
+        // onBeforeSendHeaders (declarative) — 동기 헤더 주입.
+        "\"web_request_set_request_headers\"",
+        "cef.webRequestSetRequestHeaders",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
@@ -1586,6 +1589,11 @@ test "webRequest — CefRequestHandler wiring + URL glob blocklist + 2 이벤트
         "ensureRequestHandler",
         "ensureResourceRequestHandler",
         "on_before_resource_load",
+        // onBeforeSendHeaders — 동기 set_header_by_name(RV_CONTINUE_ASYNC 전).
+        "pub fn webRequestSetRequestHeaders",
+        "fn applyRequestHeaders",
+        "set_header_by_name",
+        "g_request_headers_url_pool",
         "on_resource_load_complete",
         "client_ptr.get_request_handler",
         "\"webRequest:before-request\"",

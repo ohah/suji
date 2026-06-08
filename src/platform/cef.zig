@@ -315,6 +315,7 @@ pub const setWebRequestEmitHandler = cef_public_api.setWebRequestEmitHandler;
 pub const emitWebRequestPayload = cef_public_api.emitWebRequestPayload;
 pub const webRequestSetBlockedUrls = cef_public_api.webRequestSetBlockedUrls;
 pub const webRequestSetListenerFilter = cef_public_api.webRequestSetListenerFilter;
+pub const webRequestSetRequestHeaders = cef_public_api.webRequestSetRequestHeaders;
 pub const webRequestPendingDrops = cef_public_api.webRequestPendingDrops;
 pub const webRequestResolve = cef_public_api.webRequestResolve;
 

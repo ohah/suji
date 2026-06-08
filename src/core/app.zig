@@ -1833,6 +1833,26 @@ pub const webRequest = struct {
         return coreCmd("web_request_resolve", fields);
     }
 
+    /// Electron `session.webRequest.onBeforeSendHeaders` 의 declarative 변형 — patterns glob
+    /// 매칭 요청에 request_headers_json `{"k":"v",...}`(raw 컨벤션, caller JSON-safe) 동기 주입.
+    /// ⚠️ per-request JS 콜백은 CEF 제약상 미지원(async resolve 후 request 수정 무시) — 선언만.
+    pub fn setRequestHeaders(patterns: []const []const u8, request_headers_json: []const u8) ?[]const u8 {
+        var fields_buf: [16384]u8 = undefined;
+        var w: std.Io.Writer = .fixed(&fields_buf);
+        w.writeAll("\"patterns\":[") catch return null;
+        for (patterns, 0..) |p, i| {
+            if (i > 0) w.writeAll(",") catch return null;
+            w.writeAll("\"") catch return null;
+            var p_buf: [512]u8 = undefined;
+            const p_n = util.escapeJsonStrFull(p, &p_buf) orelse return null;
+            w.writeAll(p_buf[0..p_n]) catch return null;
+            w.writeAll("\"") catch return null;
+        }
+        w.writeAll("],\"requestHeaders\":") catch return null;
+        w.writeAll(request_headers_json) catch return null;
+        return coreCmd("web_request_set_request_headers", w.buffered());
+    }
+
     fn setUrlPatternsCmd(cmd: []const u8, patterns: []const []const u8) ?[]const u8 {
         var fields_buf: [8192]u8 = undefined;
         var w: std.Io.Writer = .fixed(&fields_buf);

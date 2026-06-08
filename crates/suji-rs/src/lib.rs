@@ -2770,6 +2770,23 @@ pub mod web_request {
     pub fn resolve(id: u64, cancel: bool) -> Option<String> {
         invoke("__core__", &resolve_request(id, cancel))
     }
+
+    /// Electron `session.webRequest.onBeforeSendHeaders` 의 declarative 변형 — urls glob 매칭
+    /// 요청에 (name, value) 헤더를 동기 주입(덮어쓰기). 빈 patterns = 해제. 응답 `{"count":N}`.
+    /// ⚠️ per-request JS 콜백은 CEF 제약상 미지원(async resolve 후 request 수정 무시) — 선언만.
+    pub fn set_request_headers(patterns: &[&str], request_headers: &[(&str, &str)]) -> Option<String> {
+        let mut map = serde_json::Map::new();
+        for (k, v) in request_headers {
+            map.insert((*k).to_string(), serde_json::Value::String((*v).to_string()));
+        }
+        let req = serde_json::json!({
+            "cmd": "web_request_set_request_headers",
+            "patterns": patterns,
+            "requestHeaders": serde_json::Value::Object(map),
+        })
+        .to_string();
+        invoke("__core__", &req)
+    }
 }
 
 pub mod crash_reporter {

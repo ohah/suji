@@ -257,6 +257,56 @@ pub fn extractJsonArrayRaw(json: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
+/// `"key":{...}` 의 균형 잡힌 JSON 객체 raw 슬라이스(문자열/이스케이프 인지) 추출.
+/// 없거나 객체가 아니면 null. webRequest requestHeaders 같은 임의-키 객체 추출에 사용.
+pub fn extractJsonObjectRaw(json: []const u8, key: []const u8) ?[]const u8 {
+    const after_colon = findKey(json, key) orelse return null;
+    var i = after_colon;
+    while (i < json.len and std.ascii.isWhitespace(json[i])) : (i += 1) {}
+    if (i >= json.len or json[i] != '{') return null;
+    const start = i;
+    var depth: i32 = 0;
+    var in_str = false;
+    var esc = false;
+    while (i < json.len) : (i += 1) {
+        const c = json[i];
+        if (in_str) {
+            if (esc) {
+                esc = false;
+            } else if (c == '\\') {
+                esc = true;
+            } else if (c == '"') {
+                in_str = false;
+            }
+            continue;
+        }
+        switch (c) {
+            '"' => in_str = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if (depth == 0) return json[start .. i + 1];
+            },
+            else => {},
+        }
+    }
+    return null;
+}
+
+test "extractJsonObjectRaw: 균형 객체 + 중첩/문자열 내 brace" {
+    try std.testing.expectEqualStrings(
+        "{\"a\":\"b\"}",
+        extractJsonObjectRaw("{\"h\":{\"a\":\"b\"},\"x\":5}", "h").?,
+    );
+    // 문자열 안의 `}` 무시 + 중첩.
+    try std.testing.expectEqualStrings(
+        "{\"a\":\"x}y\",\"n\":{\"k\":1}}",
+        extractJsonObjectRaw("{\"h\":{\"a\":\"x}y\",\"n\":{\"k\":1}}}", "h").?,
+    );
+    try std.testing.expect(extractJsonObjectRaw("{\"h\":5}", "h") == null); // 객체 아님
+    try std.testing.expect(extractJsonObjectRaw("{\"x\":{}}", "h") == null); // 키 없음
+}
+
 test "extractJsonArrayRaw: 균형 배열 + 중첩/문자열 내 bracket" {
     try std.testing.expectEqualStrings(
         "[1,2,3]",

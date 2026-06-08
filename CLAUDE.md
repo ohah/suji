@@ -549,6 +549,10 @@ suji.platform                                                // "macos" | "linux
 //     responseHeaders={헤더명:값} 객체(Electron onHeadersReceived 패리티, cef_response_t.get_header_map iterate)
 // await webRequest.onBeforeRequest({urls:["https://*.tracker/*"]}, (details, cb) => cb({cancel:true}))
 //   → RV_CONTINUE_ASYNC + listener round-trip cancel/allow (e2e 13 pass)
+// await webRequest.setRequestHeaders({urls:["https://api.x/*"]}, {Authorization:"Bearer …"})
+//   — Electron onBeforeSendHeaders (declarative). URL glob 매칭 요청에 헤더를 동기 주입(덮어쓰기).
+//     빈 urls=해제. echo-server e2e 로 wire 도달 실증. ⚠️ per-request JS 콜백(요청마다 동적
+//     헤더 계산)은 CEF 제약상 불가(RV_CONTINUE_ASYNC 후 request 수정 무시) — 선언적 규칙만
 ```
 
 ## Suji 설정
