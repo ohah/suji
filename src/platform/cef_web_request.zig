@@ -8,6 +8,7 @@ const c = cef.c;
 const zeroCefStruct = cef.zeroCefStruct;
 const initBaseRefCounted = cef.initBaseRefCounted;
 const cefUserfreeToUtf8 = cef.cefUserfreeToUtf8;
+const cefStringToUtf8 = cef.cefStringToUtf8;
 
 // ============================================
 // CEF Request Handler — webRequest URL filter (Electron `session.webRequest`)
@@ -204,7 +205,8 @@ pub fn getResourceRequestHandler(
 
 fn emitWebRequestEvent(channel_cstr: [*:0]const u8, url: []const u8, extra_json: []const u8) void {
     const emit = g_webrequest_emit_fn orelse return;
-    var payload_buf: [3072]u8 = undefined;
+    // responseHeaders(completed) 가 수 KB 가 될 수 있어 넉넉히.
+    var payload_buf: [16384]u8 = undefined;
     var url_esc_buf: [2048]u8 = undefined;
     const url_esc_n = util.escapeJsonStrFull(url, &url_esc_buf) orelse return;
     const payload = std.fmt.bufPrintZ(
@@ -213,6 +215,69 @@ fn emitWebRequestEvent(channel_cstr: [*:0]const u8, url: []const u8, extra_json:
         .{ url_esc_buf[0..url_esc_n], if (extra_json.len > 0) "," else "", extra_json },
     ) catch return;
     emit(channel_cstr, payload.ptr);
+}
+
+/// buf 에 s 를 append, n 갱신. 초과 시 false(미변경).
+fn appendStr(buf: []u8, n: *usize, s: []const u8) bool {
+    if (n.* + s.len > buf.len) return false;
+    @memcpy(buf[n.*..][0..s.len], s);
+    n.* += s.len;
+    return true;
+}
+
+/// response 헤더맵 → `{"k":"v",...}` JSON 을 buf 에 작성, 슬라이스 반환. 마지막 1바이트는
+/// 닫는 '}' 예약(brace 항상 보장). 한 헤더가 안 들어가면 거기서 멈추고 객체를 닫는다
+/// (graceful truncation — 유효 JSON 유지). 키/값 cef_string 은 escape + dtor 해제.
+fn buildResponseHeadersJson(resp: *c.cef_response_t, buf: []u8) []const u8 {
+    const work = buf[0 .. buf.len - 1]; // '}' 1바이트 예약
+    var n: usize = 0;
+    _ = appendStr(work, &n, "{");
+    const get_map = resp.get_header_map orelse {
+        buf[n] = '}';
+        return buf[0 .. n + 1];
+    };
+    const map = c.cef_string_multimap_alloc();
+    if (map == null) {
+        buf[n] = '}';
+        return buf[0 .. n + 1];
+    }
+    defer c.cef_string_multimap_free(map);
+    get_map(resp, map);
+    const size = c.cef_string_multimap_size(map);
+    var first = true;
+    var i: usize = 0;
+    while (i < size) : (i += 1) {
+        var key_cs: c.cef_string_t = .{};
+        var val_cs: c.cef_string_t = .{};
+        const has_key = c.cef_string_multimap_key(map, i, &key_cs) == 1;
+        const has_val = c.cef_string_multimap_value(map, i, &val_cs) == 1;
+        defer {
+            if (key_cs.dtor) |d| d(key_cs.str);
+            if (val_cs.dtor) |d| d(val_cs.str);
+        }
+        if (!has_key or !has_val) continue;
+        var k_utf8: [256]u8 = undefined;
+        var v_utf8: [2048]u8 = undefined;
+        var k_esc: [512]u8 = undefined;
+        var v_esc: [4096]u8 = undefined;
+        const ke = util.escapeJsonStrFull(cefStringToUtf8(&key_cs, &k_utf8), &k_esc) orelse continue;
+        const ve = util.escapeJsonStrFull(cefStringToUtf8(&val_cs, &v_utf8), &v_esc) orelse continue;
+        const checkpoint = n;
+        var ok = true;
+        if (!first) ok = ok and appendStr(work, &n, ",");
+        ok = ok and appendStr(work, &n, "\"");
+        ok = ok and appendStr(work, &n, k_esc[0..ke]);
+        ok = ok and appendStr(work, &n, "\":\"");
+        ok = ok and appendStr(work, &n, v_esc[0..ve]);
+        ok = ok and appendStr(work, &n, "\"");
+        if (!ok) {
+            n = checkpoint; // 이 헤더가 안 들어가면 되돌리고 객체 닫기
+            break;
+        }
+        first = false;
+    }
+    buf[n] = '}';
+    return buf[0 .. n + 1];
 }
 
 fn onBeforeResourceLoad(
@@ -274,14 +339,23 @@ fn onResourceLoadComplete(
     if (url.len == 0) return;
 
     var status_code: c_int = 0;
+    var status_text_buf: [256]u8 = undefined;
+    var status_text: []const u8 = "";
+    var headers_buf: [12288]u8 = undefined;
+    var headers_json: []const u8 = "{}";
     if (response) |resp| {
         if (resp.get_status) |get_status| status_code = get_status(resp);
+        if (resp.get_status_text) |get_status_text| status_text = cefUserfreeToUtf8(get_status_text(resp), &status_text_buf);
+        headers_json = buildResponseHeadersJson(resp, &headers_buf);
     }
-    var extra_buf: [128]u8 = undefined;
+    var st_esc: [512]u8 = undefined;
+    const st_n = util.escapeJsonStrFull(status_text, &st_esc) orelse 0;
+    // Electron onHeadersReceived 패리티 — statusText + responseHeaders 를 completed 에 포함.
+    var extra_buf: [13312]u8 = undefined;
     const extra = std.fmt.bufPrint(
         &extra_buf,
-        "\"statusCode\":{d},\"requestStatus\":{d},\"receivedBytes\":{d}",
-        .{ status_code, @as(i32, @intCast(status)), received_content_length },
+        "\"statusCode\":{d},\"requestStatus\":{d},\"receivedBytes\":{d},\"statusText\":\"{s}\",\"responseHeaders\":{s}",
+        .{ status_code, @as(i32, @intCast(status)), received_content_length, st_esc[0..st_n], headers_json },
     ) catch return;
     emitWebRequestEvent("webRequest:completed", url, extra);
 }
