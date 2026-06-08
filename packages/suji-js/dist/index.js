@@ -26,7 +26,7 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
-var _BrowserWindow_id, _Notification_id;
+var _BrowserWindow_id, _WebContentsView_id, _Notification_id;
 function getBridge() {
     const bridge = window.__suji__;
     if (!bridge)
@@ -517,6 +517,14 @@ export const windows = {
     getChildViews(hostId) {
         return coreCall({ cmd: "get_child_views", hostId });
     },
+    /** Electron `View.getBounds()` — view 의 추적 bounds {x,y,width,height} (없으면 ok:false+0). */
+    getViewBounds(viewId) {
+        return coreCall({ cmd: "get_view_bounds", viewId });
+    },
+    /** Electron `View.setBackgroundColor(color)` — view cef_view_t 배경색 "#RRGGBB[AA]". */
+    setViewBackgroundColor(viewId, color) {
+        return coreCall({ cmd: "set_view_background_color", viewId, color });
+    },
 };
 /**
  * `windows.*`(raw windowId)의 객체지향 facade (Electron `BrowserWindow` 패리티).
@@ -810,6 +818,59 @@ export class BrowserWindow {
     }
 }
 _BrowserWindow_id = new WeakMap();
+/**
+ * Electron `WebContentsView` 패리티 OO facade — host 창에 합성하는 child view.
+ * viewId 는 windowId 와 같은 풀이라 모든 webContents 메서드(loadURL/executeJavaScript 등)가
+ * view 에 동작한다. view 합성/조작은 `windows.*` 에 위임(BrowserWindow 와 동형 패턴).
+ */
+export class WebContentsView {
+    constructor(id) {
+        _WebContentsView_id.set(this, void 0);
+        __classPrivateFieldSet(this, _WebContentsView_id, id, "f");
+    }
+    /** view 식별자(= windowId 풀). webContents 메서드 인자로 사용. */
+    get id() {
+        return __classPrivateFieldGet(this, _WebContentsView_id, "f");
+    }
+    /** host 창에 child view 생성 후 인스턴스 반환 (Electron `new WebContentsView()` + addChildView). */
+    static async create(opts) {
+        const res = await windows.createView(opts);
+        if (typeof res.viewId !== "number") {
+            throw new Error(`create_view: no viewId in response (${JSON.stringify(res)})`);
+        }
+        return new WebContentsView(res.viewId);
+    }
+    /** 기존 viewId 를 인스턴스로 래핑. */
+    static fromId(id) {
+        return new WebContentsView(id);
+    }
+    setBounds(bounds) {
+        return windows.setViewBounds(__classPrivateFieldGet(this, _WebContentsView_id, "f"), bounds);
+    }
+    getBounds() {
+        return windows.getViewBounds(__classPrivateFieldGet(this, _WebContentsView_id, "f"));
+    }
+    setVisible(visible) {
+        return windows.setViewVisible(__classPrivateFieldGet(this, _WebContentsView_id, "f"), visible);
+    }
+    setBackgroundColor(color) {
+        return windows.setViewBackgroundColor(__classPrivateFieldGet(this, _WebContentsView_id, "f"), color);
+    }
+    destroy() {
+        return windows.destroyView(__classPrivateFieldGet(this, _WebContentsView_id, "f"));
+    }
+    // webContents 메서드 — viewId 가 windowId 풀이라 그대로 위임.
+    loadURL(url) {
+        return windows.loadURL(__classPrivateFieldGet(this, _WebContentsView_id, "f"), url);
+    }
+    executeJavaScript(code) {
+        return windows.executeJavaScript(__classPrivateFieldGet(this, _WebContentsView_id, "f"), code);
+    }
+    openDevTools() {
+        return windows.openDevTools(__classPrivateFieldGet(this, _WebContentsView_id, "f"));
+    }
+}
+_WebContentsView_id = new WeakMap();
 // ============================================
 // clipboard — 시스템 클립보드 (Electron `clipboard.readText/writeText`)
 // ============================================

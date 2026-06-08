@@ -465,6 +465,10 @@ suji.platform                                                // "macos" | "linux
 // await windows.createView({hostId, url, bounds}) → {viewId}              (Phase 17-B WebContentsView)
 // await windows.addChildView(host, view, index?) / setTopView / removeChildView
 // await windows.setViewBounds(viewId, {...}) / setViewVisible(viewId, bool) / getChildViews(host)
+//   / getViewBounds(viewId) → {ok,x,y,width,height} (추적값) / setViewBackgroundColor(viewId, "#RRGGBB[AA]")
+//     (cef_view_t.set_background_color). class WebContentsView (BrowserWindow 동형 OO facade):
+//     WebContentsView.create({hostId,url,bounds}) + setBounds/getBounds/setVisible/
+//     setBackgroundColor/destroy/loadURL/executeJavaScript/openDevTools (viewId=windowId 풀)
 //   viewId는 windowId와 같은 풀 — windows.loadURL(viewId,...) / executeJavaScript / openDevTools
 //   등 모든 webContents API가 view에도 동작.
 //   destroyView는 17-B CEF Views 경로에서 안정화 — target child cleanup/host 생존/

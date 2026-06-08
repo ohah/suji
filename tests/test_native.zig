@@ -117,6 +117,7 @@ pub const TestNative = struct {
     destroy_view_calls: usize = 0,
     set_view_bounds_calls: usize = 0,
     set_view_visible_calls: usize = 0,
+    set_view_bg_calls: usize = 0,
     reorder_view_calls: usize = 0,
     last_create_view_host_handle: ?u64 = null,
     last_create_view_bounds: ?window.Bounds = null,
@@ -208,6 +209,7 @@ pub const TestNative = struct {
         .destroy_view = destroyView,
         .set_view_bounds = setViewBounds,
         .set_view_visible = setViewVisible,
+        .set_view_background_color = setViewBackgroundColor,
         .reorder_view = reorderView,
         .minimize = minimize,
         .restore_window = restoreWindow,
@@ -524,6 +526,11 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.set_view_visible_calls += 1;
         self.last_set_view_visible = visible;
+    }
+
+    fn setViewBackgroundColor(ctx: ?*anyopaque, _: u64, _: []const u8) void {
+        const self = fromCtx(ctx);
+        self.set_view_bg_calls += 1;
     }
 
     fn reorderView(ctx: ?*anyopaque, host_handle: u64, view_handle: u64, idx: u32) void {

@@ -335,6 +335,8 @@ pub const Native = struct {
         destroy_view: *const fn (ctx: ?*anyopaque, view_handle: u64) void,
         set_view_bounds: *const fn (ctx: ?*anyopaque, view_handle: u64, bounds: Bounds) void,
         set_view_visible: *const fn (ctx: ?*anyopaque, view_handle: u64, visible: bool) void,
+        // Electron View.setBackgroundColor — view 의 cef_view_t 배경색("#RRGGBB[AA]").
+        set_view_background_color: *const fn (ctx: ?*anyopaque, view_handle: u64, hex: []const u8) void,
         reorder_view: *const fn (ctx: ?*anyopaque, host_handle: u64, view_handle: u64, index_in_host: u32) void,
         // Phase 5: 라이프사이클 제어 — minimize/maximize/fullscreen.
         // 모두 멱등 (이미 같은 상태면 no-op). is_* 게터는 platform 호출 결과 그대로 반환.
@@ -557,6 +559,9 @@ pub const Native = struct {
     }
     pub fn setViewVisible(self: Native, view_handle: u64, visible: bool) void {
         self.vtable.set_view_visible(self.ctx, view_handle, visible);
+    }
+    pub fn setViewBackgroundColor(self: Native, view_handle: u64, hex: []const u8) void {
+        self.vtable.set_view_background_color(self.ctx, view_handle, hex);
     }
     pub fn reorderView(self: Native, host_handle: u64, view_handle: u64, index_in_host: u32) void {
         self.vtable.reorder_view(self.ctx, host_handle, view_handle, index_in_host);
@@ -1922,6 +1927,23 @@ pub const WindowManager = struct {
         if (view.visible_in_host == visible) return;
         view.visible_in_host = visible;
         self.native.setViewVisible(view.native_handle, visible);
+    }
+
+    /// Electron View.getBounds() — 추적된 view.bounds(마지막 set/create 값; window getter 동형
+    /// 결정적). view 없으면 NotAView.
+    pub fn getViewBounds(self: *WindowManager, view_id: u32) Error!Bounds {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const view = try self.getLiveViewLocked(view_id);
+        return view.bounds;
+    }
+
+    /// Electron View.setBackgroundColor(color) — view 의 cef_view_t 배경색. "#RRGGBB[AA]".
+    pub fn setViewBackgroundColor(self: *WindowManager, view_id: u32, hex: []const u8) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const view = try self.getLiveViewLocked(view_id);
+        self.native.setViewBackgroundColor(view.native_handle, hex);
     }
 
     /// host의 child view id들을 z-order 순(0=bottom, 마지막=top)으로 owned slice로 반환.

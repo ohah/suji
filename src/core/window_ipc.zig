@@ -846,6 +846,30 @@ pub fn handleSetViewVisible(view_id: u32, visible: bool, response_buf: []u8, wm:
     return respondViewOp(response_buf, "set_view_visible", view_id, ok);
 }
 
+/// Electron View.getBounds() — 추적된 view.bounds. 없으면 ok:false + 0 rect.
+pub fn handleGetViewBounds(view_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const b = wm.getViewBounds(view_id) catch {
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"get_view_bounds\",\"viewId\":{d},\"ok\":false,\"x\":0,\"y\":0,\"width\":0,\"height\":0}}",
+            .{view_id},
+        ) catch null;
+    };
+    return std.fmt.bufPrint(
+        response_buf,
+        "{{\"from\":\"zig-core\",\"cmd\":\"get_view_bounds\",\"viewId\":{d},\"ok\":true,\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}}}",
+        .{ view_id, b.x, b.y, b.width, b.height },
+    ) catch null;
+}
+
+/// Electron View.setBackgroundColor(color) — view cef_view_t 배경색.
+pub fn handleSetViewBackgroundColor(view_id: u32, hex: []const u8, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    if (response_buf.len < RESPONSE_MIN_LEN) return null;
+    const ok = if (wm.setViewBackgroundColor(view_id, hex)) |_| true else |_| false;
+    return respondViewOp(response_buf, "set_view_background_color", view_id, ok);
+}
+
 /// get_child_views 응답: `{from, cmd, hostId, ok, viewIds: [...]}`. host destroyed/not-window면
 /// ok=false + 빈 배열. allocator는 임시 슬라이스 alloc용 (호출자 owned).
 pub fn handleGetChildViews(host_id: u32, response_buf: []u8, wm: *window.WindowManager, allocator: std.mem.Allocator) ?[]const u8 {

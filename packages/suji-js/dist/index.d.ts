@@ -290,6 +290,13 @@ export interface ViewOpResponse {
     viewId: number;
     ok: boolean;
 }
+/** get_view_bounds 응답 — 추적된 view bounds(없으면 ok:false + 0). */
+export interface ViewBoundsResponse extends ViewOpResponse {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+}
 export interface GetChildViewsResponse {
     cmd: "get_child_views";
     from: "zig-core";
@@ -507,6 +514,10 @@ export declare const windows: {
     setViewVisible(viewId: number, visible: boolean): Promise<ViewOpResponse>;
     /** host의 child view id들을 z-order 순서로 조회 (0=bottom, 마지막=top) */
     getChildViews(hostId: number): Promise<GetChildViewsResponse>;
+    /** Electron `View.getBounds()` — view 의 추적 bounds {x,y,width,height} (없으면 ok:false+0). */
+    getViewBounds(viewId: number): Promise<ViewBoundsResponse>;
+    /** Electron `View.setBackgroundColor(color)` — view cef_view_t 배경색 "#RRGGBB[AA]". */
+    setViewBackgroundColor(viewId: number, color: string): Promise<ViewOpResponse>;
 };
 /**
  * `windows.*`(raw windowId)의 객체지향 facade (Electron `BrowserWindow` 패리티).
@@ -625,6 +636,29 @@ export declare class BrowserWindow {
     }): Promise<{
         success: boolean;
     }>;
+}
+/**
+ * Electron `WebContentsView` 패리티 OO facade — host 창에 합성하는 child view.
+ * viewId 는 windowId 와 같은 풀이라 모든 webContents 메서드(loadURL/executeJavaScript 등)가
+ * view 에 동작한다. view 합성/조작은 `windows.*` 에 위임(BrowserWindow 와 동형 패턴).
+ */
+export declare class WebContentsView {
+    #private;
+    private constructor();
+    /** view 식별자(= windowId 풀). webContents 메서드 인자로 사용. */
+    get id(): number;
+    /** host 창에 child view 생성 후 인스턴스 반환 (Electron `new WebContentsView()` + addChildView). */
+    static create(opts: ViewOptions): Promise<WebContentsView>;
+    /** 기존 viewId 를 인스턴스로 래핑. */
+    static fromId(id: number): WebContentsView;
+    setBounds(bounds: SetBoundsArgs): Promise<ViewOpResponse>;
+    getBounds(): Promise<ViewBoundsResponse>;
+    setVisible(visible: boolean): Promise<ViewOpResponse>;
+    setBackgroundColor(color: string): Promise<ViewOpResponse>;
+    destroy(): Promise<ViewOpResponse>;
+    loadURL(url: string): Promise<WindowOpResponse>;
+    executeJavaScript(code: string): Promise<WindowOpResponse>;
+    openDevTools(): Promise<WindowOpResponse>;
 }
 export declare const powerMonitor: {
     /** 시스템 유휴 시간 (초). 활성 입력 후 0으로 리셋.

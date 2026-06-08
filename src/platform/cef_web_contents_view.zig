@@ -6,6 +6,7 @@ const runtime = @import("runtime");
 const window_mod = @import("window");
 const logger = @import("logger");
 const cef_views_policy = @import("cef_views_policy.zig");
+const cef_views_delegate = @import("cef_views_delegate.zig");
 const cef_web_contents_view_child_window = @import("cef_web_contents_view_child_window.zig");
 const cef_web_contents_view_overlay = @import("cef_web_contents_view_overlay.zig");
 const cef = @import("cef.zig");
@@ -105,6 +106,19 @@ pub fn setViewBounds(ctx: ?*anyopaque, view_handle: u64, bounds: window_mod.Boun
             return;
         }
     }
+}
+
+/// Electron `View.setBackgroundColor(color)` — view 의 cef_view_t 배경색(로드 중 표시).
+/// "#RRGGBB[AA]". 모든 variant 의 browser_view(cef_view_t)에 set_background_color.
+/// window setBackgroundColor 와 동일 파서(cefColorFromHex) — 잘못된 hex 는 no-op.
+pub fn setViewBackgroundColor(ctx: ?*anyopaque, view_handle: u64, hex: []const u8) void {
+    const self = fromCtx(ctx);
+    assertUiThread();
+    const entry = self.browsers.get(view_handle) orelse return;
+    const browser_view = entry.browser_view orelse return;
+    const set_bg = browser_view.base.set_background_color orelse return;
+    const color = cef_views_delegate.cefColorFromHex(hex) orelse return;
+    set_bg(&browser_view.base, color);
 }
 
 pub fn setViewVisible(ctx: ?*anyopaque, view_handle: u64, visible: bool) void {

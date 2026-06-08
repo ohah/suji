@@ -369,6 +369,14 @@ export interface ViewOpResponse {
   ok: boolean;
 }
 
+/** get_view_bounds 응답 — 추적된 view bounds(없으면 ok:false + 0). */
+export interface ViewBoundsResponse extends ViewOpResponse {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface GetChildViewsResponse {
   cmd: "get_child_views";
   from: "zig-core";
@@ -878,6 +886,16 @@ export const windows = {
   getChildViews(hostId: number): Promise<GetChildViewsResponse> {
     return coreCall<GetChildViewsResponse>({ cmd: "get_child_views", hostId });
   },
+
+  /** Electron `View.getBounds()` — view 의 추적 bounds {x,y,width,height} (없으면 ok:false+0). */
+  getViewBounds(viewId: number): Promise<ViewBoundsResponse> {
+    return coreCall<ViewBoundsResponse>({ cmd: "get_view_bounds", viewId });
+  },
+
+  /** Electron `View.setBackgroundColor(color)` — view cef_view_t 배경색 "#RRGGBB[AA]". */
+  setViewBackgroundColor(viewId: number, color: string): Promise<ViewOpResponse> {
+    return coreCall<ViewOpResponse>({ cmd: "set_view_background_color", viewId, color });
+  },
 };
 
 /**
@@ -1174,6 +1192,61 @@ export class BrowserWindow {
   }
   capturePage(path: string, rect?: { x: number; y: number; width: number; height: number }) {
     return windows.capturePage(this.#id, path, rect);
+  }
+}
+
+/**
+ * Electron `WebContentsView` 패리티 OO facade — host 창에 합성하는 child view.
+ * viewId 는 windowId 와 같은 풀이라 모든 webContents 메서드(loadURL/executeJavaScript 등)가
+ * view 에 동작한다. view 합성/조작은 `windows.*` 에 위임(BrowserWindow 와 동형 패턴).
+ */
+export class WebContentsView {
+  readonly #id: number;
+  private constructor(id: number) {
+    this.#id = id;
+  }
+  /** view 식별자(= windowId 풀). webContents 메서드 인자로 사용. */
+  get id(): number {
+    return this.#id;
+  }
+
+  /** host 창에 child view 생성 후 인스턴스 반환 (Electron `new WebContentsView()` + addChildView). */
+  static async create(opts: ViewOptions): Promise<WebContentsView> {
+    const res = await windows.createView(opts);
+    if (typeof res.viewId !== "number") {
+      throw new Error(`create_view: no viewId in response (${JSON.stringify(res)})`);
+    }
+    return new WebContentsView(res.viewId);
+  }
+  /** 기존 viewId 를 인스턴스로 래핑. */
+  static fromId(id: number): WebContentsView {
+    return new WebContentsView(id);
+  }
+
+  setBounds(bounds: SetBoundsArgs) {
+    return windows.setViewBounds(this.#id, bounds);
+  }
+  getBounds() {
+    return windows.getViewBounds(this.#id);
+  }
+  setVisible(visible: boolean) {
+    return windows.setViewVisible(this.#id, visible);
+  }
+  setBackgroundColor(color: string) {
+    return windows.setViewBackgroundColor(this.#id, color);
+  }
+  destroy() {
+    return windows.destroyView(this.#id);
+  }
+  // webContents 메서드 — viewId 가 windowId 풀이라 그대로 위임.
+  loadURL(url: string) {
+    return windows.loadURL(this.#id, url);
+  }
+  executeJavaScript(code: string) {
+    return windows.executeJavaScript(this.#id, code);
+  }
+  openDevTools() {
+    return windows.openDevTools(this.#id);
   }
 }
 

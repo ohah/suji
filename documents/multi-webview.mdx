@@ -80,8 +80,35 @@ const { viewIds } = await windows.getChildViews(parentWindowId);
 await windows.loadURL(viewId, 'https://example.com');  // 기존 windows.* 동일
 await windows.executeJavaScript(viewId, "document.title");
 
+const b = await windows.getViewBounds(viewId);          // {ok,x,y,width,height} (추적값)
+await windows.setViewBackgroundColor(viewId, '#202020'); // 로드 중 배경(cef_view_t)
+
 await windows.destroyView(viewId);  // child target 정리, host/남은 view 생존
 ```
+
+### WebContentsView 클래스 (OO facade — Electron 동형)
+
+`windows.*`(raw viewId)의 객체지향 래퍼. `BrowserWindow` 와 동일 패턴이고 viewId 는
+windowId 풀이라 모든 webContents 메서드가 동작한다.
+
+```ts
+import { WebContentsView } from '@suji/api';
+
+const view = await WebContentsView.create({ hostId: win.id, url: 'https://example.com', bounds: { x: 0, y: 80, width: 1024, height: 600 } });
+await view.setBounds({ x: 0, y: 80, width: 1024, height: 520 });
+await view.getBounds();
+await view.setBackgroundColor('#202020');
+await view.setVisible(false);
+await view.loadURL('https://other.example');
+await view.destroy();
+```
+
+> `getViewBounds` 는 추적된 마지막 set/create 값을 반환(window 게터 동형 결정적).
+> `setViewBackgroundColor` 는 view 의 cef_view_t 배경색(로드 중 표시)이다. window
+> `setBackgroundColor` 와 **동일 hex 파서**(`#RRGGBB[AA]`, 잘못된 값은 no-op).
+> 정직 경계: macOS 기본 child_window 경로는 child가 별도 `NSWindow` 라 로드-시점
+> 배경은 NSWindow 가 그릴 수 있어 cef_view_t 색이 안 보일 수 있다(overlay /
+> views-parent 경로는 cef_view_t 가 직접 그림).
 
 ### 구현 — CEF Views 기반 (17-B)
 

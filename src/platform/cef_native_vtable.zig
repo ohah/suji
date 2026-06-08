@@ -81,6 +81,7 @@ pub const vtable: window_mod.Native.VTable = .{
     .destroy_view = cef_web_contents_view.destroyView,
     .set_view_bounds = cef_web_contents_view.setViewBounds,
     .set_view_visible = cef_web_contents_view.setViewVisible,
+    .set_view_background_color = cef_web_contents_view.setViewBackgroundColor,
     .reorder_view = cef_web_contents_view.reorderView,
     .minimize = cef_window_state.minimizeImpl,
     .restore_window = cef_window_state.restoreWindowImpl,
