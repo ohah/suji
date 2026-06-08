@@ -36,9 +36,18 @@ pub const TestNative = struct {
     load_url_calls: usize = 0,
     reload_calls: usize = 0,
     execute_js_calls: usize = 0,
+    stop_calls: usize = 0,
+    insert_css_calls: usize = 0,
+    remove_inserted_css_calls: usize = 0,
     last_loaded_url: ?[]const u8 = null,
     last_reload_ignore_cache: ?bool = null,
     last_executed_js: ?[]const u8 = null,
+    // insertCss/removeInsertedCss 인자는 호출부 heap/stack 버퍼라 콜 종료 후 dangling →
+    // 스텁이 owned 버퍼로 복사해 콜 이후 assert 가능하게 한다(실 native 는 콜 중 즉시 소비).
+    inserted_css_buf: [1024]u8 = undefined,
+    last_inserted_css: ?[]const u8 = null,
+    css_key_buf: [64]u8 = undefined,
+    last_css_key: ?[]const u8 = null,
     /// getUrl가 반환할 값 (테스트가 미리 세팅; 기본 null)
     stub_url: ?[]const u8 = null,
     stub_user_agent: ?[]const u8 = null,
@@ -156,6 +165,9 @@ pub const TestNative = struct {
         .load_url = loadUrl,
         .reload = reload,
         .execute_javascript = executeJavascript,
+        .stop = stop,
+        .insert_css = insertCss,
+        .remove_inserted_css = removeInsertedCss,
         .get_url = getUrl,
         .set_user_agent = setUserAgent,
         .get_user_agent = getUserAgent,
@@ -325,6 +337,31 @@ pub const TestNative = struct {
         const self = fromCtx(ctx);
         self.execute_js_calls += 1;
         self.last_executed_js = code;
+    }
+
+    fn stop(ctx: ?*anyopaque, _: u64) void {
+        fromCtx(ctx).stop_calls += 1;
+    }
+
+    fn insertCss(ctx: ?*anyopaque, _: u64, css: []const u8, key: []const u8) void {
+        const self = fromCtx(ctx);
+        self.insert_css_calls += 1;
+        const n = @min(css.len, self.inserted_css_buf.len);
+        @memcpy(self.inserted_css_buf[0..n], css[0..n]);
+        self.last_inserted_css = self.inserted_css_buf[0..n];
+        self.copyCssKey(key);
+    }
+
+    fn removeInsertedCss(ctx: ?*anyopaque, _: u64, key: []const u8) void {
+        const self = fromCtx(ctx);
+        self.remove_inserted_css_calls += 1;
+        self.copyCssKey(key);
+    }
+
+    fn copyCssKey(self: *TestNative, key: []const u8) void {
+        const n = @min(key.len, self.css_key_buf.len);
+        @memcpy(self.css_key_buf[0..n], key[0..n]);
+        self.last_css_key = self.css_key_buf[0..n];
     }
 
     fn getUrl(ctx: ?*anyopaque, _: u64) ?[]const u8 {

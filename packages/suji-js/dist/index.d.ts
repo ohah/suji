@@ -133,6 +133,10 @@ export interface WindowOpResponse {
     windowId: number;
     ok: boolean;
 }
+/** insert_css 응답 — 주입된 style 의 key(removeInsertedCSS 로 제거). */
+export interface InsertCssResponse extends WindowOpResponse {
+    key: string;
+}
 export interface SetBoundsArgs {
     x?: number;
     y?: number;
@@ -322,6 +326,15 @@ export declare const windows: {
     /** 렌더러에서 임의 JS 실행 (Electron `webContents.executeJavaScript`).
      *  결과 회신은 미지원 — fire-and-forget. 결과가 필요하면 JS 측에서 `suji.send`로 회신. */
     executeJavaScript(windowId: number, code: string): Promise<WindowOpResponse>;
+    /** 진행 중 로드/네비게이션 중단 (Electron `webContents.stop`). */
+    stop(windowId: number): Promise<WindowOpResponse>;
+    /** CSS 주입 (Electron `webContents.insertCSS`). 반환된 key 로 `removeInsertedCSS` 제거.
+     *  `<style>` 엘리먼트 주입(author-origin) — `options.cssOrigin`('user')은 미지원(정직 경계). */
+    insertCSS(windowId: number, css: string, _options?: {
+        cssOrigin?: "user" | "author";
+    }): Promise<string>;
+    /** insertCSS 가 반환한 key 의 주입 CSS 제거 (Electron `webContents.removeInsertedCSS`). */
+    removeInsertedCSS(windowId: number, key: string): Promise<WindowOpResponse>;
     /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
     getURL(windowId: number): Promise<GetUrlResponse>;
     /** UA 동적 변경 (Electron `webContents.setUserAgent`). CDP
@@ -544,6 +557,11 @@ export declare class BrowserWindow {
     loadURL(url: string): Promise<WindowOpResponse>;
     reload(ignoreCache?: boolean): Promise<WindowOpResponse>;
     executeJavaScript(code: string): Promise<WindowOpResponse>;
+    stop(): Promise<WindowOpResponse>;
+    insertCSS(css: string, options?: {
+        cssOrigin?: "user" | "author";
+    }): Promise<string>;
+    removeInsertedCSS(key: string): Promise<WindowOpResponse>;
     getURL(): Promise<GetUrlResponse>;
     setUserAgent(userAgent: string): Promise<WindowOpResponse>;
     getUserAgent(): Promise<GetUserAgentResponse>;
@@ -658,6 +676,11 @@ export declare class WebContentsView {
     destroy(): Promise<ViewOpResponse>;
     loadURL(url: string): Promise<WindowOpResponse>;
     executeJavaScript(code: string): Promise<WindowOpResponse>;
+    stop(): Promise<WindowOpResponse>;
+    insertCSS(css: string, options?: {
+        cssOrigin?: "user" | "author";
+    }): Promise<string>;
+    removeInsertedCSS(key: string): Promise<WindowOpResponse>;
     openDevTools(): Promise<WindowOpResponse>;
 }
 export declare const powerMonitor: {

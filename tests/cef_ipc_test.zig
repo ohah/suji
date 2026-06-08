@@ -1182,6 +1182,46 @@ test "WebContentsView.getBounds/setBackgroundColor IPC + cef_view_t wire" {
     }
 }
 
+test "webContents stop/insertCSS/removeInsertedCSS IPC + native wire" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"stop\"",
+        "\"insert_css\"",
+        "\"remove_inserted_css\"",
+        "window_ipc.handleStop",
+        "window_ipc.handleInsertCss",
+        "window_ipc.handleRemoveInsertedCss",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn stopLoad", // CEF stop_load (이름 충돌 회피)
+        "entry.browser.stop_load orelse return",
+        "pub fn insertCss", // base64 + style 주입
+        "std.base64.standard.Encoder",
+        "data-suji-css", // style 식별 속성
+        "pub fn removeInsertedCss",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    // window_ipc: key 시퀀스 + JSON-unescape(임의 길이 CSS는 heap).
+    const ipc_src = try readProjectFile("src/core/window_ipc.zig", 1024 * 1024);
+    defer std.testing.allocator.free(ipc_src);
+    inline for (.{
+        "g_css_key_seq",
+        "suji-css-",
+        "util.unescapeJsonStr(req.css_escaped",
+        "wm.allocator.alloc",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, ipc_src, needle) != null);
+    }
+}
+
 test "screen display-added/removed/metrics-changed 이벤트 옵저버 wired" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

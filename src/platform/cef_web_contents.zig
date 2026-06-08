@@ -79,6 +79,42 @@ pub fn executeJavascript(ctx: ?*anyopaque, handle: u64, code: []const u8) void {
     evalJsOnBrowser(entry.browser, heap);
 }
 
+/// Electron webContents.stop() — 진행 중 로드/네비게이션 중단(CEF cef_browser_t.stop_load).
+pub fn stopLoad(ctx: ?*anyopaque, handle: u64) void {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.get(handle) orelse return;
+    const fn_ptr = entry.browser.stop_load orelse return;
+    fn_ptr(entry.browser);
+}
+
+/// Electron webContents.insertCSS() — `<style data-suji-css=key>` 주입(author-origin).
+/// css 는 raw 바이트(호출부가 JSON-unescape 완료) → base64 후 atob+TextDecoder 로 복원해
+/// 따옴표/백슬래시/유니코드 escape 문제를 원천 차단(executeJavascript 의 escape 한계 회피).
+/// key 는 caller 가 보장하는 영숫자+하이픈('suji-css-N')이라 JS literal 에 raw 삽입 안전.
+pub fn insertCss(ctx: ?*anyopaque, handle: u64, css: []const u8, key: []const u8) void {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.get(handle) orelse return;
+    const enc = std.base64.standard.Encoder;
+    const b64 = self.allocator.alloc(u8, enc.calcSize(css.len)) catch return;
+    defer self.allocator.free(b64);
+    _ = enc.encode(b64, css);
+    const js = std.fmt.allocPrintSentinel(self.allocator, "(function(){{try{{var b=atob('{s}');var u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);var s=document.createElement('style');s.setAttribute('data-suji-css','{s}');s.textContent=new TextDecoder().decode(u);(document.head||document.documentElement).appendChild(s);}}catch(e){{}}}})()", .{ b64, key }, 0) catch return;
+    defer self.allocator.free(js);
+    evalJsOnBrowser(entry.browser, js);
+}
+
+/// Electron webContents.removeInsertedCSS() — insertCss 가 반환한 key 의 style 제거.
+pub fn removeInsertedCss(ctx: ?*anyopaque, handle: u64, key: []const u8) void {
+    assertUiThread();
+    const self = fromCtx(ctx);
+    const entry = self.browsers.get(handle) orelse return;
+    const js = std.fmt.allocPrintSentinel(self.allocator, "(function(){{try{{var l=document.querySelectorAll('style[data-suji-css=\"{s}\"]');for(var i=0;i<l.length;i++)l[i].remove();}}catch(e){{}}}})()", .{key}, 0) catch return;
+    defer self.allocator.free(js);
+    evalJsOnBrowser(entry.browser, js);
+}
+
 /// Return the OnAddressChange URL cache. Cache misses intentionally stay null.
 pub fn getUrl(ctx: ?*anyopaque, handle: u64) ?[]const u8 {
     const self = fromCtx(ctx);

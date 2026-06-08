@@ -1843,3 +1843,54 @@ test "handlePrintToPDF: 콜백 미설정(테스트/모바일) → 기존 ack ok:
     const r = ipc.handlePrintToPDF(.{ .window_id = 1, .path = "/tmp/a.pdf" }, &buf, &wm).?;
     try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
 }
+
+test "handleStop: native stop 호출 + ok:true / unknown window ok:false" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleStop(1, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.stop_calls);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"stop\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+
+    var buf2: [256]u8 = undefined;
+    const r2 = ipc.handleStop(99999, &buf2, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.stop_calls); // 미증가
+    try std.testing.expect(std.mem.indexOf(u8, r2, "\"ok\":false") != null);
+}
+
+test "handleInsertCss: CSS JSON-unescape 후 native 전달 + key echo" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    // css_escaped = extractJsonString 결과(아직 escaped) — `\"` 가 포함된 형태.
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleInsertCss(.{ .window_id = 1, .css_escaped = "body{content:\\\"x\\\"}" }, &buf, &wm).?;
+
+    try std.testing.expectEqual(@as(usize, 1), native.insert_css_calls);
+    // native 는 unescape 된 raw CSS 를 받는다.
+    try std.testing.expectEqualStrings("body{content:\"x\"}", native.last_inserted_css.?);
+    // 생성된 key 는 'suji-css-N' 형식이고 응답에 echo.
+    try std.testing.expect(std.mem.startsWith(u8, native.last_css_key.?, "suji-css-"));
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"key\":\"suji-css-") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}
+
+test "handleRemoveInsertedCss: key 로 native 제거 호출" {
+    var native = TestNative{};
+    var wm = newWm(&native);
+    defer wm.deinit();
+    _ = try wm.create(.{});
+
+    var buf: [256]u8 = undefined;
+    const r = ipc.handleRemoveInsertedCss(.{ .window_id = 1, .key = "suji-css-7" }, &buf, &wm).?;
+    try std.testing.expectEqual(@as(usize, 1), native.remove_inserted_css_calls);
+    try std.testing.expectEqualStrings("suji-css-7", native.last_css_key.?);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"cmd\":\"remove_inserted_css\"") != null);
+    try std.testing.expect(std.mem.indexOf(u8, r, "\"ok\":true") != null);
+}

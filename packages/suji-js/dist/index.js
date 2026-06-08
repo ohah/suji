@@ -129,6 +129,20 @@ export const windows = {
     executeJavaScript(windowId, code) {
         return coreCall({ cmd: "execute_javascript", windowId, code });
     },
+    /** 진행 중 로드/네비게이션 중단 (Electron `webContents.stop`). */
+    stop(windowId) {
+        return coreCall({ cmd: "stop", windowId });
+    },
+    /** CSS 주입 (Electron `webContents.insertCSS`). 반환된 key 로 `removeInsertedCSS` 제거.
+     *  `<style>` 엘리먼트 주입(author-origin) — `options.cssOrigin`('user')은 미지원(정직 경계). */
+    async insertCSS(windowId, css, _options) {
+        const r = await coreCall({ cmd: "insert_css", windowId, css });
+        return r.key ?? "";
+    },
+    /** insertCSS 가 반환한 key 의 주입 CSS 제거 (Electron `webContents.removeInsertedCSS`). */
+    removeInsertedCSS(windowId, key) {
+        return coreCall({ cmd: "remove_inserted_css", windowId, key });
+    },
     /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
     getURL(windowId) {
         return coreCall({ cmd: "get_url", windowId });
@@ -580,6 +594,15 @@ export class BrowserWindow {
     executeJavaScript(code) {
         return windows.executeJavaScript(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), code);
     }
+    stop() {
+        return windows.stop(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
+    }
+    insertCSS(css, options) {
+        return windows.insertCSS(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), css, options);
+    }
+    removeInsertedCSS(key) {
+        return windows.removeInsertedCSS(__classPrivateFieldGet(this, _BrowserWindow_id, "f"), key);
+    }
     getURL() {
         return windows.getURL(__classPrivateFieldGet(this, _BrowserWindow_id, "f"));
     }
@@ -865,6 +888,15 @@ export class WebContentsView {
     }
     executeJavaScript(code) {
         return windows.executeJavaScript(__classPrivateFieldGet(this, _WebContentsView_id, "f"), code);
+    }
+    stop() {
+        return windows.stop(__classPrivateFieldGet(this, _WebContentsView_id, "f"));
+    }
+    insertCSS(css, options) {
+        return windows.insertCSS(__classPrivateFieldGet(this, _WebContentsView_id, "f"), css, options);
+    }
+    removeInsertedCSS(key) {
+        return windows.removeInsertedCSS(__classPrivateFieldGet(this, _WebContentsView_id, "f"), key);
     }
     openDevTools() {
         return windows.openDevTools(__classPrivateFieldGet(this, _WebContentsView_id, "f"));
