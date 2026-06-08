@@ -2445,6 +2445,14 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         ) catch return null;
         return result;
     }
+    if (std.mem.eql(u8, cmd, "power_save_blocker_is_started")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_save_blocker_is_started\",\"started\":{}}}",
+            .{cef.powerSaveBlockerIsStarted(util.nonNegU32(id_n))},
+        ) catch null;
+    }
 
     // app.getName / app.getVersion — config.app exposure (Electron `app.getName/getVersion`).
     if (std.mem.eql(u8, cmd, "app_get_name")) {

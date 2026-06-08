@@ -106,13 +106,13 @@
 
 - ~~**[medium]** `globalShortcut.registerAll`~~ ✅ (globalShortcut PR) — registerAll(accelerators[], click) 전 4 SDK. 기존 register 를 순회(JS/Node=Promise.all → 집계 boolean; Rust=Vec<Option<String>>, Go=[]string raw 응답 배열, 각 SDK register 규약 따름). 신규 IPC 없음. 성공분 유지/롤백 없음(Electron 은 void 반환).
 - ~~**[medium]** `globalShortcut.unregisterAll`~~ ✅ — Change return type of unregisterAll from Promise<boolean> to Promise<void> in: (1) packages/suji-js/src/index.ts lines 1001-1003, and (2) packages/suji-node/src/index.ts lines 1141-1144. This matches 
-- ~~**[medium]** `globalShortcut.setSuspended`~~ ✅ (globalShortcut PR) — setSuspended(bool) 전 4 SDK. `global_shortcut_set_suspended` cmd → cef_global_shortcut_state.g_suspended. suspended 동안 emit() 게이트가 trigger 발신만 차단(등록 유지, isRegistered true). 전 플랫폼 공용(emit 단일 게이트, 네이티브 unregister 아님 — 정직 경계: OS-level grab 은 유지).
-- ~~**[medium]** `globalShortcut.isSuspended`~~ ✅ (globalShortcut PR) — isSuspended() 전 4 SDK. `global_shortcut_is_suspended` cmd → cef_global_shortcut_state.g_suspended getter. setSuspended 와 짝(emit 게이트). ※ .m 의 static 대신 Zig gs_state 의 공용 게이트로 구현(전 플랫폼 단일 출처).
+- ~~**[medium]** `globalShortcut.setSuspended`~~ ✅ (globalShortcut PR; Zig SDK ipc/power PR) — setSuspended(bool) 전 5 SDK(Zig 백엔드 포함). `global_shortcut_set_suspended` cmd → cef_global_shortcut_state.g_suspended. suspended 동안 emit() 게이트가 trigger 발신만 차단(등록 유지, isRegistered true). 전 플랫폼 공용(emit 단일 게이트, 네이티브 unregister 아님 — 정직 경계: OS-level grab 은 유지).
+- ~~**[medium]** `globalShortcut.isSuspended`~~ ✅ (globalShortcut PR; Zig SDK ipc/power PR) — isSuspended() 전 5 SDK(Zig 백엔드 포함). `global_shortcut_is_suspended` cmd → cef_global_shortcut_state.g_suspended getter. setSuspended 와 짝(emit 게이트). ※ .m 의 static 대신 Zig gs_state 의 공용 게이트로 구현(전 플랫폼 단일 출처).
 
 ### ipc
 
-- **[medium]** `ipcRenderer.removeAllListeners([channel])` — In /Users/yoonhb/Documents/workspace/suji/packages/suji-js/src/index.ts (line 136-139): Add a TypeScript overload: `export function off(event?: string): void;` then update implementation to handle und
-- **[medium]** `ipcMainHandleOnce` — Add handleOnce to packages/suji-node/src/index.ts after handle() at line 114. Wrapper that registers handler and auto-unregisters after first invocation using closure variable. Maintains HandlerFn typ
+- ~~**[medium]** `ipcRenderer.removeAllListeners([channel])`~~ ✅ (ipc PR) — `off(event?)` optional: 채널 지정 시 해당 채널, 생략 시 전 채널 리스너 해제. 렌더러 브릿지 `s.off` 가 event 미지정 시 `_listeners` 전체 클리어(frozen bridge 라 property 재할당 불가 → inner 키 delete 로 클리어). e2e(off(channel) 단일 vs off() 전체) 검증.
+- ~~**[medium]** `ipcMainHandleOnce`~~ ✅ (ipc PR) — `handleOnce(channel, handler)` @suji/node. 첫 invoke 만 처리 후 채널을 consumed 핸들러로 교체(g_handlers 덮어쓰기). 정직 경계: suji 네이티브 removeHandler 부재라 진짜 unregister 아님 — 이후 invoke 는 `{error:"handler consumed (handleOnce)"}` 반환(Electron 의 'no handler' reject 와 관측 차이).
 
 ### menu
 
@@ -130,13 +130,13 @@
 
 ### nativeImage
 
-- ~~**[medium]** `image.isEmpty()`~~ ✅ (nativeImage PR) — nativeImage.isEmpty(path) @suji/api + @suji/node. `native_image_is_empty` cmd → cef.nativeImageIsEmpty(nativeImageGetSize 재사용 — 로드 실패/크기 0=true). 렌더러 경로 rendererPathFsGate.
-- ~~**[medium]** `nativeImage.isTemplateImage()`~~ ✅ (nativeImage PR) — nativeImage.isTemplateImage(path) @suji/api + @suji/node. `native_image_is_template` cmd → cef.nativeImageIsTemplate(macOS NSImage.isTemplate). 렌더러 경로 rendererPathFsGate. 정직 경계: macOS only(Win/Linux false). CEF feasibility 분석은 cef_image_t 기준 BLOCKED 라 봤으나 suji 는 NSImage 직접 사용이라 NATIVE-OK.
+- ~~**[medium]** `image.isEmpty()`~~ ✅ (nativeImage PR; Zig SDK ipc/power PR) — nativeImage.isEmpty(path) 전 5 SDK(@suji/api + @suji/node + Rust + Go + Zig 백엔드). `native_image_is_empty` cmd → cef.nativeImageIsEmpty(nativeImageGetSize 재사용 — 로드 실패/크기 0=true). 렌더러 경로 rendererPathFsGate.
+- ~~**[medium]** `nativeImage.isTemplateImage()`~~ ✅ (nativeImage PR; Zig SDK ipc/power PR) — nativeImage.isTemplateImage(path) 전 5 SDK(@suji/api + @suji/node + Rust + Go + Zig 백엔드). `native_image_is_template` cmd → cef.nativeImageIsTemplate(macOS NSImage.isTemplate). 렌더러 경로 rendererPathFsGate. 정직 경계: macOS only(Win/Linux false). CEF feasibility 분석은 cef_image_t 기준 BLOCKED 라 봤으나 suji 는 NSImage 직접 사용이라 NATIVE-OK.
 
 ### nativeTheme
 
-- ~~**[medium]** `nativeTheme.shouldUseHighContrastColors`~~ ✅ (nativeTheme PR) — shouldUseHighContrastColors() 전 4 SDK(@suji/api + @suji/node + Rust + Go). macOS NSWorkspace.accessibilityDisplayShouldIncreaseContrast(workspaceBool→msgSendBool 공용 헬퍼) + **Windows SystemParametersInfo(SPI_GETHIGHCONTRAST) HCF_HIGHCONTRASTON**(win_theme.highContrast). `native_theme_high_contrast` cmd. 정직 경계: Linux false(미지원).
-- ~~**[medium]** `nativeTheme.prefersReducedTransparency`~~ ✅ (nativeTheme PR) — prefersReducedTransparency() 전 4 SDK. macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency + **Windows HKCU EnableTransparency==0**(win_theme.reducedTransparency). `native_theme_reduced_transparency` cmd. 정직 경계: Linux false(미지원).
+- ~~**[medium]** `nativeTheme.shouldUseHighContrastColors`~~ ✅ (nativeTheme PR; Zig SDK ipc/power PR) — shouldUseHighContrastColors() 전 5 SDK(@suji/api + @suji/node + Rust + Go + Zig 백엔드). macOS NSWorkspace.accessibilityDisplayShouldIncreaseContrast(workspaceBool→msgSendBool 공용 헬퍼) + **Windows SystemParametersInfo(SPI_GETHIGHCONTRAST) HCF_HIGHCONTRASTON**(win_theme.highContrast). `native_theme_high_contrast` cmd. 정직 경계: Linux false(미지원).
+- ~~**[medium]** `nativeTheme.prefersReducedTransparency`~~ ✅ (nativeTheme PR; Zig SDK ipc/power PR) — prefersReducedTransparency() 전 5 SDK(Zig 백엔드 포함). macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency + **Windows HKCU EnableTransparency==0**(win_theme.reducedTransparency). `native_theme_reduced_transparency` cmd. 정직 경계: Linux false(미지원).
 
 ### notification
 
@@ -154,7 +154,7 @@
 
 ### powerSaveBlocker
 
-- **[medium]** `powerSaveBlocker.isStarted(id)` — Add isStarted(id: number) -> Promise<boolean> method to powerSaveBlocker in both @suji/api and @suji/node. Implement a new Zig command handler power_save_blocker_is_started in src/main.zig that mainta
+- ~~**[medium]** `powerSaveBlocker.isStarted(id)`~~ ✅ (ipc/power PR) — isStarted(id) **전 5 SDK**(@suji/api + @suji/node + Rust + Go + Zig 백엔드 src/core/app.zig). `power_save_blocker_is_started` cmd → cef.powerSaveBlockerIsStarted. 전 플랫폼 단일 추적 테이블(power_save_started_ids) — start 시 기록/stop 시 제거(성공 무관: stop 요청=추적 해제, 네이티브 release 실패에도 isStarted 거짓-true 방지). macOS 는 IOPMAssertion id 라 entry table 미사용 → 이 테이블로 통일. 정직 경계: 64개 동시 추적(macOS uncapped start 65번째+ 는 추적 슬롯 부족, 비현실적). e2e(start→true, stop→false, unknown→false). **catch-up: 이 PR 이 Zig 백엔드 SDK(app.zig)에 nativeTheme highContrast/reducedTransparency, nativeImage isEmpty/isTemplateImage, globalShortcut setSuspended/isSuspended, powerSaveBlocker isStarted 를 추가 — #117/#118 누락분 보강(5번째 SDK 파리티).**
 
 ### screen
 

@@ -63,6 +63,21 @@ describe("powerSaveBlocker", () => {
     expect(stopped.success).toBe(false);
   });
 
+  test("isStarted: start → true, stop → false; unknown id → false", async () => {
+    const id = await startBlocker("prevent_display_sleep");
+    const s1 = await core<{ started: boolean }>({ cmd: "power_save_blocker_is_started", id });
+    expect(s1.started).toBe(true);
+
+    await stopBlocker(id);
+    const s2 = await core<{ started: boolean }>({ cmd: "power_save_blocker_is_started", id });
+    expect(s2.started).toBe(false);
+
+    const s3 = await core<{ started: boolean }>({ cmd: "power_save_blocker_is_started", id: 999999 });
+    expect(s3.started).toBe(false);
+    const s0 = await core<{ started: boolean }>({ cmd: "power_save_blocker_is_started", id: 0 });
+    expect(s0.started).toBe(false);
+  });
+
   test("stopping the same id twice is false on the second stop", async () => {
     const id = await startBlocker("prevent_display_sleep");
     const first = await stopBlocker(id);

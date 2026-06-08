@@ -83,9 +83,10 @@ export declare function once(event: string, callback: Listener): () => void;
  */
 export declare function send(event: string, data: unknown, options?: SendOptions): void;
 /**
- * 채널의 모든 리스너 해제 (Electron: ipcRenderer.removeAllListeners)
+ * 리스너 해제 (Electron: ipcRenderer.removeAllListeners([channel])).
+ * `event` 지정 시 해당 채널의 모든 리스너 해제, 생략 시 **전 채널** 리스너 해제.
  */
-export declare function off(event: string): void;
+export declare function off(event?: string): void;
 export type TitleBarStyle = "default" | "hidden" | "hiddenInset";
 export interface WindowOptions {
     /** 창 타이틀 */
@@ -1284,6 +1285,8 @@ export declare const powerSaveBlocker: {
     start(type: PowerSaveBlockerType): Promise<number>;
     /** start로 받은 id를 해제. unknown id는 false. */
     stop(id: number): Promise<boolean>;
+    /** blocker 가 활성(시작됨) 상태인지 (Electron `powerSaveBlocker.isStarted`). */
+    isStarted(id: number): Promise<boolean>;
 };
 export declare const safeStorage: {
     /** service+account에 utf-8 value 저장. 같은 키면 update (idempotent). */

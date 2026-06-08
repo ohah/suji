@@ -93,6 +93,7 @@ pub const appSetBadgeCount = cef_public_api.appSetBadgeCount;
 pub const PowerSaveBlockerType = cef_public_api.PowerSaveBlockerType;
 pub const powerSaveBlockerStart = cef_public_api.powerSaveBlockerStart;
 pub const powerSaveBlockerStop = cef_public_api.powerSaveBlockerStop;
+pub const powerSaveBlockerIsStarted = cef_public_api.powerSaveBlockerIsStarted;
 pub const safeStorageSet = cef_public_api.safeStorageSet;
 pub const safeStorageGet = cef_public_api.safeStorageGet;
 pub const safeStorageDelete = cef_public_api.safeStorageDelete;

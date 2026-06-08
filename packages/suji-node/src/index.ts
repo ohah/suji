@@ -113,6 +113,29 @@ export function handle<TReq = unknown, TRes = unknown>(
   });
 }
 
+/**
+ * Electron `ipcMain.handleOnce(channel, handler)` — 첫 invoke 만 처리하고 소비.
+ * ※ suji 는 네이티브 removeHandler 가 없어 진짜 unregister 가 아니라, 첫 호출 후
+ *   채널을 "consumed" 핸들러로 교체한다(이후 invoke 는 `{error:"handler consumed (handleOnce)"}`
+ *   를 반환 — Electron 의 'no handler' reject 와 관측 차이, 정직 경계).
+ */
+export function handleOnce<TReq = unknown, TRes = unknown>(
+  channel: string,
+  handler: HandlerFn<TReq, TRes>,
+): void {
+  // onceWrapper 는 arity 2 → handle 이 항상 (data, event) 전달. 사용자 handler 가 arity 1
+  // 이면 여분 event 는 JS 가 무시(별도 arity 분기 불필요 — handle 이 이미 처리).
+  const onceWrapper = (data: TReq, event: InvokeEvent): TRes => {
+    try {
+      return (handler as (d: TReq, e: InvokeEvent) => TRes)(data, event);
+    } finally {
+      // 소비 후 교체 — g_handlers[channel] 덮어쓰기(재등록). 다음 invoke 부터 consumed.
+      handle(channel, (() => JSON.stringify({ error: 'handler consumed (handleOnce)' })) as HandlerFn);
+    }
+  };
+  handle<TReq, TRes>(channel, onceWrapper as HandlerFn<TReq, TRes>);
+}
+
 // ============================================
 // Cross-backend invocation
 // ============================================
@@ -2324,6 +2347,12 @@ export const powerSaveBlocker = {
   async stop(id: number): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'power_save_blocker_stop', id });
     return r.success === true;
+  },
+
+  /** blocker 가 활성(시작됨) 상태인지 (Electron `powerSaveBlocker.isStarted`). */
+  async isStarted(id: number): Promise<boolean> {
+    const r = await invoke<{ started: boolean }>('__core__', { cmd: 'power_save_blocker_is_started', id });
+    return r.started === true;
   },
 };
 

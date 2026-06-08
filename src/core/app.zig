@@ -1049,6 +1049,24 @@ pub const nativeImage = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\",\"quality\":{d}", .{ p_buf[0..p_n], quality }) catch return null;
         return coreCmd("native_image_to_jpeg", fields);
     }
+
+    /// 이미지가 비어있는지(로드 실패/크기 0). 응답: `{"isEmpty":bool}`.
+    pub fn isEmpty(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("native_image_is_empty", fields);
+    }
+
+    /// template 이미지 여부(macOS NSImage.isTemplate). 응답: `{"isTemplate":bool}`.
+    pub fn isTemplateImage(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("native_image_is_template", fields);
+    }
 };
 
 pub const nativeTheme = struct {
@@ -1064,6 +1082,16 @@ pub const nativeTheme = struct {
         var fields_buf: [64]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"source\":\"{s}\"", .{s_buf[0..s_n]}) catch return null;
         return coreCmd("native_theme_set_source", fields);
+    }
+
+    /// 고대비 모드 여부(macOS/Windows; Linux false). 응답: `{"highContrast":bool}`.
+    pub fn shouldUseHighContrastColors() ?[]const u8 {
+        return coreCmd("native_theme_high_contrast", "");
+    }
+
+    /// 투명도 감소 선호(macOS/Windows; Linux false). 응답: `{"reducedTransparency":bool}`.
+    pub fn prefersReducedTransparency() ?[]const u8 {
+        return coreCmd("native_theme_reduced_transparency", "");
     }
 };
 
@@ -1309,6 +1337,20 @@ pub const globalShortcut = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"accelerator\":\"{s}\"", .{a_buf[0..a_n]}) catch return null;
         return coreCmd("global_shortcut_is_registered", fields);
     }
+
+    /// suspended 토글(Electron globalShortcut.setSuspended). 등록 유지, trigger 발신만 차단.
+    /// 응답: `{"success":bool}`.
+    pub fn setSuspended(suspended: bool) ?[]const u8 {
+        var fields_buf: [32]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"suspended\":{}", .{suspended}) catch return null;
+        return coreCmd("global_shortcut_set_suspended", fields);
+    }
+
+    /// 현재 suspended 상태(Electron globalShortcut.isSuspended). 응답: `{"suspended":bool}`.
+    /// registerAll 은 Zig 백엔드가 register 를 직접 순회(공유 응답 버퍼라 SDK 집계 미제공).
+    pub fn isSuspended() ?[]const u8 {
+        return coreCmd("global_shortcut_is_suspended", "");
+    }
 };
 
 pub const dialog = struct {
@@ -1475,6 +1517,13 @@ pub const powerSaveBlocker = struct {
         var fields_buf: [32]u8 = undefined;
         const fields = std.fmt.bufPrint(&fields_buf, "\"id\":{d}", .{id}) catch return null;
         return coreCmd("power_save_blocker_stop", fields);
+    }
+
+    /// blocker 활성 여부(Electron powerSaveBlocker.isStarted). 응답: `{"started":bool}`.
+    pub fn isStarted(id: u32) ?[]const u8 {
+        var fields_buf: [32]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"id\":{d}", .{id}) catch return null;
+        return coreCmd("power_save_blocker_is_started", fields);
     }
 };
 

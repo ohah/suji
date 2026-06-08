@@ -1265,10 +1265,12 @@ test "powerSaveBlocker IPC — start/stop + 두 type 모두 노출" {
     inline for (.{
         "\"power_save_blocker_start\"",
         "\"power_save_blocker_stop\"",
+        "\"power_save_blocker_is_started\"",
         "\"prevent_app_suspension\"",
         "\"prevent_display_sleep\"",
         "cef.powerSaveBlockerStart",
         "cef.powerSaveBlockerStop",
+        "cef.powerSaveBlockerIsStarted",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
@@ -1278,6 +1280,8 @@ test "powerSaveBlocker IPC — start/stop + 두 type 모두 노출" {
     inline for (.{
         "pub fn powerSaveBlockerStart",
         "pub fn powerSaveBlockerStop",
+        "pub fn powerSaveBlockerIsStarted",
+        "power_save_started_ids", // 활성 id 추적 테이블(전 플랫폼 isStarted 단일 출처)
         "IOPMAssertionCreateWithName",
         "IOPMAssertionRelease",
         "XScreenSaverSuspend",
@@ -1322,6 +1326,14 @@ test "powerSaveBlocker IPC — start/stop + 두 type 모두 노출" {
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
+}
+
+test "ipcRenderer.removeAllListeners — bridge off(undefined) 가 전 채널 클리어" {
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    // 브릿지 off 가 event 미지정 시 _listeners 전체를 비운다(전 채널 removeAllListeners).
+    // frozen bridge(shallow) 라 property 재할당 금지 → inner 객체 키를 delete 로 클리어.
+    try std.testing.expect(std.mem.indexOf(u8, cef_src, "for (var k in s._listeners) delete s._listeners[k];") != null);
 }
 
 test "find_result IPC — find_handler 등록 + main.zig final-only forward + display struct 통합" {

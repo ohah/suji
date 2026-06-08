@@ -78,6 +78,10 @@ pub fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\    };
         \\  };
         \\  s.off = function(event) {
+        \\    if (event === undefined || event === null) {
+        \\      for (var k in s._listeners) delete s._listeners[k];
+        \\      return;
+        \\    }
         \\    delete s._listeners[event];
         \\  };
         \\  s.__dispatch__ = function(event, data) {
