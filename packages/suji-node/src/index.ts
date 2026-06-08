@@ -683,6 +683,13 @@ export const windows = {
   removeInsertedCSS(windowId: number, key: string): Promise<WindowOpResponse> {
     return invoke<WindowOpResponse>('__core__', { cmd: 'remove_inserted_css', windowId, key });
   },
+  /** Electron `webContents.setWindowOpenHandler` — 네이티브 popup 정책. "deny"=차단,
+   *  "allow"(기본)=허용. **전역 정책**. popup 마다 web-contents:new-window 이벤트 발신
+   *  (suji.on('web-contents:new-window', cb)). ⚠️ per-popup 동적 콜백은 CEF 제약상 불가. */
+  async setWindowOpenHandler(action: 'allow' | 'deny'): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'web_contents_set_window_open_handler', action });
+    return r.success === true;
+  },
   getURL(windowId: number): Promise<GetUrlResponse> {
     return invoke<GetUrlResponse>('__core__', { cmd: 'get_url', windowId });
   },

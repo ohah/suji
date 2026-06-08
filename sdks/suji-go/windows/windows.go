@@ -75,6 +75,16 @@ func RemoveInsertedCSS(windowID uint32, key string) string {
 	))
 }
 
+// SetWindowOpenHandler sets the native popup policy (Electron webContents.setWindowOpenHandler).
+// "deny"=block, "allow"=allow (global policy). Each popup emits web-contents:new-window.
+// ⚠️ per-popup dynamic callback is unsupported (CEF on_before_popup is synchronous) — policy + event.
+func SetWindowOpenHandler(action string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"web_contents_set_window_open_handler","action":"%s"}`,
+		jsonesc.Full(action),
+	))
+}
+
 func GetURL(windowID uint32) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"get_url","windowId":%d}`, windowID))
 }

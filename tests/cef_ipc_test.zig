@@ -2535,6 +2535,31 @@ test "app.setAsDefaultProtocolClient 트리오 — LS wire + 3 cmd dispatch" {
     }
 }
 
+test "webContents.setWindowOpenHandler — on_before_popup 정책 + new-window 이벤트 wired" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"web_contents_set_window_open_handler\"",
+        "cef.setWindowOpenDeny",
+        "cef.setWindowOpenEmitHandler(&windowOpenEmitHandler)",
+        "fn windowOpenEmitHandler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    // cef_life_span_handler.zig: on_before_popup 동기 정책 + web-contents:new-window emit.
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "g_life_span_handler.on_before_popup = &onBeforePopup",
+        "pub fn setWindowOpenDeny",
+        "g_window_open_deny",
+        "web-contents:new-window",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "app.getName/getVersion + screen.getDisplayNearestPoint IPC" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

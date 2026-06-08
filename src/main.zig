@@ -698,6 +698,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setDownloadEmitHandler(&downloadEmitHandler);
+    cef.setWindowOpenEmitHandler(&windowOpenEmitHandler);
     cef.setBeforeQuitHandler(&beforeQuitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
@@ -892,6 +893,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setDownloadEmitHandler(&downloadEmitHandler);
+    cef.setWindowOpenEmitHandler(&windowOpenEmitHandler);
     cef.setBeforeQuitHandler(&beforeQuitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
@@ -2915,6 +2917,17 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "web_request_set_request_headers")) {
         return handleWebRequestSetRequestHeaders(req_clean, response_buf);
     }
+    // Electron webContents.setWindowOpenHandler — action:"deny" 면 네이티브 popup 전역 차단.
+    // 그 외/미지정="allow". popup 마다 web-contents:new-window 이벤트는 정책 무관 발신.
+    if (std.mem.eql(u8, cmd, "web_contents_set_window_open_handler")) {
+        const action = util.extractJsonString(req_clean, "action") orelse "allow";
+        cef.setWindowOpenDeny(std.mem.eql(u8, action, "deny"));
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"web_contents_set_window_open_handler\",\"success\":true}}",
+            .{},
+        ) catch null;
+    }
 
     if (std.mem.eql(u8, cmd, "app_attention_cancel")) {
         const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
@@ -4834,6 +4847,11 @@ fn downloadEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(
 /// Electron `app.on('before-quit')` — quit 직전 1회 발신(cef.quit chokepoint).
 fn beforeQuitHandler() callconv(.c) void {
     emitBusRaw("app:before-quit", "{}");
+}
+
+/// Electron webContents.setWindowOpenHandler — popup 마다 web-contents:new-window 발신.
+fn windowOpenEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void {
+    emitBusRaw(std.mem.span(channel), std.mem.span(payload));
 }
 
 fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {

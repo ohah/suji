@@ -1,7 +1,9 @@
 //! CEF life span handler — cef.zig 에서 분리(동작 무변경).
 //! browser 생성/종료 콜백을 WindowManager, deferred response, DevTools map 정리와 연결한다.
+const std = @import("std");
 const window_mod = @import("window");
 const logger = @import("logger");
+const util = @import("util");
 const cef = @import("cef.zig");
 const cef_devtools = @import("cef_devtools.zig");
 
@@ -9,6 +11,25 @@ const c = cef.c;
 const log = logger.module("cef");
 const zeroCefStruct = cef.zeroCefStruct;
 const initBaseRefCounted = cef.initBaseRefCounted;
+
+// ---- Electron webContents.setWindowOpenHandler — declarative popup 정책 + 이벤트 ----
+// CEF on_before_popup 은 동기 콜백(즉시 1=block/0=allow 반환)이라 async JS 핸들러를
+// 동기 consult 할 수 없다. 따라서 전역 정책('allow'/'deny')을 동기 적용하고, popup 마다
+// `web-contents:new-window` 이벤트({url, frameName, disposition})를 발신해 app 이 관리
+// 창으로 직접 열도록 한다(정직 경계 — per-popup 동적 콜백은 CEF 제약상 불가).
+pub const WindowOpenEmitFn = *const fn (channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void;
+var g_window_open_emit_fn: ?WindowOpenEmitFn = null;
+var g_window_open_deny: std.atomic.Value(bool) = .init(false);
+
+pub fn setWindowOpenEmitHandler(fn_ptr: WindowOpenEmitFn) void {
+    g_window_open_emit_fn = fn_ptr;
+}
+
+/// Electron `webContents.setWindowOpenHandler` — deny=true 면 네이티브 popup 차단(전역).
+/// 기본 false(allow, 비파괴). popup 마다 web-contents:new-window 이벤트는 정책 무관 발신.
+pub fn setWindowOpenDeny(deny: bool) void {
+    g_window_open_deny.store(deny, .release);
+}
 
 var g_life_span_handler: c.cef_life_span_handler_t = undefined;
 var g_life_span_handler_initialized: bool = false;
@@ -18,9 +39,48 @@ pub fn initLifeSpanHandler() void {
     zeroCefStruct(c.cef_life_span_handler_t, &g_life_span_handler);
     initBaseRefCounted(&g_life_span_handler.base);
     g_life_span_handler.on_after_created = &onAfterCreated;
+    g_life_span_handler.on_before_popup = &onBeforePopup;
     g_life_span_handler.do_close = &doClose;
     g_life_span_handler.on_before_close = &onBeforeClose;
     g_life_span_handler_initialized = true;
+}
+
+/// CEF popup(window.open / target=_blank) 직전 동기 훅 — web-contents:new-window 발신 +
+/// 전역 정책 반환(1=block, 0=allow). url/frameName 은 escape 후 페이로드.
+fn onBeforePopup(
+    _: ?*c._cef_life_span_handler_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    _: c_int,
+    target_url: [*c]const c.cef_string_t,
+    target_frame_name: [*c]const c.cef_string_t,
+    target_disposition: c.cef_window_open_disposition_t,
+    _: c_int,
+    _: [*c]const c.cef_popup_features_t,
+    _: [*c]c.cef_window_info_t,
+    _: [*c][*c]c._cef_client_t,
+    _: [*c]c.cef_browser_settings_t,
+    _: [*c][*c]c._cef_dictionary_value_t,
+    _: [*c]c_int,
+) callconv(.c) c_int {
+    const deny: c_int = if (g_window_open_deny.load(.acquire)) 1 else 0;
+    const emit = g_window_open_emit_fn orelse return deny;
+    var url_buf: [2048]u8 = undefined;
+    const url = if (target_url != null) cef.cefStringToUtf8(target_url, &url_buf) else "";
+    var name_buf: [256]u8 = undefined;
+    const fname = if (target_frame_name != null) cef.cefStringToUtf8(target_frame_name, &name_buf) else "";
+    var url_esc: [4096]u8 = undefined;
+    var name_esc: [512]u8 = undefined;
+    const ue = util.escapeJsonStrFull(url, &url_esc) orelse return deny;
+    const ne = util.escapeJsonStrFull(fname, &name_esc) orelse return deny;
+    var payload: [8192]u8 = undefined;
+    const p = std.fmt.bufPrintZ(
+        &payload,
+        "{{\"url\":\"{s}\",\"frameName\":\"{s}\",\"disposition\":{d}}}",
+        .{ url_esc[0..ue], name_esc[0..ne], @as(i32, @intCast(target_disposition)) },
+    ) catch return deny;
+    emit("web-contents:new-window", p.ptr);
+    return deny;
 }
 
 pub fn getLifeSpanHandler(_: ?*c._cef_client_t) callconv(.c) ?*c._cef_life_span_handler_t {
