@@ -647,10 +647,11 @@ pub const windows = struct {
 
     /// Electron `webContents.insertCSS()` — author-origin `<style>` 주입. 응답 JSON 의
     /// `key` 로 removeInsertedCSS 제거. css 가 4KB 미만이면 stack(executeJavaScript 동일 임계),
-    /// 그 이상은 stderr warn 후 null.
+    /// 그 이상은 stderr warn 후 null. escapeJsonStrFull 로 개행/탭 보존(코어가 unescape) —
+    /// escapeJsonStr 은 제어문자 drop 해 멀티라인 CSS 평탄화(code-review max 수정).
     pub fn insertCSS(id: u32, css: []const u8) ?[]const u8 {
         var c_buf: [JS_CODE_STACK_BUF]u8 = undefined;
-        const c_n = util.escapeJsonStr(css, &c_buf) orelse {
+        const c_n = util.escapeJsonStrFull(css, &c_buf) orelse {
             std.debug.print(
                 "[suji] warning: insertCSS css too large ({d} bytes after escape > {d} stack buf) — dropped\n",
                 .{ css.len, JS_CODE_STACK_BUF },

@@ -38,6 +38,9 @@ func SetRequestHeaders(patterns []string, requestHeaders map[string]string) stri
 	if patterns == nil {
 		patterns = []string{}
 	}
+	if requestHeaders == nil { // nil map → "requestHeaders":null → 코어가 "{}" fallback(조용한 no-op) 방지
+		requestHeaders = map[string]string{}
+	}
 	body, _ := json.Marshal(map[string]any{
 		"cmd":            "web_request_set_request_headers",
 		"patterns":       patterns,

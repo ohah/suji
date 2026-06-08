@@ -2495,13 +2495,15 @@ test "app.before-quit 이벤트 — quit chokepoint 훅 wired" {
         try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
     }
 
-    // cef_message_loop.zig: quit() 직전 1회 호출되는 BeforeQuitFn 훅(idempotent guard 안).
+    // cef_message_loop: fireBeforeQuit(idempotent) 가 quit() AND life_span onBeforeClose
+    // main-browser-close 두 chokepoint 에서 호출돼야 한다(code-review max #1 — 창닫기 quit 누락 수정).
     const cef_src = try readCefSource();
     defer std.testing.allocator.free(cef_src);
     inline for (.{
         "pub fn setBeforeQuitHandler",
-        "g_before_quit_fn",
-        "if (g_before_quit_fn) |f| f();",
+        "g_before_quit_emitted", // 1회 보장 플래그
+        "pub fn fireBeforeQuit", // 공용 idempotent 발신
+        "cef.fireBeforeQuit()", // onBeforeClose main-browser-close 경로(life_span_handler)
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }
