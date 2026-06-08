@@ -1723,6 +1723,9 @@ export interface MenuCommandItem {
   /** Electron MenuItem.role — copy/paste/quit 등 표준 동작(설정 시 click 무시). macOS only,
    *  Win/Linux no-op. */
   role?: string;
+  /** Electron MenuItem.icon — 이미지 파일 경로. macOS NSImage(setImage:). fs sandbox
+   *  allowedRoots 게이트(렌더러 경로; 미설정=레거시 허용). macOS only. */
+  icon?: string;
 }
 export interface MenuCheckboxItem {
   type: 'checkbox';
@@ -1733,6 +1736,8 @@ export interface MenuCheckboxItem {
   id?: string;
   visible?: boolean;
   accelerator?: string;
+  /** Electron MenuItem.icon — 이미지 파일 경로. macOS NSImage(setImage:). fs sandbox 게이트. */
+  icon?: string;
 }
 export interface MenuSubmenuItem {
   type?: 'submenu';
@@ -1776,6 +1781,15 @@ export const menu = {
       return null;
     };
     return find(await menu.getApplicationMenu());
+  },
+
+  /** Electron `Menu.insert(pos, menuItem)` — getApplicationMenu 스냅샷 pos 에 삽입 후 재설정
+   *  (fire-and-forget — splice + setApplicationMenu). pos clamp. */
+  async insert(pos: number, item: MenuItem): Promise<boolean> {
+    const items = await menu.getApplicationMenu();
+    const idx = Math.max(0, Math.min(pos, items.length));
+    items.splice(idx, 0, item);
+    return menu.setApplicationMenu(items);
   },
 
   /** Electron `Menu.sendActionToFirstResponder(action)` — macOS first responder 에 표준

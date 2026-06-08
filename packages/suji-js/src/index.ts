@@ -1450,6 +1450,9 @@ export interface MenuCommandItem {
    *  수행). macOS only(undo/redo/cut/copy/paste/pasteAndMatchStyle/selectAll/delete/
    *  minimize/zoom/close/togglefullscreen/quit). Win/Linux no-op. */
   role?: string;
+  /** Electron MenuItem.icon — 이미지 파일 경로. macOS NSImage(setImage:). fs sandbox
+   *  allowedRoots 게이트 적용(렌더러 경로; 미설정=레거시 허용). macOS only. */
+  icon?: string;
 }
 
 export interface MenuCheckboxItem {
@@ -1461,6 +1464,8 @@ export interface MenuCheckboxItem {
   id?: string;
   visible?: boolean;
   accelerator?: string;
+  /** Electron MenuItem.icon — 이미지 파일 경로. macOS NSImage(setImage:). fs sandbox 게이트. */
+  icon?: string;
 }
 
 export interface MenuSubmenuItem {
@@ -1508,6 +1513,15 @@ export const menu = {
       return null;
     };
     return find(await menu.getApplicationMenu());
+  },
+
+  /** Electron `Menu.insert(pos, menuItem)` — getApplicationMenu 스냅샷 pos 위치에 항목 삽입
+   *  후 전체 재설정(suji 메뉴 fire-and-forget — 스냅샷 splice + setApplicationMenu). pos clamp. */
+  async insert(pos: number, item: MenuItem): Promise<boolean> {
+    const items = await menu.getApplicationMenu();
+    const idx = Math.max(0, Math.min(pos, items.length));
+    items.splice(idx, 0, item);
+    return menu.setApplicationMenu(items);
   },
 
   /** Electron `Menu.sendActionToFirstResponder(action)` — macOS first responder(포커스된

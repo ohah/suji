@@ -199,6 +199,10 @@ fn onAllClosed(_: suji.Event) void {
 //   / popup(items, {x?,y?})  — 임의 위치 컨텍스트 메뉴(macOS NSMenu
 //   popUpMenuPositioningItem, Linux GTK popup; x/y 미지정=커서/포인터)
 //                                       (macOS NSMenu / Linux GTK, menu:click 이벤트)
+//   MenuItem 필드(전 SDK): id/visible/enabled/accelerator/role/icon. icon=이미지
+//   경로(macOS NSImage setImage:, fs sandbox 게이트). popup 은 menu:will-show/
+//   menu:will-close 이벤트 발신(suji.on). Menu.getApplicationMenu/getMenuItemById/
+//   insert 는 스냅샷 기반(fire-and-forget — 라이브 객체 아님).
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key / Linux X11 XGrabKey / Windows RegisterHotKey, globalShortcut:trigger 이벤트)
 //   미디어키: register("MediaPlayPause"|"MediaNextTrack"|"MediaPreviousTrack"|

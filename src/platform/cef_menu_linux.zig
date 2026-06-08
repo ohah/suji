@@ -7,6 +7,7 @@ const cef_util = @import("cef_util.zig");
 
 const ApplicationMenuItem = menu_types.ApplicationMenuItem;
 const MenuEmitHandler = menu_types.MenuEmitHandler;
+const MenuLifecycleEmitHandler = menu_types.MenuLifecycleEmitHandler;
 const nullTerminateOrTruncate = cef_util.nullTerminateOrTruncate;
 
 const impl = if (builtin.os.tag == .linux) struct {
@@ -20,6 +21,7 @@ const impl = if (builtin.os.tag == .linux) struct {
     };
 
     var g_menu_emit_handler: ?MenuEmitHandler = null;
+    var g_menu_lifecycle_emit: ?MenuLifecycleEmitHandler = null;
     var current_menu: ?*anyopaque = null;
     var callbacks: [MAX_MENU_ITEMS]MenuCallback = [_]MenuCallback{.{}} ** MAX_MENU_ITEMS;
     var popup_x: c_int = 0;
@@ -61,6 +63,10 @@ const impl = if (builtin.os.tag == .linux) struct {
         g_menu_emit_handler = handler;
     }
 
+    pub fn setMenuLifecycleEmitHandler(handler: MenuLifecycleEmitHandler) void {
+        g_menu_lifecycle_emit = handler;
+    }
+
     fn gtkAvailable() bool {
         return suji_gtk_init_check() != 0;
     }
@@ -75,6 +81,10 @@ const impl = if (builtin.os.tag == .linux) struct {
             return;
         };
         current_menu = null;
+        // 이미 열린 메뉴를 (재-popup 등으로) 교체 destroy 할 때도 will-close 를 발신해
+        // will-show/will-close 쌍을 맞춘다. destroy 가 deactivate 를 동기 발화해도
+        // current_menu==null 이라 menuDeactivateC 는 early-return → 중복 발신 없음.
+        if (g_menu_lifecycle_emit) |emit| emit("menu:will-close");
         gtk_widget_destroy(menu);
         clearCallbacks();
     }
@@ -104,6 +114,7 @@ const impl = if (builtin.os.tag == .linux) struct {
         const menu = widget orelse return;
         if (current_menu == null or current_menu.? != menu) return;
         current_menu = null;
+        if (g_menu_lifecycle_emit) |emit| emit("menu:will-close"); // GTK dismiss
         gtk_widget_destroy(menu);
         clearCallbacks();
     }
@@ -179,6 +190,7 @@ const impl = if (builtin.os.tag == .linux) struct {
         const menu = createGtkMenuFromItems(items) orelse return false;
         current_menu = menu;
         _ = g_signal_connect_data(menu, "deactivate", @ptrCast(&menuDeactivateC), null, null, 0);
+        if (g_menu_lifecycle_emit) |emit| emit("menu:will-show");
         gtk_widget_show_all(menu);
 
         const use_position = x != null and y != null;
@@ -200,6 +212,7 @@ const impl = if (builtin.os.tag == .linux) struct {
     }
 } else struct {
     pub fn setMenuEmitHandler(_: MenuEmitHandler) void {}
+    pub fn setMenuLifecycleEmitHandler(_: MenuLifecycleEmitHandler) void {}
 
     pub fn popup(_: []const ApplicationMenuItem, _: ?f64, _: ?f64) bool {
         return false;
@@ -207,4 +220,5 @@ const impl = if (builtin.os.tag == .linux) struct {
 };
 
 pub const setMenuEmitHandler = impl.setMenuEmitHandler;
+pub const setMenuLifecycleEmitHandler = impl.setMenuLifecycleEmitHandler;
 pub const popup = impl.popup;

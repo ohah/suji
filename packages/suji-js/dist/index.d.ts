@@ -754,6 +754,9 @@ export interface MenuCommandItem {
      *  수행). macOS only(undo/redo/cut/copy/paste/pasteAndMatchStyle/selectAll/delete/
      *  minimize/zoom/close/togglefullscreen/quit). Win/Linux no-op. */
     role?: string;
+    /** Electron MenuItem.icon — 이미지 파일 경로. macOS NSImage(setImage:). fs sandbox
+     *  allowedRoots 게이트 적용(렌더러 경로; 미설정=레거시 허용). macOS only. */
+    icon?: string;
 }
 export interface MenuCheckboxItem {
     type: "checkbox";
@@ -764,6 +767,8 @@ export interface MenuCheckboxItem {
     id?: string;
     visible?: boolean;
     accelerator?: string;
+    /** Electron MenuItem.icon — 이미지 파일 경로. macOS NSImage(setImage:). fs sandbox 게이트. */
+    icon?: string;
 }
 export interface MenuSubmenuItem {
     type?: "submenu";
@@ -784,6 +789,9 @@ export declare const menu: {
     /** Electron `Menu.getMenuItemById(id)` — getApplicationMenu 스냅샷에서 id 로 재귀 탐색.
      *  없으면 null. (submenu 까지 깊이 탐색.) */
     getMenuItemById(id: string): Promise<MenuItem | null>;
+    /** Electron `Menu.insert(pos, menuItem)` — getApplicationMenu 스냅샷 pos 위치에 항목 삽입
+     *  후 전체 재설정(suji 메뉴 fire-and-forget — 스냅샷 splice + setApplicationMenu). pos clamp. */
+    insert(pos: number, item: MenuItem): Promise<boolean>;
     /** Electron `Menu.sendActionToFirstResponder(action)` — macOS first responder(포커스된
      *  web view)에 표준 셀렉터 전달(예 "copy:", "selectAll:"). macOS only, Win/Linux no-op. */
     sendActionToFirstResponder(action: string): Promise<boolean>;

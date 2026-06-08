@@ -1001,6 +1001,14 @@ export const menu = {
         };
         return find(await menu.getApplicationMenu());
     },
+    /** Electron `Menu.insert(pos, menuItem)` — getApplicationMenu 스냅샷 pos 위치에 항목 삽입
+     *  후 전체 재설정(suji 메뉴 fire-and-forget — 스냅샷 splice + setApplicationMenu). pos clamp. */
+    async insert(pos, item) {
+        const items = await menu.getApplicationMenu();
+        const idx = Math.max(0, Math.min(pos, items.length));
+        items.splice(idx, 0, item);
+        return menu.setApplicationMenu(items);
+    },
     /** Electron `Menu.sendActionToFirstResponder(action)` — macOS first responder(포커스된
      *  web view)에 표준 셀렉터 전달(예 "copy:", "selectAll:"). macOS only, Win/Linux no-op. */
     async sendActionToFirstResponder(action) {

@@ -51,6 +51,20 @@ pub fn setMenuEmitHandler(handler: MenuEmitHandler) void {
     linux_context_menu.setMenuEmitHandler(handler);
 }
 
+/// menu:will-show / menu:will-close 라이프사이클 이벤트 emit(빈 payload). click 핸들러와
+/// 별도 채널이라 분리. main 이 emitBusRaw 로 dispatch.
+pub const MenuLifecycleEmitHandler = menu_types.MenuLifecycleEmitHandler;
+var g_menu_lifecycle_emit: ?MenuLifecycleEmitHandler = null;
+
+pub fn setMenuLifecycleEmitHandler(handler: MenuLifecycleEmitHandler) void {
+    g_menu_lifecycle_emit = handler;
+    linux_context_menu.setMenuLifecycleEmitHandler(handler);
+}
+
+fn emitMenuLifecycle(channel: []const u8) void {
+    if (g_menu_lifecycle_emit) |emit| emit(channel);
+}
+
 fn ensureAppMenuTarget() ?*anyopaque {
     return ensureSimpleObjcTarget(&g_app_menu_target, "SujiAppMenuTarget", "appMenuClick:", &appMenuClickImpl);
 }
@@ -131,7 +145,11 @@ pub fn popupContextMenu(items: []const ApplicationMenuItem, x: ?f64, y: ?f64) bo
         screenGetCursorPoint();
     const f: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, NSPoint, ?*anyopaque) callconv(.c) bool =
         @ptrCast(&objc.objc_msgSend);
-    return f(menu, @ptrCast(objc.sel_registerName("popUpMenuPositioningItem:atLocation:inView:")), null, loc, null);
+    // popUp 은 동기 모달 — 직전 will-show, 반환 직후 will-close emit(best-effort 라이프사이클).
+    emitMenuLifecycle("menu:will-show");
+    const r = f(menu, @ptrCast(objc.sel_registerName("popUpMenuPositioningItem:atLocation:inView:")), null, loc, null);
+    emitMenuLifecycle("menu:will-close");
+    return r;
 }
 
 fn createMenuFromItems(title: []const u8, items: []const ApplicationMenuItem) ?*anyopaque {
@@ -150,11 +168,11 @@ fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
         .item => |it| {
             // role 매핑 시 네이티브 selector 항목(first responder); 아니면 click 항목.
             if (lookupRole(it.role)) |entry|
-                addRoleMenuItem(menu, it.label, entry, it.enabled, it.visible, it.accelerator)
+                addRoleMenuItem(menu, it.label, entry, it.enabled, it.visible, it.accelerator, it.icon)
             else
-                addAppMenuClickable(menu, it.label, it.click, it.enabled, null, it.visible, it.accelerator);
+                addAppMenuClickable(menu, .{ .label = it.label, .click = it.click, .enabled = it.enabled, .checked = null, .visible = it.visible, .accelerator = it.accelerator, .icon = it.icon });
         },
-        .checkbox => |it| addAppMenuClickable(menu, it.label, it.click, it.enabled, it.checked, it.visible, it.accelerator),
+        .checkbox => |it| addAppMenuClickable(menu, .{ .label = it.label, .click = it.click, .enabled = it.enabled, .checked = it.checked, .visible = it.visible, .accelerator = it.accelerator, .icon = it.icon }),
         .submenu => |sub| {
             const sub_menu = createMenuFromItems(sub.label, sub.items) orelse return;
             const m = addSubmenuItem(menu, sub.label, sub_menu) orelse return;
@@ -164,21 +182,40 @@ fn addApplicationMenuItem(menu: *anyopaque, item: ApplicationMenuItem) void {
     }
 }
 
-fn addAppMenuClickable(menu: *anyopaque, label: []const u8, click: []const u8, enabled: bool, checked: ?bool, visible: bool, accelerator: []const u8) void {
+const ClickableSpec = struct {
+    label: []const u8,
+    click: []const u8,
+    enabled: bool,
+    checked: ?bool,
+    visible: bool,
+    accelerator: []const u8,
+    icon: []const u8,
+};
+
+fn addAppMenuClickable(menu: *anyopaque, spec: ClickableSpec) void {
     const target = ensureAppMenuTarget() orelse return;
-    const ns_label = nsStringFromSlice(label) orelse return;
-    const ns_click = nsStringFromSlice(click) orelse return;
+    const ns_label = nsStringFromSlice(spec.label) orelse return;
+    const ns_click = nsStringFromSlice(spec.click) orelse return;
     const m = allocNSMenuItem(ns_label, "appMenuClick:", emptyNSString() orelse return) orelse return;
     msgSendVoid1(m, "setTarget:", target);
     msgSendVoid1(m, "setRepresentedObject:", ns_click);
-    if (checked) |state| {
+    if (spec.checked) |state| {
         setMenuItemTag(m, MENU_ITEM_CHECKBOX_TAG);
         setMenuItemState(m, state);
     }
-    setMenuItemEnabled(m, enabled);
-    if (!visible) setMenuItemHidden(m, true);
-    applyAccelerator(m, accelerator);
+    setMenuItemEnabled(m, spec.enabled);
+    if (!spec.visible) setMenuItemHidden(m, true);
+    applyAccelerator(m, spec.accelerator);
+    applyMenuItemIcon(m, spec.icon);
     msgSendVoid1(menu, "addItem:", m);
+}
+
+/// MenuItem.icon — NSImage(contentsOfFile:) → setImage:. 경로는 main.zig 에서 fs sandbox
+/// 게이트 통과분만 전달(빈 문자열=아이콘 없음).
+fn applyMenuItemIcon(item: *anyopaque, icon_path: []const u8) void {
+    if (icon_path.len == 0) return;
+    const img = cef.loadNSImageFromFile(icon_path) orelse return;
+    msgSendVoid1(item, "setImage:", img);
 }
 
 // Electron MenuItem.role → macOS NSMenuItem 네이티브 selector. 대부분 nil target(first
@@ -209,7 +246,7 @@ fn lookupRole(role: []const u8) ?RoleEntry {
 
 /// role 항목 — 네이티브 selector 로 표준 동작 수행(menu:click 미발화). edit/window role 은
 /// nil target(first responder), quit 은 sujiQuit: 타깃.
-fn addRoleMenuItem(menu: *anyopaque, label: []const u8, entry: RoleEntry, enabled: bool, visible: bool, accelerator: []const u8) void {
+fn addRoleMenuItem(menu: *anyopaque, label: []const u8, entry: RoleEntry, enabled: bool, visible: bool, accelerator: []const u8, icon: []const u8) void {
     const ns_label = nsStringFromSlice(label) orelse return;
     const m = allocNSMenuItem(ns_label, entry.sel.ptr, emptyNSString() orelse return) orelse return;
     if (entry.quit) {
@@ -219,6 +256,7 @@ fn addRoleMenuItem(menu: *anyopaque, label: []const u8, entry: RoleEntry, enable
     setMenuItemEnabled(m, enabled);
     if (!visible) setMenuItemHidden(m, true);
     applyAccelerator(m, accelerator);
+    applyMenuItemIcon(m, icon); // role 항목도 icon 지원(스냅샷이 광고하는 값을 네이티브에 반영)
     msgSendVoid1(menu, "addItem:", m);
 }
 
