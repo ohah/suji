@@ -209,6 +209,8 @@ fn onAllClosed(_: suji.Event) void {
 //   insert 는 스냅샷 기반(fire-and-forget — 라이브 객체 아님).
 // suji.globalShortcut.register("Cmd+Shift+K", "openSettings") / unregister(accel)
 //   / unregisterAll() / isRegistered(accel)   (macOS Carbon Hot Key / Linux X11 XGrabKey / Windows RegisterHotKey, globalShortcut:trigger 이벤트)
+//   / registerAll(["Cmd+1","Cmd+2"], click)  — 일괄 등록(모두 성공 시 true)
+//   / setSuspended(true) / isSuspended()      — 일시 정지(등록 유지, trigger 발신만 차단; 전 플랫폼 emit 게이트)
 //   미디어키: register("MediaPlayPause"|"MediaNextTrack"|"MediaPreviousTrack"|
 //   "MediaStop", click) — Electron 토큰 패리티. Carbon 불가분 NSEvent
 //   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
@@ -473,6 +475,7 @@ suji.platform                                                // "macos" | "linux
 // import { globalShortcut } from '@suji/api';
 // await globalShortcut.register("Cmd+Shift+K", "openSettings")            (macOS Carbon Hot Key / Linux X11 XGrabKey / Windows RegisterHotKey)
 // await globalShortcut.unregister(accel) / unregisterAll() / isRegistered(accel)
+// await globalShortcut.registerAll([accel...], click) / setSuspended(bool) / isSuspended()
 // suji.on('globalShortcut:trigger', ({accelerator, click}) => ...)
 
 // import { screen, powerSaveBlocker, safeStorage, app, webRequest, crashReporter, autoUpdater } from '@suji/api';

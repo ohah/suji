@@ -2406,6 +2406,25 @@ pub mod global_shortcut {
     pub fn is_registered(accelerator: &str) -> Option<String> {
         invoke("__core__", &is_registered_request(accelerator))
     }
+
+    /// 여러 단축키를 같은 click 으로 일괄 등록(Electron globalShortcut.registerAll).
+    /// 각 register 결과 raw JSON 을 Vec 으로 반환(하나라도 None 이면 그 자리 None).
+    pub fn register_all(accelerators: &[&str], click: &str) -> Vec<Option<String>> {
+        accelerators.iter().map(|a| register(a, click)).collect()
+    }
+
+    /// suspended 토글(Electron globalShortcut.setSuspended). raw JSON: `{"success":bool}`.
+    pub fn set_suspended(suspended: bool) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(r#"{{"cmd":"global_shortcut_set_suspended","suspended":{}}}"#, suspended),
+        )
+    }
+
+    /// 현재 suspended 상태(Electron globalShortcut.isSuspended). raw JSON: `{"suspended":bool}`.
+    pub fn is_suspended() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"global_shortcut_is_suspended"}"#)
+    }
 }
 
 pub mod dialog {

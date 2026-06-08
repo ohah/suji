@@ -3010,6 +3010,14 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "global_shortcut_is_registered")) {
         return handleGlobalShortcutIsRegistered(req_clean, response_buf);
     }
+    if (std.mem.eql(u8, cmd, "global_shortcut_set_suspended")) {
+        const suspended = util.extractJsonBool(req_clean, "suspended") orelse false;
+        cef.globalShortcutSetSuspended(suspended);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_set_suspended\",\"success\":true}}", .{}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "global_shortcut_is_suspended")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"global_shortcut_is_suspended\",\"suspended\":{}}}", .{cef.globalShortcutIsSuspended()}) catch null;
+    }
 
     // Notification API — UNUserNotificationCenter (macOS only).
     if (std.mem.eql(u8, cmd, "notification_is_supported")) {

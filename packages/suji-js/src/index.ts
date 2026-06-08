@@ -1572,6 +1572,28 @@ export const globalShortcut = {
     const r = await coreCall<{ registered: boolean }>({ cmd: "global_shortcut_is_registered", accelerator });
     return r.registered === true;
   },
+
+  /** 여러 단축키를 같은 click 채널로 일괄 등록 (Electron `globalShortcut.registerAll`).
+   *  모두 성공 시 true, 하나라도 실패 시 false(성공분은 그대로 유지 — 롤백 없음).
+   *  ※ Electron 은 void 반환(per-accel silent fail) — suji 는 집계 bool 을 추가 제공. */
+  async registerAll(accelerators: string[], click: string): Promise<boolean> {
+    // globalShortcut.register (not this.register) → detachable, sibling 메서드와 일관.
+    const results = await Promise.all(accelerators.map((a) => globalShortcut.register(a, click)));
+    return results.every((ok) => ok === true);
+  },
+
+  /** 모든 등록 단축키를 일시 정지/재개 (Electron `globalShortcut.setSuspended`).
+   *  등록은 유지되고 trigger 이벤트 발신만 차단(isRegistered 는 true 유지). */
+  async setSuspended(suspended: boolean): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "global_shortcut_set_suspended", suspended });
+    return r.success === true;
+  },
+
+  /** 현재 suspended 상태 (Electron `globalShortcut.isSuspended`). */
+  async isSuspended(): Promise<boolean> {
+    const r = await coreCall<{ suspended: boolean }>({ cmd: "global_shortcut_is_suspended" });
+    return r.suspended === true;
+  },
 };
 
 // ============================================

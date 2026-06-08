@@ -35,6 +35,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await core({ cmd: "global_shortcut_unregister_all" });
+  // g_suspended 는 sticky process-global — suspend 테스트가 중간에 throw 해도 resume 보장.
+  await core({ cmd: "global_shortcut_set_suspended", suspended: false });
   await browser?.disconnect();
 });
 
@@ -261,6 +263,27 @@ describe("global shortcut core commands", () => {
     const minRegistered = process.platform === "win32" ? 24 : 60;
     expect(registered).toBeGreaterThanOrEqual(minRegistered);
     expect(["capacity_full", "os_reject", "already_registered"]).toContain(lastError);
+    await core({ cmd: "global_shortcut_unregister_all" });
+  });
+
+  test("setSuspended/isSuspended round-trip + 등록 유지(isRegistered 불변)", async () => {
+    await core({ cmd: "global_shortcut_unregister_all" });
+    // 기본 false.
+    expect((await core<{ suspended: boolean }>({ cmd: "global_shortcut_is_suspended" })).suspended).toBe(false);
+
+    const accel = "Cmd+Shift+F8";
+    await core({ cmd: "global_shortcut_register", accelerator: accel, click: "suspend-test" });
+
+    // suspend → isSuspended true, 등록은 유지(isRegistered true) — trigger 발신만 차단.
+    const s1 = await core<{ success: boolean }>({ cmd: "global_shortcut_set_suspended", suspended: true });
+    expect(s1.success).toBe(true);
+    expect((await core<{ suspended: boolean }>({ cmd: "global_shortcut_is_suspended" })).suspended).toBe(true);
+    expect((await core<{ registered: boolean }>({ cmd: "global_shortcut_is_registered", accelerator: accel })).registered).toBe(true);
+
+    // resume.
+    await core({ cmd: "global_shortcut_set_suspended", suspended: false });
+    expect((await core<{ suspended: boolean }>({ cmd: "global_shortcut_is_suspended" })).suspended).toBe(false);
+
     await core({ cmd: "global_shortcut_unregister_all" });
   });
 });

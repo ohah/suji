@@ -104,10 +104,10 @@
 
 ### globalShortcut
 
-- **[medium]** `globalShortcut.registerAll` — Add `registerAll(accelerators: string[], click: string): Promise<boolean>` method to: (1) packages/suji-js/src/index.ts—loop through accelerators calling existing register() or make single IPC call wi
+- ~~**[medium]** `globalShortcut.registerAll`~~ ✅ (globalShortcut PR) — registerAll(accelerators[], click) 전 4 SDK. 기존 register 를 순회(JS/Node=Promise.all → 집계 boolean; Rust=Vec<Option<String>>, Go=[]string raw 응답 배열, 각 SDK register 규약 따름). 신규 IPC 없음. 성공분 유지/롤백 없음(Electron 은 void 반환).
 - ~~**[medium]** `globalShortcut.unregisterAll`~~ ✅ — Change return type of unregisterAll from Promise<boolean> to Promise<void> in: (1) packages/suji-js/src/index.ts lines 1001-1003, and (2) packages/suji-node/src/index.ts lines 1141-1144. This matches 
-- **[medium]** `globalShortcut.setSuspended` — Add setSuspended(suspended: boolean) and isSuspended() to Suji's globalShortcut. 1) Zig/main.zig: add global_shortcut_set_suspended and global_shortcut_is_suspended IPC handlers that toggle a module-l
-- **[medium]** `globalShortcut.isSuspended` — Add globalShortcut.isSuspended() and globalShortcut.setSuspended(bool). Implementation: (1) Add static bool g_suspended in src/platform/global_shortcut.m with getter/setter C functions, (2) Wire "glob
+- ~~**[medium]** `globalShortcut.setSuspended`~~ ✅ (globalShortcut PR) — setSuspended(bool) 전 4 SDK. `global_shortcut_set_suspended` cmd → cef_global_shortcut_state.g_suspended. suspended 동안 emit() 게이트가 trigger 발신만 차단(등록 유지, isRegistered true). 전 플랫폼 공용(emit 단일 게이트, 네이티브 unregister 아님 — 정직 경계: OS-level grab 은 유지).
+- ~~**[medium]** `globalShortcut.isSuspended`~~ ✅ (globalShortcut PR) — isSuspended() 전 4 SDK. `global_shortcut_is_suspended` cmd → cef_global_shortcut_state.g_suspended getter. setSuspended 와 짝(emit 게이트). ※ .m 의 static 대신 Zig gs_state 의 공용 게이트로 구현(전 플랫폼 단일 출처).
 
 ### ipc
 

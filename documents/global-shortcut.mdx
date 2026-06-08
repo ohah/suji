@@ -27,6 +27,8 @@ macOS에서 일반 accelerator는 Carbon path라 Accessibility 권한 없이 동
 | `globalShortcut.unregister` | ✅ | ✅ `XUngrabKey` | ✅ UnregisterHotKey |
 | `globalShortcut.unregisterAll` | ✅ | ✅ all registered slots | ✅ all registered slots |
 | `globalShortcut.isRegistered` | ✅ | ✅ local registry | ✅ local registry |
+| `globalShortcut.registerAll` | ✅ | ✅ | ✅ |
+| `globalShortcut.setSuspended` / `isSuspended` | ✅ emit 게이트 | ✅ | ✅ |
 | Trigger event | ✅ `globalShortcut:trigger` | ✅ `KeyPress` → `globalShortcut:trigger` | ✅ `WM_HOTKEY` → `globalShortcut:trigger` |
 
 ## Accelerator 문법
@@ -63,9 +65,20 @@ Cmd/CmdOrCtrl/Command/Meta/Super는 Control modifier로 매핑한다.
 | `globalShortcut.unregister(accel)` | `global_shortcut_unregister` | `{success:true}` |
 | `globalShortcut.unregisterAll()` | `global_shortcut_unregister_all` | `{success:true}` |
 | `globalShortcut.isRegistered(accel)` | `global_shortcut_is_registered` | `{registered:bool}` |
+| `globalShortcut.registerAll(accels, click)` | (SDK 루프: 각 `global_shortcut_register`) | 모두 성공 시 `true` |
+| `globalShortcut.setSuspended(bool)` | `global_shortcut_set_suspended` | `{success:true}` |
+| `globalShortcut.isSuspended()` | `global_shortcut_is_suspended` | `{suspended:bool}` |
 
 실패 응답은 `{success:false,error}`. 에러 코드: `accelerator` (빈 또는 unescape 실패),
 `click` (unescape 실패), `register` (이미 등록됨 / 키 매핑 실패 / OS 거부).
+
+`setSuspended(true)`는 등록을 유지한 채 trigger 이벤트 발신만 차단한다(전 플랫폼 공용
+emit 게이트; `isRegistered`는 true 유지). 정직 경계: OS-level 키 grab 은 유지되므로
+suspend 중에도 키는 점유된다(이벤트만 미발화). `registerAll`은 SDK 가 `register`를
+순회하는 헬퍼다 — **JS/Node 는 집계 `boolean`**(모두 성공 시 true, 성공분 유지/롤백 없음),
+**Rust(`Vec<Option<String>>`)·Go(`[]string`)는 각 accel 의 raw 응답 배열**(각 SDK 의
+`register` 반환 규약을 그대로 따름). Electron 의 registerAll 은 void 반환(per-accel
+silent fail)이라 suji 의 집계 bool 은 추가 편의.
 
 ## Frontend JS
 
@@ -80,6 +93,12 @@ on('globalShortcut:trigger', ({ accelerator, click }) => {
 
 await globalShortcut.unregister('Cmd+Shift+K');
 await globalShortcut.unregisterAll();
+
+// 일괄 등록 + 일시 정지/재개
+await globalShortcut.registerAll(['Cmd+1', 'Cmd+2', 'Cmd+3'], 'switchTab');
+await globalShortcut.setSuspended(true);   // 등록 유지, trigger 발신만 정지
+await globalShortcut.isSuspended();        // true
+await globalShortcut.setSuspended(false);  // 재개
 ```
 
 ## Node 백엔드
