@@ -93,6 +93,27 @@ session.setPermissionRequestHandler((details) => {
 });
 ```
 
+### session 다운로드 (will-download)
+
+| 채널 | payload | 발화 시점 |
+|---|---|---|
+| `session:will-download` | `{id, url, filename, mimeType, totalBytes}` | 다운로드가 시작될 때(CEF `on_before_download`) |
+
+`session.setDownloadPath(dir)` 로 저장 디렉토리를 지정하면 다운로드는 OS 저장
+대화상자 없이 `<dir>/<filename>` 으로 저장된다(빈 문자열 = 대화상자로 복귀).
+경로 지정 여부와 무관하게 모든 다운로드는 `session:will-download` 를 발신한다
+(Electron `session.on('will-download')` 동등 — 정보성). 전 5 SDK(JS/Node/Rust/Go/Zig).
+CEF `cef_download_handler_t.on_before_download`.
+
+```js
+import { session } from '@suji/api';
+
+await session.setDownloadPath('/Users/me/Downloads');
+suji.on('session:will-download', ({ url, filename, totalBytes }) => {
+  console.log(`downloading ${filename} (${totalBytes} bytes) from ${url}`);
+});
+```
+
 ## Electron API 대응표
 
 | Electron | Suji |

@@ -404,6 +404,10 @@ suji.platform                                                // "macos" | "linux
 // import { app, session } from '@suji/api';
 // await app.exit()                                           // Electron app.exit() (code 무시)
 // await session.clearCookies() / session.flushStore()        // CEF cookie_manager fire-and-forget
+// await session.setDownloadPath("/Users/me/Downloads")        // Electron session.setDownloadPath
+//   — 설정 시 다운로드는 OS 대화상자 없이 <path>/<filename> 으로 저장(빈 문자열=대화상자 복귀).
+//     모든 다운로드는 suji.on("session:will-download", {id,url,filename,mimeType,totalBytes}) 발신.
+//     전 5 SDK(JS/Node/Rust/Go/Zig). CEF cef_download_handler_t.on_before_download.
 // await session.setProxy({ mode:"fixed_servers", proxyRules:"host:port", proxyBypassRules, pacScript })
 //   — Electron session.setProxy. Chromium "proxy" pref(전역 request context). mode:"direct"=해제.
 //     프론트=UI 스레드 직접, 백엔드 SDK=UI 스레드로 post(워커 스레드)

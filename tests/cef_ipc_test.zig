@@ -819,6 +819,7 @@ fn readCefSource() ![]u8 {
         "src/platform/cef_desktop_capturer.zig",
         "src/platform/cef_session_cookies.zig",
         "src/platform/cef_session_permission.zig",
+        "src/platform/cef_download_handler.zig",
         "src/platform/cef_session_proxy.zig",
         "src/platform/cef_security_scoped_bookmark.zig",
         "src/platform/cef_request_user_attention.zig",
@@ -2435,6 +2436,35 @@ test "session.setPermissionRequestHandler IPC + CEF wire" {
         "session:permission-request", // emit 채널
         "cef_post_task", // off-UI → UI 라우팅(setProxy 동형)
         "client_ptr.get_permission_handler", // client 배선
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "session.setDownloadPath + will-download IPC + CEF download handler wire" {
+    // main.zig: cmd 디스패치 + emit 핸들러 등록.
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"session_set_download_path\"",
+        "cef.setDownloadPath",
+        "cef.setDownloadEmitHandler",
+        "fn downloadEmitHandler",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    // cef_download_handler.zig + cef_client_handler.zig: 핸들러/콜백/이벤트/path 와이어.
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn setDownloadPath",
+        "pub fn getDownloadHandler",
+        "on_before_download", // CEF 콜백
+        "can_download", // 다운로드 허용
+        "session:will-download", // emit 채널
+        "fn buildSavePath", // <dir>/<filename> 조립
+        "client_ptr.get_download_handler", // client 배선
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }

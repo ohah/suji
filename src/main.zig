@@ -697,6 +697,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.screenInstall(&screenEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
+    cef.setDownloadEmitHandler(&downloadEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -889,6 +890,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.screenInstall(&screenEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
+    cef.setDownloadEmitHandler(&downloadEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -2650,6 +2652,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const enabled = util.extractJsonBool(req_clean, "enabled") orelse true;
         cef.permissionSetHandlerEnabled(enabled);
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_permission_handler\",\"success\":true}}", .{}) catch null;
+    }
+    // Electron session.setDownloadPath(path) — 빈 path 면 OS 저장 대화상자로 복귀.
+    // 이후 다운로드는 무대화상자로 <path>/<filename> 에 저장 + session:will-download 발신.
+    if (std.mem.eql(u8, cmd, "session_set_download_path")) {
+        var path_buf: [4096]u8 = undefined;
+        const raw = util.extractJsonString(req_clean, "path") orelse "";
+        // unescape 실패(병적으로 긴 경로)는 success:false — 조용히 기존 경로를 지우지 않는다.
+        // 빈 raw 는 unescape 가 0 을 반환(성공) → 의도적 해제로 처리.
+        if (util.unescapeJsonStr(raw, &path_buf)) |path_n| {
+            cef.setDownloadPath(path_buf[0..path_n]);
+            return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_download_path\",\"success\":true}}", .{}) catch null;
+        }
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_set_download_path\",\"success\":false}}", .{}) catch null;
     }
     // 권한 결정 응답 — permissionId 로 hold 콜백을 찾아 grant/deny. 없는 id → success:false.
     if (std.mem.eql(u8, cmd, "session_permission_response")) {
@@ -4756,6 +4771,10 @@ fn webRequestEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callcon
 /// session.setPermissionRequestHandler: on_show/on_dismiss_permission_prompt(UI 스레드)가
 /// 발신. EventBus.emit 이 mutex 로 thread-safe 하므로 그대로 dispatch(webRequest 동형).
 fn permissionEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void {
+    emitBusRaw(std.mem.span(channel), std.mem.span(payload));
+}
+
+fn downloadEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void {
     emitBusRaw(std.mem.span(channel), std.mem.span(payload));
 }
 

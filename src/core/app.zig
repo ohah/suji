@@ -1923,6 +1923,17 @@ pub const session = struct {
         return coreCmd("session_flush_store", "");
     }
 
+    /// Electron `session.setDownloadPath(path)` — 다운로드 저장 디렉토리 지정. 설정 후
+    /// 다운로드는 OS 대화상자 없이 `<path>/<filename>` 으로 저장. 빈 문자열 = 해제.
+    /// 모든 다운로드는 `session:will-download` 이벤트 발신.
+    pub fn setDownloadPath(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStr(path, &p_buf) orelse return null;
+        var fields_buf: [4352]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("session_set_download_path", fields);
+    }
+
     /// IndexedDB/localStorage/cache 삭제 (Electron `session.clearStorageData`).
     /// raw JSON args: `{"origin":"https://app","storageTypes":"all"}` (둘 다
     /// 옵션 — origin 빈값이면 전역 HTTP 캐시만; storageTypes 기본 "all").

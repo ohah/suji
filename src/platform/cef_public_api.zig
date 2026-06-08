@@ -39,6 +39,7 @@ const cef_scheme = @import("cef_scheme.zig");
 const cef_security_scoped_bookmark = @import("cef_security_scoped_bookmark.zig");
 const cef_session_cookies = @import("cef_session_cookies.zig");
 const cef_session_permission = @import("cef_session_permission.zig");
+const cef_download_handler = @import("cef_download_handler.zig");
 const cef_session_proxy = @import("cef_session_proxy.zig");
 const cef_shell = @import("cef_shell.zig");
 const cef_single_instance = @import("cef_single_instance.zig");
@@ -319,6 +320,12 @@ pub const setPermissionEmitHandler = cef_session_permission.setPermissionEmitHan
 pub const permissionSetHandlerEnabled = cef_session_permission.permissionSetHandlerEnabled;
 pub const permissionRespond = cef_session_permission.permissionRespond;
 pub const getPermissionHandler = cef_session_permission.getPermissionHandler;
+
+// session.setDownloadPath + session:will-download — cef_download_handler.zig
+pub const DownloadEmitFn = cef_download_handler.DownloadEmitFn;
+pub const setDownloadEmitHandler = cef_download_handler.setDownloadEmitHandler;
+pub const setDownloadPath = cef_download_handler.setDownloadPath;
+pub const getDownloadHandler = cef_download_handler.getDownloadHandler;
 
 pub const ApplicationMenuItem = cef_menu.ApplicationMenuItem;
 pub const MenuEmitHandler = cef_menu.MenuEmitHandler;

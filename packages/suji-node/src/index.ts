@@ -2579,6 +2579,16 @@ export const session = {
   },
 
   /**
+   * 다운로드 저장 디렉토리 지정 (Electron `session.setDownloadPath(path)`). 설정 후
+   * 다운로드는 OS 대화상자 없이 `<path>/<filename>` 으로 저장. 빈 문자열 = 해제.
+   * 모든 다운로드는 `session:will-download` 이벤트를 발신 — `suji.on('session:will-download', cb)`.
+   */
+  async setDownloadPath(path: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'session_set_download_path', path });
+    return r.success === true;
+  },
+
+  /**
    * Electron `session.setProxy(config)` — Chromium "proxy" preference 설정.
    * mode 미지정/`"direct"` → 프록시 해제. `proxyRules`: `"host:port"`. 이후 요청에 적용.
    */

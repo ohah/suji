@@ -2963,6 +2963,14 @@ pub mod session {
         invoke("__core__", r#"{"cmd":"session_flush_store"}"#)
     }
 
+    /// Electron `session.setDownloadPath(path)` — 다운로드 저장 디렉토리 지정. 설정 후
+    /// 다운로드는 OS 대화상자 없이 `<path>/<filename>` 으로 저장. 빈 문자열 = 해제.
+    /// 모든 다운로드는 `session:will-download` 이벤트 발신. raw: `{"success":bool}`.
+    pub fn set_download_path(path: &str) -> Option<String> {
+        let req = json!({ "cmd": "session_set_download_path", "path": path }).to_string();
+        invoke("__core__", &req)
+    }
+
     /// Electron `session.setProxy(config)` — Chromium "proxy" preference 설정.
     /// mode "" → "direct"(프록시 해제). proxy_rules: "host:port". raw: `{"success":bool}`.
     pub fn set_proxy(mode: &str, proxy_rules: &str, proxy_bypass_rules: &str, pac_script: &str) -> Option<String> {
