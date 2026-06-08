@@ -224,6 +224,9 @@ fn onAllClosed(_: suji.Event) void {
 //   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
 //   수신은 Accessibility(TCC) 필요(헤드리스 미발화 — globalShortcut 동급 경계)
 // suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen / Linux X11 screen)
+//   display 변경 이벤트(macOS, NSApplicationDidChangeScreenParameters 옵저버, count-diff):
+//   suji.on("screen:display-added"|"screen:display-removed"|"screen:display-metrics-changed", cb)
+//   → 페이로드 후 getAllDisplays 로 상세 조회. 정직 경계: macOS only, 동시 add+remove 는 metrics
 // suji.desktopCapturer.getSources("screen,window")  — 화면/창 소스
 //   {id,name,type,x,y,width,height,displayId?} (CGGetActiveDisplayList +
 //   CGWindowListCopyWindowInfo)

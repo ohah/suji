@@ -158,9 +158,9 @@
 
 ### screen
 
-- **[medium]** `display-added` — Add NSScreenDidChangeNotification observer in Zig core. Detect display additions/removals/changes via NSScreen diffing. Emit screen:display-added, screen:display-removed, screen:display-metrics-change
-- **[medium]** `display-removed event (and display-added, display-metrics-changed)` — Add NSScreen change monitoring in src/cef.zig (watchDisplayChanges loop similar to powerMonitor NSWorkspace observer). On NSScreenChangedNotification → emit `display:added` or `display:removed` events
-- **[medium]** `display-metrics-changed event` — Implement three screen events (display-added, display-removed, display-metrics-changed) via macOS NSScreenDidChangeNotification observed by the Zig core. Wire events through existing EventBus emitting
+- ~~**[medium]** `display-added`~~ ✅ (screen events PR) — `screen:display-added` — screen.m NSApplicationDidChangeScreenParameters 옵저버 → cef_screen.screenChangedC count-diff(new>prev). suji.on 수신.
+- ~~**[medium]** `display-removed event (and display-added, display-metrics-changed)`~~ ✅ (screen events PR) — `screen:display-removed`(count new<prev). 정직 경계: count-based diff(동시 add+remove=수 동일→metrics-changed), macOS only(Linux/Win 후속), 실 hotplug 헤드리스 미발화(source-guard+wire 검증).
+- ~~**[medium]** `display-metrics-changed event`~~ ✅ (screen events PR) — `screen:display-metrics-changed`(count 동일하나 파라미터 변경). 페이로드 후 getAllDisplays 로 상세. screenEmitHandler("screen:" prefix) + suji.on(신규 SDK 메서드 0).
 
 ### session
 

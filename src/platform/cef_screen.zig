@@ -160,3 +160,52 @@ pub fn screenGetDisplayMatching(x: f64, y: f64, w: f64, h: f64) i32 {
     }
     return screen_model.matchingDisplayIndex(displays[0..len], x, y, w, h);
 }
+
+// ── display 변경 이벤트 (Electron screen display-added/removed/metrics-changed) ──
+// macOS NSApplicationDidChangeScreenParameters 옵저버(screen.m) + count-based diff.
+
+extern "c" fn suji_screen_install(cb: *const fn () callconv(.c) void) void;
+extern "c" fn suji_screen_uninstall() void;
+
+pub const ScreenEmitHandler = *const fn (event: [*:0]const u8) void;
+var g_screen_emit: ?ScreenEmitHandler = null;
+var g_prev_display_count: i32 = -1;
+
+/// 현재 연결된 디스플레이 수 (macOS NSScreen.screens.count). 비-macOS 0.
+fn screenDisplayCount() i32 {
+    if (!comptime is_macos) return 0;
+    const NSScreen = getClass("NSScreen") orelse return 0;
+    const screens = msgSend(NSScreen, "screens") orelse return 0;
+    const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
+    return @intCast(count_fn(screens, @ptrCast(objc.sel_registerName("count"))));
+}
+
+// screen.m 콜백 — 디스플레이 수 비교로 add/remove/metrics 구분(count heuristic).
+fn screenChangedC() callconv(.c) void {
+    const handler = g_screen_emit orelse return;
+    const new_count = screenDisplayCount();
+    const prev = g_prev_display_count;
+    g_prev_display_count = new_count;
+    if (new_count > prev) {
+        handler("display-added");
+    } else if (new_count < prev) {
+        handler("display-removed");
+    } else {
+        handler("display-metrics-changed");
+    }
+}
+
+/// screen display 변경 옵저버 설치. macOS only(Linux/Win 후속).
+/// 정직 경계: count-based diff — 동시 add+remove(수 동일)는 metrics-changed 로 보고.
+pub fn screenInstall(handler: ScreenEmitHandler) void {
+    if (!comptime is_macos) return;
+    g_screen_emit = handler;
+    g_prev_display_count = screenDisplayCount(); // baseline (옵저버 활성 전).
+    suji_screen_install(&screenChangedC);
+}
+
+pub fn screenUninstall() void {
+    if (!comptime is_macos) return;
+    suji_screen_uninstall();
+    g_screen_emit = null;
+}

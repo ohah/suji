@@ -694,6 +694,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.nativeThemeInstall(&nativeThemeEmitHandler);
+    cef.screenInstall(&screenEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
@@ -885,6 +886,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.nativeThemeInstall(&nativeThemeEmitHandler);
+    cef.screenInstall(&screenEmitHandler);
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
@@ -4667,8 +4669,16 @@ fn menuLifecycleEmitHandler(channel: []const u8) void {
     emitBusRaw(channel, "{}");
 }
 
-/// powerMonitor: power_monitor.m이 dispatch한 4 이벤트(suspend/resume/lock-screen/unlock-screen)
-/// 를 `power:<event>` 채널로 emit. event는 "suspend"|"resume"|"lock-screen"|"unlock-screen".
+// screen display 변경 → `screen:display-added`/`display-removed`/`display-metrics-changed`.
+// (screenChangedC 가 count diff 후 Zig 호출 — C 콜백 아님이라 callconv(.c) 불요.)
+fn screenEmitHandler(event: [*:0]const u8) void {
+    var ch_buf: [64]u8 = undefined;
+    const channel = std.fmt.bufPrint(&ch_buf, "screen:{s}", .{std.mem.span(event)}) catch return;
+    emitBusRaw(channel, "{}");
+}
+
+/// powerMonitor: power_monitor.m이 dispatch한 이벤트(suspend/resume/lock-screen/unlock-screen
+/// + macOS shutdown/on-battery/on-ac)를 `power:<event>` 채널로 emit.
 fn powerMonitorEmitHandler(event: [*:0]const u8) callconv(.c) void {
     const event_slice = std.mem.span(event);
     // 화면 잠금 상태 추적 — getSystemIdleState "locked" 판정용(Electron 동등).
