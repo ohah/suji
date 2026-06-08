@@ -1546,10 +1546,16 @@ test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
         "NSWorkspaceDidWakeNotification",
         "NSWorkspaceScreensDidSleepNotification",
         "NSWorkspaceScreensDidWakeNotification",
+        "NSWorkspaceWillPowerOffNotification", // shutdown
         "\"suspend\"",
         "\"resume\"",
         "\"lock-screen\"",
         "\"unlock-screen\"",
+        "\"shutdown\"",
+        "\"on-battery\"",
+        "\"on-ac\"",
+        "IOPSNotificationCreateRunLoopSource", // 배터리 전환 run-loop source
+        "power_source_changed", // AC↔배터리 콜백
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, m_src, needle) != null);
     }

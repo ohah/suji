@@ -148,9 +148,9 @@
 ### powerMonitor
 
 - ~~**[medium]** `powerMonitor.getSystemIdleState(threshold: number)`~~ ✅ — Update TypeScript return type in packages/suji-js/src/index.ts:724 from Promise<'active' | 'idle'> to Promise<'active' | 'idle' | 'locked'> and the coreCall generic from { state: 'active' | 'idle' } t
-- **[medium]** `powerMonitor.onBatteryPower (property)` — Implement isOnBatteryPower() method first (platform-specific: macOS via IOKit or IOPowerSources, fetch AC adapter status). Then add onBatteryPower as a getter property delegating to isOnBatteryPower()
-- **[medium]** `powerMonitor.on('on-battery') event` — Extend src/platform/power_monitor.m to use IOPowerSources.framework for battery state detection. Add 'power:on-battery' and 'power:on-ac' event emissions via existing NSWorkspace observer callback pat
-- **[medium]** `powerMonitor 'shutdown' event` — Add NSWorkspaceWillPowerOffNotification observer to power_monitor.m. Add onPowerOff method to SujiPowerObserver that calls callback with shutdown string. Register notification with NSWorkspace notific
+- ~~**[medium]** `powerMonitor.onBatteryPower (property)`~~ ✅ (이미 isOnBatteryPower()로 충족) — suji 는 IPC 라 sync property 불가 → `powerMonitor.isOnBatteryPower()` async 메서드가 Electron onBatteryPower 동등(macOS IOKit IOPSGetProvidingPowerSourceType). 전 SDK 기존 제공.
+- ~~**[medium]** `powerMonitor.on('on-battery') event`~~ ✅ (powerMonitor events PR) — `power:on-battery`/`power:on-ac` — power_monitor.m IOPSNotificationCreateRunLoopSource(메인 런루프 부착) 가 AC↔배터리 전환 시 발신(power_source_changed, 중복 억제). suji.on 수신. 정직 경계: macOS only(Linux/Win 후속), 실 전환은 헤드리스 미발화(suspend/resume 동급 — compile+wire 검증).
+- ~~**[medium]** `powerMonitor 'shutdown' event`~~ ✅ (powerMonitor events PR) — `power:shutdown` — power_monitor.m onPowerOff: (NSWorkspaceWillPowerOffNotification). suji.on 수신. 정직 경계: macOS only, 실 종료 미발화(honest).
 
 ### powerSaveBlocker
 

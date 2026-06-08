@@ -261,9 +261,11 @@ fn onAllClosed(_: suji.Event) void {
 //                                       — App Sandbox 영속 파일 접근 (NSURL bookmark,
 //                                       비-sandbox=일반 bookmark / MAS 만 실 격상)
 // powerMonitor 이벤트 — 자동 install (macOS NSWorkspace, Linux logind/ScreenSaver DBus,
-//   Windows WM_POWERBROADCAST/WTS), 4 채널 발신:
+//   Windows WM_POWERBROADCAST/WTS), 채널 발신:
 //   `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen`
-//   → suji.on("power:suspend", cb) / 다른 SDK도 동일 채널명으로 listen
+//   + macOS: `power:shutdown`(NSWorkspaceWillPowerOff) / `power:on-battery` /
+//   `power:on-ac`(IOPS run-loop source, AC↔배터리 전환) → suji.on("power:shutdown", cb)
+//   → 다른 SDK도 동일 채널명으로 listen. (shutdown/배터리 이벤트는 macOS 한정)
 // suji.process.run(allocator, suji.io(), &.{ "echo", "hi" })  — std.process.run wrap (백엔드 only)
 //   → RunResult { code, stdout, stderr }, caller가 stdout/stderr free
 // suji.http.fetch(allocator, suji.io(), "https://...", null)   — std.http.Client.fetch wrap
