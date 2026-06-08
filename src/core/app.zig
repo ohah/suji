@@ -671,6 +671,17 @@ pub const windows = struct {
         return windowCoreCmd("remove_inserted_css", fields);
     }
 
+    /// Electron `webContents.setWindowOpenHandler` — 네이티브 popup 정책(전역). "deny"=차단,
+    /// "allow"=허용. popup 마다 web-contents:new-window 이벤트 발신. ⚠️ per-popup 동적 콜백은
+    /// CEF 제약상 불가(on_before_popup 동기) — 전역 정책 + 이벤트.
+    pub fn setWindowOpenHandler(action: []const u8) ?[]const u8 {
+        var a_buf: [64]u8 = undefined;
+        const a_n = util.escapeJsonStr(action, &a_buf) orelse return null;
+        var fields_buf: [128]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"action\":\"{s}\"", .{a_buf[0..a_n]}) catch return null;
+        return windowCoreCmd("web_contents_set_window_open_handler", fields);
+    }
+
     pub fn getURL(id: u32) ?[]const u8 {
         return windowIdCmd("get_url", id);
     }

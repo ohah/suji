@@ -441,6 +441,10 @@ suji.platform                                                // "macos" | "linux
 //   유니코드 안전. 반환 key 로 제거. ⚠️ options.cssOrigin:'user'는 미지원(style=author, 정직 경계)
 // await windows.removeInsertedCSS(id, key)  — insertCSS 가 반환한 key 의 주입 CSS 제거
 //   (전 5 SDK + BrowserWindow/WebContentsView 클래스. viewId 도 동작 — id 풀 공유)
+// await windows.setWindowOpenHandler("deny"|"allow")  — Electron webContents.setWindowOpenHandler.
+//   네이티브 popup(window.open/target=_blank) 정책(전역). deny=차단. popup 마다
+//   suji.on("web-contents:new-window", ({url,frameName,disposition})) 발신 → app 이 관리 창으로 라우팅.
+//   ⚠️ per-popup 동적 콜백(요청마다 action 계산)은 CEF 제약상 불가(on_before_popup 동기) — 전역 정책+이벤트
 // await windows.getURL(id) / isLoading(id) / setTitle(id, t) / setBounds(id, {...})
 // await windows.setUserAgent(id, ua) / getUserAgent(id)  — 동적 UA(CDP override)
 //   ※ class BrowserWindow OO 래퍼: BrowserWindow.create(opts)/fromId(id) +

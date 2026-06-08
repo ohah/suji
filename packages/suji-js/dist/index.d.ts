@@ -335,6 +335,16 @@ export declare const windows: {
     }): Promise<string>;
     /** insertCSS 가 반환한 key 의 주입 CSS 제거 (Electron `webContents.removeInsertedCSS`). */
     removeInsertedCSS(windowId: number, key: string): Promise<WindowOpResponse>;
+    /**
+     * Electron `webContents.setWindowOpenHandler` — 네이티브 popup(window.open / target=_blank)
+     * 정책. `"deny"` = 차단, `"allow"`(기본) = 허용. **전역 정책**(모든 webContents). popup 마다
+     * `web-contents:new-window` 이벤트({url, frameName, disposition})를 정책 무관 발신하므로
+     * app 이 관리 창으로 직접 열 수 있다 — `suji.on('web-contents:new-window', cb)`.
+     *
+     * ⚠️ Electron 의 per-popup 동적 콜백(요청마다 action 계산)은 CEF 제약상 불가
+     * (on_before_popup 은 동기 콜백 — async JS consult 불가). 전역 정책 + 이벤트로 대체.
+     */
+    setWindowOpenHandler(action: "allow" | "deny"): Promise<boolean>;
     /** 현재 main frame URL 조회 (캐시된 값). 캐시 미스면 null */
     getURL(windowId: number): Promise<GetUrlResponse>;
     /** UA 동적 변경 (Electron `webContents.setUserAgent`). CDP

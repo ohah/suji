@@ -493,6 +493,17 @@ pub mod windows {
         invoke("__core__", &req)
     }
 
+    /// Electron `webContents.setWindowOpenHandler` — 네이티브 popup 정책(전역). "deny"=차단,
+    /// "allow"=허용. popup 마다 web-contents:new-window 이벤트 발신. raw: `{"success":bool}`.
+    /// ⚠️ per-popup 동적 콜백은 CEF 제약상 불가(on_before_popup 동기) — 전역 정책 + 이벤트.
+    pub fn set_window_open_handler(action: &str) -> Option<String> {
+        let req = format!(
+            r#"{{"cmd":"web_contents_set_window_open_handler","action":"{}"}}"#,
+            escape_json(action),
+        );
+        invoke("__core__", &req)
+    }
+
     pub fn get_url(window_id: u32) -> Option<String> {
         invoke(
             "__core__",

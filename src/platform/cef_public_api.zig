@@ -41,6 +41,7 @@ const cef_security_scoped_bookmark = @import("cef_security_scoped_bookmark.zig")
 const cef_session_cookies = @import("cef_session_cookies.zig");
 const cef_session_permission = @import("cef_session_permission.zig");
 const cef_download_handler = @import("cef_download_handler.zig");
+const cef_life_span_handler = @import("cef_life_span_handler.zig");
 const cef_session_proxy = @import("cef_session_proxy.zig");
 const cef_shell = @import("cef_shell.zig");
 const cef_single_instance = @import("cef_single_instance.zig");
@@ -334,6 +335,11 @@ pub const DownloadEmitFn = cef_download_handler.DownloadEmitFn;
 pub const setDownloadEmitHandler = cef_download_handler.setDownloadEmitHandler;
 pub const setDownloadPath = cef_download_handler.setDownloadPath;
 pub const getDownloadHandler = cef_download_handler.getDownloadHandler;
+
+// webContents.setWindowOpenHandler — cef_life_span_handler.zig (on_before_popup 정책 + 이벤트)
+pub const WindowOpenEmitFn = cef_life_span_handler.WindowOpenEmitFn;
+pub const setWindowOpenEmitHandler = cef_life_span_handler.setWindowOpenEmitHandler;
+pub const setWindowOpenDeny = cef_life_span_handler.setWindowOpenDeny;
 
 pub const ApplicationMenuItem = cef_menu.ApplicationMenuItem;
 pub const MenuEmitHandler = cef_menu.MenuEmitHandler;

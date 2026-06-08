@@ -1341,6 +1341,37 @@ describe("app.setAsDefaultProtocolClient 트리오", () => {
 });
 
 // ============================================
+// 4.7 webContents.setWindowOpenHandler (popup 정책 + new-window 이벤트)
+// ============================================
+
+describe("webContents.setWindowOpenHandler", () => {
+  test("action:deny → web-contents:new-window 이벤트 + window.open 차단", async () => {
+    await coreCall({ cmd: "web_contents_set_window_open_handler", action: "deny" });
+    const url = `https://suji-e2e-popup.invalid/x?t=${Date.now()}`;
+    const result = await page.evaluate(async (u) => {
+      (window as any).__nw = [];
+      const off = (window as any).__suji__.on("web-contents:new-window", (p: any) => {
+        (window as any).__nw.push(typeof p === "string" ? JSON.parse(p) : p);
+      });
+      const w = window.open(u, "_blank");
+      const opened = w !== null;
+      if (w) { try { w.close(); } catch {} }
+      await new Promise((r) => setTimeout(r, 600));
+      off();
+      return { opened, events: (window as any).__nw };
+    }, url);
+
+    // on_before_popup 발화 증거 — new-window 이벤트가 우리 URL 로 도착.
+    const evt = result.events.find((e: any) => typeof e.url === "string" && e.url.includes("suji-e2e-popup"));
+    expect(evt).toBeTruthy();
+    // deny 정책 → popup 차단(window.open null).
+    expect(result.opened).toBe(false);
+
+    await coreCall({ cmd: "web_contents_set_window_open_handler", action: "allow" });
+  });
+});
+
+// ============================================
 // 5. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
 // ============================================
 

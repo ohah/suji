@@ -66,6 +66,28 @@ suji.on('app:before-quit', () => {
 > IPC 비동기 모델상 quit 을 동기적으로 막을 수 없다(`window:close` 렌더러 경계와 동일).
 > 백엔드 listener 는 동기 실행되지만 현재 quit-veto 경로는 미배선이다(후속).
 
+### webContents popup (new-window)
+
+| 채널 | payload | 발화 시점 |
+|---|---|---|
+| `web-contents:new-window` | `{url, frameName, disposition}` | `window.open` / `target=_blank` 등 네이티브 popup 직전 |
+
+`windows.setWindowOpenHandler("deny")` 로 네이티브 popup 을 차단하고, 이 이벤트를 받아
+관리 창(`windows.create`)으로 직접 열 수 있다. 정책과 무관하게 모든 popup 시도가 발신된다.
+
+```js
+import { windows } from '@suji/api';
+
+await windows.setWindowOpenHandler("deny"); // 네이티브 popup 차단
+suji.on("web-contents:new-window", ({ url }) => {
+  windows.create({ url, width: 800, height: 600 }); // 관리 창으로 라우팅
+});
+```
+
+> **정직 경계**: Electron 의 per-popup 동적 콜백(요청마다 `{action}` 계산)은 CEF
+> 제약상 불가하다 — `on_before_popup` 은 동기 콜백이라 async JS 핸들러를 consult 할
+> 수 없다. 전역 정책(`"allow"`/`"deny"`) + 이벤트로 대체한다.
+
 ### app 단일 인스턴스 (second-instance)
 
 | 채널 | payload | 발화 시점 |
