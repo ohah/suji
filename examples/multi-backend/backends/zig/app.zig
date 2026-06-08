@@ -17,7 +17,10 @@ pub const my_app = suji.app()
     .handle("zig-echo-to-sender", echoToSender)
     .handle("windows-roundtrip-zig", windowsRoundtrip)
     // Electron 패턴 (macOS는 유지, 나머지는 종료).
-    .on("window:all-closed", onWindowAllClosed);
+    .on("window:all-closed", onWindowAllClosed)
+    // Electron app.on('before-quit') — quit 직전 정리 훅(in-process 동기). e2e 검증용:
+    // SUJI_E2E_BQ_MARKER 환경변수가 있으면 그 경로에 마커 파일을 쓴다(미설정=no-op, 데모 무영향).
+    .on("app:before-quit", onBeforeQuit);
 
 fn onWindowAllClosed(_: suji.Event) void {
     const p = suji.platform();
@@ -26,6 +29,20 @@ fn onWindowAllClosed(_: suji.Event) void {
         std.debug.print("[Zig] non-macOS → suji.quit()\n", .{});
         suji.quit();
     }
+}
+
+// libc file I/O (Zig 0.16 std.fs 는 Io 인스턴스 필요 — 핸들러엔 없어 libc 직접 사용).
+const libc = struct {
+    extern "c" fn fopen(path: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;
+    extern "c" fn fputs(s: [*:0]const u8, stream: *anyopaque) c_int;
+    extern "c" fn fclose(stream: *anyopaque) c_int;
+};
+
+fn onBeforeQuit(_: suji.Event) void {
+    const raw = std.c.getenv("SUJI_E2E_BQ_MARKER") orelse return;
+    const f = libc.fopen(raw, "w") orelse return;
+    _ = libc.fputs("before-quit\n", f);
+    _ = libc.fclose(f);
 }
 
 fn ping(req: suji.Request, event: suji.InvokeEvent) suji.Response {

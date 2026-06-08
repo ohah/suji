@@ -187,6 +187,9 @@ jobs:
       - name: E2E — window lifecycle events
         run: bash tests/e2e/run-window-lifecycle-events.sh
 
+      - name: E2E — app before-quit (behavioral, backend marker)
+        run: bash tests/e2e/run-before-quit.sh
+
       - name: E2E — CEF Views window lifecycle/options
         run: bash tests/e2e/run-window-lifecycle-cef-views.sh
 

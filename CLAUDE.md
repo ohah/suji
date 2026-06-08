@@ -57,6 +57,7 @@ bash tests/e2e/run-go-types-helper.sh   # Go SDK SujiHandlers .d.ts helper
 bash tests/e2e/run-node-types-helper.sh # Node SDK SujiHandlers typed invoke/call consumer
 bash tests/e2e/run-window-injection.sh  # Phase 2.5 __window wire 주입 검증
 bash tests/e2e/run-window-lifecycle.sh  # Phase 4-A 네비/JS + 창 생명주기 검증
+bash tests/e2e/run-before-quit.sh       # app:before-quit behavioral (quit → 백엔드 핸들러 마커 파일, 종료 전 발화 검증)
 bash tests/e2e/run-view-lifecycle.sh    # Phase 17-B WebContentsView (createView/z-order/lifecycle)
 bash tests/e2e/run-frameless-drag-region.sh # CEF Views frameless drag/no-drag region
 bash tests/e2e/run-cef-ipc.sh           # CEF IPC stress (chain/fanout, 200회 round-trip)
