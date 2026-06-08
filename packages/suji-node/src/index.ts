@@ -2497,6 +2497,20 @@ export const webRequest = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'web_request_resolve', id, cancel });
     return r.success === true;
   },
+
+  /**
+   * Electron `session.webRequest.onBeforeSendHeaders` 의 declarative 변형 — urls glob 매칭
+   * 요청에 headers 를 동기 주입(덮어쓰기). 빈 urls = 해제. ⚠️ per-request JS 콜백은
+   * CEF 제약상 미지원(async resolve 후 request 수정 무시) — 선언적 규칙만(정직 경계).
+   */
+  async setRequestHeaders(filter: { urls: string[] }, headers: Record<string, string>): Promise<number> {
+    const r = await invoke<{ count: number }>('__core__', {
+      cmd: 'web_request_set_request_headers',
+      patterns: filter.urls,
+      requestHeaders: headers,
+    });
+    return r.count;
+  },
 };
 
 export type PowerSaveBlockerType = 'prevent_app_suspension' | 'prevent_display_sleep';

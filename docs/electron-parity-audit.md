@@ -186,7 +186,7 @@
 
 ### webRequest
 
-- **[medium]** `webRequest.onBeforeSendHeaders` — Extend WebRequestDecision interface to include optional requestHeaders field (Record<string, string | string[]>), matching Electron's callback signature. Update the native handler to respect the retur
+- ~~**[medium]** `webRequest.onBeforeSendHeaders`~~ ✅ (PR #131 — **declarative** `webRequest.setRequestHeaders({urls}, headers)`, 전 5 SDK. URL glob 매칭 요청에 헤더를 `OnBeforeResourceLoad` **동기** 구간에서 `set_header_by_name` 으로 주입(덮어쓰기). echo-server e2e 로 실제 wire 도달 실증(주입 헤더가 CORS preflight 유발 → 실 GET 에 도달). 🔒 정직 경계: Electron 의 **per-request JS 콜백**(요청마다 헤더 동적 계산)은 CEF 제약상 불가 — CEF 는 `RV_CONTINUE_ASYNC` 반환 후의 request 수정을 무시하므로 async listener resolve 로는 헤더 수정 불가(echo-server e2e 로 실증). 동기 declarative 규칙(인증 토큰/커스텀 UA 등 대다수 use-case)만 가능) — Extend WebRequestDecision interface to include optional requestHeaders field (Record<string, string | string[]>), matching Electron's callback signature. Update the native handler to respect the retur
 - ~~**[medium]** `webRequest.onHeadersReceived`~~ ✅ (PR #128 — `webRequest:completed` 이벤트에 `responseHeaders`(헤더맵 객체) + `statusText` 추가. cef_response_t.get_header_map 을 cef_string_multimap 으로 iterate→escape→JSON, graceful truncation. e2e 실 응답 헤더 검증) — Add responseHeaders to webRequest:completed event (array of header objects), optionally implement onHeadersReceived listener method. Minimum: extend event payload to include headers captured from CEF 
 
 ### BrowserWindow

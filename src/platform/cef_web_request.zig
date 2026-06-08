@@ -164,7 +164,54 @@ fn pendingTake(id: u64) ?*c._cef_callback_t {
     return null;
 }
 
-/// listener 응답 — id로 pending callback 찾아 cont/cancel 호출. 없는 id면 false.
+/// json[from..] 에서 다음 `"..."`(escape 인지)의 inner raw slice + 닫는 따옴표 다음 위치.
+const StrTok = struct { raw: []const u8, end: usize };
+fn nextJsonString(json: []const u8, from: usize) ?StrTok {
+    var i = from;
+    while (i < json.len and json[i] != '"') : (i += 1) {}
+    if (i >= json.len) return null;
+    const start = i + 1;
+    var j = start;
+    while (j < json.len) : (j += 1) {
+        if (json[j] == '\\') {
+            j += 1;
+            continue;
+        }
+        if (json[j] == '"') return .{ .raw = json[start..j], .end = j + 1 };
+    }
+    return null;
+}
+
+/// Electron onBeforeSendHeaders — requestHeaders `{"k":"v",...}` 를 request 에 적용(overwrite).
+/// 평면 string→string 객체라 따옴표 토큰을 key/value 교대로 스캔(`:`/`,`/`{}` 무시). 키/값은
+/// unescape. 최대 64개, 키 256/값 4096 초과는 skip. cef_request_t.set_header_by_name.
+/// **반드시 OnBeforeResourceLoad 동기 구간에서 호출** — CEF 는 RV_CONTINUE_ASYNC 반환 후의
+/// request 수정을 무시한다(echo-server e2e 로 실증). 그래서 declarative(set_request_headers)
+/// 경로에서만 사용하고, async listener resolve 경로에서는 헤더 수정 불가(정직 경계).
+fn applyRequestHeaders(request: *c._cef_request_t, json: []const u8) void {
+    const set_header = request.set_header_by_name orelse return;
+    var pos: usize = 0;
+    var applied: usize = 0;
+    while (applied < 64) : (applied += 1) {
+        const key_tok = nextJsonString(json, pos) orelse break;
+        const val_tok = nextJsonString(json, key_tok.end) orelse break;
+        pos = val_tok.end;
+        var key_buf: [256]u8 = undefined;
+        var val_buf: [4096]u8 = undefined;
+        const kn = util.unescapeJsonStr(key_tok.raw, &key_buf) orelse continue;
+        const vn = util.unescapeJsonStr(val_tok.raw, &val_buf) orelse continue;
+        if (kn == 0) continue;
+        var key_cs: c.cef_string_t = .{};
+        var val_cs: c.cef_string_t = .{};
+        cef.setCefString(&key_cs, key_buf[0..kn]);
+        cef.setCefString(&val_cs, val_buf[0..vn]);
+        set_header(request, &key_cs, &val_cs, 1); // overwrite=1
+        if (key_cs.dtor) |d| d(key_cs.str);
+        if (val_cs.dtor) |d| d(val_cs.str);
+    }
+}
+
+/// listener 응답 — id로 pending callback 찾아 cont/cancel. 없는 id면 false.
 pub fn webRequestResolve(id: u64, cancel_request: bool) bool {
     const cb = pendingTake(id) orelse return false;
     if (cancel_request) {
@@ -174,6 +221,28 @@ pub fn webRequestResolve(id: u64, cancel_request: bool) bool {
     }
     if (cb.base.release) |rel| _ = rel(&cb.base);
     return true;
+}
+
+// ============================================
+// onBeforeSendHeaders — declarative 요청 헤더 주입(동기, OnBeforeResourceLoad).
+// ============================================
+// CEF 가 async resolve 후 request 수정을 무시하므로(echo e2e 실증), per-request JS 콜백
+// 대신 선언적: setRequestHeaders(urls, headers) 로 URL glob 매칭 요청에 동기 적용.
+var g_request_headers_url_pool: UrlGlobPool = .{};
+var g_request_headers_buf: [8192]u8 = undefined;
+var g_request_headers_len: usize = 0;
+var g_request_headers_lock: std.atomic.Value(bool) = .init(false);
+
+/// Electron `session.webRequest.onBeforeSendHeaders` 의 declarative 변형 — urls glob 매칭
+/// 요청에 headers_json `{"k":"v",...}` 를 동기 적용(overwrite). 빈 patterns = 해제.
+/// 반환값은 등록된 patterns 개수. headers_json 은 8KB 초과 시 truncate(정상 헤더엔 충분).
+pub fn webRequestSetRequestHeaders(patterns: []const []const u8, headers_json: []const u8) usize {
+    while (g_request_headers_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+    defer g_request_headers_lock.store(false, .release);
+    const n = @min(headers_json.len, g_request_headers_buf.len);
+    @memcpy(g_request_headers_buf[0..n], headers_json[0..n]);
+    g_request_headers_len = n;
+    return g_request_headers_url_pool.set(patterns);
 }
 
 var g_resource_request_handler: c.cef_resource_request_handler_t = undefined;
@@ -297,6 +366,14 @@ fn onBeforeResourceLoad(
     if (g_blocked_url_pool.matchesAny(url)) {
         emitWebRequestEvent("webRequest:before-request", url, "");
         return c.RV_CANCEL;
+    }
+
+    // 1b. onBeforeSendHeaders (declarative) — URL 매칭 시 요청 헤더를 **동기** 적용.
+    // CEF 는 RV_CONTINUE_ASYNC 후 수정을 무시하므로 반드시 여기(반환 전)서 적용해야 한다.
+    if (g_request_headers_url_pool.matchesAny(url)) {
+        while (g_request_headers_lock.cmpxchgWeak(false, true, .acquire, .monotonic) != null) std.atomic.spinLoopHint();
+        defer g_request_headers_lock.store(false, .release);
+        if (g_request_headers_len > 0) applyRequestHeaders(req, g_request_headers_buf[0..g_request_headers_len]);
     }
 
     // 2. listener filter 매칭 — async pending. add_ref 후 pool에 저장 + JS listener emit.

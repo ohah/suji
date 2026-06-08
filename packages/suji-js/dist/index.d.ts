@@ -1188,6 +1188,18 @@ export declare const webRequest: {
     /** blocklist 패턴 list 갱신 (전체 교체). 빈 list = 모든 요청 통과. 최대 32개, 256자/패턴. */
     setBlockedUrls(patterns: string[]): Promise<number>;
     /**
+     * Electron `session.webRequest.onBeforeSendHeaders` 의 **declarative 변형** —
+     * `filter.urls` glob 매칭 요청에 `headers`(이름→값)를 **동기** 주입(덮어쓰기). 빈 urls = 해제.
+     *
+     * ⚠️ Electron 의 per-request JS 콜백(요청마다 헤더를 동적 계산)은 **CEF 제약상 미지원**:
+     * CEF 는 `OnBeforeResourceLoad` 의 동기 구간에서만 request 수정을 반영하고 async
+     * resolve 후 수정은 무시한다(echo-server e2e 로 실증). 따라서 선언적 규칙만 가능 —
+     * 헤더 추가/덮어쓰기(인증 토큰, 커스텀 UA 등 대다수 use-case)는 충족한다.
+     */
+    setRequestHeaders(filter: {
+        urls: string[];
+    }, headers: Record<string, string>): Promise<number>;
+    /**
      * Electron `session.webRequest.onBeforeRequest({urls}, listener)` 동등.
      * filter.urls glob 매칭 시 listener가 비동기 결정 — `callback({ cancel: true })`로 차단,
      * `callback({})`로 통과.

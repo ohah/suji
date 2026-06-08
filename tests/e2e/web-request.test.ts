@@ -412,4 +412,50 @@ describe("webRequest dynamic listener (RV_CONTINUE_ASYNC)", () => {
     });
     expect(fired).toBe(0);
   });
+
+  test("setRequestHeaders (declarative onBeforeSendHeaders) → 주입 헤더가 실제 요청에 도달(echo server)", async () => {
+    // test 프로세스 내 echo 서버가 수신 헤더 기록 → 동기 주입한 헤더가 wire 에 실제 도달 검증.
+    // (async resolve 경로는 CEF 가 request 수정을 무시 — declarative 동기 경로만 동작)
+    let received: Record<string, string> | null = null;
+    const cors = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Headers": "*",
+    };
+    const server = Bun.serve({
+      port: 0,
+      fetch(req) {
+        // 주입된 커스텀 헤더 → 브라우저가 CORS preflight(OPTIONS) 먼저 보냄. 허용 응답해야
+        // 실제 GET(헤더 값 포함)이 도달한다. 실 GET 에서만 헤더 기록.
+        if (req.method === "OPTIONS") return new Response(null, { headers: cors });
+        if (new URL(req.url).searchParams.has("sujihdr")) {
+          received = Object.fromEntries(req.headers.entries());
+        }
+        return new Response("ok", { headers: cors });
+      },
+    });
+    const port = server.port;
+    const echoUrl = `http://127.0.0.1:${port}/?sujihdr=1`;
+    try {
+      const setR = await core<{ count: number }>({
+        cmd: "web_request_set_request_headers",
+        patterns: ["*sujihdr*"],
+        requestHeaders: { "X-Suji-Onbeforesend": "e2e-injected" },
+      });
+      expect(setR.count).toBe(1);
+
+      await page.evaluate((url) => fetch(url).then(() => {}).catch(() => {}), echoUrl);
+
+      const start = Date.now();
+      while (Date.now() - start < 8000 && received === null) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      expect(received).not.toBeNull();
+      // 헤더명은 lowercase 정규화. 동기 주입한 값이 실제 요청에 도달.
+      expect((received as any)["x-suji-onbeforesend"]).toBe("e2e-injected");
+    } finally {
+      await core({ cmd: "web_request_set_request_headers", patterns: [], requestHeaders: {} });
+      server.stop(true);
+    }
+  });
 });
