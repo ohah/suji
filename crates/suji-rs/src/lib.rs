@@ -2175,6 +2175,9 @@ pub mod menu {
             accelerator: &'a str,
             /// Electron MenuItem.role (copy/paste/quit 등; 설정 시 click 무시). 미사용 시 "".
             role: &'a str,
+            /// Electron MenuItem.icon (이미지 파일 경로). macOS NSImage(setImage:). fs sandbox
+            /// 게이트(렌더러 경로). 미사용 시 "". macOS only.
+            icon: &'a str,
         },
         Checkbox {
             label: &'a str,
@@ -2184,6 +2187,8 @@ pub mod menu {
             id: &'a str,
             visible: bool,
             accelerator: &'a str,
+            /// Electron MenuItem.icon (이미지 파일 경로). macOS only. 미사용 시 "".
+            icon: &'a str,
         },
         Separator,
         Submenu {
@@ -2205,6 +2210,7 @@ pub mod menu {
                 visible,
                 accelerator,
                 role,
+                icon,
             } => serde_json::json!({
                 "type": "item",
                 "label": label,
@@ -2214,6 +2220,7 @@ pub mod menu {
                 "visible": visible,
                 "accelerator": accelerator,
                 "role": role,
+                "icon": icon,
             }),
             MenuItem::Checkbox {
                 label,
@@ -2223,6 +2230,7 @@ pub mod menu {
                 id,
                 visible,
                 accelerator,
+                icon,
             } => serde_json::json!({
                 "type": "checkbox",
                 "label": label,
@@ -2232,6 +2240,7 @@ pub mod menu {
                 "id": id,
                 "visible": visible,
                 "accelerator": accelerator,
+                "icon": icon,
             }),
             MenuItem::Separator => serde_json::json!({"type": "separator"}),
             MenuItem::Submenu {
@@ -2306,6 +2315,22 @@ pub mod menu {
             None
         }
         find(items, id).map(|x| x.to_string())
+    }
+
+    /// Electron Menu.insert(pos, menuItem) — getApplicationMenu 스냅샷 pos 위치에 항목 삽입
+    /// 후 전체 재설정(fire-and-forget — splice + setApplicationMenu). pos 는 [0,len] clamp.
+    pub fn insert(pos: usize, item: &MenuItem) -> Option<String> {
+        let resp = get_application_menu()?;
+        let v: serde_json::Value = serde_json::from_str(&resp).ok()?;
+        let mut items: Vec<serde_json::Value> = v.get("items")?.as_array()?.clone();
+        let idx = pos.min(items.len());
+        items.insert(idx, item_to_json(item));
+        let req = serde_json::json!({
+            "cmd": "menu_set_application_menu",
+            "items": items,
+        })
+        .to_string();
+        invoke("__core__", &req)
     }
 }
 
@@ -3125,6 +3150,7 @@ mod tests {
                     visible: false,
                     accelerator: "Cmd+R",
                     role: "",
+                    icon: "/tmp/run.png",
                 },
                 crate::menu::MenuItem::Checkbox {
                     label: "Flag",
@@ -3134,6 +3160,7 @@ mod tests {
                     id: "",
                     visible: true,
                     accelerator: "",
+                    icon: "",
                 },
                 crate::menu::MenuItem::Separator,
             ],
@@ -3148,6 +3175,7 @@ mod tests {
         assert_eq!(v["items"][0]["submenu"][0]["id"], "run-item");
         assert_eq!(v["items"][0]["submenu"][0]["visible"], false);
         assert_eq!(v["items"][0]["submenu"][0]["accelerator"], "Cmd+R");
+        assert_eq!(v["items"][0]["submenu"][0]["icon"], "/tmp/run.png");
         assert_eq!(v["items"][0]["submenu"][1]["checked"], true);
         assert_eq!(v["items"][0]["submenu"][1]["enabled"], false);
         assert_eq!(v["items"][0]["submenu"][1]["visible"], true);
@@ -3167,6 +3195,7 @@ mod tests {
                 visible: true,
                 accelerator: "",
                 role: "",
+                icon: "",
             }],
             id: "",
             visible: true,

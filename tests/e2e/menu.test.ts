@@ -138,6 +138,46 @@ describe("menu_set_application_menu — wiring + 응답", () => {
     expect(afterReset.items).toEqual([]);
   });
 
+  test.skipIf(!isDarwin)("MenuItem.icon: set with icon path → success + 스냅샷 에코", async () => {
+    // icon 적용은 best-effort(NSImage 로드 실패해도 메뉴는 유지). wire/parse/스냅샷
+    // 라운드트립만 검증 — 실 이미지 픽셀은 e2e 범위 밖.
+    const set = await core<{ success: boolean }>({
+      cmd: "menu_set_application_menu",
+      items: [
+        {
+          type: "submenu",
+          label: "Tools",
+          id: "tools",
+          submenu: [{ label: "Run", click: "run", id: "run-item", icon: "/tmp/nonexistent-menu-icon.png" }],
+        },
+      ],
+    });
+    expect(set.success).toBe(true);
+    const got = await core<{ items: any[] }>({ cmd: "menu_get_application_menu" });
+    expect(got.items[0].submenu[0].icon).toBe("/tmp/nonexistent-menu-icon.png");
+    await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
+  });
+
+  test.skipIf(!isDarwin)("Menu.insert 메커니즘: 스냅샷 splice → re-set → get 에 반영", async () => {
+    // insert 는 SDK 레벨(get 스냅샷 splice + setApplicationMenu). 그 토대인
+    // get→splice→set→get 라운드트립이 동작하는지 wire 로 검증.
+    await core<{ success: boolean }>({
+      cmd: "menu_set_application_menu",
+      items: [
+        { type: "submenu", label: "A", id: "a", submenu: [{ label: "a1", click: "a1" }] },
+        { type: "submenu", label: "C", id: "c", submenu: [{ label: "c1", click: "c1" }] },
+      ],
+    });
+    const snap = await core<{ items: any[] }>({ cmd: "menu_get_application_menu" });
+    // pos=1 에 B 삽입(splice) → 재설정.
+    const inserted = { type: "submenu", label: "B", id: "b", submenu: [{ label: "b1", click: "b1" }] };
+    snap.items.splice(1, 0, inserted);
+    await core<{ success: boolean }>({ cmd: "menu_set_application_menu", items: snap.items });
+    const got = await core<{ items: any[] }>({ cmd: "menu_get_application_menu" });
+    expect(got.items.map((i) => i.id)).toEqual(["a", "b", "c"]);
+    await core<{ success: boolean }>({ cmd: "menu_reset_application_menu" });
+  });
+
   test.skipIf(isDarwin)("getApplicationMenu non-darwin: set 실패 → 스냅샷 미저장([])", async () => {
     await core<{ success: boolean }>({
       cmd: "menu_set_application_menu",

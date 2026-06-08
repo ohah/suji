@@ -2035,7 +2035,7 @@ test "MenuItem id + visible + accelerator + role fields wired (types + parse + n
         "role: []const u8 = \"\"",
         "pub fn setMenuItemHidden", // cef_objc 네이티브 헬퍼
         "setMenuItemHidden(top, true)", // setApplicationMenu top-level 적용
-        "if (!visible) setMenuItemHidden(m, true)", // addAppMenuClickable 적용
+        "if (!spec.visible) setMenuItemHidden(m, true)", // addAppMenuClickable 적용
         "gtk_widget_set_no_show_all", // GTK visible 처리
         "fn parseAccelerator", // accelerator 파서
         "setKeyEquivalent:", // macOS keyEquivalent 적용
@@ -2079,6 +2079,54 @@ test "Menu.sendActionToFirstResponder IPC + CEF wire" {
         "sendAction:to:from:", // NSApp 셀렉터 전달
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, sa_cef_src, needle) != null);
+    }
+}
+
+test "MenuItem.icon — fs-gate + NSImage apply wired" {
+    const icon_main_src = try readMainSource();
+    defer std.testing.allocator.free(icon_main_src);
+    inline for (.{
+        "util.jsonObjectGetString(obj, \"icon\")", // parse
+        "fn menuIconPathAllowed", // per-item fs sandbox 게이트
+        "rendererPathAllowed(path)", // rendererPathFsGate 와 공유하는 술어 재사용
+        "fn rendererPathAllowed", // 공용 술어 단일 출처
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, icon_main_src, needle) != null);
+    }
+
+    const icon_cef_src = try readCefSource();
+    defer std.testing.allocator.free(icon_cef_src);
+    inline for (.{
+        "icon: []const u8 = \"\"", // cef_menu_types 새 필드
+        "const ClickableSpec = struct", // 8-param 회피 리팩터
+        "pub fn loadNSImageFromFile", // 공용 NSImage 로더(tray/menu/nativeImage 공유)
+        "initWithContentsOfFile:", // NSImage(contentsOfFile:)
+        "const img = cef.loadNSImageFromFile(icon_path)", // applyMenuItemIcon 이 공용 로더 사용
+        "applyMenuItemIcon(m, spec.icon)", // addAppMenuClickable 적용
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, icon_cef_src, needle) != null);
+    }
+}
+
+test "Menu popup menu:will-show/will-close lifecycle events wired" {
+    const lc_main_src = try readMainSource();
+    defer std.testing.allocator.free(lc_main_src);
+    inline for (.{
+        "fn menuLifecycleEmitHandler", // 코어 emit 핸들러
+        "cef.setMenuLifecycleEmitHandler(&menuLifecycleEmitHandler)", // 등록
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, lc_main_src, needle) != null);
+    }
+
+    const lc_cef_src = try readCefSource();
+    defer std.testing.allocator.free(lc_cef_src);
+    inline for (.{
+        "pub fn setMenuLifecycleEmitHandler", // export
+        "g_menu_lifecycle_emit", // 핸들러 슬롯
+        "menu:will-show", // popup 직전 발신
+        "menu:will-close", // dismiss 시 발신
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, lc_cef_src, needle) != null);
     }
 }
 

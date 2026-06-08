@@ -4,6 +4,7 @@ package menu
 
 import (
 	"encoding/json"
+	"slices"
 
 	suji "github.com/ohah/suji-go"
 )
@@ -26,6 +27,9 @@ type MenuItem struct {
 	Accelerator string `json:"accelerator,omitempty"`
 	// Role — Electron MenuItem.role (copy/paste/quit 등; 설정 시 click 무시). macOS only.
 	Role string `json:"role,omitempty"`
+	// Icon — Electron MenuItem.icon (이미지 파일 경로). macOS NSImage(setImage:). fs sandbox
+	// allowedRoots 게이트(렌더러 경로; 미설정=레거시 허용). macOS only.
+	Icon string `json:"icon,omitempty"`
 }
 
 func Item(label, click string) MenuItem {
@@ -102,4 +106,23 @@ func findMenuItemByID(items []MenuItem, id string) *MenuItem {
 		}
 	}
 	return nil
+}
+
+// Insert inserts item at pos into the getApplicationMenu snapshot and re-sets the whole
+// menu (Electron Menu.insert; suji menus are fire-and-forget — splice + SetApplicationMenu).
+// pos is clamped to [0, len].
+func Insert(pos int, item MenuItem) string {
+	var resp struct {
+		Items []MenuItem `json:"items"`
+	}
+	_ = json.Unmarshal([]byte(GetApplicationMenu()), &resp)
+	idx := pos
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(resp.Items) {
+		idx = len(resp.Items)
+	}
+	resp.Items = slices.Insert(resp.Items, idx, item)
+	return SetApplicationMenu(resp.Items)
 }

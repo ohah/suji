@@ -690,6 +690,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setTrayEmitHandler(&trayEmitHandler);
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
+    cef.setMenuLifecycleEmitHandler(&menuLifecycleEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.nativeThemeInstall(&nativeThemeEmitHandler);
@@ -880,6 +881,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setTrayEmitHandler(&trayEmitHandler);
     cef.setNotificationEmitHandler(&notificationEmitHandler);
     cef.setMenuEmitHandler(&menuEmitHandler);
+    cef.setMenuLifecycleEmitHandler(&menuLifecycleEmitHandler);
     cef.setGlobalShortcutEmitHandler(&globalShortcutEmitHandler);
     cef.powerMonitorInstall(&powerMonitorEmitHandler);
     cef.nativeThemeInstall(&nativeThemeEmitHandler);
@@ -3778,21 +3780,30 @@ fn isPathAllowedForFrontend(path: []const u8) bool {
     return util.pathAllowedInRoots(path, roots);
 }
 
+/// 렌더러 경로 fs sandbox 허용 판정(공용 술어) — opt-in: backend 우회 /
+/// allowedRoots 미설정=레거시 허용 / 설정 시 prefix+boundary 매치(util.pathAllowedInRoots).
+/// rendererPathFsGate(에러 응답 sink)와 menuIconPathAllowed(bool, per-item) 가 공유 —
+/// 보안 게이트 로직을 단일 출처로.
+fn rendererPathAllowed(path: []const u8) bool {
+    if (g_in_backend_invoke) return true;
+    const cfg = g_config orelse return true;
+    if (cfg.fs.allowed_roots.len == 0) return true; // opt-in: 미설정=레거시 허용
+    return util.pathAllowedInRoots(path, cfg.fs.allowed_roots);
+}
+
 /// 렌더러-제어 파일경로 게이트 — fs.* 외에 path 를 받는 역사적-무제한 API 가
 /// fs 샌드박스를 우회하던 갭 보완(보안 점검 지적·후속). 대상:
 ///  - 쓰기: print_to_pdf / capture_page / desktop_capturer_capture_thumbnail
 ///  - 읽기: native_image_get_size / native_image_to_png|jpeg (임의 파일을
 ///    base64 로 인코딩해 렌더러로 반환 = 파일내용 유출)
 ///  - 파일 probe/read sink: tray_create.iconPath
+/// (menu_set_application_menu 의 MenuItem.icon 은 per-item drop 이라 menuIconPathAllowed 로 별도 게이트)
 /// **opt-in**: fs.allowedRoots 미설정/빈이면 레거시 무제한(비파괴 — 이 API
 /// 들은 그동안 무제한 출하), 설정 시 `fs.*` 와 동일 경계로 enforce(설정한 fs
 /// 통제가 이 경로들도 포함 → 신뢰불가 렌더러의 임의 파일 읽기/쓰기/이미지 로드 차단).
-/// backend SDK 호출은 fs 와 동일 thread-local 마커로 우회.
+/// backend SDK 호출은 fs 와 동일 thread-local 마커로 우회. 판정은 rendererPathAllowed 공유.
 fn rendererPathFsGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {
-    if (g_in_backend_invoke) return null;
-    const cfg = g_config orelse return null;
-    if (cfg.fs.allowed_roots.len == 0) return null; // opt-in: 미설정=레거시 허용
-    if (util.pathAllowedInRoots(path, cfg.fs.allowed_roots)) return null;
+    if (rendererPathAllowed(path)) return null;
     return coreError(response_buf, cmd, "forbidden");
 }
 
@@ -4459,6 +4470,9 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
     const visible = util.jsonObjectGetBool(obj, "visible") orelse true;
     const accelerator = util.jsonObjectGetString(obj, "accelerator") orelse "";
     const role = util.jsonObjectGetString(obj, "role") orelse "";
+    // icon 은 렌더러 경로 → fs sandbox 게이트(per-item, 차단 시 아이콘만 drop, 메뉴 유지).
+    const icon_raw = util.jsonObjectGetString(obj, "icon") orelse "";
+    const icon = if (menuIconPathAllowed(icon_raw)) icon_raw else "";
 
     if (std.mem.eql(u8, typ, "submenu") or obj.get("submenu") != null) {
         const sub_val = obj.get("submenu") orelse return error.InvalidMenuItem;
@@ -4480,6 +4494,7 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
             .id = id,
             .visible = visible,
             .accelerator = accelerator,
+            .icon = icon,
         } };
     }
     return .{ .item = .{
@@ -4490,7 +4505,14 @@ fn parseApplicationMenuItem(arena: std.mem.Allocator, value: std.json.Value) Men
         .visible = visible,
         .accelerator = accelerator,
         .role = role,
+        .icon = icon,
     } };
+}
+
+/// MenuItem.icon 경로 fs sandbox 게이트 — rendererPathAllowed 공용 술어 재사용. per-item
+/// 이라 차단 시 아이콘만 drop(메뉴 자체는 유지). 빈 경로(아이콘 없음)는 무조건 허용.
+fn menuIconPathAllowed(path: []const u8) bool {
+    return path.len == 0 or rendererPathAllowed(path);
 }
 
 /// notification id 카운터 — `suji-notif-{N}` 형식 식별자 발급.
@@ -4536,6 +4558,12 @@ fn menuEmitHandler(click: []const u8) void {
     var click_esc: [256]u8 = undefined;
     const click_n = util.escapeJsonStrFull(click, &click_esc) orelse return;
     emitToBus("menu:click", "{{\"click\":\"{s}\"}}", .{click_esc[0..click_n]});
+}
+
+/// menu:will-show / menu:will-close — context-menu popup 라이프사이클(빈 payload).
+/// channel 은 cef_menu 가 고정 문자열로 전달(escape 불요). UI 스레드, emitBusRaw thread-safe.
+fn menuLifecycleEmitHandler(channel: []const u8) void {
+    emitBusRaw(channel, "{}");
 }
 
 /// powerMonitor: power_monitor.m이 dispatch한 4 이벤트(suspend/resume/lock-screen/unlock-screen)

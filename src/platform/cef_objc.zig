@@ -126,6 +126,21 @@ pub fn nsStringFromSlice(text: []const u8) ?*anyopaque {
     return nsStringFromSliceWithCapacity(text, SHELL_MAX_PATH);
 }
 
+/// `[[NSImage alloc] initWithContentsOfFile: path]` — tray/menu icon, nativeImage 공용.
+/// 실패(파일 없음/디코드 실패) 시 null. caller 가 setImage:/size 등으로 소비. macOS only
+/// (비-macOS 는 objc 스텁 unreachable — 호출부가 is_macos 가드).
+/// ⚠️ 임의 파일을 디스크에서 읽으므로 **렌더러-제어 경로는 호출 전 fs 샌드박스 게이트
+/// 필수**(현 호출부: tray=rendererPathFsGate, menu=menuIconPathAllowed,
+/// nativeImage=rendererPathFsGate). 새 호출부 추가 시 동일 게이트 적용할 것.
+pub fn loadNSImageFromFile(path: []const u8) ?*anyopaque {
+    const ns_path = nsStringFromSlice(path) orelse return null;
+    const NSImage = getClass("NSImage") orelse return null;
+    const alloc = msgSend(NSImage, "alloc") orelse return null;
+    const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    return init_fn(alloc, @ptrCast(objc.sel_registerName("initWithContentsOfFile:")), ns_path);
+}
+
 var g_empty_ns_string: ?*anyopaque = null;
 
 /// 모든 NSMenuItem keyEquivalent에서 공유하는 `@""`. 메뉴 아이템마다 빈 NSString을 새로 만드는

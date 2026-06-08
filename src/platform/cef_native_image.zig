@@ -81,13 +81,7 @@ pub fn nativeImageEncodeFromPath(
 /// 사용 (1차 후속). file 없거나 디코딩 실패 시 width/height = 0.
 pub fn nativeImageGetSize(path: []const u8) cef.NSSize {
     if (!comptime is_macos) return .{ .width = 0, .height = 0 };
-    const ns_path = nsStringFromSlice(path) orelse return .{ .width = 0, .height = 0 };
-    const NSImage = getClass("NSImage") orelse return .{ .width = 0, .height = 0 };
-    const alloc = msgSend(NSImage, "alloc") orelse return .{ .width = 0, .height = 0 };
-    const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const img = init_fn(alloc, @ptrCast(objc.sel_registerName("initWithContentsOfFile:")), ns_path) orelse
-        return .{ .width = 0, .height = 0 };
+    const img = cef.loadNSImageFromFile(path) orelse return .{ .width = 0, .height = 0 };
     const size_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) cef.NSSize =
         @ptrCast(&objc.objc_msgSend);
     return size_fn(img, @ptrCast(objc.sel_registerName("size")));

@@ -152,12 +152,7 @@ fn applyTrayTooltip(item: *anyopaque, tooltip: []const u8) void {
 /// statusItem.button.image = NSImage(contentsOfFile: iconPath).
 fn applyTrayIcon(item: *anyopaque, icon_path: []const u8) void {
     const button = msgSend(item, "button") orelse return;
-    const ns_path = nsStringFromSlice(icon_path) orelse return;
-    const NSImage = getClass("NSImage") orelse return;
-    const alloc = msgSend(NSImage, "alloc") orelse return;
-    const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
-        @ptrCast(&objc.objc_msgSend);
-    const img = init_fn(alloc, @ptrCast(objc.sel_registerName("initWithContentsOfFile:")), ns_path) orelse return;
+    const img = cef.loadNSImageFromFile(icon_path) orelse return;
     msgSendVoid1(button, "setImage:", img);
 }
 
