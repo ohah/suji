@@ -2731,6 +2731,10 @@ pub mod power_save_blocker {
         serde_json::json!({ "cmd": "power_save_blocker_stop", "id": id }).to_string()
     }
 
+    pub(crate) fn is_started_request(id: u32) -> String {
+        serde_json::json!({ "cmd": "power_save_blocker_is_started", "id": id }).to_string()
+    }
+
     /// `"prevent_app_suspension"` | `"prevent_display_sleep"`. 응답: `{"id":N}`.
     pub fn start(type_str: &str) -> Option<String> {
         invoke("__core__", &start_request(type_str))
@@ -2739,6 +2743,11 @@ pub mod power_save_blocker {
     /// 응답: `{"success":bool}`.
     pub fn stop(id: u32) -> Option<String> {
         invoke("__core__", &stop_request(id))
+    }
+
+    /// blocker 활성 여부(Electron powerSaveBlocker.isStarted). 응답: `{"started":bool}`.
+    pub fn is_started(id: u32) -> Option<String> {
+        invoke("__core__", &is_started_request(id))
     }
 }
 

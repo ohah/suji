@@ -230,8 +230,9 @@ fn onAllClosed(_: suji.Event) void {
 //   (CEF Crashpad/Breakpad 1차. 첫 프로세스 enable은 app.crashReporter cfg 필요,
 //   getUploadedReports/getLastCrashReport는 로컬 Crashpad DB(completed dumps) 조회,
 //   실제 crash 유발/upload 서버 검증은 후속 정직 경계)
-// suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id)
-//   (macOS IOPMAssertion, Linux XScreenSaverSuspend, Windows Power Request API)
+// suji.powerSaveBlocker.start("prevent_display_sleep") / stop(id) / isStarted(id)
+//   (macOS IOPMAssertion, Linux XScreenSaverSuspend, Windows Power Request API;
+//    isStarted=전 플랫폼 power_save_started_ids 추적 테이블)
 // suji.safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                       (macOS Keychain, Linux libsecret, Windows Credential Manager)
 // suji.dock.setBadge("99") / getBadge()        — dock 배지 (macOS NSDockTile)
@@ -489,7 +490,7 @@ suji.platform                                                // "macos" | "linux
 // await autoUpdater.quitAndInstall(prepared, {relaunch:true})              (macOS/Linux shell helper, Windows PowerShell helper)
 //                                                                         (manifest check + download + SHA-256 verify + quit-and-install)
 // const id = await powerSaveBlocker.start("prevent_display_sleep")
-// await powerSaveBlocker.stop(id)                                         (macOS/Linux/Windows)
+// await powerSaveBlocker.stop(id) / await powerSaveBlocker.isStarted(id)  (macOS/Linux/Windows)
 // await safeStorage.setItem(svc, acc, "v") / getItem(svc, acc) / deleteItem(svc, acc)
 //                                                                         (macOS Keychain, Linux libsecret, Windows Credential Manager)
 // await app.dock.setBadge("99") / app.dock.getBadge()                     (macOS NSDockTile)

@@ -278,6 +278,7 @@ pub const appSetBadgeCount = cef_dock.appSetBadgeCount;
 pub const PowerSaveBlockerType = cef_power_save_blocker.PowerSaveBlockerType;
 pub const powerSaveBlockerStart = cef_power_save_blocker.powerSaveBlockerStart;
 pub const powerSaveBlockerStop = cef_power_save_blocker.powerSaveBlockerStop;
+pub const powerSaveBlockerIsStarted = cef_power_save_blocker.powerSaveBlockerIsStarted;
 
 pub const safeStorageSet = cef_safe_storage.safeStorageSet;
 pub const safeStorageGet = cef_safe_storage.safeStorageGet;

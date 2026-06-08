@@ -71,6 +71,14 @@ var power_save_next_id: u32 = 1;
 var power_save_entries = [_]PowerSaveBlockerEntry{.{}} ** max_power_save_blockers;
 var linux_power_save_display: ?*anyopaque = null;
 
+/// Electron `powerSaveBlocker.isStarted(id)` 용 활성 id 추적 — start 시 기록, stop 시 제거.
+/// 전 플랫폼 단일 메커니즘(macOS 는 IOPMAssertion id 라 entry table 미사용 → isStarted 는 이
+/// 테이블로 통일). powerSaveLock 으로 보호. 정직 경계: 64개(max_power_save_blockers) 동시
+/// 추적 — Linux/Win 은 entry table 이 65번째 start 를 실패시켜 오버플로 없음. macOS 는 start
+/// 가 무제한이라 65번째+ 는 추적 슬롯 부족으로 isStarted 가 false(실 blocker 는 활성). 동시
+/// 64+ blocker 는 비현실적(앱당 보통 1~2개)이라 정직 경계로 둠.
+var power_save_started_ids = [_]u32{0} ** max_power_save_blockers;
+
 fn powerSaveLock() void {
     while (power_save_lock_flag.cmpxchgWeak(false, true, .acquire, .monotonic) != null) {
         std.atomic.spinLoopHint();
@@ -215,8 +223,48 @@ fn windowsPowerSaveStop(id: u32) bool {
     return ok;
 }
 
-/// powerSaveBlocker 시작 — 0이면 실패 (id는 1+).
+fn powerSaveRecordStartedLocked(id: u32) void {
+    if (id == 0) return;
+    for (&power_save_started_ids) |*s| {
+        if (s.* == 0) {
+            s.* = id;
+            return;
+        }
+    }
+}
+
+fn powerSaveForgetStartedLocked(id: u32) void {
+    for (&power_save_started_ids) |*s| {
+        if (s.* == id) {
+            s.* = 0;
+            return;
+        }
+    }
+}
+
+/// Electron `powerSaveBlocker.isStarted(id)` — 활성(시작됨) 여부.
+pub fn powerSaveBlockerIsStarted(id: u32) bool {
+    if (id == 0) return false;
+    powerSaveLock();
+    defer powerSaveUnlock();
+    for (power_save_started_ids) |s| {
+        if (s == id) return true;
+    }
+    return false;
+}
+
+/// powerSaveBlocker 시작 — 0이면 실패 (id는 1+). 성공 id 를 started 테이블에 기록.
 pub fn powerSaveBlockerStart(t: PowerSaveBlockerType) u32 {
+    const id = powerSaveBlockerStartInner(t);
+    if (id != 0) {
+        powerSaveLock();
+        powerSaveRecordStartedLocked(id);
+        powerSaveUnlock();
+    }
+    return id;
+}
+
+fn powerSaveBlockerStartInner(t: PowerSaveBlockerType) u32 {
     if (comptime is_linux) {
         powerSaveLock();
         defer powerSaveUnlock();
@@ -241,7 +289,18 @@ pub fn powerSaveBlockerStart(t: PowerSaveBlockerType) u32 {
     return if (r == 0) id else 0;
 }
 
+/// powerSaveBlocker 중지 — started 테이블에서 제거(성공 여부 무관: 사용자가 stop 을 요청하면
+/// 더 이상 "started" 로 추적하지 않음. 네이티브 release 가 실패해도 isStarted 가 거짓으로 true
+/// 를 보고하지 않게, entry-table 의 stop-시-제거 동작과 일관).
 pub fn powerSaveBlockerStop(id: u32) bool {
+    const ok = powerSaveBlockerStopInner(id);
+    powerSaveLock();
+    powerSaveForgetStartedLocked(id); // 미존재 id 는 no-op.
+    powerSaveUnlock();
+    return ok;
+}
+
+fn powerSaveBlockerStopInner(id: u32) bool {
     if (comptime is_linux) {
         powerSaveLock();
         defer powerSaveUnlock();

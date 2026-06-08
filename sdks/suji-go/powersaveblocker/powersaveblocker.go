@@ -20,10 +20,20 @@ func Stop(id uint32) string {
 	return suji.Invoke("__core__", buildStopRequest(id))
 }
 
+// IsStarted reports whether the blocker id is active (Electron powerSaveBlocker.isStarted).
+// Response: `{"started":bool}`.
+func IsStarted(id uint32) string {
+	return suji.Invoke("__core__", buildIsStartedRequest(id))
+}
+
 func buildStartRequest(typeStr string) string {
 	return fmt.Sprintf(`{"cmd":"power_save_blocker_start","type":"%s"}`, jsonesc.Full(typeStr))
 }
 
 func buildStopRequest(id uint32) string {
 	return fmt.Sprintf(`{"cmd":"power_save_blocker_stop","id":%d}`, id)
+}
+
+func buildIsStartedRequest(id uint32) string {
+	return fmt.Sprintf(`{"cmd":"power_save_blocker_is_started","id":%d}`, id)
 }

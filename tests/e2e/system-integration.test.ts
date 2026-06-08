@@ -1851,3 +1851,29 @@ describe("session.setProxy", () => {
     expect(await sdk<boolean>("session.setProxy", { mode: "direct" })).toBe(true);
   });
 });
+
+describe("ipcRenderer.removeAllListeners (bridge off)", () => {
+  test("off(channel) 는 해당 채널만, off() 는 전 채널 리스너 해제", async () => {
+    const r = await page.evaluate(() => {
+      const s = (window as any).__suji__;
+      const fired: string[] = [];
+      s.on("ipc-rm-a", () => fired.push("a"));
+      s.on("ipc-rm-b", () => fired.push("b"));
+      s.__dispatch__("ipc-rm-a", "{}");
+      s.__dispatch__("ipc-rm-b", "{}");
+      const after2 = fired.length; // 2
+
+      s.off("ipc-rm-a"); // 단일 채널 해제
+      s.__dispatch__("ipc-rm-a", "{}"); // 미발화
+      s.__dispatch__("ipc-rm-b", "{}"); // b 발화 → 3
+      const afterSingle = fired.length;
+
+      s.off(); // 전 채널 해제
+      s.__dispatch__("ipc-rm-b", "{}"); // 미발화
+      return { after2, afterSingle, afterAll: fired.length };
+    });
+    expect(r.after2).toBe(2);
+    expect(r.afterSingle).toBe(3); // a 해제, b만 발화
+    expect(r.afterAll).toBe(3); // off() 후 미발화
+  });
+});

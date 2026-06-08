@@ -131,9 +131,10 @@ export function send(event: string, data: unknown, options?: SendOptions): void 
 }
 
 /**
- * 채널의 모든 리스너 해제 (Electron: ipcRenderer.removeAllListeners)
+ * 리스너 해제 (Electron: ipcRenderer.removeAllListeners([channel])).
+ * `event` 지정 시 해당 채널의 모든 리스너 해제, 생략 시 **전 채널** 리스너 해제.
  */
-export function off(event: string): void {
+export function off(event?: string): void {
   const bridge = (window as any).__suji__;
   if (bridge?.off) bridge.off(event);
 }
@@ -2655,6 +2656,12 @@ export const powerSaveBlocker = {
   async stop(id: number): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "power_save_blocker_stop", id });
     return r.success === true;
+  },
+
+  /** blocker 가 활성(시작됨) 상태인지 (Electron `powerSaveBlocker.isStarted`). */
+  async isStarted(id: number): Promise<boolean> {
+    const r = await coreCall<{ started: boolean }>({ cmd: "power_save_blocker_is_started", id });
+    return r.started === true;
   },
 };
 

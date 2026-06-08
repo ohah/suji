@@ -100,7 +100,9 @@ session.setPermissionRequestHandler((details) => {
 | `ipcRenderer.invoke(ch, ...args)` | `suji.invoke(ch, data, options)` — data는 단일 객체 |
 | `ipcRenderer.send(ch, data)` | `suji.send(ch, data)` |
 | `ipcRenderer.on(ch, fn)` | `suji.on(ch, fn)` |
+| `ipcRenderer.removeAllListeners([ch])` | `suji.off(ch?)` — ch 생략 시 전 채널 해제 |
 | `ipcMain.handle(ch, (event, ...args) => {})` | 백엔드 `handle(ch, (req, event) => {})` |
+| `ipcMain.handleOnce(ch, fn)` | 백엔드 `handleOnce(ch, fn)` — 첫 invoke 만 처리(이후 consumed 응답) |
 | `ipcMain.on(ch, fn)` | 백엔드 `on(ch, fn)` |
 | `event.sender` / `BrowserWindow.fromWebContents(e.sender)` | `event.window` rich 객체 (`{id, name}`) |
 | `win.webContents.send(ch, data)` | `suji.send(ch, data, {to: winId})` / Zig `suji.sendTo(id, ch, data)` |
