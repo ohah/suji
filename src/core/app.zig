@@ -1266,6 +1266,36 @@ pub const notification = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"notificationId\":\"{s}\"", .{id_buf[0..id_n]}) catch return null;
         return coreCmd("notification_close", fields);
     }
+
+    /// caller-id + groupId(macOS threadIdentifier) 지정 표시 — removeGroup 대상.
+    /// id 빈 문자열이면 자동 생성. 응답: `{"notificationId","success"}`.
+    pub fn showGrouped(id: []const u8, title: []const u8, body: []const u8, silent: bool, group_id: []const u8) ?[]const u8 {
+        var id_buf: [128]u8 = undefined;
+        var t_buf: [4096]u8 = undefined;
+        var b_buf: [4096]u8 = undefined;
+        var g_buf: [512]u8 = undefined;
+        const id_n = util.escapeJsonStrFull(id, &id_buf) orelse return null;
+        const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
+        const b_n = util.escapeJsonStrFull(body, &b_buf) orelse return null;
+        const g_n = util.escapeJsonStrFull(group_id, &g_buf) orelse return null;
+        var fields_buf: [9400]u8 = undefined;
+        const fields = std.fmt.bufPrint(
+            &fields_buf,
+            "\"id\":\"{s}\",\"title\":\"{s}\",\"body\":\"{s}\",\"silent\":{},\"groupId\":\"{s}\"",
+            .{ id_buf[0..id_n], t_buf[0..t_n], b_buf[0..b_n], silent, g_buf[0..g_n] },
+        ) catch return null;
+        return coreCmd("notification_show", fields);
+    }
+
+    /// 그룹(groupId=macOS threadIdentifier) 알림 제거(Electron Notification.removeGroup).
+    /// macOS only. 응답: `{"success":bool}`.
+    pub fn removeGroup(group_id: []const u8) ?[]const u8 {
+        var g_buf: [512]u8 = undefined;
+        const g_n = util.escapeJsonStrFull(group_id, &g_buf) orelse return null;
+        var fields_buf: [600]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"groupId\":\"{s}\"", .{g_buf[0..g_n]}) catch return null;
+        return coreCmd("notification_remove_group", fields);
+    }
 };
 
 pub const tray = struct {

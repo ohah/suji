@@ -89,6 +89,29 @@ describe("notification.show — IPC 라우팅", () => {
     });
     expect(r.notificationId).toMatch(/^suji-notif-/);
   });
+
+  test("caller-supplied id → notificationId 그대로 반환 (NotificationOptions.id)", async () => {
+    const r = await core<{ notificationId: string }>({
+      cmd: "notification_show", title: "Custom", body: "id", id: "my-custom-notif-id",
+    });
+    expect(r.notificationId).toBe("my-custom-notif-id");
+  });
+
+  test("groupId 포함 show → notificationId 반환 (threadIdentifier wire)", async () => {
+    const r = await core<{ notificationId: string; success: boolean }>({
+      cmd: "notification_show", title: "Grouped", body: "g", groupId: "grp-1",
+    });
+    expect(typeof r.notificationId).toBe("string");
+    expect(typeof r.success).toBe("boolean");
+  });
+});
+
+describe("notification.removeGroup", () => {
+  test("removeGroup → success boolean", async () => {
+    await core({ cmd: "notification_show", title: "G", body: "g", groupId: "grp-rm" });
+    const r = await core<{ success: boolean }>({ cmd: "notification_remove_group", groupId: "grp-rm" });
+    expect(typeof r.success).toBe("boolean");
+  });
 });
 
 describe("notification.close", () => {

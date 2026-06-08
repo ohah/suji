@@ -17,6 +17,10 @@ deprecated 후 macOS 26 제거), Linux freedesktop notification D-Bus, Windows
 | `notification.requestPermission` | ✅ OS 다이얼로그 | ✅ daemon reachable (no prompt) | ✅ true (권한 프롬프트 없음) |
 | `notification.show` | ✅ UNUserNotificationCenter | ✅ D-Bus `Notify` | ✅ `NIF_INFO` balloon |
 | `notification.close` | ✅ pending + delivered | ✅ D-Bus `CloseNotification` | ✅ backing tray icon 제거 |
+| `notification.removeAll` | ✅ removeAll* | ⬜ false | ⬜ false |
+| `notification.removeGroup(groupId)` | ✅ threadIdentifier 필터 | ⬜ false | ⬜ false |
+| `NotificationOptions.id` / `.groupId` | ✅ caller-id / threadIdentifier | id ✅ / group ⬜ | id ✅ / group ⬜ |
+| `Notification` 클래스 (id getter) | ✅ (JS/Node OO) | ✅ | ✅ |
 | Click event | ✅ `notification:click` | — | ✅ balloon click |
 
 Linux는 `org.freedesktop.Notifications` 서비스가 없으면 graceful false.
@@ -78,7 +82,23 @@ suji.on('notification:click', ({ notificationId: clickedId }) => {
 
 // 명시 close (자동 dismiss 외에)
 await notification.close(notificationId);
+
+// 그룹화(macOS threadIdentifier) + 그룹 제거
+await notification.show({ title: 'Sync', body: '1/3', groupId: 'sync' });
+await notification.show({ title: 'Sync', body: '2/3', groupId: 'sync' });
+await notification.removeGroup('sync');   // macOS: 'sync' 그룹 표시분 제거
+
+// Notification 클래스 (Electron 동형 OO 래퍼 — id getter)
+import { Notification } from '@suji/api';
+const n = new Notification({ title: 'Hi', body: 'World', id: 'my-id' });
+await n.show();
+console.log(n.id);   // 'my-id' (show 후)
+await n.close();
 ```
+
+> `removeGroup`/`groupId`/`Notification` 클래스의 그룹화는 **macOS 전용**(UNUserNotification
+> Center `threadIdentifier`). Win/Linux 는 groupId 를 무시하고 개별 알림으로 표시하며
+> `removeGroup` 은 `false`. `id` 는 전 플랫폼 caller-supplied(생략 시 자동 생성).
 
 ## Backend SDK
 

@@ -15,7 +15,8 @@ const writeCStr = cef.writeCStr;
 extern "c" fn suji_notification_is_supported() i32;
 extern "c" fn suji_notification_set_click_callback(cb: *const fn ([*:0]const u8) callconv(.c) void) void;
 extern "c" fn suji_notification_request_permission() i32;
-extern "c" fn suji_notification_show(id: [*:0]const u8, title: [*:0]const u8, body: [*:0]const u8, silent: i32) i32;
+extern "c" fn suji_notification_show(id: [*:0]const u8, title: [*:0]const u8, body: [*:0]const u8, silent: i32, group: [*:0]const u8) i32;
+extern "c" fn suji_notification_remove_group(group: [*:0]const u8) void;
 extern "c" fn suji_notification_close(id: [*:0]const u8) void;
 extern "c" fn suji_notification_remove_all() void;
 
@@ -66,17 +67,30 @@ pub fn notificationRequestPermission() bool {
 
 /// 알림 표시. id는 caller-controlled 식별자 (close에 사용). 한도: 64 byte.
 /// title/body는 4KB stack-alloc 한도.
-pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, silent: bool, group: []const u8) bool {
+    // group(threadIdentifier)은 macOS 전용 — Win/Linux 는 무시(개별 알림으로 표시).
     if (comptime builtin.os.tag == .windows) return notification_windows.win_notify.show(id, title, body, silent);
     if (comptime is_linux) return notification_linux.show(id, title, body, silent);
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
     var t_buf: [4096]u8 = undefined;
     var b_buf: [4096]u8 = undefined;
+    var g_buf: [512]u8 = undefined;
     const id_cstr = writeCStr(id, &id_buf) orelse return false;
     const t_cstr = writeCStr(title, &t_buf) orelse return false;
     const b_cstr = writeCStr(body, &b_buf) orelse return false;
-    return suji_notification_show(id_cstr, t_cstr, b_cstr, if (silent) 1 else 0) != 0;
+    const g_cstr = writeCStr(group, &g_buf) orelse return false;
+    return suji_notification_show(id_cstr, t_cstr, b_cstr, if (silent) 1 else 0, g_cstr) != 0;
+}
+
+/// Electron `Notification.removeGroup(groupId)` — threadIdentifier 가 일치하는 표시된 알림 제거.
+/// macOS only(UNUserNotificationCenter threadIdentifier). Win/Linux 는 그룹 개념 미지원 → false.
+pub fn notificationRemoveGroup(group: []const u8) bool {
+    if (!comptime is_macos) return false;
+    var g_buf: [512]u8 = undefined;
+    const g_cstr = writeCStr(group, &g_buf) orelse return false;
+    suji_notification_remove_group(g_cstr);
+    return true;
 }
 
 pub fn notificationClose(id: []const u8) bool {

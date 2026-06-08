@@ -1687,6 +1687,10 @@ export interface NotificationOptions {
   title: string;
   body: string;
   silent?: boolean;
+  /** caller-supplied 식별자 (생략 시 자동 생성). */
+  id?: string;
+  /** 그룹 식별자 — macOS threadIdentifier(removeGroup 대상). Win/Linux 무시. */
+  groupId?: string;
 }
 
 export const notification = {
@@ -1717,7 +1721,35 @@ export const notification = {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'notification_remove_all' });
     return r.success === true;
   },
+
+  /** 그룹(groupId=macOS threadIdentifier) 알림 제거 (Electron `Notification.removeGroup`).
+   *  macOS only — Win/Linux false. */
+  async removeGroup(groupId: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'notification_remove_group', groupId });
+    return r.success === true;
+  },
 };
+
+/** Electron `Notification` 클래스 동등 — OO 래퍼. show() 후 `id` 로 식별자 조회. */
+export class Notification {
+  #id: string | null = null;
+  constructor(private readonly options: NotificationOptions) {}
+
+  get id(): string | null {
+    return this.#id;
+  }
+
+  async show(): Promise<boolean> {
+    const r = await notification.show(this.options);
+    this.#id = r.notificationId;
+    return r.success;
+  }
+
+  async close(): Promise<boolean> {
+    if (!this.#id) return false;
+    return notification.close(this.#id);
+  }
+}
 
 // ============================================
 // tray — 시스템 트레이 (Electron `Tray`). frontend `@suji/api`와 동일 cmd.

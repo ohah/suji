@@ -3083,14 +3083,24 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const silent = util.extractJsonBool(req_clean, "silent") orelse false;
         var t_buf: [4096]u8 = undefined;
         var b_buf: [4096]u8 = undefined;
+        var g_buf: [256]u8 = undefined;
         const t_n = util.unescapeJsonStr(title_raw, &t_buf) orelse 0;
         const b_n = util.unescapeJsonStr(body_raw, &b_buf) orelse 0;
+        const g_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "groupId") orelse "", &g_buf) orelse 0;
 
-        const id = nextNotificationId();
-        var id_buf: [32]u8 = undefined;
-        const id_str = std.fmt.bufPrint(&id_buf, "suji-notif-{d}", .{id}) catch return null;
+        // caller 가 id 를 주면 사용(NotificationOptions.id), 없으면 자동 생성. id 한도는 64
+        // byte(네이티브 notificationShow id_buf 와 동형) — 초과 시 graceful 하게 자동 생성으로
+        // 폴백(응답 notificationId 가 generated 라 caller 가 그 값으로 close — uuid 등 정상 id 는 안전).
+        var id_buf: [64]u8 = undefined;
+        const id_str = blk: {
+            const id_override = util.extractJsonString(req_clean, "id") orelse "";
+            if (id_override.len > 0) {
+                if (util.unescapeJsonStr(id_override, &id_buf)) |n| break :blk id_buf[0..n];
+            }
+            break :blk std.fmt.bufPrint(&id_buf, "suji-notif-{d}", .{nextNotificationId()}) catch return null;
+        };
 
-        const ok = cef.notificationShow(id_str, t_buf[0..t_n], b_buf[0..b_n], silent);
+        const ok = cef.notificationShow(id_str, t_buf[0..t_n], b_buf[0..b_n], silent, g_buf[0..g_n]);
         const result = std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"notification_show\",\"notificationId\":\"{s}\",\"success\":{}}}",
@@ -3110,6 +3120,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "notification_remove_all")) {
         const ok = cef.notificationRemoveAll();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_remove_all\",\"success\":{}}}", .{ok}) catch null;
+    }
+    // Electron Notification.removeGroup(groupId) — threadIdentifier 일치 알림 제거(macOS).
+    if (std.mem.eql(u8, cmd, "notification_remove_group")) {
+        var g_buf: [256]u8 = undefined;
+        const g_n = util.unescapeJsonStr(util.extractJsonString(req_clean, "groupId") orelse "", &g_buf) orelse 0;
+        const ok = cef.notificationRemoveGroup(g_buf[0..g_n]);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"notification_remove_group\",\"success\":{}}}", .{ok}) catch null;
     }
 
     if (std.mem.eql(u8, cmd, "core_info")) {

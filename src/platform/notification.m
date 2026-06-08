@@ -98,13 +98,15 @@ int suji_notification_request_permission(void) {
 
 // 알림 표시. id는 caller-controlled 식별자 (close에 사용). silent=1이면 sound 없음.
 // 반환: 1 = success, 0 = error (권한 없음 등).
-int suji_notification_show(const char *id, const char *title, const char *body, int silent) {
+int suji_notification_show(const char *id, const char *title, const char *body, int silent, const char *group) {
     if (!suji_notification_is_supported()) return 0;
     if (id == NULL) return 0;
     UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
     if (title && *title) content.title = [NSString stringWithUTF8String:title];
     if (body && *body) content.body = [NSString stringWithUTF8String:body];
     if (!silent) content.sound = [UNNotificationSound defaultSound];
+    // groupId → threadIdentifier (UNUserNotificationCenter 그룹화 + removeGroup 대상).
+    if (group && *group) content.threadIdentifier = [NSString stringWithUTF8String:group];
 
     NSString *identifier = [NSString stringWithUTF8String:id];
     UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:identifier
@@ -139,4 +141,25 @@ void suji_notification_remove_all(void) {
     UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
     [center removeAllDeliveredNotifications];
     [center removeAllPendingNotificationRequests];
+}
+
+// Notification.removeGroup(groupId) — threadIdentifier 가 group 과 일치하는 표시된 알림 제거.
+// getDelivered 는 async → wait_for_done 으로 동기 대기(show 패턴 동형).
+void suji_notification_remove_group(const char *group) {
+    if (!suji_notification_is_supported()) return;
+    if (group == NULL || !*group) return;
+    NSString *gid = [NSString stringWithUTF8String:group];
+    UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
+    __block BOOL done = NO;
+    [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> *notifications) {
+        NSMutableArray<NSString *> *ids = [NSMutableArray array];
+        for (UNNotification *n in notifications) {
+            if ([n.request.content.threadIdentifier isEqualToString:gid]) {
+                [ids addObject:n.request.identifier];
+            }
+        }
+        if (ids.count > 0) [center removeDeliveredNotificationsWithIdentifiers:ids];
+        done = YES;
+    }];
+    wait_for_done(&done);
 }

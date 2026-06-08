@@ -26,7 +26,7 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
-var _BrowserWindow_id;
+var _BrowserWindow_id, _Notification_id;
 function getBridge() {
     const bridge = window.__suji__;
     if (!bridge)
@@ -966,7 +966,37 @@ export const notification = {
         const r = await coreCall({ cmd: "notification_remove_all" });
         return r.success === true;
     },
+    /** 그룹(groupId=macOS threadIdentifier) 알림 제거 (Electron `Notification.removeGroup`).
+     *  macOS only — Win/Linux false(그룹 개념 미지원). */
+    async removeGroup(groupId) {
+        const r = await coreCall({ cmd: "notification_remove_group", groupId });
+        return r.success === true;
+    },
 };
+/** Electron `Notification` 클래스 동등 — OO 래퍼. show() 후 `id` 로 식별자 조회 가능. */
+export class Notification {
+    constructor(options) {
+        this.options = options;
+        _Notification_id.set(this, null);
+    }
+    /** show() 이후의 알림 식별자(생성 전 null). Electron `notification.id` readonly. */
+    get id() {
+        return __classPrivateFieldGet(this, _Notification_id, "f");
+    }
+    /** 알림 표시 — 성공 시 id 가 채워진다. */
+    async show() {
+        const r = await notification.show(this.options);
+        __classPrivateFieldSet(this, _Notification_id, r.notificationId, "f");
+        return r.success;
+    }
+    /** 이 알림 닫기 (show 전이면 false). */
+    async close() {
+        if (!__classPrivateFieldGet(this, _Notification_id, "f"))
+            return false;
+        return notification.close(__classPrivateFieldGet(this, _Notification_id, "f"));
+    }
+}
+_Notification_id = new WeakMap();
 export const tray = {
     /** 새 시스템 트레이 아이콘 생성. 반환된 trayId로 이후 update/destroy. */
     async create(options = {}) {
