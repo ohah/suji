@@ -37,7 +37,16 @@ import { clipboard } from '@suji/api';
 await clipboard.readText();        // → string (빈 문자열이면 클립보드 빔)
 await clipboard.writeText(text);   // → boolean (성공 여부)
 await clipboard.clear();           // → boolean
+
+// 추가 포맷 (macOS NSPasteboard 중심)
+await clipboard.writeBookmark('Suji', 'https://suji.dev'); // public.url (macOS only)
+await clipboard.writeFindText('query');                    // Find pasteboard (macOS only)
+await clipboard.write({ text: 'plain', html: '<b>x</b>' }); // 여러 포맷 atomic (macOS)
 ```
+
+> `writeBookmark`/`writeFindText` 는 macOS 전용(Win/Linux `false`). `write({text,html,rtf})`
+> 는 macOS 에서 한 번의 clear 로 여러 포맷을 atomic 하게 기록하고, Win/Linux 에서는
+> 단일 포맷(text 우선) best-effort 다. 이미지는 `writeImage` 를 별도로 쓴다.
 
 ### Zig 백엔드 (`suji.clipboard.*`)
 

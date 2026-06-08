@@ -1454,6 +1454,30 @@ export const clipboard = {
     const r = await invoke<{ data: string }>('__core__', { cmd: 'clipboard_read_tiff' });
     return r.data ?? '';
   },
+
+  /** 북마크(title+url) 쓰기 (Electron `clipboard.writeBookmark`). macOS only(Win/Linux false). */
+  async writeBookmark(title: string, url: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_bookmark', title, url });
+    return r.success === true;
+  },
+
+  /** Find 펜보드 텍스트 쓰기 (Electron `clipboard.writeFindText`). macOS only(Win/Linux false). */
+  async writeFindText(text: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'clipboard_write_find_text', text });
+    return r.success === true;
+  },
+
+  /** 여러 포맷 한 번에 쓰기 (Electron `clipboard.write({text,html,rtf})`). macOS=atomic,
+   *  Win/Linux=best-effort 단일(text 우선). */
+  async write(data: { text?: string; html?: string; rtf?: string }): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', {
+      cmd: 'clipboard_write',
+      text: data.text ?? '',
+      html: data.html ?? '',
+      rtf: data.rtf ?? '',
+    });
+    return r.success === true;
+  },
 };
 
 export const powerMonitor = {

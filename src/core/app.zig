@@ -964,6 +964,40 @@ pub const clipboard = struct {
     pub fn readTiff() ?[]const u8 {
         return coreCmd("clipboard_read_tiff", "");
     }
+
+    /// 북마크(title+url) 쓰기 (Electron clipboard.writeBookmark). macOS only. 응답: `{"success":bool}`.
+    pub fn writeBookmark(title: []const u8, url: []const u8) ?[]const u8 {
+        var t_buf: [4096]u8 = undefined;
+        var u_buf: [4096]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(title, &t_buf) orelse return null;
+        const u_n = util.escapeJsonStrFull(url, &u_buf) orelse return null;
+        var fields_buf: [8400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"title\":\"{s}\",\"url\":\"{s}\"", .{ t_buf[0..t_n], u_buf[0..u_n] }) catch return null;
+        return coreCmd("clipboard_write_bookmark", fields);
+    }
+
+    /// Find 펜보드 텍스트 쓰기 (Electron clipboard.writeFindText). macOS only. 응답: `{"success":bool}`.
+    pub fn writeFindText(text: []const u8) ?[]const u8 {
+        var t_buf: [16384]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(text, &t_buf) orelse return null;
+        var fields_buf: [16400]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"text\":\"{s}\"", .{t_buf[0..t_n]}) catch return null;
+        return coreCmd("clipboard_write_find_text", fields);
+    }
+
+    /// 여러 포맷 한 번에 쓰기 (Electron clipboard.write). 빈 문자열 필드 skip.
+    /// macOS=atomic, Win/Linux=best-effort 단일(text 우선). 응답: `{"success":bool}`.
+    pub fn write(text: []const u8, html: []const u8, rtf: []const u8) ?[]const u8 {
+        var t_buf: [8192]u8 = undefined;
+        var h_buf: [8192]u8 = undefined;
+        var r_buf: [8192]u8 = undefined;
+        const t_n = util.escapeJsonStrFull(text, &t_buf) orelse return null;
+        const h_n = util.escapeJsonStrFull(html, &h_buf) orelse return null;
+        const r_n = util.escapeJsonStrFull(rtf, &r_buf) orelse return null;
+        var fields_buf: [25000]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"text\":\"{s}\",\"html\":\"{s}\",\"rtf\":\"{s}\"", .{ t_buf[0..t_n], h_buf[0..h_n], r_buf[0..r_n] }) catch return null;
+        return coreCmd("clipboard_write", fields);
+    }
 };
 
 pub const powerMonitor = struct {

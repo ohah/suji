@@ -223,6 +223,9 @@ pub const appHide = cef_app.appHide;
 
 pub const clipboardReadText = cef_clipboard.clipboardReadText;
 pub const clipboardWriteText = cef_clipboard.clipboardWriteText;
+pub const clipboardWriteBookmark = cef_clipboard.clipboardWriteBookmark;
+pub const clipboardWriteFindText = cef_clipboard.clipboardWriteFindText;
+pub const clipboardWriteMulti = cef_clipboard.clipboardWriteMulti;
 pub const clipboardClear = cef_clipboard.clipboardClear;
 pub const clipboardWriteImagePng = cef_clipboard.clipboardWriteImagePng;
 pub const clipboardReadImagePng = cef_clipboard.clipboardReadImagePng;

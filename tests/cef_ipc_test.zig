@@ -2737,6 +2737,35 @@ test "clipboard RTF + Buffer IPC + cef pasteboard" {
     }
 }
 
+test "clipboard writeBookmark/writeFindText/write IPC + cef pasteboard" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"clipboard_write_bookmark\"",
+        "\"clipboard_write_find_text\"",
+        "\"clipboard_write\"",
+        "cef.clipboardWriteBookmark",
+        "cef.clipboardWriteFindText",
+        "cef.clipboardWriteMulti",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn clipboardWriteBookmark",
+        "pub fn clipboardWriteFindText",
+        "pub fn clipboardWriteMulti",
+        "public.url", // bookmark URL 타입
+        "Apple Find Pasteboard", // find pasteboard 이름
+        "pasteboardWithName:", // find pasteboard 접근
+        "fn pbSetString", // 다중-타입 atomic 빌딩블록
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "clipboard TIFF IPC + cef pasteboard (public.tiff)" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

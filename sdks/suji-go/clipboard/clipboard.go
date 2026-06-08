@@ -97,3 +97,21 @@ func WriteBuffer(format, dataBase64 string) string {
 func ReadBuffer(format string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_read_buffer","format":"%s"}`, jsonesc.Full(format)))
 }
+
+// WriteBookmark writes a title+url bookmark (Electron clipboard.writeBookmark).
+// macOS NSPasteboard public.url(+url-name). macOS only; Win/Linux false. Response: `{"success":bool}`.
+func WriteBookmark(title, url string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_bookmark","title":"%s","url":"%s"}`, jsonesc.Full(title), jsonesc.Full(url)))
+}
+
+// WriteFindText writes text to the macOS Find pasteboard (Electron clipboard.writeFindText).
+// macOS only; Win/Linux false. Response: `{"success":bool}`.
+func WriteFindText(text string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_find_text","text":"%s"}`, jsonesc.Full(text)))
+}
+
+// Write writes multiple formats at once (Electron clipboard.write). Empty fields are skipped.
+// macOS=atomic, Win/Linux=best-effort single (text first). Response: `{"success":bool}`.
+func Write(text, html, rtf string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write","text":"%s","html":"%s","rtf":"%s"}`, jsonesc.Full(text), jsonesc.Full(html), jsonesc.Full(rtf)))
+}
