@@ -25,6 +25,20 @@ const win_theme = if (builtin.os.tag == .windows) struct {
     const HWND_BROADCAST: ?*anyopaque = @ptrFromInt(0xFFFF);
     const WM_SETTINGCHANGE: u32 = 0x001A;
     const SMTO_ABORTIFHUNG: u32 = 0x0002;
+    const SPI_GETHIGHCONTRAST: u32 = 0x0042;
+    const HCF_HIGHCONTRASTON: u32 = 0x00000001;
+
+    const HIGHCONTRASTW = extern struct {
+        cbSize: u32,
+        dwFlags: u32,
+        lpszDefaultScheme: ?[*:0]u16,
+    };
+    extern "user32" fn SystemParametersInfoW(
+        uiAction: u32,
+        uiParam: u32,
+        pvParam: ?*anyopaque,
+        fWinIni: u32,
+    ) callconv(.winapi) i32;
 
     extern "advapi32" fn RegGetValueW(
         hkey: usize,
@@ -136,6 +150,25 @@ const win_theme = if (builtin.os.tag == .windows) struct {
             null,
         );
     }
+
+    /// 고대비 모드 — SystemParametersInfo(SPI_GETHIGHCONTRAST) dwFlags & HCF_HIGHCONTRASTON.
+    fn highContrast() bool {
+        var hc: HIGHCONTRASTW = .{ .cbSize = @sizeOf(HIGHCONTRASTW), .dwFlags = 0, .lpszDefaultScheme = null };
+        if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, @sizeOf(HIGHCONTRASTW), &hc, 0) == 0) return false;
+        return (hc.dwFlags & HCF_HIGHCONTRASTON) != 0;
+    }
+
+    /// 투명도 감소 선호 — HKCU\...\Themes\Personalize\EnableTransparency DWORD.
+    /// 1 = 투명 효과 on(기본), 0 = off → reducedTransparency. 값 부재 시 on 가정 → false.
+    fn reducedTransparency() bool {
+        const sub_key = std.unicode.utf8ToUtf16LeStringLiteral("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize");
+        const value_name = std.unicode.utf8ToUtf16LeStringLiteral("EnableTransparency");
+        var data: u32 = 1;
+        var size: u32 = @sizeOf(u32);
+        const status = RegGetValueW(HKEY_CURRENT_USER, sub_key.ptr, value_name.ptr, RRF_RT_REG_DWORD, null, &data, &size);
+        if (status != 0) return false; // 부재/오류 → 투명 on 가정.
+        return data == 0;
+    }
 } else struct {};
 
 /// 다크 모드 감지 (Electron `nativeTheme.shouldUseDarkColors`).
@@ -181,6 +214,31 @@ pub fn nativeThemeSetSource(source: []const u8) bool {
     const appearance = namedFn(NSAppearance, @ptrCast(objc.sel_registerName("appearanceNamed:")), ns_name) orelse return false;
     setApFn(app, @ptrCast(objc.sel_registerName("setAppearance:")), appearance);
     return true;
+}
+
+/// NSWorkspace BOOL accessor 공용 — accessibilityDisplay* 접근성 플래그 계열.
+/// 비-macOS 는 false(아래 호출부가 플랫폼 분기).
+fn workspaceBool(sel_name: [:0]const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSWorkspace = getClass("NSWorkspace") orelse return false;
+    const ws = msgSend(NSWorkspace, "sharedWorkspace") orelse return false;
+    return cef.msgSendBool(ws, sel_name);
+}
+
+/// 고대비 모드 (Electron `nativeTheme.shouldUseHighContrastColors`).
+/// macOS: NSWorkspace.accessibilityDisplayShouldIncreaseContrast.
+/// Windows: SystemParametersInfo(SPI_GETHIGHCONTRAST) HCF_HIGHCONTRASTON. Linux: false(미지원).
+pub fn nativeThemeHighContrast() bool {
+    if (comptime builtin.os.tag == .windows) return win_theme.highContrast();
+    return workspaceBool("accessibilityDisplayShouldIncreaseContrast");
+}
+
+/// 투명도 감소 선호 (Electron `nativeTheme.prefersReducedTransparency`).
+/// macOS 10.12+: NSWorkspace.accessibilityDisplayShouldReduceTransparency.
+/// Windows: HKCU EnableTransparency==0. Linux: false(미지원).
+pub fn nativeThemeReducedTransparency() bool {
+    if (comptime builtin.os.tag == .windows) return win_theme.reducedTransparency();
+    return workspaceBool("accessibilityDisplayShouldReduceTransparency");
 }
 
 // nativeTheme:updated callback — Windows pump WM_SETTINGCHANGE 가 호출.

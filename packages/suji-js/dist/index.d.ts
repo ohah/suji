@@ -836,6 +836,11 @@ export declare const nativeImage: {
     toPng(path: string): Promise<string>;
     /** 이미지 파일 → JPEG base64. quality 0~100 (기본 90). */
     toJpeg(path: string, quality?: number): Promise<string>;
+    /** 이미지가 비어있는지 (로드 실패/크기 0) — Electron `nativeImage.isEmpty()`. */
+    isEmpty(path: string): Promise<boolean>;
+    /** template 이미지 여부 (macOS 메뉴바 자동 틴트 대상) — Electron `nativeImage.isTemplateImage()`.
+     *  macOS NSImage.isTemplate. Win/Linux는 false(미지원). */
+    isTemplateImage(path: string): Promise<boolean>;
 };
 export type ThemeSource = "system" | "light" | "dark";
 export declare const nativeTheme: {
@@ -848,6 +853,14 @@ export declare const nativeTheme: {
     setThemeSource(source: ThemeSource): Promise<boolean>;
     /** Electron `nativeTheme.themeSource` (getter) — 마지막 설정값(기본 "system"). */
     getThemeSource(): Promise<ThemeSource>;
+    /** 고대비 모드 여부 (Electron `nativeTheme.shouldUseHighContrastColors`).
+     *  macOS NSWorkspace.accessibilityDisplayShouldIncreaseContrast / Windows SPI_GETHIGHCONTRAST.
+     *  Linux는 false(미지원). */
+    shouldUseHighContrastColors(): Promise<boolean>;
+    /** 투명도 감소 선호 여부 (Electron `nativeTheme.prefersReducedTransparency`).
+     *  macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency / Windows EnableTransparency==0.
+     *  Linux는 false(미지원). */
+    prefersReducedTransparency(): Promise<boolean>;
 };
 export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
 export interface FsStat {

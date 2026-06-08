@@ -86,3 +86,18 @@ pub fn nativeImageGetSize(path: []const u8) cef.NSSize {
         @ptrCast(&objc.objc_msgSend);
     return size_fn(img, @ptrCast(objc.sel_registerName("size")));
 }
+
+/// Electron `nativeImage.createFromPath(path).isEmpty()` — 로드 실패/크기 0 이면 true.
+/// nativeImageGetSize 재사용(비-macOS/실패 시 {0,0} → empty).
+pub fn nativeImageIsEmpty(path: []const u8) bool {
+    const sz = nativeImageGetSize(path);
+    return sz.width <= 0 or sz.height <= 0;
+}
+
+/// Electron `nativeImage.isTemplateImage()` — NSImage.isTemplate(메뉴바 자동 틴트 대상 여부).
+/// macOS only(NSImage 메타데이터). Win/Linux: false(미지원 honest).
+pub fn nativeImageIsTemplate(path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const img = cef.loadNSImageFromFile(path) orelse return false;
+    return cef.msgSendBool(img, "isTemplate");
+}

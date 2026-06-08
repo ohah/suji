@@ -58,6 +58,7 @@ pub const getClass = cef_objc.getClass;
 pub const msgSendVoid1 = cef_objc.msgSendVoid1;
 pub const msgSendVoid2 = cef_objc.msgSendVoid2;
 pub const msgSendVoidBool = cef_objc.msgSendVoidBool;
+pub const msgSendBool = cef_objc.msgSendBool;
 pub const deferMakeKeyAndOrderFront = cef_objc.deferMakeKeyAndOrderFront;
 pub const nsStringFromSliceWithCapacity = cef_objc.nsStringFromSliceWithCapacity;
 pub const nsStringFromSlice = cef_objc.nsStringFromSlice;
@@ -265,6 +266,8 @@ pub const desktopCapturerCaptureThumbnail = cef_desktop_capturer.desktopCapturer
 
 pub const nativeThemeIsDark = cef_native_theme.nativeThemeIsDark;
 pub const nativeThemeSetSource = cef_native_theme.nativeThemeSetSource;
+pub const nativeThemeHighContrast = cef_native_theme.nativeThemeHighContrast;
+pub const nativeThemeReducedTransparency = cef_native_theme.nativeThemeReducedTransparency;
 pub const nativeThemeInstall = cef_native_theme.nativeThemeInstall;
 pub const nativeThemeUninstall = cef_native_theme.nativeThemeUninstall;
 
@@ -291,6 +294,8 @@ pub const securityScopedAccessStop = cef_security_scoped_bookmark.securityScoped
 pub const NSBitmapImageFileType = cef_native_image.NSBitmapImageFileType;
 pub const nativeImageEncodeFromPath = cef_native_image.nativeImageEncodeFromPath;
 pub const nativeImageGetSize = cef_native_image.nativeImageGetSize;
+pub const nativeImageIsEmpty = cef_native_image.nativeImageIsEmpty;
+pub const nativeImageIsTemplate = cef_native_image.nativeImageIsTemplate;
 
 pub const appSetProgressBar = cef_app_progress.appSetProgressBar;
 

@@ -1504,6 +1504,19 @@ export const nativeImage = {
     const r = await invoke<{ data: string }>('__core__', { cmd: 'native_image_to_jpeg', path, quality });
     return r.data ?? '';
   },
+
+  /** 이미지가 비어있는지 (로드 실패/크기 0) — Electron `nativeImage.isEmpty()`. */
+  async isEmpty(path: string): Promise<boolean> {
+    const r = await invoke<{ isEmpty: boolean }>('__core__', { cmd: 'native_image_is_empty', path });
+    return r.isEmpty === true;
+  },
+
+  /** template 이미지 여부 (macOS 메뉴바 자동 틴트 대상) — Electron `nativeImage.isTemplateImage()`.
+   *  macOS NSImage.isTemplate. Win/Linux는 false(미지원). */
+  async isTemplateImage(path: string): Promise<boolean> {
+    const r = await invoke<{ isTemplate: boolean }>('__core__', { cmd: 'native_image_is_template', path });
+    return r.isTemplate === true;
+  },
 };
 
 export type ThemeSource = 'system' | 'light' | 'dark';
@@ -1525,6 +1538,22 @@ export const nativeTheme = {
   async getThemeSource(): Promise<ThemeSource> {
     const r = await invoke<{ source: ThemeSource }>('__core__', { cmd: 'native_theme_get_source' });
     return r.source;
+  },
+
+  /** 고대비 모드 여부 (Electron `nativeTheme.shouldUseHighContrastColors`).
+   *  macOS NSWorkspace.accessibilityDisplayShouldIncreaseContrast / Windows SPI_GETHIGHCONTRAST.
+   *  Linux는 false(미지원). */
+  async shouldUseHighContrastColors(): Promise<boolean> {
+    const r = await invoke<{ highContrast: boolean }>('__core__', { cmd: 'native_theme_high_contrast' });
+    return r.highContrast === true;
+  },
+
+  /** 투명도 감소 선호 여부 (Electron `nativeTheme.prefersReducedTransparency`).
+   *  macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency / Windows EnableTransparency==0.
+   *  Linux는 false(미지원). */
+  async prefersReducedTransparency(): Promise<boolean> {
+    const r = await invoke<{ reducedTransparency: boolean }>('__core__', { cmd: 'native_theme_reduced_transparency' });
+    return r.reducedTransparency === true;
   },
 };
 

@@ -632,6 +632,31 @@ describe("nativeImage.getSize", () => {
     expect(r.height).toBe(0);
   });
 
+  test("isEmpty: 유효 PNG → false, 없는 파일 → true", async () => {
+    const tmp = `/tmp/suji-nimg-empty-${Date.now()}.png`;
+    fs.writeFileSync(tmp, PNG_1X1);
+    try {
+      const valid = await core<{ isEmpty: boolean }>({ cmd: "native_image_is_empty", path: tmp });
+      expect(valid.isEmpty).toBe(false);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+    const missing = await core<{ isEmpty: boolean }>({ cmd: "native_image_is_empty", path: "/tmp/suji-nimg-none-xyz.png" });
+    expect(missing.isEmpty).toBe(true);
+  });
+
+  test("isTemplate: 일반 PNG → boolean (template 아님)", async () => {
+    const tmp = `/tmp/suji-nimg-tmpl-${Date.now()}.png`;
+    fs.writeFileSync(tmp, PNG_1X1);
+    try {
+      const r = await core<{ isTemplate: boolean }>({ cmd: "native_image_is_template", path: tmp });
+      // 일반 PNG 는 template flag 미설정 → false. 값 단언 가능.
+      expect(r.isTemplate).toBe(false);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
   test("toPNG: 1x1 PNG 파일 → base64 비어있지 않고 PNG signature 시작", async () => {
     const tmp = `/tmp/suji-topng-${Date.now()}.png`;
     fs.writeFileSync(tmp, PNG_1X1);
@@ -1246,6 +1271,19 @@ describe("nativeTheme.getThemeSource (getter)", () => {
     expect((await core<{ source: string }>({ cmd: "native_theme_get_source" })).source).toBe("light");
     await core({ cmd: "native_theme_set_source", source: "system" }); // 복원
     expect((await core<{ source: string }>({ cmd: "native_theme_get_source" })).source).toBe("system");
+  });
+});
+
+describe("nativeTheme.shouldUseHighContrastColors / prefersReducedTransparency", () => {
+  // 접근성 플래그는 호스트 OS 설정 의존이라 값 단언 불가 — wire/네이티브 호출 정상
+  // (boolean 반환)만 검증. macOS NSWorkspace.accessibilityDisplay* 접근.
+  test("highContrast → boolean", async () => {
+    const r = await core<{ highContrast: boolean }>({ cmd: "native_theme_high_contrast" });
+    expect(typeof r.highContrast).toBe("boolean");
+  });
+  test("reducedTransparency → boolean", async () => {
+    const r = await core<{ reducedTransparency: boolean }>({ cmd: "native_theme_reduced_transparency" });
+    expect(typeof r.reducedTransparency).toBe("boolean");
   });
 });
 

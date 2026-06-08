@@ -103,9 +103,7 @@ pub fn hasShadowImpl(ctx: ?*anyopaque, handle: u64) bool {
     }
     if (!comptime is_macos) return false;
     const ns = nsWindowFor(fromCtx(ctx), handle) orelse return false;
-    const sel = objc.sel_registerName("hasShadow");
-    const fn_ptr: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
-    return fn_ptr(ns, @ptrCast(sel)) != 0;
+    return cef.msgSendBool(ns, "hasShadow");
 }
 
 // Win32 Window helpers for opacity (layered window) and DWM shadow.

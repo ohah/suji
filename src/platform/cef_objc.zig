@@ -64,6 +64,14 @@ pub fn getClass(name: [:0]const u8) ?*anyopaque {
     return @ptrCast(objc.objc_getClass(name.ptr));
 }
 
+/// 무인자 BOOL getter — `[target sel]` 가 BOOL 반환(예 isTemplate / accessibilityDisplay*).
+/// msgSendVoidBool(BOOL setter)의 getter 짝. objc_msgSend bool-cast 중복 제거.
+pub fn msgSendBool(target: ?*anyopaque, sel_name: [:0]const u8) bool {
+    const sel = objc.sel_registerName(sel_name.ptr);
+    const func: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
+    return func(target, @ptrCast(sel)) != 0;
+}
+
 pub fn msgSendVoid1(target: ?*anyopaque, sel_name: [:0]const u8, arg: ?*anyopaque) void {
     const sel = objc.sel_registerName(sel_name.ptr);
     const func: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);

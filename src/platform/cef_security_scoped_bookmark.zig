@@ -104,8 +104,7 @@ pub fn securityScopedAccessStart(b64: []const u8, out_path: []u8) ScopedAccess {
         null,
     ) orelse return fail;
 
-    const startFn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u8 = @ptrCast(&objc.objc_msgSend);
-    if (startFn(url, @ptrCast(objc.sel_registerName("startAccessingSecurityScopedResource"))) == 0) return fail;
+    if (!cef.msgSendBool(url, "startAccessingSecurityScopedResource")) return fail;
 
     const slot = for (&g_scoped_urls, 0..) |*u, i| {
         if (u.* == null) break i;

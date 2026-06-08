@@ -1799,6 +1799,22 @@ pub mod native_image {
             &serde_json::json!({ "cmd": "native_image_to_jpeg", "path": path, "quality": quality }).to_string(),
         )
     }
+
+    /// 이미지가 비어있는지(로드 실패/크기 0) raw JSON: `{"isEmpty":bool}`.
+    pub fn is_empty(path: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &serde_json::json!({ "cmd": "native_image_is_empty", "path": path }).to_string(),
+        )
+    }
+
+    /// template 이미지 여부(macOS NSImage.isTemplate) raw JSON: `{"isTemplate":bool}`.
+    pub fn is_template_image(path: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &serde_json::json!({ "cmd": "native_image_is_template", "path": path }).to_string(),
+        )
+    }
 }
 
 pub mod native_theme {
@@ -1823,6 +1839,16 @@ pub mod native_theme {
     /// themeSource getter — 마지막 설정값 raw JSON: `{"source":"system"|"light"|"dark"}`.
     pub fn get_theme_source() -> Option<String> {
         invoke("__core__", r#"{"cmd":"native_theme_get_source"}"#)
+    }
+
+    /// 고대비 모드 여부 raw JSON: `{"highContrast":bool}` (macOS/Windows; Linux false).
+    pub fn should_use_high_contrast_colors() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"native_theme_high_contrast"}"#)
+    }
+
+    /// 투명도 감소 선호 raw JSON: `{"reducedTransparency":bool}` (macOS; Win/Linux false).
+    pub fn prefers_reduced_transparency() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"native_theme_reduced_transparency"}"#)
     }
 }
 
