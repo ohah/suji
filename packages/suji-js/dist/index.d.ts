@@ -1435,6 +1435,18 @@ export declare const app: {
     hasSingleInstanceLock(): Promise<boolean>;
     /** Electron `app.releaseSingleInstanceLock()` — 보유 락 해제(없으면 no-op). */
     releaseSingleInstanceLock(): Promise<boolean>;
+    /**
+     * Electron `app.setAsDefaultProtocolClient(protocol)` — 이 앱을 `protocol://` 의 기본
+     * 핸들러로 지정. macOS Launch Services. scheme 등록 자체는 suji.json `app.deepLinkSchemes`
+     * (Info.plist CFBundleURLTypes)가 담당하고, 이 API 는 기본 핸들러로 강제한다.
+     * ⚠️ 실 `.app` 번들에서만 동작(dev=번들 ID 부재 → false). path/args 는 macOS 미사용.
+     */
+    setAsDefaultProtocolClient(protocol: string): Promise<boolean>;
+    /** Electron `app.isDefaultProtocolClient(protocol)` — 이 앱이 현재 기본 핸들러인지. */
+    isDefaultProtocolClient(protocol: string): Promise<boolean>;
+    /** Electron `app.removeAsDefaultProtocolClient(protocol)` — macOS LS 엔 해제 API 부재 →
+     *  항상 false(Electron macOS 동형). Windows 레지스트리 제거는 후속. */
+    removeAsDefaultProtocolClient(protocol: string): Promise<boolean>;
     /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
     focus(): Promise<boolean>;
     /** 모든 윈도우 hide (macOS Cmd+H 동등). */

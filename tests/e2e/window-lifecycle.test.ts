@@ -1314,6 +1314,33 @@ describe("session.setDownloadPath / will-download (Electron 패리티)", () => {
 });
 
 // ============================================
+// 4.6 app.setAsDefaultProtocolClient 트리오 (Electron 패리티)
+// ============================================
+
+describe("app.setAsDefaultProtocolClient 트리오", () => {
+  // 정직 경계: dev(맨 실행 파일)는 번들 ID 부재 → LS 호출이 graceful false.
+  // 실 .app 번들 동작은 검증 천장. 여기선 wire 왕복 + dev graceful no-op 만 검증.
+  test("set/is/remove — wire 왕복 + dev graceful false", async () => {
+    const setR: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "app_set_as_default_protocol_client", protocol: "sujie2e" })),
+    );
+    expect(setR.cmd).toBe("app_set_as_default_protocol_client");
+    expect(typeof setR.success).toBe("boolean");
+    expect(setR.success).toBe(false); // dev: 번들 ID 부재
+
+    const isR: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "app_is_default_protocol_client", protocol: "sujie2e" })),
+    );
+    expect(isR.success).toBe(false);
+
+    const rmR: any = await page.evaluate(
+      () => (window as any).__suji__.core(JSON.stringify({ cmd: "app_remove_as_default_protocol_client", protocol: "sujie2e" })),
+    );
+    expect(rmR.success).toBe(false); // macOS LS 해제 API 부재(Electron 동형)
+  });
+});
+
+// ============================================
 // 5. 로그 파일 — 실행 중 `~/.suji/logs/suji-*.log` 생성
 // ============================================
 

@@ -257,6 +257,13 @@ pub fn build(b: *std.Build) void {
             .file = b.path("src/platform/screen.m"),
             .flags = &[_][]const u8{"-fobjc-arc"},
         });
+        // protocol_client.m — Launch Services 기본 URL scheme 핸들러 (app.setAsDefaultProtocolClient).
+        root_module.addCSourceFile(.{
+            .file = b.path("src/platform/protocol_client.m"),
+            .flags = &[_][]const u8{"-fobjc-arc"},
+        });
+        // CoreServices — LSSetDefaultHandlerForURLScheme / LSCopyDefaultHandlerForURLScheme.
+        root_module.linkFramework("CoreServices", .{});
     } else if (os_tag == .linux) {
         // Linux: CEF 공유 라이브러리 + GTK
         const cef_lib_path = std.fmt.allocPrint(b.allocator, "{s}/Release", .{cef_base}) catch @panic("OOM");

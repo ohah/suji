@@ -820,6 +820,7 @@ fn readCefSource() ![]u8 {
         "src/platform/cef_session_cookies.zig",
         "src/platform/cef_session_permission.zig",
         "src/platform/cef_download_handler.zig",
+        "src/platform/cef_protocol_client.zig",
         "src/platform/cef_session_proxy.zig",
         "src/platform/cef_security_scoped_bookmark.zig",
         "src/platform/cef_request_user_attention.zig",
@@ -2493,6 +2494,34 @@ test "app.before-quit 이벤트 — quit chokepoint 훅 wired" {
         "pub fn setBeforeQuitHandler",
         "g_before_quit_fn",
         "if (g_before_quit_fn) |f| f();",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
+test "app.setAsDefaultProtocolClient 트리오 — LS wire + 3 cmd dispatch" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"app_set_as_default_protocol_client\"",
+        "\"app_is_default_protocol_client\"",
+        "\"app_remove_as_default_protocol_client\"",
+        "cef.protocolSetAsDefault",
+        "cef.protocolIsDefault",
+        "cef.protocolRemoveAsDefault",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    // cef_protocol_client.zig: macOS Launch Services extern + comptime is_macos prune.
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "suji_protocol_set_default",
+        "suji_protocol_is_default",
+        "suji_protocol_remove_default",
+        "pub fn setAsDefault",
+        "if (!comptime is_macos) return false", // 비-macOS prune(링크 안전)
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }

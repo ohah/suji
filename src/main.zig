@@ -2535,6 +2535,27 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{esc_buf[0..esc_n]},
         ) catch null;
     }
+    // Electron app.{setAsDefaultProtocolClient/isDefaultProtocolClient/removeAsDefaultProtocolClient}.
+    // macOS Launch Services — 실 .app 번들에서만 동작(dev=번들 ID 부재 → false).
+    if (std.mem.eql(u8, cmd, "app_set_as_default_protocol_client") or
+        std.mem.eql(u8, cmd, "app_is_default_protocol_client") or
+        std.mem.eql(u8, cmd, "app_remove_as_default_protocol_client"))
+    {
+        var scheme_buf: [256]u8 = undefined;
+        const raw = util.extractJsonString(req_clean, "protocol") orelse "";
+        const scheme_z = cef.nullTerminateOrTruncate(raw, &scheme_buf) orelse return null;
+        const ok = if (std.mem.eql(u8, cmd, "app_set_as_default_protocol_client"))
+            cef.protocolSetAsDefault(scheme_z)
+        else if (std.mem.eql(u8, cmd, "app_is_default_protocol_client"))
+            cef.protocolIsDefault(scheme_z)
+        else
+            cef.protocolRemoveAsDefault(scheme_z);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"success\":{}}}",
+            .{ cmd, ok },
+        ) catch null;
+    }
     // Electron app.requestSingleInstanceLock — primary 면 locked:true, 다른
     // 인스턴스가 이미 보유 중이면 false. macOS/Linux=userData flock, Windows=
     // named mutex. POSIX 는 userData 경로(앱별 격리)로 lockfile 위치 결정.

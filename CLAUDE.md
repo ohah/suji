@@ -527,6 +527,11 @@ suji.platform                                                // "macos" | "linux
 // await app.setBadgeCount(5) / app.getBadgeCount()                        (Electron app badge count)
 //   macOS dock label / Linux libunity / Windows taskbar overlay best-effort
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
+// await app.setAsDefaultProtocolClient("myapp") / isDefaultProtocolClient("myapp")
+//   / removeAsDefaultProtocolClient("myapp")     — Electron 기본 URL scheme 핸들러 (전 5 SDK)
+//   macOS Launch Services. scheme 등록 자체는 suji.json app.deepLinkSchemes(CFBundleURLTypes)가
+//   담당 — 이 트리오는 기본-핸들러 강제/조회. remove=macOS LS 해제 API 부재로 false(Electron 동형).
+//   ⚠️ 실 .app 번들에서만 동작(dev=번들 ID 부재 → false, 검증 천장)
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
 // const bm = await app.createSecurityScopedBookmark(path)                 — App Sandbox 영속 파일 접근

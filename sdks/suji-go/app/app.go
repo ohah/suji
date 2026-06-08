@@ -99,6 +99,26 @@ func ReleaseSingleInstanceLock() string {
 	return suji.Invoke("__core__", `{"cmd":"app_release_single_instance_lock"}`)
 }
 
+// SetAsDefaultProtocolClient sets this app as the default handler for protocol://
+// (Electron `app.setAsDefaultProtocolClient`, macOS Launch Services). scheme 등록은
+// suji.json `app.deepLinkSchemes`(CFBundleURLTypes)가 담당. Response: `{"success":bool}`.
+// ⚠️ 실 .app 번들에서만 동작(dev=번들 ID 부재 → false).
+func SetAsDefaultProtocolClient(protocol string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_as_default_protocol_client","protocol":"%s"}`, jsonesc.Full(protocol)))
+}
+
+// IsDefaultProtocolClient reports whether this app is the current default handler.
+// Electron `app.isDefaultProtocolClient`. Response: `{"success":bool}`.
+func IsDefaultProtocolClient(protocol string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_is_default_protocol_client","protocol":"%s"}`, jsonesc.Full(protocol)))
+}
+
+// RemoveAsDefaultProtocolClient — macOS LS 해제 API 부재 → false (Electron macOS 동형).
+// Electron `app.removeAsDefaultProtocolClient`. Response: `{"success":bool}`.
+func RemoveAsDefaultProtocolClient(protocol string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_remove_as_default_protocol_client","protocol":"%s"}`, jsonesc.Full(protocol)))
+}
+
 // Focus brings the app frontmost. raw JSON: `{"success":bool}`.
 func Focus() string {
 	return suji.Invoke("__core__", `{"cmd":"app_focus"}`)
