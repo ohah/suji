@@ -91,7 +91,7 @@
 
 ### app
 
-- **[medium]** `app.before-quit event` — Add app:before-quit event hook to Suji quit() path. Modify the quit flow in Zig core to emit a 'app:before-quit' event before termination begins, allowing handlers to call an event.preventDefault() eq
+- ~~**[medium]** `app.before-quit event`~~ ✅ (PR #129 — cef.quit() chokepoint(모든 quit 경로: Cmd+Q/suji.quit/all-closed/IPC)에서 idempotent 1회 `app:before-quit` 발신. in-process(백엔드) listener 동기 실행, 렌더러 best-effort. 정직 경계: preventDefault(quit 취소)는 IPC 비동기 모델상 미지원 — window:close 렌더러 경계와 동일. 검증=source-contract guard(quit 은 프로세스 종료라 자동 e2e 불가)) — Add app:before-quit event hook to Suji quit() path. Modify the quit flow in Zig core to emit a 'app:before-quit' event before termination begins, allowing handlers to call an event.preventDefault() eq
 - **[medium]** `app.removeAsDefaultProtocolClient(protocol: string, path?: string, args?: string[]) : boolean` — Add app.setAsDefaultProtocolClient(protocol: string, path?: string, args?: string[]): Promise<boolean> and app.removeAsDefaultProtocolClient(protocol: string, path?: string, args?: string[]): Promise<
 - ~~**[medium]** `app.requestSingleInstanceLock()`~~ ✅ (#94) — Add app.requestSingleInstanceLock(additionalData?) method across all SDKs. Zig: implement with temp file lock or NSFileManager (macOS). JS/Node: expose as async method returning boolean. Rust/Go: wrap
 - ~~**[medium]** `hasSingleInstanceLock() method`~~ ✅ (#94) — Implement three methods in the app object across both suji-js and suji-node SDKs: (1) app.requestSingleInstanceLock() → Promise<boolean> indicating lock acquisition success, (2) app.hasSingleInstanceL

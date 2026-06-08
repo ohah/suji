@@ -2475,6 +2475,29 @@ test "session.setDownloadPath + will-download IPC + CEF download handler wire" {
     }
 }
 
+test "app.before-quit 이벤트 — quit chokepoint 훅 wired" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "fn beforeQuitHandler",
+        "cef.setBeforeQuitHandler(&beforeQuitHandler)",
+        "\"app:before-quit\"",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    // cef_message_loop.zig: quit() 직전 1회 호출되는 BeforeQuitFn 훅(idempotent guard 안).
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn setBeforeQuitHandler",
+        "g_before_quit_fn",
+        "if (g_before_quit_fn) |f| f();",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "app.getName/getVersion + screen.getDisplayNearestPoint IPC" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

@@ -698,6 +698,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setDownloadEmitHandler(&downloadEmitHandler);
+    cef.setBeforeQuitHandler(&beforeQuitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -891,6 +892,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setWebRequestEmitHandler(&webRequestEmitHandler);
     cef.setPermissionEmitHandler(&permissionEmitHandler);
     cef.setDownloadEmitHandler(&downloadEmitHandler);
+    cef.setBeforeQuitHandler(&beforeQuitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -4776,6 +4778,11 @@ fn permissionEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callcon
 
 fn downloadEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(.c) void {
     emitBusRaw(std.mem.span(channel), std.mem.span(payload));
+}
+
+/// Electron `app.on('before-quit')` — quit 직전 1회 발신(cef.quit chokepoint).
+fn beforeQuitHandler() callconv(.c) void {
+    emitBusRaw("app:before-quit", "{}");
 }
 
 fn globalShortcutEmitHandler(accelerator: []const u8, click: []const u8) void {
