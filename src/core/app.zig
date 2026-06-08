@@ -1969,6 +1969,31 @@ pub fn getVersion() ?[]const u8 {
     return coreCmd("app_get_version", "");
 }
 
+/// Electron `app.setAsDefaultProtocolClient(protocol)` — 이 앱을 `protocol://` 기본 핸들러로
+/// (macOS Launch Services). scheme 등록은 suji.json `app.deepLinkSchemes`(CFBundleURLTypes)가
+/// 담당. 응답: `{"success":bool}`. ⚠️ 실 `.app` 번들에서만 동작(dev=false).
+pub fn setAsDefaultProtocolClient(protocol: []const u8) ?[]const u8 {
+    return protocolClientCmd("app_set_as_default_protocol_client", protocol);
+}
+
+/// Electron `app.isDefaultProtocolClient(protocol)` — 현재 기본 핸들러인지. 응답: `{"success":bool}`.
+pub fn isDefaultProtocolClient(protocol: []const u8) ?[]const u8 {
+    return protocolClientCmd("app_is_default_protocol_client", protocol);
+}
+
+/// Electron `app.removeAsDefaultProtocolClient(protocol)` — macOS LS 해제 API 부재 → false.
+pub fn removeAsDefaultProtocolClient(protocol: []const u8) ?[]const u8 {
+    return protocolClientCmd("app_remove_as_default_protocol_client", protocol);
+}
+
+fn protocolClientCmd(cmd: []const u8, protocol: []const u8) ?[]const u8 {
+    var p_buf: [256]u8 = undefined;
+    const p_n = util.escapeJsonStr(protocol, &p_buf) orelse return null;
+    var fields_buf: [384]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"protocol\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+    return coreCmd(cmd, fields);
+}
+
 /// 앱 init 완료 여부 (V8 binding 호출 가능 시점이면 항상 true). 응답: `{"ready":bool}`.
 pub fn isReady() ?[]const u8 {
     return coreCmd("app_is_ready", "");

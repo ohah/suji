@@ -2854,6 +2854,28 @@ export const app = {
     return r.success === true;
   },
 
+  /**
+   * Electron `app.setAsDefaultProtocolClient(protocol)` — 이 앱을 `protocol://` 기본 핸들러로.
+   * macOS Launch Services. scheme 등록은 suji.json `app.deepLinkSchemes`(CFBundleURLTypes)가 담당.
+   * ⚠️ 실 `.app` 번들에서만 동작(dev=번들 ID 부재 → false).
+   */
+  async setAsDefaultProtocolClient(protocol: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_set_as_default_protocol_client', protocol });
+    return r.success === true;
+  },
+
+  /** Electron `app.isDefaultProtocolClient(protocol)` — 현재 기본 핸들러인지. */
+  async isDefaultProtocolClient(protocol: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_is_default_protocol_client', protocol });
+    return r.success === true;
+  },
+
+  /** Electron `app.removeAsDefaultProtocolClient(protocol)` — macOS LS 해제 API 부재 → false. */
+  async removeAsDefaultProtocolClient(protocol: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_remove_as_default_protocol_client', protocol });
+    return r.success === true;
+  },
+
   /** 앱 frontmost로. */
   async focus(): Promise<boolean> {
     const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_focus' });

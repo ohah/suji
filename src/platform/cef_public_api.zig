@@ -35,6 +35,7 @@ const cef_request_user_attention = @import("cef_request_user_attention.zig");
 const cef_runtime = @import("cef_runtime.zig");
 const cef_safe_storage = @import("cef_safe_storage.zig");
 const cef_screen = @import("cef_screen.zig");
+const cef_protocol_client = @import("cef_protocol_client.zig");
 const cef_scheme = @import("cef_scheme.zig");
 const cef_security_scoped_bookmark = @import("cef_security_scoped_bookmark.zig");
 const cef_session_cookies = @import("cef_session_cookies.zig");
@@ -268,6 +269,10 @@ pub const screenUninstall = cef_screen.screenUninstall;
 pub const screenGetCursorPoint = cef_screen.screenGetCursorPoint;
 pub const screenGetDisplayNearestPoint = cef_screen.screenGetDisplayNearestPoint;
 pub const screenGetDisplayMatching = cef_screen.screenGetDisplayMatching;
+
+pub const protocolSetAsDefault = cef_protocol_client.setAsDefault;
+pub const protocolIsDefault = cef_protocol_client.isDefault;
+pub const protocolRemoveAsDefault = cef_protocol_client.removeAsDefault;
 
 pub const desktopCapturerGetSources = cef_desktop_capturer.desktopCapturerGetSources;
 pub const desktopCapturerCaptureThumbnail = cef_desktop_capturer.desktopCapturerCaptureThumbnail;

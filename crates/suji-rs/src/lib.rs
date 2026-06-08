@@ -3210,6 +3210,35 @@ pub fn release_single_instance_lock() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_release_single_instance_lock"}"#)
 }
 
+/// Electron `app.setAsDefaultProtocolClient(protocol)` — 이 앱을 `protocol://` 기본 핸들러로
+/// (macOS Launch Services). scheme 등록은 suji.json `app.deepLinkSchemes`(CFBundleURLTypes)가
+/// 담당. raw: `{"success":bool}`. ⚠️ 실 `.app` 번들에서만 동작(dev=false).
+pub fn set_as_default_protocol_client(protocol: &str) -> Option<String> {
+    let req = format!(
+        r#"{{"cmd":"app_set_as_default_protocol_client","protocol":"{}"}}"#,
+        escape_json_full(protocol),
+    );
+    invoke("__core__", &req)
+}
+
+/// Electron `app.isDefaultProtocolClient(protocol)` — 현재 기본 핸들러인지. raw: `{"success":bool}`.
+pub fn is_default_protocol_client(protocol: &str) -> Option<String> {
+    let req = format!(
+        r#"{{"cmd":"app_is_default_protocol_client","protocol":"{}"}}"#,
+        escape_json_full(protocol),
+    );
+    invoke("__core__", &req)
+}
+
+/// Electron `app.removeAsDefaultProtocolClient(protocol)` — macOS LS 해제 API 부재 → false. raw: `{"success":bool}`.
+pub fn remove_as_default_protocol_client(protocol: &str) -> Option<String> {
+    let req = format!(
+        r#"{{"cmd":"app_remove_as_default_protocol_client","protocol":"{}"}}"#,
+        escape_json_full(protocol),
+    );
+    invoke("__core__", &req)
+}
+
 /// 앱 frontmost로. raw JSON: `{"success":bool}`.
 pub fn focus() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_focus"}"#)

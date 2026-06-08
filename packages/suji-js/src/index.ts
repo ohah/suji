@@ -2999,6 +2999,30 @@ export const app = {
     return r.success === true;
   },
 
+  /**
+   * Electron `app.setAsDefaultProtocolClient(protocol)` — 이 앱을 `protocol://` 의 기본
+   * 핸들러로 지정. macOS Launch Services. scheme 등록 자체는 suji.json `app.deepLinkSchemes`
+   * (Info.plist CFBundleURLTypes)가 담당하고, 이 API 는 기본 핸들러로 강제한다.
+   * ⚠️ 실 `.app` 번들에서만 동작(dev=번들 ID 부재 → false). path/args 는 macOS 미사용.
+   */
+  async setAsDefaultProtocolClient(protocol: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_set_as_default_protocol_client", protocol });
+    return r.success === true;
+  },
+
+  /** Electron `app.isDefaultProtocolClient(protocol)` — 이 앱이 현재 기본 핸들러인지. */
+  async isDefaultProtocolClient(protocol: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_is_default_protocol_client", protocol });
+    return r.success === true;
+  },
+
+  /** Electron `app.removeAsDefaultProtocolClient(protocol)` — macOS LS 엔 해제 API 부재 →
+   *  항상 false(Electron macOS 동형). Windows 레지스트리 제거는 후속. */
+  async removeAsDefaultProtocolClient(protocol: string): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_remove_as_default_protocol_client", protocol });
+    return r.success === true;
+  },
+
   /** 앱을 frontmost로 (NSApp `activateIgnoringOtherApps:`). */
   async focus(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_focus" });
