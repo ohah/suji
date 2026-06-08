@@ -46,6 +46,26 @@ fn onAllClosed(_: suji.Event) void {
 
 macOS는 창이 모두 닫혀도 앱은 dock에 유지 (Electron과 동일). 나머지 플랫폼은 종료.
 
+### app 종료 직전 (before-quit)
+
+| 채널 | payload | 발화 시점 |
+|---|---|---|
+| `app:before-quit` | `{}` | 앱이 종료되기 직전(모든 quit 경로: Cmd+Q / `suji.quit()` / window:all-closed 자동 quit / IPC quit) |
+
+종료 전 정리/상태 저장 훅으로 쓴다. 모든 quit 경로가 거치는 단일 chokepoint에서
+정확히 1회 발신한다(중복 quit 호출에도 1회).
+
+```js
+suji.on('app:before-quit', () => {
+  // 종료 직전 정리/저장 — 백엔드(in-process) listener 는 동기 실행
+  localStorage.setItem('lastClosed', String(Date.now()));
+});
+```
+
+> **정직 경계**: `event.preventDefault()`(종료 취소)는 지원하지 않는다. 렌더러 listener 는
+> IPC 비동기 모델상 quit 을 동기적으로 막을 수 없다(`window:close` 렌더러 경계와 동일).
+> 백엔드 listener 는 동기 실행되지만 현재 quit-veto 경로는 미배선이다(후속).
+
 ### app 단일 인스턴스 (second-instance)
 
 | 채널 | payload | 발화 시점 |

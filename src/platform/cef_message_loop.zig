@@ -37,9 +37,23 @@ pub fn shutdown() void {
 var g_quit_called: bool = false;
 pub const quitAfterNextResponse = cef_browser_ipc.quitAfterNextResponse;
 
+/// Electron `app.on('before-quit')` 훅 — quit 직전 1회 호출(main 이 주입해
+/// `app:before-quit` 이벤트를 EventBus 로 발신). 모든 quit 경로(Cmd+Q, suji.quit,
+/// window:all-closed 자동 quit, IPC quit)가 cef.quit() 를 거치므로 단일 chokepoint.
+pub const BeforeQuitFn = *const fn () callconv(.c) void;
+var g_before_quit_fn: ?BeforeQuitFn = null;
+pub fn setBeforeQuitHandler(fn_ptr: BeforeQuitFn) void {
+    g_before_quit_fn = fn_ptr;
+}
+
 pub fn quit() void {
     if (g_quit_called) return;
     g_quit_called = true;
+
+    // before-quit 알림(idempotent guard 안 — 정확히 1회). in-process(백엔드) listener 는
+    // 동기 실행, 렌더러는 best-effort(quit 진행 전 짧은 윈도). preventDefault(취소)는
+    // IPC 비동기 모델상 미지원 — window:close 렌더러 경계와 동일(정직 경계).
+    if (g_before_quit_fn) |f| f();
 
     cef_devtools.closeMappedDevToolsBeforeQuit();
 

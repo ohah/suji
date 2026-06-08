@@ -276,6 +276,9 @@ fn onAllClosed(_: suji.Event) void {
 // suji.webRequest.setBlockedUrls(&.{ "https://*.ad/*" })   — URL glob blocklist
 //   → 매칭 요청 cancel + `webRequest:before-request` / `webRequest:completed` 이벤트
 // suji.quit()                  — 앱 종료 요청 (Electron app.quit())
+//   → quit 직전 `app:before-quit` 이벤트 1회 발신(모든 quit 경로: Cmd+Q/suji.quit/
+//     all-closed/IPC 가 cef.quit chokepoint 경유). suji.on("app:before-quit", cb) 로 정리/저장.
+//     ⚠️ preventDefault(종료 취소)는 IPC 비동기상 미지원(window:close 렌더러 경계 동일, 정직 경계)
 // suji.exit()                  — 앱 강제 종료 (Electron app.exit(), code 무시)
 // suji.session.clearCookies() / flushStore() — CEF cookie_manager fire-and-forget
 //   / setCookieRaw(args) / getCookiesRaw(args) / removeCookiesRaw(args)

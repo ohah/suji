@@ -151,6 +151,8 @@ pub const run = cef_message_loop.run;
 pub const shutdown = cef_message_loop.shutdown;
 pub const quit = cef_message_loop.quit;
 pub const quitAfterNextResponse = cef_message_loop.quitAfterNextResponse;
+pub const BeforeQuitFn = cef_message_loop.BeforeQuitFn;
+pub const setBeforeQuitHandler = cef_message_loop.setBeforeQuitHandler;
 
 pub const MAX_TITLE_BYTES = cef_window_display.MAX_TITLE_BYTES;
 pub const WindowReadyToShowHandler = cef_window_display.WindowReadyToShowHandler;
