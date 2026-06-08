@@ -158,6 +158,9 @@ fn onBeforeClose(_: ?*c._cef_life_span_handler_t, browser: ?*c._cef_browser_t) c
     // (defense-in-depth: g_browser fallback이 view를 main으로 잘못 인식하는 경로 차단).
     const is_main = !is_view and cef.isMainBrowser(br);
     if (is_main) {
+        // main-browser-close 도 종료 chokepoint — cef.quit() 를 안 거치므로 여기서도
+        // app:before-quit 발신(idempotent — cef.quit() 와 어느 쪽이 먼저든 1회).
+        cef.fireBeforeQuit();
         log.info("main browser closed → quitting message loop", .{});
         c.cef_quit_message_loop();
     } else {

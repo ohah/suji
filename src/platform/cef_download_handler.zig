@@ -79,14 +79,16 @@ fn emitWillDownload(item: *c.cef_download_item_t, filename: []const u8) void {
     var mime_buf: [256]u8 = undefined;
     const mime = if (item.get_mime_type) |f| cefUserfreeToUtf8(f(item), &mime_buf) else "";
 
+    // escape 버퍼는 source 캡의 2x(따옴표/백슬래시 worst) 이상 — escapeJsonStrFull 이 넘치면
+    // 이벤트가 통째 drop 되므로 여유 확보(name 은 1024→4096; code-review max 수정).
     var url_esc: [4096]u8 = undefined;
     const ue = util.escapeJsonStrFull(url, &url_esc) orelse return;
-    var name_esc: [1024]u8 = undefined;
+    var name_esc: [4096]u8 = undefined;
     const ne = util.escapeJsonStrFull(filename, &name_esc) orelse return;
-    var mime_esc: [512]u8 = undefined;
+    var mime_esc: [1024]u8 = undefined;
     const me = util.escapeJsonStrFull(mime, &mime_esc) orelse return;
 
-    var payload_buf: [8192]u8 = undefined;
+    var payload_buf: [16384]u8 = undefined;
     const payload = std.fmt.bufPrintZ(
         &payload_buf,
         "{{\"id\":{d},\"url\":\"{s}\",\"filename\":\"{s}\",\"mimeType\":\"{s}\",\"totalBytes\":{d}}}",
@@ -136,7 +138,9 @@ fn onBeforeDownload(
     const filename = if (suggested_name != null) cefStringToUtf8(suggested_name, &name_buf) else "";
     emitWillDownload(item, filename);
 
-    var path_buf: [5120]u8 = undefined;
+    // dir(g_path_buf 4096) + sep(1) + filename(name_buf 1024) = 5121 worst case 수용
+    // (5120 이면 최대길이 경로가 조용히 OS 대화상자로 fallback — code-review max 수정).
+    var path_buf: [5200]u8 = undefined;
     if (buildSavePath(filename, &path_buf)) |full| {
         // setDownloadPath 설정됨 — 무대화상자 다운로드.
         var cs: c.cef_string_t = .{};

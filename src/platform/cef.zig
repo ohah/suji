@@ -295,6 +295,7 @@ pub const quit = cef_public_api.quit;
 pub const quitAfterNextResponse = cef_public_api.quitAfterNextResponse;
 pub const BeforeQuitFn = cef_public_api.BeforeQuitFn;
 pub const setBeforeQuitHandler = cef_public_api.setBeforeQuitHandler;
+pub const fireBeforeQuit = cef_public_api.fireBeforeQuit;
 
 // ============================================
 // Window display/load/find/print handlers — cef_window_display.zig 로 분리(동작 무변경).

@@ -474,11 +474,13 @@ pub mod windows {
 
     /// Electron `webContents.insertCSS()` — author-origin `<style>` 주입. 응답 JSON 의
     /// `key` 로 `remove_inserted_css` 제거(raw JSON 반환 — caller 가 key 파싱).
+    /// escape_json_full 사용 — 멀티라인 CSS 의 개행/탭을 \n/\t 로 보존(코어가 unescape).
+    /// (mod-local escape_json 은 제어문자를 drop 해 CSS 가 평탄화됨 — code-review max 수정.)
     pub fn insert_css(window_id: u32, css: &str) -> Option<String> {
         let req = format!(
             r#"{{"cmd":"insert_css","windowId":{},"css":"{}"}}"#,
             window_id,
-            escape_json(css),
+            super::escape_json_full(css),
         );
         invoke("__core__", &req)
     }
