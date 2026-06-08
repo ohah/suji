@@ -35,9 +35,26 @@ static void (*g_power_callback)(const char *event) = NULL;
     (void)note;
     if (g_power_callback) g_power_callback("unlock-screen");
 }
+- (void)onPowerOff:(NSNotification *)note {
+    (void)note;
+    if (g_power_callback) g_power_callback("shutdown");
+}
 @end
 
 static SujiPowerObserver *g_observer = nil;
+static CFRunLoopSourceRef g_power_source = NULL;
+static int g_last_on_battery = -1;
+
+int suji_power_monitor_is_on_battery(void); // 아래 정의 — power_source_changed 가 먼저 참조.
+
+// IOPS power-source 변경 콜백 — AC↔배터리 전환 시에만 emit(스풀리어스 중복 억제).
+static void power_source_changed(void *ctx) {
+    (void)ctx;
+    int ob = suji_power_monitor_is_on_battery();
+    if (ob == g_last_on_battery) return;
+    g_last_on_battery = ob;
+    if (g_power_callback) g_power_callback(ob ? "on-battery" : "on-ac");
+}
 
 void suji_power_monitor_install(void (*cb)(const char *)) {
     g_power_callback = cb;
@@ -48,6 +65,12 @@ void suji_power_monitor_install(void (*cb)(const char *)) {
     [nc addObserver:g_observer selector:@selector(onWake:) name:NSWorkspaceDidWakeNotification object:nil];
     [nc addObserver:g_observer selector:@selector(onScreenSleep:) name:NSWorkspaceScreensDidSleepNotification object:nil];
     [nc addObserver:g_observer selector:@selector(onScreenWake:) name:NSWorkspaceScreensDidWakeNotification object:nil];
+    [nc addObserver:g_observer selector:@selector(onPowerOff:) name:NSWorkspaceWillPowerOffNotification object:nil];
+
+    // IOPS run-loop source — AC/배터리 전환 이벤트(on-battery/on-ac). 메인 런루프에 부착.
+    g_last_on_battery = suji_power_monitor_is_on_battery();
+    g_power_source = IOPSNotificationCreateRunLoopSource(power_source_changed, NULL);
+    if (g_power_source) CFRunLoopAddSource(CFRunLoopGetMain(), g_power_source, kCFRunLoopDefaultMode);
 }
 
 void suji_power_monitor_uninstall(void) {
@@ -56,6 +79,11 @@ void suji_power_monitor_uninstall(void) {
     [nc removeObserver:g_observer];
     g_observer = nil;
     g_power_callback = NULL;
+    if (g_power_source) {
+        CFRunLoopRemoveSource(CFRunLoopGetMain(), g_power_source, kCFRunLoopDefaultMode);
+        CFRelease(g_power_source);
+        g_power_source = NULL;
+    }
 }
 
 // Electron powerMonitor.isOnBatteryPower() — 현재 전원이 배터리인지(IOKit IOPS).
