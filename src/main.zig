@@ -3003,6 +3003,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const result = std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"tray_set_tooltip\",\"success\":{}}}", .{ok}) catch return null;
         return result;
     }
+    if (std.mem.eql(u8, cmd, "tray_get_bounds")) {
+        const tray_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "trayId") orelse return null);
+        const r = cef.trayGetBounds(tray_id);
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"tray_get_bounds\",\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d}}}",
+            .{ r.x, r.y, r.width, r.height },
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "tray_set_menu")) {
         return handleTraySetMenu(req_clean, response_buf);
     }

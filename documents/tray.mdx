@@ -15,6 +15,8 @@ Windows는 system tray `Shell_NotifyIconW` 경로를 쓴다. Frontend JS + Zig/R
 |---|---|---|---|
 | `tray.create` | ✅ title/tooltip/iconPath | ✅ title/tooltip/iconPath | ✅ tooltip, 기본 icon |
 | `tray.setTitle/setTooltip` | ✅ title + tooltip | ✅ title + tooltip | ✅ tooltip update (`setTitle`도 tooltip으로 매핑) |
+| `tray.setToolTip` (별칭) | ✅ setTooltip 위임 | ✅ | ✅ |
+| `tray.getBounds` | ✅ NSStatusItem.button window frame | ⬜ 0 rect | ⬜ 0 rect |
 | `tray.setMenu` | ✅ item/separator/checkbox/submenu/enabled | ✅ item/separator/checkbox/submenu/enabled | ✅ flat HMENU item/separator, checkbox 표시 best-effort |
 | `tray.destroy` | ✅ | ✅ hide + unref | ✅ `NIM_DELETE` |
 | Click event | ✅ `tray:menu-click` for menu items | ✅ activate + menu item click | ✅ left click + menu item click |

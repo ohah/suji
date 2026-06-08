@@ -2737,6 +2737,27 @@ test "clipboard RTF + Buffer IPC + cef pasteboard" {
     }
 }
 
+test "tray.getBounds IPC + cef NSStatusItem frame" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"tray_get_bounds\"",
+        "cef.trayGetBounds",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn trayGetBounds",
+        "\"window\"", // status_item.button.window
+        "\"frame\"", // window frame (NSRect)
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "clipboard writeBookmark/writeFindText/write IPC + cef pasteboard" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

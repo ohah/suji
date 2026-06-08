@@ -52,6 +52,17 @@ func SetTooltip(trayID uint32, tooltip string) string {
 	))
 }
 
+// SetToolTip is the Electron-named alias of SetTooltip (identical behavior).
+func SetToolTip(trayID uint32, toolTip string) string {
+	return SetTooltip(trayID, toolTip)
+}
+
+// GetBounds returns the tray icon's screen rect (Electron tray.getBounds).
+// Response: `{"x","y","width","height"}`. macOS only; Win/Linux 0 rect.
+func GetBounds(trayID uint32) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"tray_get_bounds","trayId":%d}`, trayID))
+}
+
 // SetMenu — items 배열로 메뉴 구성. macOS/Linux는 checkbox/submenu/enabled를 지원한다.
 func SetMenu(trayID uint32, items []MenuItem) string {
 	return suji.Invoke("__core__", buildSetMenuRequest(trayID, items))

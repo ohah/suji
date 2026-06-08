@@ -1308,6 +1308,19 @@ pub const tray = struct {
         return coreCmd("tray_set_tooltip", fields);
     }
 
+    /// Electron 명명(tray.setToolTip) 별칭 — setTooltip 과 동일.
+    pub fn setToolTip(tray_id: u32, tool_tip: []const u8) ?[]const u8 {
+        return setTooltip(tray_id, tool_tip);
+    }
+
+    /// 트레이 아이콘 화면 좌표 rect(Electron tray.getBounds). 응답: `{"x","y","width","height"}`.
+    /// macOS only(Win/Linux 0 rect).
+    pub fn getBounds(tray_id: u32) ?[]const u8 {
+        var fields_buf: [32]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"trayId\":{d}", .{tray_id}) catch return null;
+        return coreCmd("tray_get_bounds", fields);
+    }
+
     /// 메뉴 설정 — items_json은 cmd 객체에 들어갈 raw JSON `"items":[...]`. caller가 빌드.
     /// 예: `\"items\":[{\"label\":\"Settings\",\"click\":\"open-settings\"},{\"type\":\"separator\"}]`.
     pub fn setMenuRaw(tray_id: u32, items_json: []const u8) ?[]const u8 {

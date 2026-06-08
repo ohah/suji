@@ -334,6 +334,7 @@ pub const setTrayEmitHandler = cef_tray.setTrayEmitHandler;
 pub const createTray = cef_tray.createTray;
 pub const setTrayTitle = cef_tray.setTrayTitle;
 pub const setTrayTooltip = cef_tray.setTrayTooltip;
+pub const trayGetBounds = cef_tray.trayGetBounds;
 pub const setTrayMenu = cef_tray.setTrayMenu;
 pub const destroyTray = cef_tray.destroyTray;
 
