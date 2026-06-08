@@ -1,6 +1,6 @@
 ---
-title: Menu (Phase 5-D)
-description: 애플리케이션 메뉴바와 컨텍스트 메뉴 — macOS NSMenu, Linux GTK popup, submenu/item/checkbox/separator + click 이벤트
+title: Menu
+description: 애플리케이션 메뉴바와 컨텍스트 메뉴 — macOS NSMenu, Linux GTK popup, item/checkbox/separator/submenu + id/visible/accelerator/role/icon, getApplicationMenu/getMenuItemById/insert, click·will-show·will-close 이벤트
 ---
 
 # Menu
@@ -18,8 +18,13 @@ Suji는 macOS App 메뉴(About/Hide/Quit)는 유지하고, caller가 전달한 t
 |---|---|---|---|
 | `menu.setApplicationMenu` | ✅ NSMenu | stub (false) | stub |
 | `menu.resetApplicationMenu` | ✅ 기본 메뉴 복원 | stub (false) | stub |
+| `menu.getApplicationMenu` | ✅ 스냅샷 | `[]` | `[]` |
+| `menu.getMenuItemById(id)` | ✅ 스냅샷 탐색 | `null` | `null` |
+| `menu.insert(pos, item)` | ✅ 스냅샷 splice | stub (false) | stub |
+| `menu.sendActionToFirstResponder(action)` | ✅ NSApp | no-op | no-op |
 | `menu.popup` | ✅ NSMenu popup | ✅ GTK popup | stub |
 | Click event | ✅ `menu:click` | ✅ `menu:click` for popup items | — |
+| Lifecycle event | ✅ `menu:will-show`/`will-close` (popup) | ✅ (popup) | — |
 
 Linux는 native 애플리케이션 메뉴바를 만들지 않고 `menu.popup`만 지원한다. Windows는 native menu 구현 전까지 graceful false 응답.
 
@@ -27,15 +32,56 @@ Linux는 native 애플리케이션 메뉴바를 만들지 않고 `menu.popup`만
 
 | 항목 | 필드 |
 |---|---|
-| 일반 item | `{ label, click, enabled? }` |
-| checkbox | `{ type: "checkbox", label, click, checked?, enabled? }` |
+| 일반 item | `{ label, click, enabled?, id?, visible?, accelerator?, role?, icon? }` |
+| checkbox | `{ type: "checkbox", label, click, checked?, enabled?, id?, visible?, accelerator?, icon? }` |
 | separator | `{ type: "separator" }` |
-| submenu | `{ type?: "submenu", label, enabled?, submenu: MenuItem[] }` |
+| submenu | `{ type?: "submenu", label, enabled?, id?, visible?, submenu: MenuItem[] }` |
 
 `setApplicationMenu`의 top-level 항목은 메뉴바에 붙는 메뉴이므로 `submenu` 형태를 사용한다. `menu.popup`은 top-level `item`/`checkbox`/`separator`/`submenu`를 모두 받을 수 있다. 중첩 submenu는 지원된다.
 
 checkbox는 클릭 시 native menu item의 checked state를 즉시 토글하고, 동일하게
 `menu:click {click}` 이벤트를 발화한다.
+
+### MenuItem 옵션 필드
+
+| 필드 | 의미 | 플랫폼 |
+|---|---|---|
+| `id` | `getMenuItemById` 식별자 (UI 효과 없음) | 전 플랫폼 (스냅샷) |
+| `visible` | `false` 면 항목 숨김 (기본 `true`) | macOS NSMenuItem.setHidden:, Linux GTK set_no_show_all, Win no-op |
+| `accelerator` | 단축키 — 예 `"Cmd+Shift+K"` | macOS keyEquivalent (단일 문자 키; 특수키 best-effort), Win/Linux no-op |
+| `role` | 표준 동작 (copy/paste/quit 등) — 설정 시 `click` 무시, 네이티브 selector 수행 | macOS only, Win/Linux no-op |
+| `icon` | 이미지 파일 경로 — macOS NSImage(setImage:) | macOS only. fs sandbox `allowedRoots` 게이트 적용(렌더러 경로; 미설정=레거시 허용) |
+
+지원 `role` 값(macOS): `undo` `redo` `cut` `copy` `paste` `pasteAndMatchStyle`
+`selectAll` `delete` `minimize` `zoom` `close` `toggleFullScreen` `quit`.
+
+## 메뉴 조회 / 수정
+
+Suji 메뉴는 **fire-and-forget 스냅샷 모델**이다 — 라이브 객체가 아니라 마지막으로
+`setApplicationMenu` 한 항목들의 스냅샷을 보관하며, 변경은 항상 재설정으로 이뤄진다.
+
+- `getApplicationMenu()` → 마지막 set 한 메뉴 배열(없으면 `[]`).
+- `getMenuItemById(id)` → 스냅샷에서 `id` 재귀 탐색(submenu 포함), 없으면 `null`.
+- `insert(pos, item)` → 스냅샷 `pos`(클램프 `[0,len]`) 위치에 항목 삽입 후 전체 재설정.
+- `sendActionToFirstResponder(action)` → macOS first responder(포커스된 web view)에
+  표준 셀렉터(예 `"copy:"`) 전달. macOS only, Win/Linux no-op.
+
+> ⚠️ 스냅샷은 **요청 원본**이라 fs 게이트로 차단된 `icon` 경로도 그대로 에코된다
+> (네이티브 NSImage 로드는 차단되지만 스냅샷은 "요청값" 의미 — 렌더러 자기 경로라
+> 정보유출 아님).
+
+## 생명주기 이벤트
+
+`menu.popup`은 컨텍스트 메뉴 표시/닫힘 시 페이로드 없는 이벤트를 발신한다.
+
+```ts
+on('menu:will-show', () => { /* 메뉴 표시 직전 */ });
+on('menu:will-close', () => { /* 메뉴 닫힘 */ });
+```
+
+정직 경계: macOS `popUpMenuPositioningItem` 은 **동기 모달**이라 `will-show` 가 모달
+진입 전 발신되지만 전달 타이밍은 중첩 런루프에 의존한다("표시 전 수신" 보장은 약함).
+앱 메뉴바 드롭다운은 AppKit 내부 동작이라 발화하지 않는다(컨텍스트 메뉴 한정).
 
 ## Frontend JS
 
@@ -63,9 +109,30 @@ on('menu:click', ({ click }) => {
   }
 });
 
+// 옵션 필드 — accelerator / role / icon / id / visible (macOS)
+await menu.setApplicationMenu([
+  {
+    label: 'Edit',
+    submenu: [
+      { label: 'Undo', role: 'undo', accelerator: 'Cmd+Z' },   // role=네이티브 동작
+      { label: 'Copy', role: 'copy', icon: '/path/icon.png' },  // icon=macOS NSImage
+      { type: 'separator' },
+      { label: 'Find', click: 'find', id: 'find-item', accelerator: 'Cmd+F' },
+    ],
+  },
+]);
+
+// 조회 / 수정 (스냅샷 기반)
+const items = await menu.getApplicationMenu();        // 마지막 set 한 배열
+const found = await menu.getMenuItemById('find-item'); // 재귀 탐색, 없으면 null
+await menu.insert(0, { label: 'File', submenu: [{ label: 'New', click: 'new' }] });
+await menu.sendActionToFirstResponder('copy:');        // macOS first responder
+
 await menu.resetApplicationMenu();
 
 // Programmatic context menu. x/y 생략 시 현재 커서 위치.
+on('menu:will-show', () => {/* 표시 직전 */});
+on('menu:will-close', () => {/* 닫힘 */});
 await menu.popup([
   { label: 'Refresh', click: 'refresh' },
   { type: 'separator' },
@@ -93,14 +160,29 @@ let _ = menu::set_application_menu(&[
     MenuItem::Submenu {
         label: "Tools",
         enabled: true,
+        id: "",
+        visible: true,
         submenu: vec![
-            MenuItem::Item { label: "Run", click: "run", enabled: true },
-            MenuItem::Checkbox { label: "Flag", click: "flag", checked: true, enabled: true },
+            // 옵션 필드는 미사용 시 "" / true 전달 (accelerator/role/icon).
+            MenuItem::Item { label: "Run", click: "run", enabled: true,
+                             id: "run-item", visible: true,
+                             accelerator: "Cmd+R", role: "", icon: "" },
+            MenuItem::Checkbox { label: "Flag", click: "flag", checked: true,
+                                 enabled: true, id: "", visible: true,
+                                 accelerator: "", icon: "" },
             MenuItem::Separator,
         ],
     },
 ]);
 let _ = menu::reset_application_menu();
+
+// 조회 / 수정 (raw JSON 반환)
+let _items = menu::get_application_menu();
+let _hit = menu::get_menu_item_by_id("run-item");
+let _ = menu::insert(0, MenuItem::Item { label: "New", click: "new", enabled: true,
+                                         id: "", visible: true, accelerator: "",
+                                         role: "", icon: "" });
+let _ = menu::send_action_to_first_responder("copy:");
 ```
 
 ### Go (`github.com/ohah/suji-go/menu`)
@@ -110,12 +192,19 @@ import "github.com/ohah/suji-go/menu"
 
 menu.SetApplicationMenu([]menu.MenuItem{
     menu.Submenu("Tools", []menu.MenuItem{
-        menu.Item("Run", "run"),
+        // 옵션 필드는 struct 리터럴로 직접 설정 (ID/Accelerator/Role/Icon).
+        {Type: "item", Label: "Run", Click: "run", ID: "run-item", Accelerator: "Cmd+R"},
         menu.Checkbox("Flag", "flag", true),
         menu.Separator(),
     }),
 })
 menu.ResetApplicationMenu()
+
+// 조회 / 수정 (raw JSON 문자열 / *MenuItem 반환)
+_ = menu.GetApplicationMenu()
+_ = menu.GetMenuItemByID("run-item")
+menu.Insert(0, menu.Item("New", "new"))
+menu.SendActionToFirstResponder("copy:")
 ```
 
 ### Node (`@suji/node`)
