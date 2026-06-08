@@ -2560,6 +2560,60 @@ test "webContents.setWindowOpenHandler — on_before_popup 정책 + new-window �
     }
 }
 
+// cross-SDK wire-contract 가드 — 이번 세션 신규 코어 메서드의 cmd/필드명이 각 백엔드 SDK
+// (Rust/Go/Zig) 소스 ↔ 코어(main.zig) 에 일관되게 존재하는지 검사. FFI-coupled SDK 는
+// behavioral mock 이 비현실적이라(suji-node 는 별도 behavioral 테스트), 필드명 drift 를
+// 소스 레벨로 잡는 net. cmd 오타/필드명 불일치 = 빌드 통과하지만 런타임 무동작 → 여기서 차단.
+test "cross-SDK wire-contract — 신규 코어 cmd/필드 가 Rust/Go/Zig SDK 에 일관" {
+    const a = std.testing.allocator;
+    const main_src = try readMainSource();
+    defer a.free(main_src);
+    const rust = try readProjectFile("crates/suji-rs/src/lib.rs", 2 * 1024 * 1024);
+    defer a.free(rust);
+    const zig_sdk = try readProjectFile("src/core/app.zig", 1024 * 1024);
+    defer a.free(zig_sdk);
+    const go_win = try readProjectFile("sdks/suji-go/windows/windows.go", 256 * 1024);
+    defer a.free(go_win);
+    const go_sess = try readProjectFile("sdks/suji-go/session/session.go", 64 * 1024);
+    defer a.free(go_sess);
+    const go_wr = try readProjectFile("sdks/suji-go/webrequest/webrequest.go", 64 * 1024);
+    defer a.free(go_wr);
+    const go_app = try readProjectFile("sdks/suji-go/app/app.go", 64 * 1024);
+    defer a.free(go_app);
+
+    // cmd 이름: core(main.zig) + Rust + Zig SDK 모두에 존재해야(drift 차단).
+    inline for (.{
+        "stop",
+        "insert_css",
+        "remove_inserted_css",
+        "web_contents_set_window_open_handler",
+        "session_set_download_path",
+        "web_request_set_request_headers",
+        "app_set_as_default_protocol_client",
+        "app_is_default_protocol_client",
+        "app_remove_as_default_protocol_client",
+    }) |cmd| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, cmd) != null);
+        try std.testing.expect(std.mem.indexOf(u8, rust, cmd) != null);
+        try std.testing.expect(std.mem.indexOf(u8, zig_sdk, cmd) != null);
+    }
+
+    // 다중-필드 cmd 의 distinctive 필드명: core + 각 SDK 에 동일.
+    inline for (.{ main_src, rust, zig_sdk }) |src| {
+        try std.testing.expect(std.mem.indexOf(u8, src, "requestHeaders") != null); // setRequestHeaders
+        try std.testing.expect(std.mem.indexOf(u8, src, "protocol") != null); // protocol trio
+    }
+
+    // Go: 패키지별 파일에 해당 cmd 존재(분산 — 패키지 경계).
+    try std.testing.expect(std.mem.indexOf(u8, go_win, "web_contents_set_window_open_handler") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_win, "insert_css") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_sess, "session_set_download_path") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_wr, "web_request_set_request_headers") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_wr, "requestHeaders") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_app, "app_set_as_default_protocol_client") != null);
+    try std.testing.expect(std.mem.indexOf(u8, go_app, "protocol") != null);
+}
+
 test "app.getName/getVersion + screen.getDisplayNearestPoint IPC" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
