@@ -537,7 +537,8 @@ suji.platform                                                // "macos" | "linux
 //     suji.on('app:second-instance', ({argv}) => myWindow.focus())       (Electron second-instance;
 //     argv 전달 IPC: macOS/Linux Unix 소켓, Windows named pipe)
 // await webRequest.setBlockedUrls(["https://*.ad/*"])                     (CEF ResourceRequestHandler)
-//   → suji.on('webRequest:completed', ({url, statusCode, ...}) => ...)
+//   → suji.on('webRequest:completed', ({url, statusCode, statusText, requestStatus, receivedBytes, responseHeaders}) => ...)
+//     responseHeaders={헤더명:값} 객체(Electron onHeadersReceived 패리티, cef_response_t.get_header_map iterate)
 // await webRequest.onBeforeRequest({urls:["https://*.tracker/*"]}, (details, cb) => cb({cancel:true}))
 //   → RV_CONTINUE_ASYNC + listener round-trip cancel/allow (e2e 13 pass)
 ```

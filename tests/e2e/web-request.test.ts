@@ -232,6 +232,53 @@ describe("webRequest blocklist", () => {
     expect(found.url).toContain(tag);
   });
 
+  test("webRequest:completed — 성공 응답에 responseHeaders + statusText (onHeadersReceived 패리티)", async () => {
+    await core({ cmd: "web_request_set_blocked_urls", patterns: [] }); // 차단 해제
+    const listenerKey = await page.evaluate(() => {
+      const events: any[] = [];
+      const off = (window as any).__suji__.on(
+        "webRequest:completed",
+        (payload: string) => {
+          try { events.push(JSON.parse(payload)); } catch { events.push(payload); }
+        },
+      );
+      const reg = ((window as any).__wr_test__ ||= {});
+      const k = String(Math.random());
+      reg[k] = { events, off };
+      return k;
+    });
+
+    const tag = `rh-${Date.now()}`;
+    await page.evaluate(async (t) => {
+      // dev server origin = 실제 응답(200 + content-type 등 헤더) → responseHeaders 채워짐.
+      await fetch(window.location.origin + "/?rh=" + t).catch(() => {});
+    }, tag);
+
+    const found = await page.evaluate(
+      async ({ k, tag }) => {
+        const reg = (window as any).__wr_test__;
+        const c = reg[k];
+        const start = Date.now();
+        while (Date.now() - start < 5000) {
+          const hit = c.events.find((e: any) =>
+            typeof e.url === "string" && e.url.includes(tag) &&
+            e.responseHeaders && Object.keys(e.responseHeaders).length > 0,
+          );
+          if (hit) { c.off(); delete reg[k]; return hit; }
+          await new Promise((r) => setTimeout(r, 100));
+        }
+        c.off(); delete reg[k]; return null;
+      },
+      { k: listenerKey, tag },
+    );
+    expect(found).not.toBeNull();
+    expect(found.url).toContain(tag);
+    expect(typeof found.responseHeaders).toBe("object");
+    expect(found.statusCode).toBeGreaterThan(0);
+    expect(Object.keys(found.responseHeaders).length).toBeGreaterThan(0);
+    expect(typeof found.statusText).toBe("string");
+  });
+
   test("middle wildcard 매칭 — `*/blocked-mid/*`은 origin 무관하게 path 매칭", async () => {
     await core({
       cmd: "web_request_set_blocked_urls",

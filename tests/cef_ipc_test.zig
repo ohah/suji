@@ -1589,6 +1589,11 @@ test "webRequest — CefRequestHandler wiring + URL glob blocklist + 2 이벤트
         "client_ptr.get_request_handler",
         "\"webRequest:before-request\"",
         "\"webRequest:completed\"",
+        // onHeadersReceived 패리티 — completed 에 responseHeaders + statusText.
+        "fn buildResponseHeadersJson",
+        "cef_string_multimap_alloc",
+        "responseHeaders", // completed 페이로드 필드
+        "statusText", // completed 페이로드 필드
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
     }

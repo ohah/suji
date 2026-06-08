@@ -187,7 +187,7 @@
 ### webRequest
 
 - **[medium]** `webRequest.onBeforeSendHeaders` — Extend WebRequestDecision interface to include optional requestHeaders field (Record<string, string | string[]>), matching Electron's callback signature. Update the native handler to respect the retur
-- **[medium]** `webRequest.onHeadersReceived` — Add responseHeaders to webRequest:completed event (array of header objects), optionally implement onHeadersReceived listener method. Minimum: extend event payload to include headers captured from CEF 
+- ~~**[medium]** `webRequest.onHeadersReceived`~~ ✅ (PR #128 — `webRequest:completed` 이벤트에 `responseHeaders`(헤더맵 객체) + `statusText` 추가. cef_response_t.get_header_map 을 cef_string_multimap 으로 iterate→escape→JSON, graceful truncation. e2e 실 응답 헤더 검증) — Add responseHeaders to webRequest:completed event (array of header objects), optionally implement onHeadersReceived listener method. Minimum: extend event payload to include headers captured from CEF 
 
 ### BrowserWindow
 
