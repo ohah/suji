@@ -98,9 +98,9 @@
 
 ### clipboard
 
-- **[medium]** `clipboard.writeBookmark(title, url[, type])` — Add clipboard.writeBookmark(title: string, url: string, type?: 'clipboard' | 'selection') to Suji. Implementation: (1) Add Zig handler in src/main.zig parsing title/url/type params, call cef.clipboard
-- **[medium]** `clipboard.writeFindText(text: string)` — Add writeFindText(text: string) → Promise<boolean> to Suji's clipboard module: (1) src/platform/cef.zig: new pub fn clipboardWriteFindText(text: []const u8) bool using objc msgSend to get NSPasteboard
-- **[medium]** `clipboard.write(data[, type])` — Implement `clipboard.write(data: {text?: string, html?: string, image?: string, rtf?: string}, type?: 'clipboard' | 'selection'): Promise<boolean>` in all SDKs (@suji/api, @suji/node, @suji/js, Zig, R
+- ~~**[medium]** `clipboard.writeBookmark(title, url[, type])`~~ ✅ (clipboard PR) — writeBookmark(title, url) 전 5 SDK. macOS NSPasteboard public.url(+url-name, pbSetString 다중-타입). `clipboard_write_bookmark` cmd. 정직 경계: macOS only(Win/Linux false), type 파라미터 미지원(general pasteboard).
+- ~~**[medium]** `clipboard.writeFindText(text: string)`~~ ✅ (clipboard PR) — writeFindText(text) 전 5 SDK. macOS Find pasteboard("Apple Find Pasteboard", pasteboardWithName:). `clipboard_write_find_text` cmd. 정직 경계: macOS only(Win/Linux false — cross-app find pasteboard 개념 없음).
+- ~~**[medium]** `clipboard.write(data[, type])`~~ ✅ (clipboard PR) — write({text,html,rtf}) 전 5 SDK. `clipboard_write` cmd → clipboardWriteMulti(clear 1회 + 제공 필드만). macOS=atomic(pbSetString), Win/Linux=best-effort 단일(text 우선). image 는 writeImage 별도(정직 경계 — 바이너리 atomic 미포함).
 
 ### globalShortcut
 

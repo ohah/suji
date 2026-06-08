@@ -1702,6 +1702,43 @@ pub mod clipboard {
     pub fn read_tiff() -> Option<String> {
         invoke("__core__", r#"{"cmd":"clipboard_read_tiff"}"#)
     }
+
+    /// 북마크(title+url) 쓰기(Electron clipboard.writeBookmark). macOS only(Win/Linux false).
+    pub fn write_bookmark(title: &str, url: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_write_bookmark","title":"{}","url":"{}"}}"#,
+                escape_json_full(title),
+                escape_json_full(url)
+            ),
+        )
+    }
+
+    /// Find 펜보드 텍스트 쓰기(Electron clipboard.writeFindText). macOS only(Win/Linux false).
+    pub fn write_find_text(text: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_write_find_text","text":"{}"}}"#,
+                escape_json_full(text)
+            ),
+        )
+    }
+
+    /// 여러 포맷 한 번에 쓰기(Electron clipboard.write). 빈 문자열 필드 skip.
+    /// macOS=atomic, Win/Linux=best-effort 단일(text 우선).
+    pub fn write(text: &str, html: &str, rtf: &str) -> Option<String> {
+        invoke(
+            "__core__",
+            &format!(
+                r#"{{"cmd":"clipboard_write","text":"{}","html":"{}","rtf":"{}"}}"#,
+                escape_json_full(text),
+                escape_json_full(html),
+                escape_json_full(rtf)
+            ),
+        )
+    }
 }
 
 pub mod power_monitor {

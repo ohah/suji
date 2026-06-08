@@ -77,12 +77,7 @@ fn clipboardWriteType(text: []const u8, type_cstr: [*:0]const u8) bool {
     const NSPasteboard = getClass("NSPasteboard") orelse return false;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
     _ = msgSend(pb, "clearContents");
-
-    const ns_text = nsStringFromClipboardText(text) orelse return false;
-    const ns_type = nsStringFromCstr(type_cstr) orelse return false;
-    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
-        @ptrCast(&objc.objc_msgSend);
-    return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_text, ns_type) != 0;
+    return pbSetString(pb, text, type_cstr); // 단일-타입 = clear + 1회 set.
 }
 
 /// 시스템 클립보드에서 plain text 읽기 — buf에 복사 후 slice 반환. 비어 있거나
@@ -110,6 +105,64 @@ pub fn clipboardClear() void {
     const NSPasteboard = getClass("NSPasteboard") orelse return;
     const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return;
     _ = msgSend(pb, "clearContents");
+}
+
+/// (macOS) 이미 clear 된 pasteboard 에 setString:forType: 1회 — clear 안 함. 다중-타입
+/// atomic write(bookmark/write/clipboardWriteType) 의 빌딩블록. nsString 변환 실패 시 false
+/// (빈 문자열은 유효 NSString 이라 성공 — 호출부가 .len 으로 skip 판단).
+fn pbSetString(pb: *anyopaque, text: []const u8, type_cstr: [*:0]const u8) bool {
+    const ns_text = nsStringFromClipboardText(text) orelse return false;
+    const ns_type = nsStringFromCstr(type_cstr) orelse return false;
+    const setFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) u8 =
+        @ptrCast(&objc.objc_msgSend);
+    return setFn(pb, @ptrCast(objc.sel_registerName("setString:forType:")), ns_text, ns_type) != 0;
+}
+
+/// Electron `clipboard.writeBookmark(title, url)` — macOS NSPasteboard public.url(+url-name).
+/// macOS only(bookmark 포맷은 macOS/Win 고유) — Win/Linux false(honest 경계).
+pub fn clipboardWriteBookmark(title: []const u8, url: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    _ = msgSend(pb, "clearContents");
+    const url_ok = pbSetString(pb, url, "public.url");
+    // url-name(title)은 best-effort — 실패해도 url 만 성공하면 true.
+    _ = pbSetString(pb, title, "public.url-name");
+    return url_ok;
+}
+
+/// Electron `clipboard.writeFindText(text)` — macOS Find pasteboard("Apple Find Pasteboard").
+/// cross-app find. macOS only(Win/Linux 개념 없음 → false).
+pub fn clipboardWriteFindText(text: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const ns_name = nsStringFromCstr("Apple Find Pasteboard") orelse return false;
+    const nameFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const pb = nameFn(NSPasteboard, @ptrCast(objc.sel_registerName("pasteboardWithName:")), ns_name) orelse return false;
+    _ = msgSend(pb, "clearContents");
+    return pbSetString(pb, text, PASTEBOARD_TYPE_STRING);
+}
+
+/// Electron `clipboard.write({text,html,rtf})` — 여러 포맷 atomic write(clear 1회).
+/// 빈 문자열 필드는 skip. macOS=실 atomic; Win/Linux=best-effort 단일 포맷(text 우선,
+/// 멀티-포맷 atomic 미지원 — honest 경계). 하나라도 쓰면 true.
+pub fn clipboardWriteMulti(text: []const u8, html: []const u8, rtf: []const u8) bool {
+    if (comptime builtin.os.tag == .windows or is_linux) {
+        if (text.len > 0) return clipboardWriteType(text, PASTEBOARD_TYPE_STRING);
+        if (html.len > 0) return clipboardWriteType(html, PASTEBOARD_TYPE_HTML);
+        if (rtf.len > 0) return clipboardWriteType(rtf, PASTEBOARD_TYPE_RTF);
+        return false;
+    }
+    if (!comptime is_macos) return false;
+    const NSPasteboard = getClass("NSPasteboard") orelse return false;
+    const pb = msgSend(NSPasteboard, "generalPasteboard") orelse return false;
+    _ = msgSend(pb, "clearContents");
+    var any = false;
+    if (text.len > 0 and pbSetString(pb, text, PASTEBOARD_TYPE_STRING)) any = true;
+    if (html.len > 0 and pbSetString(pb, html, PASTEBOARD_TYPE_HTML)) any = true;
+    if (rtf.len > 0 and pbSetString(pb, rtf, PASTEBOARD_TYPE_RTF)) any = true;
+    return any;
 }
 
 /// 클립보드에 PNG 바이트 쓰기 (Electron `clipboard.writeImage`). clipboardWriteBuffer wrapper.

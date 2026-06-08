@@ -670,6 +670,19 @@ export declare const clipboard: {
     writeTiff(tiffBase64: string): Promise<boolean>;
     /** TIFF 이미지 읽기 — base64 반환. TIFF 아니면 빈 문자열. */
     readTiff(): Promise<string>;
+    /** 북마크(title+url) 쓰기 (Electron `clipboard.writeBookmark`). macOS NSPasteboard
+     *  public.url(+url-name). macOS only — Win/Linux false(bookmark 포맷 미지원). */
+    writeBookmark(title: string, url: string): Promise<boolean>;
+    /** Find 펜보드에 텍스트 쓰기 (Electron `clipboard.writeFindText`). macOS cross-app find
+     *  pasteboard. macOS only — Win/Linux false. */
+    writeFindText(text: string): Promise<boolean>;
+    /** 여러 포맷 한 번에 쓰기 (Electron `clipboard.write({text,html,rtf})`). clear 1회 후
+     *  제공된 필드만 기록. macOS=atomic, Win/Linux=best-effort 단일(text 우선). */
+    write(data: {
+        text?: string;
+        html?: string;
+        rtf?: string;
+    }): Promise<boolean>;
 };
 export interface NotificationOptions {
     title: string;

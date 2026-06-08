@@ -172,6 +172,9 @@ fn onAllClosed(_: suji.Event) void {
 //   / writeTiff(base64) / readTiff() — TIFF round-trip (NSPasteboard public.tiff, PNG 동형)
 //   / readRtf() / writeRtf("{\\rtf1...}")  — RTF round-trip (NSPasteboard public.rtf)
 //   / readBuffer(uti) / writeBuffer(uti, base64)  — 임의 UTI raw bytes (raw ~8KB)
+//   / writeBookmark(title, url) / writeFindText(text)  — macOS NSPasteboard public.url /
+//     Find pasteboard (macOS only, Win/Linux false)
+//   / write({text?, html?, rtf?})  — 여러 포맷 atomic (macOS) / best-effort 단일 (Win/Linux)
 // suji.powerMonitor.getSystemIdleTime()  — 유휴 초
 //   (macOS CGEventSource / Linux XScreenSaver / Windows GetLastInputInfo)
 // suji.powerMonitor.getSystemIdleState(60)  — "active"|"idle"|"locked"

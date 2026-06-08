@@ -2014,6 +2014,36 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             .{ok},
         ) catch null;
     }
+    if (std.mem.eql(u8, cmd, "clipboard_write_bookmark")) {
+        var t_buf: [util.MAX_RESPONSE]u8 = undefined;
+        var u_buf: [util.MAX_RESPONSE]u8 = undefined;
+        // 필드 한도 초과(unescape null) → success:false (write_text 패턴; 빈 문자열은 0=정상).
+        const ok = blk: {
+            const title = util.unescapeJsonStr(util.extractJsonString(req_clean, "title") orelse "", &t_buf) orelse break :blk false;
+            const url = util.unescapeJsonStr(util.extractJsonString(req_clean, "url") orelse "", &u_buf) orelse break :blk false;
+            break :blk cef.clipboardWriteBookmark(t_buf[0..title], u_buf[0..url]);
+        };
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_bookmark\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_write_find_text")) {
+        const raw = util.extractJsonString(req_clean, "text") orelse "";
+        var unesc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |n| cef.clipboardWriteFindText(unesc_buf[0..n]) else false;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_find_text\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "clipboard_write")) {
+        var t_buf: [util.MAX_RESPONSE]u8 = undefined;
+        var h_buf: [util.MAX_RESPONSE]u8 = undefined;
+        var r_buf: [util.MAX_RESPONSE]u8 = undefined;
+        // 한 필드라도 한도 초과 → success:false(조용히 drop 금지). 빈 필드는 0=skip.
+        const ok = blk: {
+            const tn = util.unescapeJsonStr(util.extractJsonString(req_clean, "text") orelse "", &t_buf) orelse break :blk false;
+            const hn = util.unescapeJsonStr(util.extractJsonString(req_clean, "html") orelse "", &h_buf) orelse break :blk false;
+            const rn = util.unescapeJsonStr(util.extractJsonString(req_clean, "rtf") orelse "", &r_buf) orelse break :blk false;
+            break :blk cef.clipboardWriteMulti(t_buf[0..tn], h_buf[0..hn], r_buf[0..rn]);
+        };
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write\",\"success\":{}}}", .{ok}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "clipboard_read_rtf")) {
         var raw_buf: [util.MAX_RESPONSE]u8 = undefined;
         const rtf = cef.clipboardReadRtf(&raw_buf);

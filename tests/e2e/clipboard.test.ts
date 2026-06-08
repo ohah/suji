@@ -461,3 +461,37 @@ describe("누락 / 잘못된 필드", () => {
     expect(c.success).toBe(true);
   });
 });
+
+// ============================================
+// K. writeBookmark / writeFindText / write (multi) — macOS only
+// ============================================
+
+describe.skipIf(process.platform !== "darwin")("writeBookmark / writeFindText / write (macOS)", () => {
+  test("write({text,html}) atomic → readText + readHTML 둘 다 반영", async () => {
+    const w = await core<{ success: boolean }>({
+      cmd: "clipboard_write",
+      text: "multi-plain",
+      html: "<b>multi-html</b>",
+      rtf: "",
+    });
+    expect(w.success).toBe(true);
+    expect((await core<{ text: string }>({ cmd: "clipboard_read_text" })).text).toBe("multi-plain");
+    expect((await core<{ html: string }>({ cmd: "clipboard_read_html" })).html).toContain("multi-html");
+  });
+
+  test("writeBookmark → success + public.url 포맷 존재", async () => {
+    const w = await core<{ success: boolean }>({
+      cmd: "clipboard_write_bookmark",
+      title: "Suji",
+      url: "https://suji.dev",
+    });
+    expect(w.success).toBe(true);
+    const has = await core<{ present: boolean }>({ cmd: "clipboard_has", format: "public.url" });
+    expect(has.present).toBe(true);
+  });
+
+  test("writeFindText → success boolean (별도 find pasteboard, read-back 없음)", async () => {
+    const w = await core<{ success: boolean }>({ cmd: "clipboard_write_find_text", text: "find-me" });
+    expect(w.success).toBe(true);
+  });
+});
