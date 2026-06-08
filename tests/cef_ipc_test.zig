@@ -1693,6 +1693,29 @@ test "globalShortcut 미디어키 — global_shortcut.m NSEvent systemDefined �
     }
 }
 
+test "globalShortcut.setSuspended/isSuspended IPC + emit 게이트" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"global_shortcut_set_suspended\"",
+        "\"global_shortcut_is_suspended\"",
+        "cef.globalShortcutSetSuspended",
+        "cef.globalShortcutIsSuspended",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn globalShortcutSetSuspended",
+        "pub fn globalShortcutIsSuspended",
+        "if (g_suspended.load(.monotonic)) return;", // emit 게이트(suspended 시 trigger 삼킴, atomic)
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+}
+
 test "app.getPath IPC — main.zig dispatch + cef.zig 함수 + 7 키" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

@@ -28,6 +28,28 @@ func IsRegistered(accelerator string) string {
 	return suji.Invoke("__core__", buildIsRegisteredRequest(accelerator))
 }
 
+// RegisterAll registers multiple accelerators on the same click channel
+// (Electron globalShortcut.registerAll). Returns each register's raw JSON response.
+func RegisterAll(accelerators []string, click string) []string {
+	out := make([]string, len(accelerators))
+	for i, a := range accelerators {
+		out[i] = Register(a, click)
+	}
+	return out
+}
+
+// SetSuspended toggles suspended state (Electron globalShortcut.setSuspended).
+// Registrations stay active; only trigger delivery is gated. raw JSON: `{"success":bool}`.
+func SetSuspended(suspended bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"global_shortcut_set_suspended","suspended":%t}`, suspended))
+}
+
+// IsSuspended returns the current suspended state (Electron globalShortcut.isSuspended).
+// raw JSON: `{"suspended":bool}`.
+func IsSuspended() string {
+	return suji.Invoke("__core__", `{"cmd":"global_shortcut_is_suspended"}`)
+}
+
 func buildRegisterRequest(accelerator, click string) string {
 	return fmt.Sprintf(`{"cmd":"global_shortcut_register","accelerator":"%s","click":"%s"}`, jsonesc.Full(accelerator), jsonesc.Full(click))
 }

@@ -347,6 +347,8 @@ pub const setGlobalShortcutEmitHandler = cef_global_shortcut.setGlobalShortcutEm
 pub const globalShortcutRegister = cef_global_shortcut.globalShortcutRegister;
 pub const globalShortcutUnregister = cef_global_shortcut.globalShortcutUnregister;
 pub const globalShortcutUnregisterAll = cef_global_shortcut.globalShortcutUnregisterAll;
+pub const globalShortcutSetSuspended = cef_global_shortcut.globalShortcutSetSuspended;
+pub const globalShortcutIsSuspended = cef_global_shortcut.globalShortcutIsSuspended;
 pub const globalShortcutIsRegistered = cef_global_shortcut.globalShortcutIsRegistered;
 
 pub const WindowResizedHandler = cef_window_lifecycle.WindowResizedHandler;

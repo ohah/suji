@@ -45,6 +45,15 @@ pub fn setGlobalShortcutEmitHandler(handler: GlobalShortcutEmitHandler) void {
     if (comptime builtin.os.tag == .linux) cef_global_shortcut_linux.prepare();
 }
 
+/// Electron globalShortcut.setSuspended/isSuspended — emit 게이트(전 플랫폼 공용, gs_state).
+pub fn globalShortcutSetSuspended(v: bool) void {
+    gs_state.setSuspended(v);
+}
+
+pub fn globalShortcutIsSuspended() bool {
+    return gs_state.isSuspended();
+}
+
 // ============================================
 // Win32 globalShortcut FFI (Windows only) — RegisterHotKey + accelerator parser.
 // ============================================

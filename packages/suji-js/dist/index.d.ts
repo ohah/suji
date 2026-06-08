@@ -809,6 +809,15 @@ export declare const globalShortcut: {
     unregister(accelerator: string): Promise<boolean>;
     unregisterAll(): Promise<boolean>;
     isRegistered(accelerator: string): Promise<boolean>;
+    /** 여러 단축키를 같은 click 채널로 일괄 등록 (Electron `globalShortcut.registerAll`).
+     *  모두 성공 시 true, 하나라도 실패 시 false(성공분은 그대로 유지 — 롤백 없음).
+     *  ※ Electron 은 void 반환(per-accel silent fail) — suji 는 집계 bool 을 추가 제공. */
+    registerAll(accelerators: string[], click: string): Promise<boolean>;
+    /** 모든 등록 단축키를 일시 정지/재개 (Electron `globalShortcut.setSuspended`).
+     *  등록은 유지되고 trigger 이벤트 발신만 차단(isRegistered 는 true 유지). */
+    setSuspended(suspended: boolean): Promise<boolean>;
+    /** 현재 suspended 상태 (Electron `globalShortcut.isSuspended`). */
+    isSuspended(): Promise<boolean>;
 };
 export declare const shell: {
     /** URL을 시스템 기본 핸들러로 열기 (http(s) → 브라우저, mailto: → 메일 앱 등).
