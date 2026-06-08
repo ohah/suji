@@ -1147,6 +1147,46 @@ test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
     }
 }
 
+test "screen display-added/removed/metrics-changed 이벤트 옵저버 wired" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "fn screenEmitHandler",
+        "cef.screenInstall(&screenEmitHandler)", // 등록
+        "screen:", // 채널 prefix
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn screenInstall",
+        "fn screenChangedC", // count-diff 콜백
+        "\"display-added\"",
+        "\"display-removed\"",
+        "\"display-metrics-changed\"",
+        "suji_screen_install", // extern (screen.m)
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    // screen.m — NSApplicationDidChangeScreenParameters 옵저버.
+    const m_src = try std.Io.Dir.cwd().readFileAlloc(std_io, "src/platform/screen.m", std.testing.allocator, .limited(1024 * 1024));
+    defer std.testing.allocator.free(m_src);
+    inline for (.{
+        "NSApplicationDidChangeScreenParametersNotification",
+        "void suji_screen_install",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, m_src, needle) != null);
+    }
+
+    // build.zig 가 screen.m 을 macOS 컴파일에 포함(옵저버 링크).
+    const build_src = try readProjectFile("build.zig", 1024 * 1024);
+    defer std.testing.allocator.free(build_src);
+    try std.testing.expect(std.mem.indexOf(u8, build_src, "src/platform/screen.m") != null);
+}
+
 test "desktopCapturer.getSources IPC — main.zig dispatch + cef.zig 함수" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);

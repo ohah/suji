@@ -260,6 +260,8 @@ pub const shellOpenPath = cef_shell.shellOpenPath;
 pub const shellTrashItem = cef_shell.shellTrashItem;
 
 pub const screenGetAllDisplays = cef_screen.screenGetAllDisplays;
+pub const screenInstall = cef_screen.screenInstall;
+pub const screenUninstall = cef_screen.screenUninstall;
 pub const screenGetCursorPoint = cef_screen.screenGetCursorPoint;
 pub const screenGetDisplayNearestPoint = cef_screen.screenGetDisplayNearestPoint;
 pub const screenGetDisplayMatching = cef_screen.screenGetDisplayMatching;
