@@ -620,6 +620,14 @@ export interface ViewOpResponse {
   ok: boolean;
 }
 
+/** get_view_bounds 응답 — 추적된 view bounds(없으면 ok:false + 0). */
+export interface ViewBoundsResponse extends ViewOpResponse {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface GetChildViewsResponse {
   cmd: 'get_child_views';
   from: 'zig-core';
@@ -704,6 +712,14 @@ export const windows = {
   },
   getChildViews(hostId: number): Promise<GetChildViewsResponse> {
     return invoke<GetChildViewsResponse>('__core__', { cmd: 'get_child_views', hostId });
+  },
+  /** Electron View.getBounds() — view 추적 bounds. */
+  getViewBounds(viewId: number): Promise<ViewBoundsResponse> {
+    return invoke<ViewBoundsResponse>('__core__', { cmd: 'get_view_bounds', viewId });
+  },
+  /** Electron View.setBackgroundColor(color) — "#RRGGBB[AA]". */
+  setViewBackgroundColor(viewId: number, color: string): Promise<ViewOpResponse> {
+    return invoke<ViewOpResponse>('__core__', { cmd: 'set_view_background_color', viewId, color });
   },
 
   openDevTools(windowId: number): Promise<WindowOpResponse> {
@@ -1357,6 +1373,51 @@ export class BrowserWindow {
   }
   capturePage(path: string, rect?: { x: number; y: number; width: number; height: number }) {
     return windows.capturePage(this.#id, path, rect);
+  }
+}
+
+/** Electron `WebContentsView` 패리티 OO facade (suji-js 동형). viewId 는 windowId 풀. */
+export class WebContentsView {
+  readonly #id: number;
+  private constructor(id: number) {
+    this.#id = id;
+  }
+  get id(): number {
+    return this.#id;
+  }
+  static async create(opts: CreateViewOptions): Promise<WebContentsView> {
+    const res = await windows.createView(opts);
+    if (typeof res.viewId !== 'number') {
+      throw new Error(`create_view: no viewId in response (${JSON.stringify(res)})`);
+    }
+    return new WebContentsView(res.viewId);
+  }
+  static fromId(id: number): WebContentsView {
+    return new WebContentsView(id);
+  }
+  setBounds(bounds: SetBoundsArgs) {
+    return windows.setViewBounds(this.#id, bounds);
+  }
+  getBounds() {
+    return windows.getViewBounds(this.#id);
+  }
+  setVisible(visible: boolean) {
+    return windows.setViewVisible(this.#id, visible);
+  }
+  setBackgroundColor(color: string) {
+    return windows.setViewBackgroundColor(this.#id, color);
+  }
+  destroy() {
+    return windows.destroyView(this.#id);
+  }
+  loadURL(url: string) {
+    return windows.loadURL(this.#id, url);
+  }
+  executeJavaScript(code: string) {
+    return windows.executeJavaScript(this.#id, code);
+  }
+  openDevTools() {
+    return windows.openDevTools(this.#id);
   }
 }
 

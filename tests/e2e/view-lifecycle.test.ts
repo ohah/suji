@@ -267,6 +267,32 @@ describe("WebContentsView: setViewBounds / setViewVisible", () => {
     expect(r.ok).toBe(true);
   });
 
+  test("getViewBounds reflects last setViewBounds (tracked)", async () => {
+    const host = await freshHost();
+    const view = await mkView(host);
+    await coreCall({ cmd: "set_view_bounds", viewId: view, x: 11, y: 22, width: 333, height: 444 });
+    const b = (await coreCall({ cmd: "get_view_bounds", viewId: view })) as {
+      ok: boolean; x: number; y: number; width: number; height: number;
+    };
+    expect(b.ok).toBe(true);
+    expect(b.x).toBe(11);
+    expect(b.y).toBe(22);
+    expect(b.width).toBe(333);
+    expect(b.height).toBe(444);
+  });
+
+  test("getViewBounds on unknown view → ok:false", async () => {
+    const b = (await coreCall({ cmd: "get_view_bounds", viewId: 999999 })) as { ok: boolean };
+    expect(b.ok).toBe(false);
+  });
+
+  test("setViewBackgroundColor returns ok:true", async () => {
+    const host = await freshHost();
+    const view = await mkView(host);
+    const r = (await coreCall({ cmd: "set_view_background_color", viewId: view, color: "#3366ff" })) as { ok: boolean };
+    expect(r.ok).toBe(true);
+  });
+
   test("setViewVisible toggle ok:true", async () => {
     const host = await freshHost();
     const view = await mkView(host);

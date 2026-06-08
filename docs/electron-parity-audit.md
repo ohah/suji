@@ -85,9 +85,9 @@
 
 ### WebContentsView
 
-- **[medium]** `View.getBounds()` — Add getViewBounds handler in window_ipc.zig mirroring the pattern of existing view getters. Add public getViewBounds method to WindowManager in window.zig that retrieves the bounds from the stored Win
-- **[medium]** `View.setBackgroundColor(color)` — Add windows.setViewBackgroundColor(viewId: number, color: string) method in packages/suji-js/src/index.ts (mirror of windows.setBackgroundColor but for views, using cmd 'set_view_background_color'). T
-- **[medium]** `BrowserWindow facade for views` — Export a WebContentsView class in packages/suji-js/src/index.ts (after BrowserWindow, around line 708) that mirrors BrowserWindow's pattern: static create(opts): Promise<WebContentsView> delegating to
+- ~~**[medium]** `View.getBounds()`~~ ✅ (WebContentsView PR) — windows.getViewBounds(viewId)/WebContentsView.getBounds() @suji/api + @suji/node. `get_view_bounds` cmd → window_ipc.handleGetViewBounds → WindowManager.getViewBounds 가 **추적 view.bounds** 반환(window 게터 동형 결정적, native/VTable 불요). 없으면 ok:false.
+- ~~**[medium]** `View.setBackgroundColor(color)`~~ ✅ (WebContentsView PR) — windows.setViewBackgroundColor(viewId, "#RRGGBB[AA]"). `set_view_background_color` cmd → VTable → cef_web_contents_view.setViewBackgroundColor(cef_view_t.set_background_color, parseHexColorArgb). 모든 variant(child/overlay/views-parent)의 browser_view 에 적용.
+- ~~**[medium]** `BrowserWindow facade for views`~~ ✅ (WebContentsView PR) — `class WebContentsView`(@suji/api + @suji/node, BrowserWindow 동형): create({hostId,url,bounds})/fromId + setBounds/getBounds/setVisible/setBackgroundColor/destroy/loadURL/executeJavaScript/openDevTools(viewId=windowId 풀 위임).
 
 ### app
 

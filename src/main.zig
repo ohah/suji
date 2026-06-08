@@ -1831,6 +1831,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const visible = util.extractJsonBool(req_clean, "visible") orelse true;
         return window_ipc.handleSetViewVisible(view_id, visible, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "get_view_bounds")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        return window_ipc.handleGetViewBounds(view_id, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_view_background_color")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const view_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "viewId") orelse return null);
+        const raw_hex = util.extractJsonString(req_clean, "color") orelse "";
+        var hex_buf: [32]u8 = undefined;
+        const hex_n = util.unescapeJsonStr(raw_hex, &hex_buf) orelse 0;
+        return window_ipc.handleSetViewBackgroundColor(view_id, hex_buf[0..hex_n], response_buf, wm);
+    }
     if (std.mem.eql(u8, cmd, "get_child_views")) {
         const wm = window_mod.WindowManager.global orelse return null;
         const host_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "hostId") orelse return null);

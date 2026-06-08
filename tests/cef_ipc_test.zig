@@ -1147,6 +1147,41 @@ test "screen.getAllDisplays IPC — main.zig dispatch + cef.zig 함수" {
     }
 }
 
+test "WebContentsView.getBounds/setBackgroundColor IPC + cef_view_t wire" {
+    const main_src = try readMainSource();
+    defer std.testing.allocator.free(main_src);
+    inline for (.{
+        "\"get_view_bounds\"",
+        "\"set_view_background_color\"",
+        "window_ipc.handleGetViewBounds",
+        "window_ipc.handleSetViewBackgroundColor",
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, main_src, needle) != null);
+    }
+
+    const cef_src = try readCefSource();
+    defer std.testing.allocator.free(cef_src);
+    inline for (.{
+        "pub fn setViewBackgroundColor", // native cef_view_t.set_background_color
+        "cef_views_delegate.cefColorFromHex", // window setter 와 동일 hex 파서 재사용
+        "set_background_color orelse return", // cef_view_t base
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, cef_src, needle) != null);
+    }
+
+    // window.zig: VTable + WindowManager(getViewBounds=tracked view.bounds).
+    const win_src = try readProjectFile("src/core/window.zig", 1024 * 1024);
+    defer std.testing.allocator.free(win_src);
+    inline for (.{
+        "set_view_background_color:",
+        "pub fn getViewBounds",
+        "pub fn setViewBackgroundColor",
+        "return view.bounds", // getViewBounds = tracked
+    }) |needle| {
+        try std.testing.expect(std.mem.indexOf(u8, win_src, needle) != null);
+    }
+}
+
 test "screen display-added/removed/metrics-changed 이벤트 옵저버 wired" {
     const main_src = try readMainSource();
     defer std.testing.allocator.free(main_src);
