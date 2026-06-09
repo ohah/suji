@@ -844,6 +844,22 @@ pub const windows = struct {
         return windowCoreCmd("set_bounds", fields);
     }
 
+    /// 창 bounds 조회 (Electron BrowserWindow.getBounds). 응답:
+    /// `{...,"ok":bool,"x","y","width","height"}` — caller가 std.json 으로 파싱.
+    /// 프론트/Rust/Go SDK 엔 있던 reader 의 zig 백엔드 패리티(window-state 플러그인 사용).
+    pub fn getBounds(id: u32) ?[]const u8 {
+        return windowIdCmd("get_bounds", id);
+    }
+
+    /// 창 최대화 (Electron BrowserWindow.maximize). 응답 `{...,"ok":bool}`.
+    pub fn maximize(id: u32) ?[]const u8 {
+        return windowIdCmd("maximize", id);
+    }
+    /// 최대화 여부 (Electron BrowserWindow.isMaximized). 응답 `{...,"ok":bool,"maximized":bool}`.
+    pub fn isMaximized(id: u32) ?[]const u8 {
+        return windowIdCmd("is_maximized", id);
+    }
+
     /// JS code escape용 stack 버퍼 — cef.zig executeJavascript와 동일 임계값.
     const JS_CODE_STACK_BUF: usize = 4096;
 };

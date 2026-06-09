@@ -24,6 +24,7 @@ zig build test-store    # store 플러그인 (file-backed config store, named in
 zig build test-http     # http 플러그인 (renderer-safe fetch with URL allowlist, deny-by-default)
 zig build test-os-autostart # os-info + autostart 플러그인 (시스템 정보 / 로그인 자동실행)
 zig build test-notification-rich # notification-rich 플러그인 (WinRT/UNUserNotificationCenter/Freedesktop actions)
+zig build test-window-state # window-state 플러그인 (창 bounds/maximized 저장·복원; CEF-free 표면 — file/validate/graceful no-window)
 
 # 임베드 코어 라이브러리 (CEF 무관 — 모바일/임베드용)
 zig build lib                                  # libsuji_core.a (host)
@@ -70,8 +71,9 @@ bash tests/e2e/run-gpu-accel.sh         # GPU 가속 회귀 가드 (#12) — Web
 bash tests/e2e/run-releasesafe-renderer-boot.sh # #60 part2 회귀 가드 — ReleaseSafe 빌드해 렌더러 V8 부트스트랩(window.__suji__ 바인딩) 검증(Windows CI). 디버깅: SUJI_CEF_DEBUG=1
 bash tests/e2e/run-set-user-agent.sh    # set_user_agent CDP override 실효(navigator.userAgent)
 bash tests/e2e/run-context-isolation.sh # window.__suji__ frozen/슬롯봉인/변조차단/기능보존
-bash tests/e2e/run-plugin-wrappers.sh   # 공식 플러그인 (state/sqlite/log/store/http/notification-rich) × {JS, Node} wrapper wire-contract (mock bridge)
+bash tests/e2e/run-plugin-wrappers.sh   # 공식 플러그인 (state/sqlite/log/store/http/notification-rich/window-state) × {JS, Node} wrapper wire-contract (mock bridge)
 bash tests/e2e/run-plugin-state-integration.sh # state plugin DLL 라운드트립(__suji__ → DLL → 응답)
+bash tests/e2e/run-plugin-window-state.sh # window-state plugin 실 CEF 창 라운드트립(save 가 라이브 bounds 읽기 → file → get/restore/clear)
 bash tests/e2e/run-lua-e2e.sh           # Lua 백엔드 (vendored Lua 5.4 + cjson) invoke 왕복/cjson roundtrip/50 concurrent (-Dlua 자동 빌드)
 bash tests/e2e/run-python-e2e.sh        # Python 백엔드 (embedded CPython 3.13 + GIL) invoke 왕복/json roundtrip/50 concurrent/send·on (scripts/stage-python.sh 자동 staging)
 
