@@ -62,7 +62,7 @@ done
 ABI="$("$ADB" -s "$SERIAL" shell getprop ro.product.cpu.abi | tr -d '\r')"
 
 echo "=== build-lib.sh $ABI ==="
-( cd "$dir" && ./build-lib.sh "$ABI" >/dev/null )
+( cd "$dir" && bash build-lib.sh "$ABI" >/dev/null ) # bash 호출 — exec bit 누락 변형도 동작
 
 # AGP 8.5.2 ↔ Gradle 호환 wrapper 핀(시스템 gradle 9.x 비호환 회피).
 if [ ! -x "$dir/gradlew" ]; then
