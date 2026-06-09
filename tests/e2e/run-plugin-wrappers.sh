@@ -8,4 +8,4 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
-bun test plugins/state/js/src plugins/state/node/src plugins/sqlite/js/src plugins/sqlite/node/src plugins/log/js/src plugins/log/node/src plugins/store/js/src plugins/store/node/src plugins/http/js/src plugins/http/node/src plugins/notification-rich/js/src plugins/notification-rich/node/src plugins/window-state/js/src plugins/window-state/node/src
+bun test plugins/state/js/src plugins/state/node/src plugins/sqlite/js/src plugins/sqlite/node/src plugins/log/js/src plugins/log/node/src plugins/store/js/src plugins/store/node/src plugins/http/js/src plugins/http/node/src plugins/notification-rich/js/src plugins/notification-rich/node/src plugins/window-state/js/src plugins/window-state/node/src plugins/positioner/js/src plugins/positioner/node/src

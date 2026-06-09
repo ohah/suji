@@ -14,7 +14,7 @@
       "protocol": "suji"
     }
   ],
-  "plugins": ["state", "window-state"],
+  "plugins": ["state", "window-state", "positioner"],
   "backends": [
     { "name": "zig", "lang": "zig", "entry": "backends/zig" },
     { "name": "rust", "lang": "rust", "entry": "backends/rust" },

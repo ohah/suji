@@ -1,0 +1,65 @@
+---
+title: positioner 플러그인
+description: 창을 화면/트레이/커서 기준 위치로 배치 (Tauri positioner 동등)
+---
+
+# positioner 플러그인
+
+창을 한 줄로 화면 모서리/중앙, 커서, 트레이 아이콘 아래로 배치한다. 코어 `screen.getAllDisplays`
++ `windows.getBounds/setBounds` (+ `tray.getBounds`/`screen.getCursorScreenPoint`) 조합이라
+**새 네이티브 코드 0**.
+
+## 설치
+
+```json
+{
+  "plugins": ["positioner"]
+}
+```
+
+## 사용 (`@suji/plugin-positioner`)
+
+```ts
+import { positioner } from '@suji/plugin-positioner';
+
+await positioner.move('center');               // 현재 디스플레이 work area 중앙
+await positioner.move('bottom-right');         // 우하단
+await positioner.move('top-center');           // 상단 중앙
+await positioner.move('at-cursor');            // 커서 위치 (창 좌상단)
+await positioner.move('tray-center', { trayId }); // 트레이 아이콘 아래 (menu-bar 앱)
+
+const { x, y } = await positioner.move('center'); // 적용된 좌상단 좌표
+```
+
+호출 창은 코어가 `__window` 를 자동 주입하므로 `windowId` 생략 가능. Node 백엔드
+(`@suji/plugin-positioner-node`)는 창 컨텍스트가 없어 `{ windowId }` 명시 필요.
+
+## position 목록
+
+| 종류 | 값 |
+|---|---|
+| 화면 상대(work area 내) | `center`, `top-left`, `top-right`, `bottom-left`, `bottom-right`, `top-center`, `bottom-center`, `left-center`, `right-center` |
+| 커서 | `at-cursor` |
+| 트레이(`trayId` 필요) | `tray-center` |
+
+모든 위치는 창이 화면 밖으로 나가지 않도록 work area 로 **clamp** 된다.
+
+## 동작 / 좌표계
+
+- 창이 **현재 위치한 디스플레이**의 work area(메뉴바/Dock/taskbar 제외) 안에서 계산한다.
+  multi-display 는 primary 디스플레이 높이 기준 전역 변환으로 정확히 처리.
+- 코어 `screen`/`tray`/`cursor` rect 는 macOS NSScreen **bottom-up** 좌표, 창 bounds 는
+  CEF **top-left** 좌표라, macOS 는 primary 높이로 y-flip 후 계산한다(Win/Linux 는 둘 다
+  top-left 라 flip 없음).
+
+## 정직 경계
+
+- **tray-center 는 macOS 전용** — `tray.getBounds` 가 Win/Linux 에서 0-rect 라
+  `tray bounds unavailable` 에러를 반환한다(잘못된 코너 배치 대신 명시적 실패 →
+  caller 가 화면 상대 위치로 폴백 가능). 화면 상대 위치 + at-cursor 는 전 플랫폼 동작.
+- **multi-display 정확** — at-cursor 는 커서가 있는 디스플레이, tray-center 는 트레이가
+  있는 디스플레이, 화면 위치는 창이 있는 디스플레이의 work area 로 각각 clamp 한다.
+- 잘못된 position 문자열은 `unknown position` 에러. 창 컨텍스트 없음(`windowId` 0)은
+  `no window`. 범위 밖 `windowId`/좌표는 패닉 대신 에러(`std.math.cast`).
+- 단위 테스트는 screen/window API 가 없어 graceful 표면만 커버 — 실 좌표 단조성
+  (top-left < bottom-right, center 사이)은 `bash tests/e2e/run-plugin-positioner.sh`(실 CEF 창)가 검증.
