@@ -228,13 +228,14 @@ fn handleBrowserInvoke(
     g_current_call_ctx = .{ .browser = browser, .frame = frame, .seq_id = seq_id, .browser_handle = sender_handle, .deferred = false };
     defer g_current_call_ctx = null;
 
-    // 백엔드 호출
-    var response_buf: [16384]u8 = undefined;
+    // 백엔드 호출 — 재사용 큰 힙(4MB)으로 받아 큰 응답을 안 자른다. 송신은 sendInvokeResponse
+    // 가 32KB 청크로 분할(작은 건 단일). 콜백 시그니처·핸들러는 전부 그대로.
+    const response_buf = responseBuf() orelse return 0;
     var success: bool = false;
     var result: []const u8 = "\"no handler\"";
 
     if (g_invoke_callback) |cb| {
-        if (cb(channel, data_to_backend, &response_buf)) |resp| {
+        if (cb(channel, data_to_backend, response_buf)) |resp| {
             result = resp;
             success = true;
         } else {
@@ -259,12 +260,46 @@ fn handleBrowserInvoke(
     return 1;
 }
 
+// 단일 CefProcessMessage 가 안전히 싣는 청크 크기. 큰 응답은 N개로 쪼개 보내 무제한 지원.
+const RESP_CHUNK_LEN: usize = 32 * 1024;
+
+// 백엔드 응답 수용 버퍼(재사용). 콜백이 여기 write → 32KB 청크로 송신. 브라우저 IPC 는 단일
+// 스레드라 재사용 안전. lazy alloc(첫 큰 호출 때만). 이 이상(>4MB)은 localhost http 권장.
+const RESP_BUF_LEN: usize = 4 * 1024 * 1024;
+var g_response_buf: ?[]u8 = null;
+fn responseBuf() ?[]u8 {
+    if (g_response_buf) |b| return b;
+    const b = std.heap.c_allocator.alloc(u8, RESP_BUF_LEN) catch return null;
+    g_response_buf = b;
+    return b;
+}
+
 fn sendInvokeResponse(browser: ?*c._cef_browser_t, frame: ?*c._cef_frame_t, seq_id: i32, success: bool, result: []const u8) void {
     const f = frame orelse blk: {
         const br = browser orelse return;
         break :blk asPtr(c.cef_frame_t, br.get_main_frame.?(br)) orelse return;
     };
 
+    // 작은 응답: 기존 단일 suji:response (회귀 없음).
+    if (result.len <= RESP_CHUNK_LEN) {
+        sendResponseSingle(f, seq_id, success, result);
+        return;
+    }
+
+    // 큰 응답: suji:response-chunk ×N → suji:response-complete. JS(_chunks)가 재조립.
+    const total: i32 = @intCast((result.len + RESP_CHUNK_LEN - 1) / RESP_CHUNK_LEN);
+    var idx: i32 = 0;
+    var off: usize = 0;
+    while (off < result.len) {
+        const end = @min(off + RESP_CHUNK_LEN, result.len);
+        sendResponseChunk(f, seq_id, idx, total, result[off..end]);
+        off = end;
+        idx += 1;
+    }
+    sendResponseComplete(f, seq_id, success);
+}
+
+fn sendResponseSingle(f: *c.cef_frame_t, seq_id: i32, success: bool, result: []const u8) void {
     var resp_name: c.cef_string_t = .{};
     setCefString(&resp_name, "suji:response");
     const resp_msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&resp_name)) orelse return;
@@ -278,6 +313,30 @@ fn sendInvokeResponse(browser: ?*c._cef_browser_t, frame: ?*c._cef_frame_t, seq_
     _ = resp_args.set_string.?(resp_args, 2, &result_str);
 
     f.send_process_message.?(f, c.PID_RENDERER, resp_msg);
+}
+
+fn sendResponseChunk(f: *c.cef_frame_t, seq_id: i32, idx: i32, total: i32, data: []const u8) void {
+    var name: c.cef_string_t = .{};
+    setCefString(&name, "suji:response-chunk");
+    const msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&name)) orelse return;
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return;
+    _ = args.set_int.?(args, 0, seq_id);
+    _ = args.set_int.?(args, 1, idx);
+    _ = args.set_int.?(args, 2, total);
+    var data_str: c.cef_string_t = .{};
+    setCefString(&data_str, data);
+    _ = args.set_string.?(args, 3, &data_str);
+    f.send_process_message.?(f, c.PID_RENDERER, msg);
+}
+
+fn sendResponseComplete(f: *c.cef_frame_t, seq_id: i32, success: bool) void {
+    var name: c.cef_string_t = .{};
+    setCefString(&name, "suji:response-complete");
+    const msg = asPtr(c.cef_process_message_t, c.cef_process_message_create(&name)) orelse return;
+    const args = asPtr(c.cef_list_value_t, msg.get_argument_list.?(msg)) orelse return;
+    _ = args.set_int.?(args, 0, seq_id);
+    _ = args.set_int.?(args, 1, if (success) 1 else 0);
+    f.send_process_message.?(f, c.PID_RENDERER, msg);
 }
 
 /// 메인 프로세스: emit 처리 → EventBus
