@@ -29,11 +29,16 @@ trap 'rm -rf "$OUT"; [ -z "$installed" ] || xcrun simctl uninstall "$UDID" "$ins
 echo "시뮬레이터 UDID=$UDID, 변형=$V"
 
 echo "=== build-lib.sh sim ==="
-( cd "$dir" && ./build-lib.sh sim >/dev/null )
-proj="$(cd "$dir" && ls -d *.xcodeproj | head -1)"
-scheme="${proj%.xcodeproj}"
-echo "=== xcodegen + xcodebuild ($scheme) ==="
+( cd "$dir" && bash build-lib.sh sim >/dev/null )
+# xcodegen 을 proj 계산(ls)보다 먼저 — .xcodeproj 는 전 변형이 .gitignore 대상이라
+# 아무도 커밋하지 않는다(전부 project.yml 만). xcodegen 이 생성해야 ls 가 찾으므로
+# 깨끗한 체크아웃에서 ls-first 면 proj 가 비어 xcodebuild 가 모호하게 실패한다.
+echo "=== xcodegen ==="
 ( cd "$dir" && xcodegen generate >/dev/null )
+proj="$(cd "$dir" && ls -d *.xcodeproj | head -1)"
+[ -n "$proj" ] || { echo "FAIL: .xcodeproj 없음 (xcodegen 실패?)"; exit 1; }
+scheme="${proj%.xcodeproj}"
+echo "=== xcodebuild ($scheme) ==="
 ( cd "$dir" && xcodebuild -project "$proj" -scheme "$scheme" -sdk iphonesimulator \
     -derivedDataPath "$OUT/dd" ARCHS=arm64 build >/dev/null )
 

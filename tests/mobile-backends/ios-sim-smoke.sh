@@ -34,14 +34,21 @@ for v in "${VARIANTS[@]}"; do
   dir="$REPO/examples/ios/$v"
   [ -d "$dir" ] || { echo "[$v] 변형 디렉토리 없음 — skip"; fail=1; continue; }
   echo "=== [$v] build-lib.sh sim ==="
-  ( cd "$dir" && ./build-lib.sh sim >/dev/null )
+  ( cd "$dir" && bash build-lib.sh sim >/dev/null ) \
+    || { echo "[$v] build-lib 실패 — FAIL"; fail=1; continue; }
 
+  # xcodegen 을 ls 보다 먼저 — .xcodeproj 는 전 변형이 .gitignore 대상이라 아무도
+  # 커밋하지 않는다. xcodegen 이 생성해야 ls 가 찾는다(ls-first 면 깨끗한 트리에서 빈 proj).
+  echo "=== [$v] xcodegen ==="
+  ( cd "$dir" && xcodegen generate >/dev/null ) \
+    || { echo "[$v] xcodegen 실패 — FAIL"; fail=1; continue; }
   proj="$(cd "$dir" && ls -d *.xcodeproj | head -1)"
+  [ -n "$proj" ] || { echo "[$v] .xcodeproj 없음 — FAIL"; fail=1; continue; }
   scheme="${proj%.xcodeproj}"
-  echo "=== [$v] xcodegen + xcodebuild ($scheme) ==="
-  ( cd "$dir" && xcodegen generate >/dev/null )
+  echo "=== [$v] xcodebuild ($scheme) ==="
   ( cd "$dir" && xcodebuild -project "$proj" -scheme "$scheme" -sdk iphonesimulator \
-      -derivedDataPath "$DD/$v" ARCHS=arm64 build >/dev/null )
+      -derivedDataPath "$DD/$v" ARCHS=arm64 build >/dev/null ) \
+    || { echo "[$v] xcodebuild 실패 — FAIL"; fail=1; continue; }
 
   app="$(find "$DD/$v/Build/Products" -maxdepth 3 -name '*.app' | head -1)"
   [ -n "$app" ] || { echo "[$v] .app 산출물 없음 — FAIL"; fail=1; continue; }
