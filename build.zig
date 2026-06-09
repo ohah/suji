@@ -1168,6 +1168,28 @@ pub fn build(b: *std.Build) void {
     const window_state_test_step = b.step("test-window-state", "Run window-state plugin tests (requires built dylib)");
     window_state_test_step.dependOn(&window_state_test_run.step);
 
+    const positioner_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/positioner_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const positioner_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    positioner_loader.addImport("events", events_module);
+    positioner_loader.addImport("runtime", runtime_module);
+    positioner_loader.addImport("util", util_module);
+    positioner_test_mod.addImport("loader", positioner_loader);
+    positioner_test_mod.addImport("events", events_module);
+    const positioner_test = b.addTest(.{ .root_module = positioner_test_mod });
+    const positioner_test_run = b.addRunArtifact(positioner_test);
+    positioner_test_run.setCwd(b.path("."));
+    const positioner_test_step = b.step("test-positioner", "Run positioner plugin tests (requires built dylib)");
+    positioner_test_step.dependOn(&positioner_test_run.step);
+
     // HTTP plugin tests (log/state/sqlite/store 와 동형)
     const http_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/http_plugin_test.zig"),
