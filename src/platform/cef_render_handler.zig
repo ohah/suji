@@ -251,6 +251,10 @@ fn onRendererProcessMessageReceived(
 
     if (std.mem.eql(u8, msg_name, "suji:response")) {
         return cef_render_ipc.handleRendererResponse(msg);
+    } else if (std.mem.eql(u8, msg_name, "suji:response-chunk")) {
+        return cef_render_ipc.handleRendererChunk(msg);
+    } else if (std.mem.eql(u8, msg_name, "suji:response-complete")) {
+        return cef_render_ipc.handleRendererComplete(msg);
     } else if (std.mem.eql(u8, msg_name, "suji:event")) {
         return cef_render_ipc.handleRendererEvent(msg);
     }

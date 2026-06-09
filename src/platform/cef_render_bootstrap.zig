@@ -47,6 +47,19 @@ pub fn injectJsHelpers(ctx: *c._cef_v8_context_t) void {
         \\    if (p) { delete s._pending[seq]; p.reject(new Error(err)); }
         \\    else s._early[seq] = { ok: false, value: err };
         \\  };
+        \\  s._chunks = {};
+        \\  s._nextChunk = function(seq, idx, total, data) {
+        \\    var st = s._chunks[seq];
+        \\    if (!st) { st = s._chunks[seq] = { parts: new Array(total), got: 0 }; }
+        \\    if (idx >= 0 && idx < total && st.parts[idx] === undefined) { st.parts[idx] = data; st.got++; }
+        \\  };
+        \\  s._chunkComplete = function(seq, success) {
+        \\    var st = s._chunks[seq];
+        \\    var full = st ? st.parts.join('') : '';
+        \\    delete s._chunks[seq];
+        \\    if (success) s._nextResolve(seq, full);
+        \\    else s._nextReject(seq, full);
+        \\  };
         \\  s.invoke = function(channel, data, options) {
         \\    var req = data ? Object.assign({cmd: channel}, data) : {cmd: channel};
         \\    var target = options && options.target;

@@ -240,13 +240,16 @@ pub const EventBus = struct {
 
     fn emitToJs(self: *EventBus, event_name: []const u8, data: []const u8, target: ?u32) void {
         if (self.webview_eval) |eval_fn| {
-            var js_buf: [16384]u8 = undefined;
-            const js = std.fmt.bufPrint(&js_buf,
+            // 16KB 고정이면 큰 data(예: 200KB 응답)가 안 들어가 bufPrint 가 실패→이벤트 누락.
+            // event_name+data 길이에 맞춰 동적 alloc(allocPrintZ)으로 잘림 없이 실행.
+            const tmp = std.fmt.allocPrint(self.allocator,
                 "window.__suji__ && window.__suji__.__dispatch__ && window.__suji__.__dispatch__(\"{s}\", {s})",
                 .{ event_name, data },
             ) catch return;
-            js_buf[js.len] = 0;
-            eval_fn(target, js_buf[0..js.len :0]);
+            defer self.allocator.free(tmp);
+            const js = self.allocator.dupeZ(u8, tmp) catch return;
+            defer self.allocator.free(js);
+            eval_fn(target, js);
         }
     }
 };
