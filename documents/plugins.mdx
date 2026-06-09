@@ -16,7 +16,7 @@ JS)에서 일관되게 호출하기 위한 구조. OS native API (clipboard/fs/d
 | 위치 | `src/platform/cef.zig` (코어) | `plugins/<name>/` (외부 디렉토리) |
 | 빌드 | suji 코어와 함께 | 별도 dylib (또는 source 포함) |
 | 5 SDK 노출 | ✅ 자동 (suji core가 책임) | ✅ wrapper 직접 작성 |
-| 예시 | clipboard, fs, dialog, tray, menu, notification, globalShortcut | `state`, `sqlite`, `log`, `store`, `http`, `notification-rich`, `window-state`, `positioner`, 사용자 DB / 인증 / telemetry 등 |
+| 예시 | clipboard, fs, dialog, tray, menu, notification, globalShortcut | `state`, `sqlite`, `log`, `store`, `http`, `notification-rich`, `window-state`, `positioner`, `upload`, 사용자 DB / 인증 / telemetry 등 |
 | Mac App Sandbox 호환 | ✅ (entitlements + 코어 binary) | 🟡 dylib + entitlements 분리 작업 필요 |
 
 OS native API를 plugin으로 만들지 못하는 이유:

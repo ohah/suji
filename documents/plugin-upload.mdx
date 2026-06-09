@@ -1,0 +1,81 @@
+---
+title: upload 플러그인
+description: 파일 업로드(multipart/form-data) / 다운로드(→디스크) (Tauri upload 동등)
+---
+
+# upload 플러그인
+
+디스크 파일을 그대로 서버에 업로드하거나, 서버 응답을 디스크 파일로 내려받는다 —
+바이너리를 JS 메모리에 올리지 않는다. `http` 플러그인이 문자열 body 만 다루는 것과
+대비된다. 코어 `std.http.Client` + 파일 I/O 조합.
+
+## 설치
+
+```json
+{
+  "plugins": ["upload"]
+}
+```
+
+## 사용 (`@suji/plugin-upload`)
+
+```ts
+import { upload } from '@suji/plugin-upload';
+
+// 1) 두 allowlist 를 먼저 설정 (deny-by-default — 안 하면 전부 차단)
+await upload.setAllowedUrls(['https://api.example.com/*']);
+await upload.setAllowedPaths(['~/Documents/myapp']);
+
+// 2) 업로드 — 디스크 파일을 multipart/form-data 로 POST
+const res = await upload.upload(
+  'https://api.example.com/u',
+  '~/Documents/myapp/photo.png',
+  { fieldName: 'file', fileName: 'photo.png', contentType: 'image/png', id: 'job1' },
+);
+// res = { status, body }
+
+// 3) 다운로드 — 서버 body 를 디스크 파일로 저장
+const dl = await upload.download('https://api.example.com/f/1', '~/Documents/myapp/out.bin', { id: 'job2' });
+// dl = { status, bytes }
+
+// 4) 완료 progress 구독
+const unsub = upload.onProgress((p) => console.log(p.id, p.uploaded, '/', p.total, p.done));
+unsub();
+```
+
+## 채널 (저수준)
+
+| 채널 | 요청 | 응답 |
+|---|---|---|
+| `upload:upload` | `{url, filePath, fieldName?, fileName?, contentType?, id?}` | `{status, body}` |
+| `upload:download` | `{url, filePath, id?}` | `{status, bytes}` |
+| `upload:set_allowed_urls` / `get_allowed_urls` | `{urls:[glob,...]}` | `{ok}` / `{urls}` |
+| `upload:set_allowed_paths` / `get_allowed_paths` | `{paths:[prefix,...]}` | `{ok}` / `{paths}` |
+
+완료 시 `suji.send("upload:progress", {id, uploaded, total, done:true})` 발화.
+
+## 보안 (2중 deny-by-default)
+
+`http` 플러그인의 URL allowlist + `fs` sandbox 의 path allowlist 를 **둘 다** 적용한다.
+
+- **URL allowlist** — 비어 있으면 모든 요청 차단. scheme `http`/`https` 만, `user@host`
+  userinfo bypass 차단, CRLF 차단, redirect 미추적(`.not_allowed`) → SSRF 방지.
+- **PATH allowlist** — 비어 있으면 모든 파일 접근 차단. 없으면 렌더러가 임의 파일을 읽어
+  업로드(유출)하거나 임의 경로로 다운로드(덮어쓰기)할 수 있다. `..` 항상 차단,
+  prefix + separator boundary(`/foo` 허용 시 `/fooX` 통과 X), `*`=escape hatch.
+
+`~` prefix 는 `$HOME`/`%USERPROFILE%` 로 확장된다(allowlist 패턴·filePath 모두 — 그래야 `~/Documents` 허용이 확장된 경로와 매치된다).
+
+> ⚠️ path 검증은 **lexical**(문자열 prefix)이다 — 코어 fs sandbox 와 동일하게 symlink 를
+> realpath 로 해석하지 않는다. allowlist 디렉토리 안의 symlink 가 밖을 가리키면 우회 가능
+> (fs sandbox 와 동일 신뢰 경계). 신뢰할 수 없는 symlink 가 있는 디렉토리는 allowlist 에 넣지 말 것.
+
+## 정직 경계
+
+- **bounded in-memory** — 파일 ≤ 64MB, 응답 ≤ 16MB. 코어가 `std.http.Client.fetch`
+  (payload 일괄)만 쓰고 low-level streaming request 는 미사용이라, **mid-stream(청크)
+  progress 는 불가** — 시작/완료 이벤트만 발화한다(`done:true`). 진짜 청크 단위 진행률은
+  std.http low-level API 도입 후속.
+- multipart boundary 가 파일에 우연히 포함되면 `boundary collision` 에러(손상 방지).
+- 단위 테스트는 network 없이 allowlist/SSRF/traversal 표면만 — 실 업/다운로드 라운드트립은
+  `bash tests/e2e/run-plugin-upload.sh`(실 Bun HTTP 서버 + 디스크)가 검증.

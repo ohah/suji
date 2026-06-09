@@ -1190,6 +1190,28 @@ pub fn build(b: *std.Build) void {
     const positioner_test_step = b.step("test-positioner", "Run positioner plugin tests (requires built dylib)");
     positioner_test_step.dependOn(&positioner_test_run.step);
 
+    const upload_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/upload_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const upload_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    upload_loader.addImport("events", events_module);
+    upload_loader.addImport("runtime", runtime_module);
+    upload_loader.addImport("util", util_module);
+    upload_test_mod.addImport("loader", upload_loader);
+    upload_test_mod.addImport("events", events_module);
+    const upload_test = b.addTest(.{ .root_module = upload_test_mod });
+    const upload_test_run = b.addRunArtifact(upload_test);
+    upload_test_run.setCwd(b.path("."));
+    const upload_test_step = b.step("test-upload", "Run upload plugin tests (requires built dylib)");
+    upload_test_step.dependOn(&upload_test_run.step);
+
     // HTTP plugin tests (log/state/sqlite/store 와 동형)
     const http_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/http_plugin_test.zig"),
