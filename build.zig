@@ -1146,6 +1146,28 @@ pub fn build(b: *std.Build) void {
     const store_test_step = b.step("test-store", "Run store plugin tests (requires built dylib)");
     store_test_step.dependOn(&store_test_run.step);
 
+    const window_state_test_mod = b.createModule(.{
+        .root_source_file = b.path("tests/window_state_plugin_test.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const window_state_loader = b.createModule(.{
+        .root_source_file = b.path("src/backends/loader.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    window_state_loader.addImport("events", events_module);
+    window_state_loader.addImport("runtime", runtime_module);
+    window_state_loader.addImport("util", util_module);
+    window_state_test_mod.addImport("loader", window_state_loader);
+    window_state_test_mod.addImport("events", events_module);
+    const window_state_test = b.addTest(.{ .root_module = window_state_test_mod });
+    const window_state_test_run = b.addRunArtifact(window_state_test);
+    window_state_test_run.setCwd(b.path("."));
+    const window_state_test_step = b.step("test-window-state", "Run window-state plugin tests (requires built dylib)");
+    window_state_test_step.dependOn(&window_state_test_run.step);
+
     // HTTP plugin tests (log/state/sqlite/store 와 동형)
     const http_test_mod = b.createModule(.{
         .root_source_file = b.path("tests/http_plugin_test.zig"),

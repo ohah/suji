@@ -1,0 +1,87 @@
+---
+title: window-state 플러그인
+description: 창 위치/크기/최대화 상태 저장·복원 (Electron/Tauri window-state 동등)
+---
+
+# window-state 플러그인
+
+창을 닫았다 다시 열어도 마지막 위치·크기·최대화 상태를 그대로 복원한다. 코어 백엔드
+window API(`getBounds`/`isMaximized`/`setBounds`/`maximize`)를 조합 + 파일 영속이라
+**새 네이티브 코드 0** — `store` 플러그인의 atomic-write 패턴을 재사용한다.
+
+## 설치
+
+`suji.json`에 등록:
+
+```json
+{
+  "plugins": ["window-state"]
+}
+```
+
+## 동작 모델
+
+코어에 window move/resize **이벤트가 없으므로** 자동 추적은 불가능하다(Tauri 도
+디바운스 차이뿐). 따라서 적절한 시점에 `saveState()`를 **명시 호출**하고, 시작 시
+`restoreState()`를 호출한다.
+
+저장 위치: `<appdata>/suji-app/window-state/<key>.json` (key 별 단일 파일).
+`key` 생략 시 **호출 창 name**(있으면) 또는 `"main"` — 멀티 윈도우는 `key`로 구분.
+
+## 프론트 (`@suji/plugin-window-state`)
+
+```ts
+import { windowState } from '@suji/plugin-window-state';
+
+// 1) 앱 시작 — 마지막 상태 복원 (저장값 없으면 false)
+await windowState.restoreState();
+
+// 2) 종료 직전 — 현재 상태 저장 (move/resize 이벤트가 없어 명시 저장)
+suji.on('app:before-quit', () => windowState.saveState());
+
+// 멀티 윈도우 — key 로 슬롯 구분
+await windowState.restoreState({ key: 'settings' });
+await windowState.saveState({ key: 'settings' });
+
+// 조회/삭제
+const s = await windowState.getState({ key: 'main' });
+// s = { x, y, width, height, maximized } | null
+await windowState.clearState({ key: 'main' });
+```
+
+호출 창은 코어가 `__window`를 자동 주입하므로 `windowId`를 줄 필요가 없다.
+
+## 백엔드 (`@suji/plugin-window-state-node`)
+
+Wire contract 은 프론트와 동일. ⚠️ Node 백엔드는 **창 컨텍스트가 없으므로** `windowId`를
+명시해야 한다.
+
+```ts
+const { windowState } = require('@suji/plugin-window-state-node');
+await windowState.restoreState({ key: 'main', windowId: 1 });
+await windowState.saveState({ key: 'main', windowId: 1 });
+```
+
+## 채널 (저수준)
+
+| 채널 | 요청 | 응답 |
+|---|---|---|
+| `window-state:save` | `{key?, windowId?}` | `{ok:true}` |
+| `window-state:restore` | `{key?, windowId?}` | `{ok:true, restored:bool}` |
+| `window-state:get` | `{key?}` | `{state: {x,y,width,height,maximized}|null}` |
+| `window-state:clear` | `{key?}` | `{ok:true}` |
+
+`save`/`restore`는 `windowId`(명시) 우선, 없으면 호출 창. `id=0`(창 컨텍스트 없음)이면
+`"no window"` 에러. `key`는 path traversal 방지 화이트리스트(`store` 와 동일 가드).
+
+## 정직 경계
+
+- **자동 추적 없음** — move/resize 이벤트가 코어에 없어 `saveState`를 명시 호출해야 한다.
+- **bounds 먼저, 그 다음 maximize** — 복원은 항상 `setBounds()`로 저장 위치·크기를 적용한
+  뒤, 저장이 maximized 면 `maximize()`. 코어에 `getNormalBounds`(pre-maximize bounds)가
+  없어 maximized 창의 저장 bounds 는 최대화 bounds 자체다 — unmaximize 시 pre-maximize
+  크기로 복귀하지는 않는다(정직 경계).
+- **잘못된 정수/키 방어** — 디스크 파일이 손상/변조돼 범위 밖 좌표면 패닉 대신
+  `corrupt state` 에러. 자동 파생 key(창 name)가 파일명 부적합(공백 등)이면 `"main"` 으로 폴백.
+- 단위 테스트는 window API 가 없어 file/validate/graceful-no-window 표면만 커버 —
+  실 창 라운드트립은 `bash tests/e2e/run-plugin-window-state.sh`(실 CEF 창)가 검증.
