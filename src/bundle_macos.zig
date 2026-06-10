@@ -146,6 +146,33 @@ pub fn createBundle(
         } else |_| {}
     }
 
+    // 2.6. embedded Node runtime (libnode) — node 백엔드 앱은 필수 동반.
+    //   메인 바이너리는 libnode 를 weak-link(`@rpath/libnode.137.dylib`)하고 rpath 에는
+    //   `@executable_path` + 빌드 머신 절대경로(~/.suji/node/…)만 있다. 번들에 libnode 가
+    //   없으면 다른 맥에선 weak 심볼이 전부 null → suji_node_init 의 첫 libnode 호출
+    //   (node::InitializeOncePerProcess)이 0x0 점프로 launch 즉시 SIGSEGV(qa-runner 실측).
+    //   libpython 과 동일하게 Contents/MacOS 에 두면 rpath `@executable_path` 로 해석된다.
+    //   소스의 참조명(libnode.137.dylib)은 실파일(libnode.dylib)로의 심링크 — cp 가
+    //   따라가 실파일을 참조명으로 복사한다. node 백엔드가 아니면 skip(117MB —
+    //   Go/Python 앱에 불필요). 경로의 버전은 build.zig 의 node_path 와 동기(24.14.1).
+    {
+        var has_node_backend = false;
+        for (backends) |b| {
+            if (std.mem.eql(u8, b.lang, "node")) has_node_backend = true;
+        }
+        if (has_node_backend) {
+            const home = runtime.env("HOME") orelse "/tmp";
+            const libnode_src = try std.fmt.allocPrint(allocator, "{s}/.suji/node/24.14.1/libnode.137.dylib", .{home});
+            defer allocator.free(libnode_src);
+            if (Dir.cwd().access(runtime.io, libnode_src, .{})) |_| {
+                const libnode_dst = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/libnode.137.dylib", .{app_name});
+                try copyFile(allocator, libnode_src, libnode_dst); // copyFile 이 dst free
+            } else |_| {
+                std.debug.print("[suji] warn: libnode 미발견({s}) — node 백엔드 앱이 다른 맥에서 launch 크래시한다\n", .{libnode_src});
+            }
+        }
+    }
+
     // 3. CEF 프레임워크 복사 (옵션: locale 필터링 + binary strip)
     try copyCefFramework(allocator, app_name, opts);
 
@@ -529,6 +556,11 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     // (Apple 권장; --deep 은 deprecated). 디렉토리 부재면 skip.
     try codesignDylibsIn(allocator, app_name, "Contents/Resources/backends", opts);
     try codesignDylibsIn(allocator, app_name, "Contents/Resources/plugins", opts);
+
+    // 2.7. Contents/MacOS 의 동반 dylib(libnode/libpython) — 메인 exe 서명 전에 개별
+    // 서명해야 공증(모든 Mach-O 서명 필수)을 통과한다. GPU 심링크(libGLESv2 등)는
+    // codesignDylibsFlat 이 kind != .file 로 건너뛰므로 CEF 프레임워크 seal 을 깨지 않는다.
+    try codesignDylibsFlat(allocator, app_name, "Contents/MacOS", opts);
 
     // 3. 메인 바이너리 + 4. 전체 앱 번들 — 둘 다 main.plist.
     const exe = try std.fmt.allocPrint(allocator, "{s}/Contents/MacOS/{s}", .{ app_name, name });
