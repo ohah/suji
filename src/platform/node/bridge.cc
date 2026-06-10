@@ -897,14 +897,28 @@ static int run_node_internal(const char* entry_path) {
         // ThreadPool을 V8 isolate scope 안에서 정리 (in-flight 작업 완료 대기)
         g_invoke_pool.reset();
 
-        // async 핸들을 닫아야 g_setup 파괴 시 uv_loop_close가 "open handles"로
-        // abort하지 않는다. uv_close는 async라 loop를 한 번 더 돌려 close 콜백
-        // 처리까지 해줘야 uv_loop가 alive=0이 됨.
-        uv_close(reinterpret_cast<uv_handle_t*>(&g_ipc_async), nullptr);
-        uv_close(reinterpret_cast<uv_handle_t*>(&g_async_invoke_async), nullptr);
-        uv_close(reinterpret_cast<uv_handle_t*>(&g_event_async), nullptr);
+        // 브리지 소유 async 핸들 3개를 닫아야 g_setup 파괴 시 uv_loop_close가
+        // "open handles"로 abort하지 않는다. uv_close는 async라 close 콜백이
+        // 돌 때까지 loop를 펌프해야 한다.
+        //
+        // 단, "모든 핸들이 닫힐 때까지"(uv_run != 0) 기다리면 안 된다 — 앱(JS)이
+        // 남긴 핸들(listen 소켓·자식 프로세스 등)은 여기가 아니라 아래
+        // g_setup.reset()의 FreeEnvironment env cleanup이 닫는다. 그 전엔
+        // uv_run이 영원히 != 0 이라 이 루프가 무한 스핀 → NodeRuntime.stop의
+        // join이 안 풀려 앱 종료(Cmd+Q)가 행한다. 그래서 우리 3개의 close
+        // 콜백까지만 펌프한다.
+        int bridge_handles_closed = 0;
+        auto count_close = [](uv_handle_t* h) {
+            ++*static_cast<int*>(h->data);
+        };
+        g_ipc_async.data = &bridge_handles_closed;
+        g_async_invoke_async.data = &bridge_handles_closed;
+        g_event_async.data = &bridge_handles_closed;
+        uv_close(reinterpret_cast<uv_handle_t*>(&g_ipc_async), count_close);
+        uv_close(reinterpret_cast<uv_handle_t*>(&g_async_invoke_async), count_close);
+        uv_close(reinterpret_cast<uv_handle_t*>(&g_event_async), count_close);
         uv_loop_t* loop = g_setup->event_loop();
-        while (uv_run(loop, UV_RUN_NOWAIT) != 0) {}
+        while (bridge_handles_closed < 3) uv_run(loop, UV_RUN_NOWAIT);
     }
 
     node::Stop(env);
