@@ -769,6 +769,14 @@ pub fn notarizeBundle(allocator: std.mem.Allocator, name: []const u8, creds: Not
 /// 경고가 뜬다(앱은 정상이어도 컨테이너가 미공증이라). sign_identity 가 null(adhoc) 이면
 /// 서명 생략 — adhoc 은 공증 자체가 불가하므로 호출자가 identity 모드에서만 부른다.
 pub fn notarizeDmg(allocator: std.mem.Allocator, dmg: []const u8, sign_identity: ?[]const u8, creds: NotarizeCreds) !void {
+    // 제출 전 dmg 가독성 게이트 — 파일이 잠겨 있으면(EAGAIN: 잔존 diskimagesiod,
+    // iCloud FileProvider 등) notarytool preflight 가 UDIF 매직을 못 읽고 다른 포맷
+    // 추정을 하다 무기한 행한다(실측 20분+, 업로드가 Apple 에 도달조차 안 함).
+    // 여기서 즉시 실패시켜 "왜 안 올라가지"가 아니라 "파일이 안 읽힌다"로 드러낸다.
+    runCmd(allocator, &.{ "hdiutil", "imageinfo", dmg }) catch |err| {
+        std.debug.print("[suji] dmg 검증 실패 — 파일이 디스크 이미지로 읽히지 않습니다(잠금/손상): {s}\n", .{dmg});
+        return err;
+    };
     if (sign_identity) |id| {
         std.debug.print("[suji] notarize: signing dmg {s}...\n", .{dmg});
         try runCmd(allocator, &.{ "codesign", "--force", "--sign", id, "--timestamp", dmg });
