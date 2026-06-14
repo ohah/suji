@@ -64,10 +64,11 @@ SRC="$work/node-v${NODE_VERSION}"
 
 echo "[stage-node-android] cross-building libnode.so (NDK, ~30-60분)"
 ( cd "$SRC"
-  # shellcheck disable=SC1091
-  source ./android-configure "$ANDROID_NDK_HOME" 26 "$DEST_CPU"
-  ./configure --dest-cpu="$DEST_CPU" --dest-os=android --cross-compiling \
-    --shared --openssl-no-asm --without-npm --without-corepack
+  # android-configure 는 python(exec python3 "$0") — source 금지(run 블록을 python 으로
+  # 재실행해 깨진다). 직접 실행 + configure 호출에 --shared 주입(android_configure.py 는
+  # 3 인자 고정 + configure 를 --shared 없이 호출). DEST_CPU 는 arm64(arm64-v8a).
+  sed -i 's| --cross-compiling")| --cross-compiling --shared --without-npm --without-corepack")|' android_configure.py
+  ./android-configure "$ANDROID_NDK_HOME" 26 "$DEST_CPU"
   make -j"$(nproc)" )
 
 LIB="$(ls "$SRC/out/Release/lib/libnode.so."* "$SRC/out/Release/libnode.so."* 2>/dev/null | head -1)"

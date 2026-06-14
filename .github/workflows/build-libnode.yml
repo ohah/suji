@@ -64,11 +64,13 @@ jobs:
           curl -fSL "https://nodejs.org/dist/v${{ inputs.node_version }}/node-v${{ inputs.node_version }}.tar.gz" -o /tmp/node.tar.gz
           tar xzf /tmp/node.tar.gz -C /tmp
           cd /tmp/node-v${{ inputs.node_version }}
-          # android-configure 가 NDK toolchain(host=linux-x86_64) + cross env 설정.
-          # 그 뒤 --shared 로 configure 재실행해 libnode.so 산출(env 유지).
-          source ./android-configure "$ANDROID_NDK_HOME" 26 arm64
-          ./configure --dest-cpu=arm64 --dest-os=android --cross-compiling \
-            --shared --openssl-no-asm --without-npm --without-corepack
+          # android-configure 는 python(sh→python polyglot: exec python3 "$0") — source
+          # 하면 $0 가 run 블록이 되어 run 블록을 python 으로 재실행해 깨진다 → 직접 실행.
+          # 또 android_configure.py 는 정확히 3 인자만 받고 configure 를 고정 플래그
+          # (--shared 없음)로 호출하므로, 그 호출에 --shared 를 주입해야 libnode.so 가
+          # 나온다(NDK toolchain/CC/CXX/GYP_DEFINES 는 android-configure 가 설정).
+          sed -i 's| --cross-compiling")| --cross-compiling --shared --without-npm --without-corepack")|' android_configure.py
+          ./android-configure "$ANDROID_NDK_HOME" 26 arm64
           make -j$(nproc)
 
       - name: Package (Unix)
