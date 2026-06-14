@@ -207,10 +207,13 @@ fn onAllClosed(_: suji.Event) void {
 // suji.tray.createWithIcon("App", "tooltip", "/tmp/tray.png")
 //   / setMenuRaw(id, "...items with submenu/checkbox...") / destroy(id)
 //   / setToolTip(id, tip) (setTooltip Electron 별칭) / getBounds(id) → {x,y,width,height}
-//     (getBounds=macOS NSStatusItem.button window frame, Win/Linux 0 rect)
+//     (getBounds=macOS NSStatusItem.button window frame / Windows Shell_NotifyIconGetRect /
+//      Linux gtk_status_icon_get_geometry(X11; Wayland 0 rect))
 //                                                                       (macOS NSStatusItem / Linux GTK StatusIcon / Windows Shell_NotifyIconW)
 // suji.notification.show("Title", "Body", false) / requestPermission() / close(id)
-//   / removeAll() / removeGroup(groupId)  — groupId=macOS threadIdentifier (Win/Linux false)
+//   / removeAll() / removeGroup(groupId)  — groupId: macOS threadIdentifier(스택 그룹화),
+//     Windows group 추적 후 removeGroup 이 그룹 전체 tray icon 닫음, Linux freedesktop
+//     replaces_id 갱신(근사 — 정직 경계)
 //   NotificationOptions {id?, groupId?} — caller-id + 그룹화. Notification 클래스(JS/Node):
 //   new Notification(opts); await n.show(); n.id (readonly) / n.close()
 //                                       (macOS UNUserNotificationCenter, .app 번들 필수 / Linux D-Bus / Windows Shell_NotifyIcon balloon)
@@ -231,9 +234,11 @@ fn onAllClosed(_: suji.Event) void {
 //   systemDefined 모니터 분기(신규 API 0, 동일 register IPC). ⚠️ 글로벌
 //   수신은 Accessibility(TCC) 필요(헤드리스 미발화 — globalShortcut 동급 경계)
 // suji.screen.getAllDisplays()                — Display 배열 raw JSON (macOS NSScreen / Linux X11 screen)
-//   display 변경 이벤트(macOS, NSApplicationDidChangeScreenParameters 옵저버, count-diff):
+//   display 변경 이벤트(macOS NSApplicationDidChangeScreenParameters / Windows WM_DISPLAYCHANGE /
+//   Linux X11 RandR RRScreenChangeNotify 스레드 — 모두 count-diff):
 //   suji.on("screen:display-added"|"screen:display-removed"|"screen:display-metrics-changed", cb)
-//   → 페이로드 후 getAllDisplays 로 상세 조회. 정직 경계: macOS only, 동시 add+remove 는 metrics
+//   → 페이로드 후 getAllDisplays 로 상세 조회. 정직 경계: 동시 add+remove(수 동일)는 metrics,
+//   Linux 는 libXrandr dlopen(미설치/Wayland 는 no-op)
 // suji.desktopCapturer.getSources("screen,window")  — 화면/창 소스
 //   {id,name,type,x,y,width,height,displayId?} (CGGetActiveDisplayList +
 //   CGWindowListCopyWindowInfo)
@@ -273,9 +278,11 @@ fn onAllClosed(_: suji.Event) void {
 // powerMonitor 이벤트 — 자동 install (macOS NSWorkspace, Linux logind/ScreenSaver DBus,
 //   Windows WM_POWERBROADCAST/WTS), 채널 발신:
 //   `power:suspend` / `power:resume` / `power:lock-screen` / `power:unlock-screen`
-//   + macOS: `power:shutdown`(NSWorkspaceWillPowerOff) / `power:on-battery` /
-//   `power:on-ac`(IOPS run-loop source, AC↔배터리 전환) → suji.on("power:shutdown", cb)
-//   → 다른 SDK도 동일 채널명으로 listen. (shutdown/배터리 이벤트는 macOS 한정)
+//   + `power:shutdown`(macOS NSWorkspaceWillPowerOff / Linux login1 PrepareForShutdown) /
+//   `power:on-battery` / `power:on-ac`(macOS IOPS run-loop / Windows WM_POWERBROADCAST
+//   PBT_APMPOWERSTATUSCHANGE+GetSystemPowerStatus) → suji.on("power:shutdown", cb)
+//   → 다른 SDK도 동일 채널명으로 listen. 정직 경계: Windows shutdown 은 message-only
+//   window 가 WM_ENDSESSION broadcast 미수신이라 미지원, Linux 배터리는 UPower dict 파싱 후속
 // suji.process.run(allocator, suji.io(), &.{ "echo", "hi" })  — std.process.run wrap (백엔드 only)
 //   → RunResult { code, stdout, stderr }, caller가 stdout/stderr free
 // suji.http.fetch(allocator, suji.io(), "https://...", null)   — std.http.Client.fetch wrap

@@ -178,12 +178,18 @@ pub fn setTrayTooltip(tray_id: u32, tooltip: []const u8) bool {
     return true;
 }
 
-/// Electron `tray.getBounds()` — 트레이 아이콘 화면 좌표 rect. macOS: NSStatusItem.button.
-/// window.frame 을 **top-left origin** 으로 변환(Electron/getMacWindowBounds 동일 — Cocoa
-/// bottom-left → top-left: y = screenH - frame.y - frame.height). 미존재/비-macOS 는 0 rect.
-/// 정직 경계: macOS only(Win/Linux 는 0 — Shell_NotifyIconGetRect/GTK geometry 후속).
+/// Electron `tray.getBounds()` — 트레이 아이콘 화면 좌표 rect (top-left origin).
+/// macOS: NSStatusItem.button.window.frame 을 Cocoa bottom-left → top-left 변환
+/// (y = screenH - frame.y - frame.height). Windows: Shell_NotifyIconGetRect.
+/// Linux: gtk_status_icon_get_geometry(X11). 미존재/실패/Wayland 는 0 rect.
+fn boundsToNSRect(b: tray_types.Bounds) cef.NSRect {
+    return .{ .x = b.x, .y = b.y, .width = b.width, .height = b.height };
+}
+
 pub fn trayGetBounds(tray_id: u32) cef.NSRect {
     const empty = cef.NSRect{ .x = 0, .y = 0, .width = 0, .height = 0 };
+    if (comptime builtin.os.tag == .windows) return boundsToNSRect(win_tray.getBounds(tray_id) orelse return empty);
+    if (comptime is_linux) return boundsToNSRect(cef_tray_linux.getBounds(tray_id) orelse return empty);
     if (!comptime is_macos) return empty;
     if (!g_trays_initialized) return empty;
     const entry = g_trays.get(tray_id) orelse return empty;

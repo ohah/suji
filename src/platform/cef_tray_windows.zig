@@ -38,6 +38,16 @@ pub const win_tray = if (builtin.os.tag == .windows) struct {
     extern "user32" fn LoadIconW(hInstance: ?*anyopaque, lpIconName: usize) callconv(.winapi) ?*anyopaque;
     const IDI_APPLICATION: usize = 32512;
 
+    // tray.getBounds() — Shell_NotifyIconGetRect(NOTIFYICONIDENTIFIER, RECT*).
+    const RECT = extern struct { left: i32 = 0, top: i32 = 0, right: i32 = 0, bottom: i32 = 0 };
+    const NOTIFYICONIDENTIFIER = extern struct {
+        cbSize: u32 = 0,
+        hWnd: ?*anyopaque = null,
+        uID: u32 = 0,
+        guidItem: [16]u8 = std.mem.zeroes([16]u8),
+    };
+    extern "shell32" fn Shell_NotifyIconGetRect(identifier: *const NOTIFYICONIDENTIFIER, iconLocation: *RECT) callconv(.winapi) i32;
+
     /// id 별 entry — pump hwnd 가 모든 콜백을 받으므로 hwnd 동일. hmenu 는
     /// 옵션(setMenu 호출 후 set, destroyIcon/setMenu rebuild 시 DestroyMenu).
     pub const Entry = struct {
@@ -119,6 +129,29 @@ pub const win_tray = if (builtin.os.tag == .windows) struct {
             }
         }
         return false;
+    }
+
+    /// tray.getBounds() — Shell_NotifyIconGetRect 로 taskbar 아이콘 화면 rect 조회.
+    /// RECT(left/top/right/bottom) → top-left origin {x,y,w,h}. 미존재/실패 시 null.
+    /// (read-only system query — pump proxy 불요, main 스레드 직접 호출 안전.)
+    pub fn getBounds(tray_id: u32) ?tray_types.Bounds {
+        for (&entries) |*e| {
+            if (e.used and e.id == tray_id) {
+                var idf: NOTIFYICONIDENTIFIER = .{};
+                idf.cbSize = @sizeOf(NOTIFYICONIDENTIFIER);
+                idf.hWnd = e.hwnd;
+                idf.uID = tray_id;
+                var rect: RECT = .{};
+                if (Shell_NotifyIconGetRect(&idf, &rect) != 0) return null; // S_OK == 0
+                return .{
+                    .x = @floatFromInt(rect.left),
+                    .y = @floatFromInt(rect.top),
+                    .width = @floatFromInt(rect.right - rect.left),
+                    .height = @floatFromInt(rect.bottom - rect.top),
+                };
+            }
+        }
+        return null;
     }
 
     /// caller (main thread) 가 호출 → pump 스레드로 proxy. pump executeReq 가

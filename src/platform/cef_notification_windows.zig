@@ -17,6 +17,8 @@ pub const win_notify = if (builtin.os.tag == .windows) struct {
         id_len: usize = 0,
         id: [64]u8 = [_]u8{0} ** 64,
         tray_id: u32 = 0,
+        group_len: usize = 0,
+        group: [64]u8 = [_]u8{0} ** 64,
     };
     // 64-slot — Linux notify entries 와 동일 cap. main 스레드(show/close) 와
     // pump 스레드(handleTrayCallback NIN_BALLOONUSERCLICK/TIMEOUT) 가 동시 접근
@@ -31,13 +33,23 @@ pub const win_notify = if (builtin.os.tag == .windows) struct {
         id_map_lock_flag.store(false, .release);
     }
 
-    fn rememberMapping(id: []const u8, tray_id: u32) void {
+    fn storeGroup(m: *MapEntry, group: []const u8) void {
+        if (group.len > 0 and group.len <= m.group.len) {
+            m.group_len = group.len;
+            @memcpy(m.group[0..group.len], group);
+        } else {
+            m.group_len = 0;
+        }
+    }
+
+    fn rememberMapping(id: []const u8, tray_id: u32, group: []const u8) void {
         if (id.len == 0 or id.len > 64) return;
         lockIdMap();
         defer unlockIdMap();
         for (&id_map) |*m| {
             if (m.used and m.id_len == id.len and std.mem.eql(u8, m.id[0..m.id_len], id)) {
                 m.tray_id = tray_id;
+                storeGroup(m, group);
                 return;
             }
         }
@@ -47,6 +59,7 @@ pub const win_notify = if (builtin.os.tag == .windows) struct {
                 m.id_len = id.len;
                 @memcpy(m.id[0..id.len], id);
                 m.tray_id = tray_id;
+                storeGroup(m, group);
                 return;
             }
         }
@@ -99,8 +112,12 @@ pub const win_notify = if (builtin.os.tag == .windows) struct {
 
     /// id 별 tray icon 생성 → balloon (NIM_MODIFY + NIF_INFO). show 후
     /// auto-timeout (10초). close 시 NIM_DELETE.
-    /// caller 가 같은 id 로 여러 번 show 하면 새 icon 추가 (기존 안 지움).
-    pub fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+    /// group(suji 확장 = macOS threadIdentifier): 매핑에 저장만 — removeGroup 이 같은
+    /// group 의 tray icon 들을 한꺼번에 닫는 용도. Shell_NotifyIcon balloon 은 macOS
+    /// 처럼 스택 그룹화가 없고, icon 재사용은 OS auto-timeout(~10s) 후 stale handle
+    /// 위험(NIM_MODIFY 실패)이라 하지 않는다 — 알림마다 새 icon(정직 경계). caller 가
+    /// 같은 id 로 여러 번 show 하면 새 icon 추가 (기존 안 지움).
+    pub fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool, group: []const u8) bool {
         // 빈 tooltip 으로 tray icon 생성 (notification 전용 — 사용자에게 visible 한 icon
         // 짧게 표시 후 destroy 됨, 실제로는 toast UI 가 주로 보임).
         const tray_id = cef_tray.win_tray.createIcon("", "");
@@ -136,7 +153,7 @@ pub const win_notify = if (builtin.os.tag == .windows) struct {
             _ = cef_tray.win_tray.destroyIcon(tray_id);
             return false;
         }
-        rememberMapping(id, tray_id);
+        rememberMapping(id, tray_id, group);
         return true;
     }
 
@@ -144,5 +161,37 @@ pub const win_notify = if (builtin.os.tag == .windows) struct {
     pub fn close(id: []const u8) bool {
         const tray_id = lookupAndForget(id) orelse return false;
         return cef_tray.win_tray.destroyIcon(tray_id);
+    }
+
+    /// Electron Notification.removeGroup — 같은 group 의 tray icon 들을 NIM_DELETE +
+    /// 매핑 정리. tray_id 는 lock 안에서 수집(dedup)하고 destroyIcon(submitSync 경유)은
+    /// lock 밖에서 — idMap lock 과 pump 요청 데드락 회피.
+    pub fn removeGroup(group: []const u8) bool {
+        if (group.len == 0 or group.len > 64) return false;
+        var tids: [64]u32 = undefined;
+        var cnt: usize = 0;
+        lockIdMap();
+        for (&id_map) |*m| {
+            if (m.used and m.group_len == group.len and std.mem.eql(u8, m.group[0..m.group_len], group)) {
+                var dup = false;
+                for (tids[0..cnt]) |t| {
+                    if (t == m.tray_id) {
+                        dup = true;
+                        break;
+                    }
+                }
+                if (!dup and cnt < tids.len) {
+                    tids[cnt] = m.tray_id;
+                    cnt += 1;
+                }
+                m.* = .{};
+            }
+        }
+        unlockIdMap();
+        var any = false;
+        for (tids[0..cnt]) |tid| {
+            if (cef_tray.win_tray.destroyIcon(tid)) any = true;
+        }
+        return any;
     }
 } else struct {};

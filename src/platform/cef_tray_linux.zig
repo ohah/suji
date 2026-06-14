@@ -40,6 +40,11 @@ pub fn destroy(tray_id: u32) bool {
     return linux_tray.destroy(tray_id);
 }
 
+pub fn getBounds(tray_id: u32) ?tray_types.Bounds {
+    if (!comptime is_linux) return null;
+    return linux_tray.getBounds(tray_id);
+}
+
 const linux_tray = if (is_linux) struct {
     const MAX_TRAYS: usize = 16;
     const MAX_MENU_ITEMS: usize = 64;
@@ -99,6 +104,10 @@ const linux_tray = if (is_linux) struct {
         connect_flags: c_int,
     ) callconv(.c) usize;
     extern "c" fn g_object_unref(object: ?*anyopaque) callconv(.c) void;
+
+    // tray.getBounds() — GdkRectangle{x,y,width,height} (i32), screen-space top-left.
+    const GdkRectangle = extern struct { x: c_int = 0, y: c_int = 0, width: c_int = 0, height: c_int = 0 };
+    extern "c" fn gtk_status_icon_get_geometry(status_icon: ?*anyopaque, screen: ?*?*anyopaque, area: *GdkRectangle, orientation: ?*c_int) callconv(.c) c_int;
 
     fn gtkAvailable() bool {
         return suji_gtk_init_check() != 0;
@@ -280,6 +289,21 @@ const linux_tray = if (is_linux) struct {
         gtk_widget_set_sensitive(menu_item, if (enabled) 1 else 0);
         _ = g_signal_connect_data(menu_item, "activate", @ptrCast(&menuItemActivateC), cb, null, 0);
         gtk_menu_shell_append(menu, menu_item);
+    }
+
+    /// tray.getBounds() — gtk_status_icon_get_geometry 로 X11 트레이 아이콘 화면 rect.
+    /// GdkRectangle 은 이미 top-left origin → 좌표 변환 불요. 실패/Wayland 는 null
+    /// (gtk_status_icon_get_geometry 가 FALSE 반환 — X11 전용, 정직 경계).
+    fn getBounds(tray_id: u32) ?tray_types.Bounds {
+        const entry = findEntry(tray_id) orelse return null;
+        var area: GdkRectangle = .{};
+        if (gtk_status_icon_get_geometry(entry.status_icon, null, &area, null) == 0) return null;
+        return .{
+            .x = @floatFromInt(area.x),
+            .y = @floatFromInt(area.y),
+            .width = @floatFromInt(area.width),
+            .height = @floatFromInt(area.height),
+        };
     }
 
     fn destroy(tray_id: u32) bool {

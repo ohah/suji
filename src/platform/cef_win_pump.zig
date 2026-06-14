@@ -12,6 +12,7 @@ const builtin = @import("builtin");
 pub const win_pump = if (builtin.os.tag == .windows) struct {
     const cef_global_shortcut = @import("cef_global_shortcut.zig");
     const cef_native_theme = @import("cef_native_theme.zig");
+    const cef_screen = @import("cef_screen.zig");
     const notification_state = @import("cef_notification_state.zig");
     const notification_windows = @import("cef_notification_windows.zig");
     const cef_tray = @import("cef_tray.zig");
@@ -23,6 +24,7 @@ pub const win_pump = if (builtin.os.tag == .windows) struct {
     const WM_TRAY: u32 = 0x0400 + 1; // WM_USER + 1
     const WM_COMMAND: u32 = 0x0111;
     const WM_SETTINGCHANGE: u32 = 0x001A;
+    const WM_DISPLAYCHANGE: u32 = 0x007E;
     const WM_LBUTTONUP: u32 = 0x0202;
     const WM_RBUTTONUP: u32 = 0x0205;
     const WM_LBUTTONDBLCLK: u32 = 0x0203;
@@ -194,6 +196,12 @@ pub const win_pump = if (builtin.os.tag == .windows) struct {
                         }
                     }
                 }
+                return 0;
+            },
+            WM_DISPLAYCHANGE => {
+                // 모니터 추가/제거/해상도 변경 — cef_screen 이 displayCount count-diff 로
+                // add/removed/metrics 구분(WM_SETTINGCHANGE 와 동일 broadcast 메커니즘).
+                if (cef_screen.g_screen_cb_windows) |cb| cb();
                 return 0;
             },
             else => return DefWindowProcW(hwnd, msg, wparam, lparam),

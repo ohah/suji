@@ -3,9 +3,13 @@
 // Runtime sources:
 //   - org.freedesktop.login1.Manager.PrepareForSleep(bool) on the system bus
 //     true -> suspend, false -> resume
+//   - org.freedesktop.login1.Manager.PrepareForShutdown(bool) -> shutdown (start=true)
 //   - org.freedesktop.ScreenSaver / org.gnome.ScreenSaver ActiveChanged(bool)
 //     true -> lock-screen, false -> unlock-screen
 //   - org.freedesktop.login1.Session Lock/Unlock as an additional lock source
+//
+// on-battery/on-ac(macOS 패리티)는 UPower PropertiesChanged a{sv} dict 파싱이 필요해
+// (현재 boolean-only D-Bus 헬퍼로는 불가) 정직 경계로 미지원 — 후속.
 //
 // libdbus is loaded with dlopen so the core keeps building on systems that only
 // have the runtime library available, and gracefully becomes a no-op otherwise.
@@ -161,6 +165,10 @@ static void process_message(SujiDbus *d, DBusMessage *msg) {
     if (d->message_is_signal(msg, "org.freedesktop.login1.Manager", "PrepareForSleep")) {
         int sleeping = 0;
         if (get_bool_arg(d, msg, &sleeping)) emit_event(sleeping ? "suspend" : "resume");
+    } else if (d->message_is_signal(msg, "org.freedesktop.login1.Manager", "PrepareForShutdown")) {
+        // start=true 일 때만 — 종료가 시작되는 시점(macOS power:shutdown 패리티).
+        int shutting = 0;
+        if (get_bool_arg(d, msg, &shutting) && shutting) emit_event("shutdown");
     } else if (d->message_is_signal(msg, "org.freedesktop.ScreenSaver", "ActiveChanged") ||
                d->message_is_signal(msg, "org.gnome.ScreenSaver", "ActiveChanged")) {
         int active = 0;
@@ -204,6 +212,9 @@ static void *power_thread_main(void *unused) {
     add_match(&d, system,
         "type='signal',interface='org.freedesktop.login1.Manager',"
         "member='PrepareForSleep',path='/org/freedesktop/login1'");
+    add_match(&d, system,
+        "type='signal',interface='org.freedesktop.login1.Manager',"
+        "member='PrepareForShutdown',path='/org/freedesktop/login1'");
     add_match(&d, system,
         "type='signal',interface='org.freedesktop.login1.Session',member='Lock'");
     add_match(&d, system,

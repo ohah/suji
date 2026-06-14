@@ -68,9 +68,10 @@ pub fn notificationRequestPermission() bool {
 /// 알림 표시. id는 caller-controlled 식별자 (close에 사용). 한도: 64 byte.
 /// title/body는 4KB stack-alloc 한도.
 pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, silent: bool, group: []const u8) bool {
-    // group(threadIdentifier)은 macOS 전용 — Win/Linux 는 무시(개별 알림으로 표시).
-    if (comptime builtin.os.tag == .windows) return notification_windows.win_notify.show(id, title, body, silent);
-    if (comptime is_linux) return notification_linux.show(id, title, body, silent);
+    // group(suji 확장 = macOS threadIdentifier): macOS=스택 그룹화, Windows=같은 group
+    // tray icon 재사용, Linux=freedesktop replaces_id 갱신(근사 — 정직 경계, 각 backend 주석).
+    if (comptime builtin.os.tag == .windows) return notification_windows.win_notify.show(id, title, body, silent, group);
+    if (comptime is_linux) return notification_linux.show(id, title, body, silent, group);
     if (!comptime is_macos) return false;
     var id_buf: [64]u8 = undefined;
     var t_buf: [4096]u8 = undefined;
@@ -83,9 +84,12 @@ pub fn notificationShow(id: []const u8, title: []const u8, body: []const u8, sil
     return suji_notification_show(id_cstr, t_cstr, b_cstr, if (silent) 1 else 0, g_cstr) != 0;
 }
 
-/// Electron `Notification.removeGroup(groupId)` — threadIdentifier 가 일치하는 표시된 알림 제거.
-/// macOS only(UNUserNotificationCenter threadIdentifier). Win/Linux 는 그룹 개념 미지원 → false.
+/// Electron `Notification.removeGroup(groupId)` — group 이 일치하는 표시된 알림 제거.
+/// macOS: UNUserNotificationCenter threadIdentifier. Windows: 같은 group tray icon NIM_DELETE.
+/// Linux: 같은 group 의 표시 알림 CloseNotification. 미일치/그룹 없으면 false.
 pub fn notificationRemoveGroup(group: []const u8) bool {
+    if (comptime builtin.os.tag == .windows) return notification_windows.win_notify.removeGroup(group);
+    if (comptime is_linux) return notification_linux.removeGroup(group);
     if (!comptime is_macos) return false;
     var g_buf: [512]u8 = undefined;
     const g_cstr = writeCStr(group, &g_buf) orelse return false;
