@@ -1032,6 +1032,26 @@ void suji_node_free(const char* ptr) {
     if (ptr) free(const_cast<char*>(ptr));
 }
 
+// 등록된 핸들러 채널 목록을 JSON 배열로 반환(호출자가 suji_node_free 로 해제).
+// Android JNI 가 채널을 suji_core_register_handler 로 일괄 등록하는 데 사용
+// (suji_python_backend_channels 동형). 채널명은 식별자 가정 — escape 생략.
+char* suji_node_channels(void) {
+    std::lock_guard<std::mutex> lock(g_handler_mutex);
+    std::string json = "[";
+    bool first = true;
+    for (const auto& kv : g_handlers) {
+        if (!first) json += ',';
+        json += '"';
+        json += kv.first;
+        json += '"';
+        first = false;
+    }
+    json += ']';
+    char* out = static_cast<char*>(malloc(json.size() + 1));
+    if (out) memcpy(out, json.c_str(), json.size() + 1);
+    return out;
+}
+
 void suji_node_set_handler(suji_node_handler_fn handler) {
     (void)handler;
 }

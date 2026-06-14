@@ -11,10 +11,14 @@ iOS(`examples/ios`)와 동형. 모바일은 호스트(JNI `.so`)에 백엔드를
 | [`rust/`](./rust) | Rust(`.a`) + Kotlin 네이티브 | `rust/build-lib.sh` |
 | [`go/`](./go) | Go(`.so` c-shared) + Kotlin 네이티브 | `go/build-lib.sh` |
 | [`zig/`](./zig) | Zig staticlib(`backends/zig`) + Kotlin 네이티브 | `zig/build-lib.sh` |
+| [`node/`](./node) | Node.js(`libnode.so` + 데스크탑 `bridge.cc` `.a`) + Kotlin 네이티브 | `node/build-lib.sh` |
 
 > **Go 는 Android 에서 c-archive 미지원 → `c-shared`(`.so`)**. Gradle 이
 > `jniLibs/<abi>/` 의 `.so` 를 자동 패키징, CMake 는 SHARED IMPORTED 로 링크.
-> Rust/Zig 는 `.a` 정적 링크. **Node**: Android NDK 로 가능하나 미배선(후속).
+> Rust/Zig 는 `.a` 정적 링크. **Node**: `node/` 변형 배선됨 — 데스크탑과 동일
+> `bridge.cc` 를 NDK clang++ 컴파일 + libnode.so(`build-libnode.yml` NDK
+> 크로스빌드 → release asset) 링크. `scripts/stage-node-android.sh` 가 libnode.so
+> 를 다운로드(데스크탑 libnode staging 동형). 엔트리는 `main.js`/`main.ts`.
 
 ## 실행
 

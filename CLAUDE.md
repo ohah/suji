@@ -844,7 +844,16 @@ c-shared(Android는 Go c-archive 미지원 → JNI `.so`가 정적/공유 혼합
 `(channel,json)→{"cmd":..}` 브리지는 `include/suji_mobile_bridge.h` 공용
 (verify.c·JNI 공유, iOS는 Swift 동형). **Node 만 iOS 미지원** — V8 JIT 가
 iOS 코드서명 샌드박스에서 금지(정적 링크해도 런타임 코드 생성 불가).
-Android Node 는 NDK로 가능하나 예제 미배선(후속).
+**Android Node 는 예제 배선됨**(`examples/android/node` — 데스크탑과 *동일한*
+`bridge.cc` 를 NDK clang++ 로 컴파일 + libnode.so 링크, main.js/main.ts 엔트리·
+suji.handle 채널·request 형식 동형. bridge 에 `suji_node_channels()` 추가 —
+등록 핸들러 목록을 JSON 으로 반환해 호스트가 `suji_core_register_handler` 로
+일괄 배선, `suji_python_backend_channels` 동형). libnode.so 는 V8 가 cross
+host-tool(mksnapshot)을 Linux 로 가정하므로 `build-libnode.yml`(ubuntu)이 NDK
+크로스빌드 → release asset, `scripts/stage-node-android.sh` 가 다운로드(데스크탑
+libnode staging 동형, end-user 는 prebuilt 만 — Docker/NDK 불요). ⚠️ 로컬 macOS
+arm64 는 V8 host build 가정과 어긋나 framework/SDK/archive 패치가 다발 → libnode
+크로스빌드는 CI(ubuntu), 에뮬 e2e(`android-e2e.sh node`)는 로컬 검증(정직 경계).
 
 **embedded CPython 은 iOS 동작**(Node 와 결정적 대조 — 인터프리터라 JIT/코드생성
 불요, CPython 3.13 PEP 730 공식 iOS 지원). `src/platform/python.zig` 데스크탑

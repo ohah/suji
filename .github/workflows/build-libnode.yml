@@ -21,6 +21,8 @@ jobs:
             platform: macos-arm64
           - os: ubuntu-24.04
             platform: linux-x86_64
+          - os: ubuntu-24.04
+            platform: android-arm64
           - os: windows-latest
             platform: windows-x86_64
 
@@ -32,7 +34,7 @@ jobs:
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
       - name: Build libnode (Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && matrix.platform != 'android-arm64'
         timeout-minutes: 120
         run: |
           curl -fSL "https://nodejs.org/dist/v${{ inputs.node_version }}/node-v${{ inputs.node_version }}.tar.gz" -o /tmp/node.tar.gz
@@ -41,6 +43,33 @@ jobs:
           ./configure --shared --prefix=/tmp/node-install
           JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
           make -j$JOBS
+
+      # Android arm64 — V8 의 cross host-tool(mksnapshot/torque)은 Linux 를 가정하므로
+      # ubuntu 러너에서 빌드해야 패치 없이 통과(macOS host 는 framework/SDK/archive
+      # 패치 다발). NDK + android-configure(host=linux-x86_64) + --shared.
+      - name: Setup NDK (Android)
+        id: setup-ndk
+        if: matrix.platform == 'android-arm64'
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Build libnode (Android)
+        if: matrix.platform == 'android-arm64'
+        timeout-minutes: 120
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          curl -fSL "https://nodejs.org/dist/v${{ inputs.node_version }}/node-v${{ inputs.node_version }}.tar.gz" -o /tmp/node.tar.gz
+          tar xzf /tmp/node.tar.gz -C /tmp
+          cd /tmp/node-v${{ inputs.node_version }}
+          # android-configure 가 NDK toolchain(host=linux-x86_64) + cross env 설정.
+          # 그 뒤 --shared 로 configure 재실행해 libnode.so 산출(env 유지).
+          source ./android-configure "$ANDROID_NDK_HOME" 26 arm64
+          ./configure --dest-cpu=arm64 --dest-os=android --cross-compiling \
+            --shared --openssl-no-asm --without-npm --without-corepack
+          make -j$(nproc)
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
