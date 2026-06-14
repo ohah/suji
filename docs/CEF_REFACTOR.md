@@ -20,6 +20,7 @@ PLAN.md 의 "후속 refactor 후보" 노트가 이 문서를 가리킨다.
 | powerSaveBlocker | ✅ 완료 | `cef_power_save_blocker.zig` (~258줄) |
 | desktopCapturer | ✅ 완료 | `cef_desktop_capturer.zig` (~203줄) |
 | sessionCookies | ✅ 완료 | `cef_session_cookies.zig` (~323줄) |
+| singleInstance | ✅ 완료 (platform split) | `cef_single_instance.zig` (~250줄; 공유 락 state(g_has_lock/spinlock) + 플랫폼 라우팅 + POSIX 유닛 테스트) + `cef_single_instance_state.zig` (~35줄; second-instance argv 공유 콜백/launch/dispatch) + `cef_single_instance_posix.zig` (~120줄; flock + Unix 소켓) + `cef_single_instance_windows.zig` (~140줄; named mutex + named pipe) |
 | securityScopedBookmark | ✅ 완료 | `cef_security_scoped_bookmark.zig` (~136줄) |
 | requestUserAttention | ✅ 완료 | `cef_request_user_attention.zig` (~44줄) |
 | menu | ✅ 완료 | `cef_menu.zig` (~152줄; public routing + macOS) + `cef_menu_{types,linux}.zig` |
