@@ -769,6 +769,15 @@ pub fn build(b: *std.Build) void {
                 \\  if (Test-Path $p) { Copy-Item -Force -LiteralPath $p -Destination $env:SUJI_BIN_DIR }
                 \\  elseif ($d -eq $env:SUJI_PY_DLL) { throw "missing embedded python DLL: $p (stage via scripts/stage-python.sh)" }
                 \\}
+                \\# stdlib + 확장모듈 → PYTHONHOME 레이아웃(<bin>/python/{Lib,DLLs}). Windows
+                \\# CPython 은 home/Lib + home/DLLs 를 본다. dev(exeRelativePythonHome) +
+                \\# packaged(pythonHome) 둘 다 <exe_dir>/python 을 home 으로 쓴다. 수십 MB 라 1회만.
+                \\$pyhome = Join-Path $env:SUJI_BIN_DIR 'python'
+                \\if (-not (Test-Path (Join-Path $pyhome 'Lib'))) {
+                \\  New-Item -ItemType Directory -Force -Path $pyhome | Out-Null
+                \\  Copy-Item -Recurse -Force -LiteralPath (Join-Path $src 'Lib') -Destination $pyhome
+                \\  if (Test-Path (Join-Path $src 'DLLs')) { Copy-Item -Recurse -Force -LiteralPath (Join-Path $src 'DLLs') -Destination $pyhome }
+                \\}
                 ,
             });
             const py_dir_w = b.allocator.dupe(u8, python_path) catch @panic("OOM");
