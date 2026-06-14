@@ -158,19 +158,6 @@ fn expandHome(arena: std.mem.Allocator, path: []const u8) []const u8 {
     return std.fmt.allocPrint(arena, "{s}{s}", .{ home, path[1..] }) catch path;
 }
 
-/// req.string() (util.extractJsonString) 는 JSON escape 를 **unescape 하지 않고** 따옴표
-/// 사이 raw 바이트를 반환한다 → Windows 경로가 `C:\\Users\\...`(이중 백슬래시) 로 온다.
-/// 반면 set_allowed_paths 는 std.json(parseStringArrayInto)으로 **unescape** 해 `C:\Users\...`
-/// (단일 백슬래시)로 저장한다. 둘을 그대로 비교하면 Windows 에서 startsWith 가 항상 어긋나
-/// 모든 업로드/다운로드가 "forbidden path" 가 된다(파일 I/O 는 Windows 가 `\\` 를 정규화해
-/// 통과하지만 문자열 비교만 실패 — macOS/Linux 는 경로에 escape 가 없어 무증상). filePath 도
-/// allowlist 와 동일하게 unescape 해 양쪽 표현을 맞춘다.
-fn unescapePath(arena: std.mem.Allocator, raw: []const u8) []const u8 {
-    const buf = arena.alloc(u8, raw.len) catch return raw;
-    const n = util.unescapeJsonStr(raw, buf) orelse return raw;
-    return buf[0..n];
-}
-
 /// multipart 폼 필드 값(파일명/필드명) 안의 `"`/CR/LF 차단 — 헤더 인젝션 방지.
 fn validFormToken(s: []const u8) bool {
     if (s.len == 0 or s.len > 256) return false;
@@ -200,9 +187,12 @@ fn emitProgress(arena: std.mem.Allocator, id: []const u8, n: u64) void {
 fn uploadFile(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const url = req.string("url") orelse return req.err("missing url");
     if (validateUrl(req, url)) |e| return e;
-    const raw_path = req.string("filePath") orelse return req.err("missing filePath");
+    // stringUnescaped: filePath 를 allowlist(std.json 파싱, unescaped)와 동일 표현으로.
+    // string() 은 raw 바이트라 Windows 경로가 `C:\\Users\\…`(이중 백슬래시) → startsWith
+    // 불일치로 항상 forbidden(파일 I/O 는 통과, 비교만 실패; macOS/Linux 무증상).
+    const raw_path = req.stringUnescaped("filePath") orelse return req.err("missing filePath");
     if (raw_path.len == 0 or raw_path.len > MAX_PATH_LEN) return req.err("invalid filePath");
-    const file_path = expandHome(req.arena, unescapePath(req.arena, raw_path));
+    const file_path = expandHome(req.arena, raw_path);
     if (!isPathAllowed(file_path)) return req.err("forbidden path");
 
     const field = req.string("fieldName") orelse "file";
@@ -265,9 +255,12 @@ fn uploadFile(req: suji.Request, _: suji.InvokeEvent) suji.Response {
 fn downloadFile(req: suji.Request, _: suji.InvokeEvent) suji.Response {
     const url = req.string("url") orelse return req.err("missing url");
     if (validateUrl(req, url)) |e| return e;
-    const raw_path = req.string("filePath") orelse return req.err("missing filePath");
+    // stringUnescaped: filePath 를 allowlist(std.json 파싱, unescaped)와 동일 표현으로.
+    // string() 은 raw 바이트라 Windows 경로가 `C:\\Users\\…`(이중 백슬래시) → startsWith
+    // 불일치로 항상 forbidden(파일 I/O 는 통과, 비교만 실패; macOS/Linux 무증상).
+    const raw_path = req.stringUnescaped("filePath") orelse return req.err("missing filePath");
     if (raw_path.len == 0 or raw_path.len > MAX_PATH_LEN) return req.err("invalid filePath");
-    const file_path = expandHome(req.arena, unescapePath(req.arena, raw_path));
+    const file_path = expandHome(req.arena, raw_path);
     if (!isPathAllowed(file_path)) return req.err("forbidden path");
     const id = req.string("id") orelse "";
     if (id.len > 256) return req.err("id too long");
