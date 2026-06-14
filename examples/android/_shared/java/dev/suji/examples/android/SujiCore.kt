@@ -25,6 +25,13 @@ object SujiCore {
     /// 에셋이 있을 때만 호출하므로(JNI lazy bind) 다른 변형엔 영향 없음.
     external fun nativeRegisterPythonBackend(filesDir: String): Int
 
+    /// embedded Node.js 백엔드 등록 (node 변형만). filesDir 하위 entry(main.js/
+    /// main.ts — MainActivity 가 결정·복사)로 libnode 초기화 후 suji.handle 로
+    /// 등록된 채널을 suji_core 에 배선. node 변형 backends.c 만 구현 —
+    /// MainActivity 가 엔트리 에셋이 있을 때만 호출하므로(JNI lazy bind) 다른
+    /// 변형엔 영향 없음(nativeRegisterPythonBackend 와 동형).
+    external fun nativeRegisterNodeBackend(filesDir: String, entry: String): Int
+
     /// 네이티브 이벤트 수신 지점 (suji_jni.c event_trampoline 가 호출).
     /// 활성 호스트로 위임 — UI 스레드 전환은 호스트가 책임.
     @JvmStatic

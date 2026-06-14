@@ -30,6 +30,10 @@ const char* suji_node_invoke(const char* channel, const char* data);
 // 응답 메모리 해제
 void suji_node_free(const char* ptr);
 
+// 등록된 핸들러 채널 목록 (JSON 배열 문자열; 호출자가 suji_node_free 로 해제).
+// Android JNI 가 채널을 suji_core_register_handler 로 일괄 등록하는 데 사용.
+char* suji_node_channels(void);
+
 // 콜백: JS에서 suji.handle() 호출 시
 typedef const char* (*suji_node_handler_fn)(const char* channel, const char* data);
 void suji_node_set_handler(suji_node_handler_fn handler);

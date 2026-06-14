@@ -1,0 +1,110 @@
+<!doctype html>
+<!--
+  Node.js 백엔드 기능 e2e (데모 index.html 과 별개 — 호스트가 e2e 모드일 때만 로드:
+  Android android-e2e.sh 가 --es suji_e2e 1). 디바이스 안에서 embedded Node.js
+  핸들러(main.js 의 ping/echo)를 invoke 로 실 왕복(에뮬=실 libnode → 진짜 e2e)하고
+  verdict 를 e2e:report 채널로 보고. android-e2e.sh 가 logcat 으로 회수·assert.
+
+  브리지(__suji__)는 데모 index.html 인라인과 동형(window.SujiNative 있을 때만
+  자체 정의) — 다른 변형 e2e.html 과 lockstep.
+-->
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>suji-e2e-pending</title>
+<body style="font:14px -apple-system,system-ui;padding:1rem">
+<pre id="log">running…</pre>
+<script>
+(function () {
+  // 데모 인라인 브리지와 동형(없을 때만 정의).
+  if (!window.__suji__ && window.SujiNative) {
+    var _id = 0, _pending = {}, _listeners = {};
+    function invoke(channel, payload) {
+      return new Promise(function (res) {
+        var id = ++_id; _pending[id] = res;
+        window.SujiNative.invoke(id, String(channel),
+          JSON.stringify(payload === undefined ? {} : payload));
+      });
+    }
+    function core(json) {
+      return new Promise(function (res) {
+        var id = ++_id; _pending[id] = res;
+        window.SujiNative.invoke(id, "__core__",
+          (typeof json === "string" ? json : JSON.stringify(json)));
+      });
+    }
+    function __resolve__(id, json) {
+      var r = _pending[id]; if (!r) return; delete _pending[id];
+      try { r(json ? JSON.parse(json) : null); } catch (e) { r(json); }
+    }
+    function on(name, cb) { (_listeners[name] = _listeners[name] || []).push(cb); }
+    function __emit__(name, json) {
+      var ls = _listeners[name]; if (!ls) return;
+      var d; try { d = json ? JSON.parse(json) : null; } catch (e) { d = json; }
+      ls.forEach(function (f) { try { f(d); } catch (e) {} });
+    }
+    var api = { invoke: invoke, core: core, on: on,
+                __resolve__: __resolve__, __emit__: __emit__ };
+    window.__suji__ = api; window.suji = api;
+  }
+
+  function invoke(ch, payload) { return window.__suji__.invoke(ch, payload); }
+  var cases = [];
+  function check(name, cond) { cases.push({ name: name, ok: !!cond }); }
+
+  async function nodeSuite() {
+    // ping → embedded Node.js 핸들러(main.js) 왕복. 에뮬=실 libnode.
+    var p = await invoke("ping");
+    check("ping runtime=node msg=pong",
+          p && p.runtime === "node" && p.msg === "pong");
+
+    // echo → JSON.parse/stringify 라운드트립(node 내장).
+    var e = await invoke("echo", { value: "hello-android" });
+    check("echo round-trip + cmd",
+          e && e.runtime === "node" && e.value === "hello-android" &&
+          e.echo && e.echo.cmd === "echo");
+
+    // unicode/이모지 — UTF-8 인코딩 경계.
+    var u = await invoke("echo", { value: "한글-🚀" });
+    check("echo unicode", u && u.value === "한글-🚀");
+
+    // nested object/array — json 직렬화 깊이.
+    var n = await invoke("echo", { value: "x", nested: { a: [1, 2, 3], s: "z" } });
+    check("echo nested",
+          n && n.echo && n.echo.nested && n.echo.nested.a &&
+          n.echo.nested.a.length === 3 && n.echo.nested.s === "z");
+
+    // 20x 안정성(이벤트 루프 상태 오염/누수 없음).
+    var stressOk = true;
+    for (var k = 0; k < 20; k++) {
+      var sv = "s" + k;
+      var r = await invoke("echo", { value: sv });
+      if (!r || r.value !== sv) { stressOk = false; break; }
+    }
+    check("20x stress", stressOk);
+  }
+
+  async function run() {
+    try {
+      await nodeSuite();
+    } catch (err) { check("suite threw: " + err, false); }
+    var fail = cases.filter(function (c) { return !c.ok; }).length;
+    var verdict = { suite: "node", ok: fail === 0, fail: fail, cases: cases };
+    document.getElementById("log").textContent = JSON.stringify(verdict, null, 1);
+    document.title = fail === 0 ? "suji-e2e-pass" : "suji-e2e-fail";
+    console.log("SUJI_E2E_RESULT " + JSON.stringify(verdict));
+    try { await window.__suji__.invoke("e2e:report", verdict); } catch (e) {}
+  }
+
+  (function wait(n) {
+    if (window.__suji__ && window.__suji__.invoke) { run(); return; }
+    if (n <= 0) {
+      document.title = "suji-e2e-fail";
+      console.log('SUJI_E2E_RESULT {"suite":"node","ok":false,"fail":1,' +
+                  '"cases":[{"name":"bridge unavailable","ok":false}]}');
+      return;
+    }
+    setTimeout(function () { wait(n - 1); }, 100);
+  })(50);
+})();
+</script>
+</body>
+</html>

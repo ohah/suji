@@ -85,6 +85,7 @@ class MainActivity : Activity() {
         // Android 에셋은 FS 가 아니므로 번들 stdlib(zip)+main.py 를 filesDir 로 1회
         // 추출 후 네이티브 등록. python 에셋 없는 다른 변형은 graceful skip.
         maybeStartPython()
+        maybeStartNode()
 
         webView = WebView(this)
         webView.settings.javaScriptEnabled = true
@@ -117,6 +118,21 @@ class MainActivity : Activity() {
         copyAsset("main.py", java.io.File(filesDir, "main.py")) // 작아서 매번 갱신
         val rc = SujiCore.nativeRegisterPythonBackend(filesDir.path)
         if (rc != 0) Log.w("suji", "python backend register failed rc=$rc")
+    }
+
+    // node 변형: 번들 main.js 를 filesDir 로 1회 복사 후 네이티브 등록(libnode
+    // 초기화 + suji.handle 채널 배선). 마커(assets/main.js) 없으면 graceful skip
+    // → 다른 변형은 nativeRegisterNodeBackend 를 호출조차 안 함(JNI lazy bind,
+    // 미구현 변형 무영향 — maybeStartPython 동형).
+    private fun maybeStartNode() {
+        // 데스크톱 resolveNodeDirMain 동형 — main.js 우선, 없으면 main.ts(Node 24
+        // 타입 스트리핑). 둘 다 없으면 graceful skip(다른 변형 무영향).
+        val entry = listOf("main.js", "main.ts").firstOrNull {
+            runCatching { assets.open(it).close(); true }.getOrDefault(false)
+        } ?: return
+        copyAsset(entry, java.io.File(filesDir, entry)) // 작아서 매번 갱신
+        val rc = SujiCore.nativeRegisterNodeBackend(filesDir.path, entry)
+        if (rc != 0) Log.w("suji", "node backend register failed rc=$rc")
     }
 
     private fun unzipAsset(name: String, dest: java.io.File) {
