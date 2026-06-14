@@ -1160,6 +1160,16 @@ pub const nativeImage = struct {
         const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
         return coreCmd("native_image_is_template", fields);
     }
+
+    /// 파일의 시스템 아이콘 PNG base64(Electron `app.getFileIcon`, macOS
+    /// NSWorkspace.iconForFile). 응답: `{"data":"<base64>"}`.
+    pub fn fileIcon(path: []const u8) ?[]const u8 {
+        var p_buf: [4096]u8 = undefined;
+        const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+        var fields_buf: [4200]u8 = undefined;
+        const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+        return coreCmd("app_get_file_icon", fields);
+    }
 };
 
 pub const nativeTheme = struct {

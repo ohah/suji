@@ -3013,6 +3013,13 @@ export const app = {
     return r.path;
   },
 
+  /** Electron `app.getFileIcon(path)` 동등. 파일 시스템 아이콘 PNG base64
+   *  (macOS NSWorkspace.iconForFile). 파일 없거나 Win/Linux는 빈 문자열. */
+  async getFileIcon(path: string): Promise<string> {
+    const r = await invoke<{ data: string }>('__core__', { cmd: 'app_get_file_icon', path });
+    return r.data ?? '';
+  },
+
   /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */
   async requestUserAttention(critical = true): Promise<number> {
     const r = await invoke<{ id: number }>('__core__', { cmd: 'app_attention_request', critical });

@@ -657,6 +657,15 @@ describe("nativeImage.getSize", () => {
     }
   });
 
+  test("app.getFileIcon: 존재 파일 → PNG base64 (macOS NSWorkspace 아이콘)", async () => {
+    // 존재하는 파일의 시스템 아이콘. macOS NSWorkspace.iconForFile 은 항상 아이콘 반환.
+    const r = await core<{ data: string }>({ cmd: "app_get_file_icon", path: "/bin/ls" });
+    expect(typeof r.data).toBe("string");
+    expect(r.data.length).toBeGreaterThan(0);
+    const buf = Buffer.from(r.data, "base64");
+    expect(buf.subarray(0, 4).toString("latin1")).toBe("\x89PNG"); // PNG signature
+  });
+
   test("toPNG: 1x1 PNG 파일 → base64 비어있지 않고 PNG signature 시작", async () => {
     const tmp = `/tmp/suji-topng-${Date.now()}.png`;
     fs.writeFileSync(tmp, PNG_1X1);

@@ -321,6 +321,7 @@ pub const nativeImageEncodeFromPath = cef_native_image.nativeImageEncodeFromPath
 pub const nativeImageGetSize = cef_native_image.nativeImageGetSize;
 pub const nativeImageIsEmpty = cef_native_image.nativeImageIsEmpty;
 pub const nativeImageIsTemplate = cef_native_image.nativeImageIsTemplate;
+pub const nativeImageFileIconPng = cef_native_image.nativeImageFileIconPng;
 
 pub const appSetProgressBar = cef_app_progress.appSetProgressBar;
 

@@ -2680,6 +2680,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const bytes = cef.nativeImageEncodeFromPath(path_buf[0..path_n], file_type, quality, &raw_buf);
         return respondBase64Data(response_buf, cmd, bytes);
     }
+    // Electron app.getFileIcon(path) — 파일의 시스템 아이콘 PNG(base64). NSWorkspace
+    // iconForFile(아이콘은 file type 기반이라 파일 내용 유출 아님 → fs gate 불요).
+    if (std.mem.eql(u8, cmd, "app_get_file_icon")) {
+        const raw_path = util.extractJsonString(req_clean, "path") orelse "";
+        var path_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const path_n = util.unescapeJsonStr(raw_path, &path_buf) orelse return respondBase64Data(response_buf, cmd, &.{});
+        var raw_buf: [8 * 1024]u8 = undefined;
+        const bytes = cef.nativeImageFileIconPng(path_buf[0..path_n], &raw_buf);
+        return respondBase64Data(response_buf, cmd, bytes);
+    }
     if (std.mem.eql(u8, cmd, "app_exit")) {
         cef.quit();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_exit\",\"success\":true}}", .{}) catch null;
