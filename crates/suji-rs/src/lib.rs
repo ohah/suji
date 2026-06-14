@@ -3058,21 +3058,25 @@ pub mod session {
     /// 렌더러(웹 콘텐츠) 권한 요청 정보 — `set_permission_request_handler` 핸들러 인자.
     #[derive(Debug, Clone)]
     pub struct PermissionRequest {
-        /// 응답 매칭용 CEF prompt id.
+        /// 응답 매칭용 CEF prompt id. getUserMedia(media) 요청은 0.
         pub permission_id: u64,
         /// 요청 origin (file:// 페이지는 빈 문자열 가능).
         pub origin: String,
-        /// 요청된 권한 이름 (예: ["geolocation"]).
+        /// 요청된 권한 이름 (예: ["geolocation"], ["media"]).
         pub permissions: Vec<String>,
+        /// getUserMedia 요청 시 요청된 미디어 타입 (["audio"]/["video"]). 비-media 는 빈 Vec.
+        pub media_types: Vec<String>,
     }
 
     /// Electron `session.setPermissionRequestHandler(handler)` 동등. 렌더러가 geolocation/
     /// notifications/clipboard 등 권한을 요청하면 `handler` 가 호출돼 `true`(허용)/`false`(거부)
-    /// 를 반환한다. 한 번 등록(앱 수명). 정직 경계: camera/mic(getUserMedia)는 별도 CEF
-    /// 경로라 미포함 — on_show_permission_prompt 권한군 대상.
+    /// 를 반환한다. 한 번 등록(앱 수명). camera/mic(getUserMedia)도 이 핸들러가 받는다
+    /// (permissions=["media"], media_types=["audio"]/["video"]; true 면 요청된 타입 grant).
+    /// 정직 경계: media 실 grant 검증은 헤드리스 e2e 불가.
     ///
-    /// `session:permission-request` 이벤트를 구독해 결정 후 `session_permission_response`
-    /// 로 응답한다(JS/Node SDK 와 동일 wire). 핸들러는 leak 되어 앱 수명 동안 유지.
+    /// `session:permission-request`/`session:media-access-request` 를 구독해 결정 후
+    /// `session_permission_response`/`session_media_access_response` 로 응답한다(JS/Node SDK
+    /// 와 동일 wire). 핸들러는 leak 되어 앱 수명 동안 유지(두 trampoline 이 공유).
     pub fn set_permission_request_handler<F>(handler: F)
     where
         F: Fn(PermissionRequest) -> bool + Send + Sync + 'static,
@@ -3080,7 +3084,9 @@ pub mod session {
         type BoxedHandler = Box<dyn Fn(PermissionRequest) -> bool + Send + Sync>;
         let boxed: Box<BoxedHandler> = Box::new(Box::new(handler));
         let arg = Box::into_raw(boxed) as *mut std::os::raw::c_void;
+        // 같은 leaked handler 를 두 이벤트에 등록(빌림만 — arg 소유권 미이전, 앱 수명 유지).
         crate::on("session:permission-request", permission_trampoline, arg);
+        crate::on("session:media-access-request", media_trampoline, arg);
         invoke(
             "__core__",
             r#"{"cmd":"session_set_permission_handler","enabled":true}"#,
@@ -3131,6 +3137,7 @@ pub mod session {
                 permission_id,
                 origin,
                 permissions,
+                media_types: Vec::new(),
             })
         }))
         .unwrap_or(false);
@@ -3138,6 +3145,56 @@ pub mod session {
             "cmd": "session_permission_response",
             "permissionId": permission_id,
             "granted": granted,
+        })
+        .to_string();
+        invoke("__core__", &resp);
+    }
+
+    /// getUserMedia(camera/mic) 트램폴린 — session:media-access-request → handler →
+    /// session_media_access_response. permission_trampoline 과 같은 leaked handler 공유.
+    extern "C" fn media_trampoline(
+        _channel: *const std::os::raw::c_char,
+        data: *const std::os::raw::c_char,
+        arg: *mut std::os::raw::c_void,
+    ) {
+        if arg.is_null() || data.is_null() {
+            return;
+        }
+        let handler =
+            unsafe { &*(arg as *const Box<dyn Fn(PermissionRequest) -> bool + Send + Sync>) };
+        let payload = unsafe { std::ffi::CStr::from_ptr(data) }
+            .to_str()
+            .unwrap_or("");
+        let v: serde_json::Value = serde_json::from_str(payload).unwrap_or(serde_json::Value::Null);
+        let media_request_id = v.get("mediaRequestId").and_then(|x| x.as_u64()).unwrap_or(0);
+        let origin = v
+            .get("origin")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string();
+        let audio = v.get("audio").and_then(|x| x.as_bool()).unwrap_or(false);
+        let video = v.get("video").and_then(|x| x.as_bool()).unwrap_or(false);
+        let mut media_types: Vec<String> = Vec::new();
+        if audio {
+            media_types.push("audio".to_string());
+        }
+        if video {
+            media_types.push("video".to_string());
+        }
+        let granted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handler(PermissionRequest {
+                permission_id: 0,
+                origin,
+                permissions: vec!["media".to_string()],
+                media_types,
+            })
+        }))
+        .unwrap_or(false);
+        let resp = json!({
+            "cmd": "session_media_access_response",
+            "mediaRequestId": media_request_id,
+            "audio": granted && audio,
+            "video": granted && video,
         })
         .to_string();
         invoke("__core__", &resp);

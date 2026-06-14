@@ -337,6 +337,7 @@ pub const PermissionEmitFn = cef_session_permission.PermissionEmitFn;
 pub const setPermissionEmitHandler = cef_session_permission.setPermissionEmitHandler;
 pub const permissionSetHandlerEnabled = cef_session_permission.permissionSetHandlerEnabled;
 pub const permissionRespond = cef_session_permission.permissionRespond;
+pub const mediaAccessRespond = cef_session_permission.mediaAccessRespond;
 pub const getPermissionHandler = cef_session_permission.getPermissionHandler;
 
 // session.setDownloadPath + session:will-download — cef_download_handler.zig

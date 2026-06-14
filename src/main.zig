@@ -2733,6 +2733,15 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = if (id_i < 0) false else cef.permissionRespond(@intCast(id_i), granted);
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_permission_response\",\"success\":{}}}", .{ok}) catch null;
     }
+    // getUserMedia(camera/mic) 권한 — session:media-access-request 이벤트에 대한 app 응답.
+    // 같은 setPermissionRequestHandler 등록(g_have_handler) 흐름. audio/video 각각 grant.
+    if (std.mem.eql(u8, cmd, "session_media_access_response")) {
+        const id_i = util.extractJsonInt(req_clean, "mediaRequestId") orelse -1;
+        const audio = util.extractJsonBool(req_clean, "audio") orelse false;
+        const video = util.extractJsonBool(req_clean, "video") orelse false;
+        const ok = if (id_i < 0) false else cef.mediaAccessRespond(@intCast(id_i), audio, video);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"session_media_access_response\",\"success\":{}}}", .{ok}) catch null;
+    }
     if (std.mem.eql(u8, cmd, "session_clear_storage_data")) {
         var origin_buf: [2048]u8 = undefined;
         var types_buf: [256]u8 = undefined;
