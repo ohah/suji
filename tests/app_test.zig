@@ -1843,3 +1843,23 @@ test "emitSchemaTs: schema 미등록이면 빈 interface(라인 0)" {
     // wrapper 는 나오되 interface 본문 0줄.
     try std.testing.expect(std.mem.indexOf(u8, buf[0..n], "interface SujiHandlers {\n  }") != null);
 }
+
+test "Request.stringUnescaped: JSON escape unescaped (Windows path)" {
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    // 와이어 JSON 값의 백슬래시는 이스케이프돼 온다(x5c=백슬래시, x22=따옴표 hex escape —
+    // 리터럴 백슬래시 중첩 혼동 방지). 즉 값 바이트는 이중 백슬래시(C:\x5c\x5cUsers...).
+    const raw = "{\x22filePath\x22:\x22C:\x5c\x5cUsers\x5c\x5cout.bin\x22}";
+    const req = app_mod.Request{ .raw = raw, .arena = arena.allocator() };
+
+    // string(): raw 바이트 — 이스케이프된 이중 백슬래시 그대로(미해제).
+    try std.testing.expectEqualStrings("C:\x5c\x5cUsers\x5c\x5cout.bin", req.string("filePath").?);
+    // stringUnescaped(): 실제 경로 — 단일 백슬래시.
+    try std.testing.expectEqualStrings("C:\x5cUsers\x5cout.bin", req.stringUnescaped("filePath").?);
+    // 키 부재 → null.
+    try std.testing.expect(req.stringUnescaped("nope") == null);
+
+    // escape 없는 값(macOS/Linux 경로)은 그대로(no-op 복사).
+    const req2 = app_mod.Request{ .raw = "{\x22p\x22:\x22/Users/out.bin\x22}", .arena = arena.allocator() };
+    try std.testing.expectEqualStrings("/Users/out.bin", req2.stringUnescaped("p").?);
+}

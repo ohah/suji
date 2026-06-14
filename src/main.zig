@@ -2470,7 +2470,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     }
     if (std.mem.eql(u8, cmd, "desktop_capturer_capture_thumbnail")) {
         const source_id = util.extractJsonString(req_clean, "sourceId") orelse "";
-        const path = util.extractJsonString(req_clean, "path") orelse "";
+        // 다른 게이트 호출부(native_image / print_to_pdf / shell_* 등)와 동일하게 path 를
+        // unescape 한 뒤 게이트/캡처에 사용 — extractJsonString 은 raw(미-unescape)라 Windows
+        // 경로가 `C:\\…`(이중 백슬래시)로 남아 allowedRoots(config std.json, unescaped)와 어긋나
+        // (opt-in fs.allowedRoots 설정 시) 정상 경로가 forbidden 된다. 이 호출부만 누락돼 있었다.
+        const raw_path = util.extractJsonString(req_clean, "path") orelse "";
+        var dc_path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+        const path = if (util.unescapeJsonStr(raw_path, &dc_path_buf)) |n| dc_path_buf[0..n] else raw_path;
         if (rendererPathFsGate(response_buf, "desktop_capturer_capture_thumbnail", path)) |e| return e;
         const ok = source_id.len > 0 and path.len > 0 and
             cef.desktopCapturerCaptureThumbnail(source_id, path);
