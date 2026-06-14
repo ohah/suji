@@ -69,7 +69,9 @@ echo "[stage-node-android] cross-building libnode.so (NDK, ~30-60분)"
   # 3 인자 고정 + configure 를 --shared 없이 호출). DEST_CPU 는 arm64(arm64-v8a).
   sed -i 's| --cross-compiling")| --cross-compiling --shared --without-npm --without-corepack")|' android_configure.py
   ./android-configure "$ANDROID_NDK_HOME" 26 "$DEST_CPU"
-  make -j"$(nproc)" )
+  # host toolset 은 native gcc/g++ — android-configure 의 NDK clang 은 target 만
+  # (host 도 NDK clang 이면 V8 host build 가 android 로 컴파일돼 execinfo backtrace 실패).
+  make -j"$(nproc)" CC.host=gcc CXX.host=g++ LINK.host=g++ )
 
 LIB="$(ls "$SRC/out/Release/lib/libnode.so."* "$SRC/out/Release/libnode.so."* 2>/dev/null | head -1)"
 [ -n "$LIB" ] || { echo "[stage-node-android] FAILED — libnode.so 미생성(out/Release)" >&2; exit 1; }

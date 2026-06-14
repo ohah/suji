@@ -71,7 +71,11 @@ jobs:
           # 나온다(NDK toolchain/CC/CXX/GYP_DEFINES 는 android-configure 가 설정).
           sed -i 's| --cross-compiling")| --cross-compiling --shared --without-npm --without-corepack")|' android_configure.py
           ./android-configure "$ANDROID_NDK_HOME" 26 arm64
-          make -j$(nproc)
+          # host toolset(mksnapshot/torque 등 — Linux 에서 도는 빌드 도구)은 ubuntu
+          # native gcc/g++ 로. android-configure 가 CC/CXX 를 NDK clang(android)으로
+          # 설정하면 host build 도 android 로 컴파일돼 V8 stack_trace 가 glibc
+          # execinfo.h(backtrace) 를 못 쓴다(undeclared). target=NDK clang, host=native.
+          make -j$(nproc) CC.host=gcc CXX.host=g++ LINK.host=g++
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
