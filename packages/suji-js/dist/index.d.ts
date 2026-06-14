@@ -70,6 +70,8 @@ export declare function invoke<K extends string>(cmd: K, ...rest: InvokeArgs<K>)
  * @returns 리스너 해제 함수
  */
 export declare function on(event: string, callback: Listener): () => void;
+/** `ipcRenderer.addListener` 별칭 — `on` 과 동일(Electron 패리티). */
+export declare const addListener: typeof on;
 /**
  * 이벤트 한 번만 구독 (Electron: ipcRenderer.once)
  *
@@ -703,6 +705,9 @@ export declare const powerMonitor: {
     /** Electron `powerMonitor.isOnBatteryPower()` — 현재 배터리 전원 여부.
      *  macOS IOKit / Windows GetSystemPowerStatus / Linux /sys. 정보 없으면 false. */
     isOnBatteryPower(): Promise<boolean>;
+    /** 현재 열 상태 (Electron `powerMonitor.getCurrentThermalState`). macOS NSProcessInfo.thermalState
+     *  → "nominal"|"fair"|"serious"|"critical". Win/Linux "unknown"(표준 API 부재). */
+    getCurrentThermalState(): Promise<"nominal" | "fair" | "serious" | "critical" | "unknown">;
 };
 export declare const clipboard: {
     /** 클립보드의 plain text 읽기. 비어 있거나 non-text면 빈 문자열. */
@@ -743,6 +748,9 @@ export declare const clipboard: {
     /** Find 펜보드에 텍스트 쓰기 (Electron `clipboard.writeFindText`). macOS cross-app find
      *  pasteboard. macOS only — Win/Linux false. */
     writeFindText(text: string): Promise<boolean>;
+    /** Find 펜보드에서 텍스트 읽기 (Electron `clipboard.readFindText`). writeFindText 대칭.
+     *  macOS only — Win/Linux 빈 문자열. */
+    readFindText(): Promise<string>;
     /** 여러 포맷 한 번에 쓰기 (Electron `clipboard.write({text,html,rtf})`). clear 1회 후
      *  제공된 필드만 기록. macOS=atomic, Win/Linux=best-effort 단일(text 우선). */
     write(data: {
@@ -953,6 +961,9 @@ export declare const nativeImage: {
     /** 이미지 파일 → PNG base64 (raw ~8KB 한도, 작은 아이콘용 1차).
      *  Electron `nativeImage.createFromPath(path).toPNG()` → base64.toString('base64'). */
     toPng(path: string): Promise<string>;
+    /** 이미지 파일 → data URL (Electron `nativeImage.toDataURL()`). PNG base64 에
+     *  `data:image/png;base64,` 접두. 빈/로드실패 이미지는 빈 문자열. */
+    toDataURL(path: string): Promise<string>;
     /** 이미지 파일 → JPEG base64. quality 0~100 (기본 90). */
     toJpeg(path: string, quality?: number): Promise<string>;
     /** 이미지가 비어있는지 (로드 실패/크기 0) — Electron `nativeImage.isEmpty()`. */
@@ -980,6 +991,12 @@ export declare const nativeTheme: {
      *  macOS NSWorkspace.accessibilityDisplayShouldReduceTransparency / Windows EnableTransparency==0.
      *  Linux는 false(미지원). */
     prefersReducedTransparency(): Promise<boolean>;
+    /** 색상 반전 사용 여부 (Electron `nativeTheme.shouldUseInvertedColorScheme`).
+     *  macOS NSWorkspace.accessibilityDisplayShouldInvertColors. Win/Linux는 false(미지원). */
+    shouldUseInvertedColorScheme(): Promise<boolean>;
+    /** 색상 없이 구분 선호 (Electron `nativeTheme.shouldDifferentiateWithoutColor`).
+     *  macOS NSWorkspace.accessibilityDisplayShouldDifferentiateWithoutColor. Win/Linux는 false. */
+    shouldDifferentiateWithoutColor(): Promise<boolean>;
 };
 export type FileType = "file" | "directory" | "symlink" | "blockDevice" | "characterDevice" | "fifo" | "socket" | "whiteout" | "door" | "eventPort" | "unknown";
 export interface FsStat {
@@ -1100,6 +1117,9 @@ export interface PermissionRequestDetails {
  *  async 가능(커스텀 UI 등). 한 번에 1 핸들러만 active. */
 export type PermissionRequestHandler = (details: PermissionRequestDetails) => boolean | Promise<boolean>;
 export declare const session: {
+    /** 세션 영속성 여부 (Electron `session.isPersistent()`). Suji 는 항상 영속 프로필
+     *  (app.getPath('userData') 아래 디스크 격리) → 항상 true. */
+    isPersistent(): boolean;
     /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
      *  fire-and-forget — 실제 cleanup은 비동기. */
     clearCookies(): Promise<boolean>;
@@ -1473,6 +1493,14 @@ export declare const app: {
     focus(): Promise<boolean>;
     /** 모든 윈도우 hide (macOS Cmd+H 동등). */
     hide(): Promise<boolean>;
+    /** hide 상태에서 다시 표시 (Electron `app.show()` macOS — unhide + activate). */
+    show(): Promise<boolean>;
+    /** 앱이 frontmost(활성)인지 (Electron `app.isActive()`). macOS only(Win/Linux false). */
+    isActive(): Promise<boolean>;
+    /** 앱이 hide 상태인지 (Electron `app.isHidden()`). macOS only(Win/Linux false). */
+    isHidden(): Promise<boolean>;
+    /** 이모지 패널 지원 여부 (Electron `app.isEmojiPanelSupported()`). macOS true / Win/Linux false. */
+    isEmojiPanelSupported(): Promise<boolean>;
     /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
     getPath(name: AppPathName): Promise<string>;
     /** dock 아이콘 바운스 시작. 0이면 no-op (앱이 이미 active). 아니면 cancel용 id. */

@@ -1877,3 +1877,101 @@ describe("ipcRenderer.removeAllListeners (bridge off)", () => {
     expect(r.afterAll).toBe(3); // off() 후 미발화
   });
 });
+
+// ── PR2 (Electron parity 백로그) — 신규 메서드 e2e ──
+
+describe("nativeTheme.shouldUseInvertedColorScheme / shouldDifferentiateWithoutColor", () => {
+  test("invertedColorScheme: boolean 반환", async () => {
+    const r = await core<{ invertedColorScheme: boolean }>({ cmd: "native_theme_inverted_color_scheme" });
+    expect(typeof r.invertedColorScheme).toBe("boolean");
+  });
+  test("differentiateWithoutColor: boolean 반환", async () => {
+    const r = await core<{ differentiateWithoutColor: boolean }>({ cmd: "native_theme_differentiate_without_color" });
+    expect(typeof r.differentiateWithoutColor).toBe("boolean");
+  });
+});
+
+describe("clipboard.writeFindText / readFindText (Find pasteboard 라운드트립)", () => {
+  test("ASCII 라운드트립", async () => {
+    const text = `find-me-${Date.now()}`;
+    const w = await core<{ success: boolean }>({ cmd: "clipboard_write_find_text", text });
+    expect(w.success).toBe(true);
+    const r = await core<{ text: string }>({ cmd: "clipboard_read_find_text" });
+    expect(r.text).toBe(text);
+  });
+  test("유니코드 라운드트립", async () => {
+    const text = "찾기 텍스트 🔍";
+    await core({ cmd: "clipboard_write_find_text", text });
+    const r = await core<{ text: string }>({ cmd: "clipboard_read_find_text" });
+    expect(r.text).toBe(text);
+  });
+});
+
+describe("app.isActive / isHidden / isEmojiPanelSupported / show", () => {
+  test("isActive: boolean 반환", async () => {
+    const r = await core<{ active: boolean }>({ cmd: "app_is_active" });
+    expect(typeof r.active).toBe("boolean");
+  });
+  test("isHidden: boolean 반환", async () => {
+    const r = await core<{ hidden: boolean }>({ cmd: "app_is_hidden" });
+    expect(typeof r.hidden).toBe("boolean");
+  });
+  test("isEmojiPanelSupported: macOS → true", async () => {
+    const r = await core<{ supported: boolean }>({ cmd: "app_is_emoji_panel_supported" });
+    expect(r.supported).toBe(true);
+  });
+  test("show: success true (NSApp unhide + activate)", async () => {
+    const r = await core<{ success: boolean }>({ cmd: "app_show" });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("powerMonitor.getCurrentThermalState", () => {
+  test("유효 thermalState 문자열", async () => {
+    const r = await core<{ thermalState: string }>({ cmd: "power_monitor_thermal_state" });
+    expect(["nominal", "fair", "serious", "critical", "unknown"]).toContain(r.thermalState);
+  });
+});
+
+describe("nativeImage.toDataURL (SDK wrapper)", () => {
+  const PNG_1X1 = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  test("유효 PNG → data:image/png;base64, 접두", async () => {
+    const tmp = `/tmp/suji-dataurl-${Date.now()}.png`;
+    fs.writeFileSync(tmp, PNG_1X1);
+    try {
+      const dataUrl = await page.evaluate(
+        (p) => (window as any).__suji_sdk__.nativeImage.toDataURL(p),
+        tmp,
+      );
+      expect(typeof dataUrl).toBe("string");
+      expect((dataUrl as string).startsWith("data:image/png;base64,")).toBe(true);
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+});
+
+describe("session.isPersistent (SDK wrapper)", () => {
+  test("항상 true", async () => {
+    const v = await page.evaluate(() => (window as any).__suji_sdk__.session.isPersistent());
+    expect(v).toBe(true);
+  });
+});
+
+describe("ipc.addListener (on 별칭, SDK wrapper)", () => {
+  test("addListener === on (별칭) + 구독/해제 동작", async () => {
+    const r = await page.evaluate(() => {
+      const sdk = (window as any).__suji_sdk__;
+      // addListener 는 on 의 별칭 — 동일 참조이며 unsubscribe 함수를 반환한다.
+      const off = sdk.addListener("e2e-add-listener-test", () => {});
+      const okOff = typeof off === "function";
+      off();
+      return { isAlias: sdk.addListener === sdk.on, okOff };
+    });
+    expect(r.isAlias).toBe(true);
+    expect(r.okOff).toBe(true);
+  });
+});
