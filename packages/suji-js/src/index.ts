@@ -3090,6 +3090,13 @@ export const app = {
     return r.success === true;
   },
 
+  /** Electron `app.relaunch()` — quit 후 현재 앱 재시작 등록. 이후 quit()/exit()
+   *  시 새 인스턴스 spawn(현재 argv). args/execPath 옵션 미지원(정직 경계). */
+  async relaunch(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_relaunch" });
+    return r.success === true;
+  },
+
   /**
    * Electron `app.requestSingleInstanceLock()` — 이 프로세스를 primary 로 만들고
    * true 반환. 다른 인스턴스가 이미 락을 보유 중이면 false (앱은 보통 quit).

@@ -86,6 +86,13 @@ func Exit() string {
 	return suji.Invoke("__core__", `{"cmd":"app_exit"}`)
 }
 
+// Relaunch registers app restart after quit (Electron `app.relaunch()`). 이후
+// Quit/Exit 시 현재 argv 로 새 인스턴스 spawn. Response: `{"success":bool}`.
+// args/execPath 옵션 미지원(현재 argv 그대로 — 정직 경계).
+func Relaunch() string {
+	return suji.Invoke("__core__", `{"cmd":"app_relaunch"}`)
+}
+
 // RequestSingleInstanceLock makes this process the primary instance.
 // Electron `app.requestSingleInstanceLock()`. primary 면 `{"locked":true}`,
 // 다른 인스턴스가 이미 보유 중이면 `{"locked":false}` (보통 앱 quit). 이미 보유

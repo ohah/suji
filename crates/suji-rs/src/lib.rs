@@ -3326,6 +3326,12 @@ pub fn exit() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_exit"}"#)
 }
 
+/// Electron `app.relaunch()` — quit 후 현재 앱 재시작 등록(이후 quit/exit 시 현재
+/// argv 로 새 인스턴스 spawn). raw JSON `{"success":bool}`. args/execPath 미지원.
+pub fn relaunch() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_relaunch"}"#)
+}
+
 /// Electron `app.requestSingleInstanceLock()` — primary 면 `{"locked":true}`,
 /// 다른 인스턴스가 이미 보유 중이면 `{"locked":false}` (보통 앱 quit). 이미 보유
 /// 중이면 멱등적으로 true. macOS/Linux=userData flock, Windows=named mutex.

@@ -568,6 +568,16 @@ describe("app.getPath", () => {
   });
 });
 
+describe("app.relaunch", () => {
+  test("wire success — SUJI_NO_RELAUNCH 로 실 spawn 우회(고아 방지)", async () => {
+    // app.relaunch() 는 다음 quit 시 재시작 flag 등록. e2e 는 run-system-integration.sh
+    // 의 SUJI_NO_RELAUNCH=1 로 실 spawn 을 막고 dispatch wire(success)만 검증
+    // (실 재시작은 graceful 종료 시 고아 프로세스 위험으로 수동 — 정직 경계).
+    const r = await core<{ success: boolean }>({ cmd: "app_relaunch" });
+    expect(r.success).toBe(true);
+  });
+});
+
 describe("app.getName / getVersion", () => {
   test("config.app.name → multi-backend example name 반환", async () => {
     const r = await core<{ name: string }>({ cmd: "app_get_name" });
