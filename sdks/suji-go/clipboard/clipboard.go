@@ -110,6 +110,12 @@ func WriteFindText(text string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"clipboard_write_find_text","text":"%s"}`, jsonesc.Full(text)))
 }
 
+// ReadFindText reads text from the macOS Find pasteboard (Electron clipboard.readFindText).
+// WriteFindText 대칭. macOS only; Win/Linux empty. Response: `{"text":"..."}`.
+func ReadFindText() string {
+	return suji.Invoke("__core__", `{"cmd":"clipboard_read_find_text"}`)
+}
+
 // Write writes multiple formats at once (Electron clipboard.write). Empty fields are skipped.
 // macOS=atomic, Win/Linux=best-effort single (text first). Response: `{"success":bool}`.
 func Write(text, html, rtf string) string {

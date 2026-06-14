@@ -227,11 +227,16 @@ pub const appIsPackaged = cef_app.appIsPackaged;
 pub const appGetLocale = cef_app.appGetLocale;
 pub const appFocus = cef_app.appFocus;
 pub const appHide = cef_app.appHide;
+pub const appIsActive = cef_app.appIsActive;
+pub const appIsHidden = cef_app.appIsHidden;
+pub const appShow = cef_app.appShow;
+pub const appIsEmojiPanelSupported = cef_app.appIsEmojiPanelSupported;
 
 pub const clipboardReadText = cef_clipboard.clipboardReadText;
 pub const clipboardWriteText = cef_clipboard.clipboardWriteText;
 pub const clipboardWriteBookmark = cef_clipboard.clipboardWriteBookmark;
 pub const clipboardWriteFindText = cef_clipboard.clipboardWriteFindText;
+pub const clipboardReadFindText = cef_clipboard.clipboardReadFindText;
 pub const clipboardWriteMulti = cef_clipboard.clipboardWriteMulti;
 pub const clipboardClear = cef_clipboard.clipboardClear;
 pub const clipboardWriteImagePng = cef_clipboard.clipboardWriteImagePng;
@@ -249,6 +254,7 @@ pub const clipboardReadBuffer = cef_clipboard.clipboardReadBuffer;
 
 pub const powerMonitorIdleSeconds = cef_power_monitor.powerMonitorIdleSeconds;
 pub const powerMonitorIsOnBattery = cef_power_monitor.powerMonitorIsOnBattery;
+pub const powerMonitorThermalState = cef_power_monitor.powerMonitorThermalState;
 pub const powerMonitorInstall = cef_power_monitor.powerMonitorInstall;
 pub const powerMonitorUninstall = cef_power_monitor.powerMonitorUninstall;
 pub const powerMonitorSetScreenLocked = cef_power_monitor.powerMonitorSetScreenLocked;
@@ -284,6 +290,8 @@ pub const nativeThemeIsDark = cef_native_theme.nativeThemeIsDark;
 pub const nativeThemeSetSource = cef_native_theme.nativeThemeSetSource;
 pub const nativeThemeHighContrast = cef_native_theme.nativeThemeHighContrast;
 pub const nativeThemeReducedTransparency = cef_native_theme.nativeThemeReducedTransparency;
+pub const nativeThemeInvertedColorScheme = cef_native_theme.nativeThemeInvertedColorScheme;
+pub const nativeThemeDifferentiateWithoutColor = cef_native_theme.nativeThemeDifferentiateWithoutColor;
 pub const nativeThemeInstall = cef_native_theme.nativeThemeInstall;
 pub const nativeThemeUninstall = cef_native_theme.nativeThemeUninstall;
 

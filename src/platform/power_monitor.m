@@ -99,3 +99,12 @@ int suji_power_monitor_is_on_battery(void) {
     CFRelease(blob);
     return on_battery;
 }
+
+// 열 상태 (Electron powerMonitor.getCurrentThermalState). NSProcessInfo.thermalState:
+// 0=nominal 1=fair 2=serious 3=critical. macOS 10.10.3+; 미만/조회불가는 -1(unknown).
+int suji_power_monitor_thermal_state(void) {
+    if (@available(macOS 10.10.3, *)) {
+        return (int)[[NSProcessInfo processInfo] thermalState];
+    }
+    return -1;
+}

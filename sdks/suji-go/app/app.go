@@ -129,6 +129,26 @@ func Hide() string {
 	return suji.Invoke("__core__", `{"cmd":"app_hide"}`)
 }
 
+// Show re-displays the app after hide (Electron app.show — unhide + activate). raw JSON: `{"success":bool}`. macOS only.
+func Show() string {
+	return suji.Invoke("__core__", `{"cmd":"app_show"}`)
+}
+
+// IsActive reports whether the app is frontmost (Electron app.isActive). raw JSON: `{"active":bool}`. macOS only.
+func IsActive() string {
+	return suji.Invoke("__core__", `{"cmd":"app_is_active"}`)
+}
+
+// IsHidden reports whether the app is hidden (Electron app.isHidden). raw JSON: `{"hidden":bool}`. macOS only.
+func IsHidden() string {
+	return suji.Invoke("__core__", `{"cmd":"app_is_hidden"}`)
+}
+
+// IsEmojiPanelSupported reports emoji panel support (Electron app.isEmojiPanelSupported). raw JSON: `{"supported":bool}`. macOS true.
+func IsEmojiPanelSupported() string {
+	return suji.Invoke("__core__", `{"cmd":"app_is_emoji_panel_supported"}`)
+}
+
 // CreateSecurityScopedBookmark creates a security-scoped bookmark for App
 // Sandbox persistent file access. Response:
 // `{"success":bool,"bookmark":"<base64>"}` (비-sandbox 빌드에선 일반 bookmark).

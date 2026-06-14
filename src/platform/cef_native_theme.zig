@@ -241,6 +241,18 @@ pub fn nativeThemeReducedTransparency() bool {
     return workspaceBool("accessibilityDisplayShouldReduceTransparency");
 }
 
+/// 색상 반전 사용 여부 (Electron `nativeTheme.shouldUseInvertedColorScheme`).
+/// macOS: NSWorkspace.accessibilityDisplayShouldInvertColors. Win/Linux: false(미지원).
+pub fn nativeThemeInvertedColorScheme() bool {
+    return workspaceBool("accessibilityDisplayShouldInvertColors");
+}
+
+/// 색상 없이 구분 선호 (Electron `nativeTheme.shouldDifferentiateWithoutColor`).
+/// macOS: NSWorkspace.accessibilityDisplayShouldDifferentiateWithoutColor. Win/Linux: false.
+pub fn nativeThemeDifferentiateWithoutColor() bool {
+    return workspaceBool("accessibilityDisplayShouldDifferentiateWithoutColor");
+}
+
 // nativeTheme:updated callback — Windows pump WM_SETTINGCHANGE 가 호출.
 pub var g_native_theme_cb_windows: ?*const fn () callconv(.c) void = null;
 

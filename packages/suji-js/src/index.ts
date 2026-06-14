@@ -108,6 +108,9 @@ export function on(event: string, callback: Listener): () => void {
   return getBridge().on(event, callback);
 }
 
+/** `ipcRenderer.addListener` 별칭 — `on` 과 동일(Electron 패리티). */
+export const addListener = on;
+
 /**
  * 이벤트 한 번만 구독 (Electron: ipcRenderer.once)
  *
@@ -1333,6 +1336,12 @@ export const powerMonitor = {
     const r = await coreCall<{ onBattery: boolean }>({ cmd: "power_monitor_is_on_battery" });
     return r.onBattery === true;
   },
+  /** 현재 열 상태 (Electron `powerMonitor.getCurrentThermalState`). macOS NSProcessInfo.thermalState
+   *  → "nominal"|"fair"|"serious"|"critical". Win/Linux "unknown"(표준 API 부재). */
+  async getCurrentThermalState(): Promise<"nominal" | "fair" | "serious" | "critical" | "unknown"> {
+    const r = await coreCall<{ thermalState: "nominal" | "fair" | "serious" | "critical" | "unknown" }>({ cmd: "power_monitor_thermal_state" });
+    return r.thermalState ?? "unknown";
+  },
 };
 
 export const clipboard = {
@@ -1440,6 +1449,12 @@ export const clipboard = {
   async writeFindText(text: string): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "clipboard_write_find_text", text });
     return r.success === true;
+  },
+  /** Find 펜보드에서 텍스트 읽기 (Electron `clipboard.readFindText`). writeFindText 대칭.
+   *  macOS only — Win/Linux 빈 문자열. */
+  async readFindText(): Promise<string> {
+    const r = await coreCall<{ text: string }>({ cmd: "clipboard_read_find_text" });
+    return r.text ?? "";
   },
 
   /** 여러 포맷 한 번에 쓰기 (Electron `clipboard.write({text,html,rtf})`). clear 1회 후
@@ -1851,6 +1866,13 @@ export const nativeImage = {
     return r.data ?? "";
   },
 
+  /** 이미지 파일 → data URL (Electron `nativeImage.toDataURL()`). PNG base64 에
+   *  `data:image/png;base64,` 접두. 빈/로드실패 이미지는 빈 문자열. */
+  async toDataURL(path: string): Promise<string> {
+    const r = await coreCall<{ data: string }>({ cmd: "native_image_to_png", path });
+    return r.data ? `data:image/png;base64,${r.data}` : "";
+  },
+
   /** 이미지 파일 → JPEG base64. quality 0~100 (기본 90). */
   async toJpeg(path: string, quality: number = 90): Promise<string> {
     const r = await coreCall<{ data: string }>({ cmd: "native_image_to_jpeg", path, quality });
@@ -1909,6 +1931,18 @@ export const nativeTheme = {
   async prefersReducedTransparency(): Promise<boolean> {
     const r = await coreCall<{ reducedTransparency: boolean }>({ cmd: "native_theme_reduced_transparency" });
     return r.reducedTransparency === true;
+  },
+  /** 색상 반전 사용 여부 (Electron `nativeTheme.shouldUseInvertedColorScheme`).
+   *  macOS NSWorkspace.accessibilityDisplayShouldInvertColors. Win/Linux는 false(미지원). */
+  async shouldUseInvertedColorScheme(): Promise<boolean> {
+    const r = await coreCall<{ invertedColorScheme: boolean }>({ cmd: "native_theme_inverted_color_scheme" });
+    return r.invertedColorScheme === true;
+  },
+  /** 색상 없이 구분 선호 (Electron `nativeTheme.shouldDifferentiateWithoutColor`).
+   *  macOS NSWorkspace.accessibilityDisplayShouldDifferentiateWithoutColor. Win/Linux는 false. */
+  async shouldDifferentiateWithoutColor(): Promise<boolean> {
+    const r = await coreCall<{ differentiateWithoutColor: boolean }>({ cmd: "native_theme_differentiate_without_color" });
+    return r.differentiateWithoutColor === true;
   },
 };
 
@@ -2122,6 +2156,11 @@ export type PermissionRequestHandler = (
 let activePermissionOff: (() => void) | null = null;
 
 export const session = {
+  /** 세션 영속성 여부 (Electron `session.isPersistent()`). Suji 는 항상 영속 프로필
+   *  (app.getPath('userData') 아래 디스크 격리) → 항상 true. */
+  isPersistent(): boolean {
+    return true;
+  },
   /** 모든 cookie 삭제 (Electron `session.clearStorageData({storages:["cookies"]})`).
    *  fire-and-forget — 실제 cleanup은 비동기. */
   async clearCookies(): Promise<boolean> {
@@ -3065,6 +3104,30 @@ export const app = {
   async hide(): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_hide" });
     return r.success === true;
+  },
+
+  /** hide 상태에서 다시 표시 (Electron `app.show()` macOS — unhide + activate). */
+  async show(): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_show" });
+    return r.success === true;
+  },
+
+  /** 앱이 frontmost(활성)인지 (Electron `app.isActive()`). macOS only(Win/Linux false). */
+  async isActive(): Promise<boolean> {
+    const r = await coreCall<{ active: boolean }>({ cmd: "app_is_active" });
+    return r.active === true;
+  },
+
+  /** 앱이 hide 상태인지 (Electron `app.isHidden()`). macOS only(Win/Linux false). */
+  async isHidden(): Promise<boolean> {
+    const r = await coreCall<{ hidden: boolean }>({ cmd: "app_is_hidden" });
+    return r.hidden === true;
+  },
+
+  /** 이모지 패널 지원 여부 (Electron `app.isEmojiPanelSupported()`). macOS true / Win/Linux false. */
+  async isEmojiPanelSupported(): Promise<boolean> {
+    const r = await coreCall<{ supported: boolean }>({ cmd: "app_is_emoji_panel_supported" });
+    return r.supported === true;
   },
 
   /** Electron `app.getPath` 동등. 표준 디렉토리 경로 반환. unknown 키는 빈 문자열. */
