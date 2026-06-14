@@ -2927,6 +2927,13 @@ export const app = {
     return r.success === true;
   },
 
+  /** Electron `app.relaunch()` — quit 후 현재 앱 재시작 등록. 이후 quit()/exit()
+   *  시 새 인스턴스 spawn(현재 argv). args/execPath 옵션 미지원(정직 경계). */
+  async relaunch(): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_relaunch' });
+    return r.success === true;
+  },
+
   /**
    * Electron `app.requestSingleInstanceLock()` — primary 면 true, 다른 인스턴스가
    * 이미 보유 중이면 false (보통 앱 quit). 이미 보유 중이면 멱등적으로 true.

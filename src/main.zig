@@ -108,7 +108,32 @@ pub fn main(init: std.process.Init) !void {
     // 빈 화면). Debug 는 인라인이 없어 호스트 프레임이 작아 통과. 따라서 호스트
     // 로직을 never_inline 경계로 분리해 서브프로세스가 얕은 main() 프레임 위에서
     // 돌게 한다. (이슈 #60 part 2 — Windows ReleaseSafe/Fast 렌더러 크래시 루트커즈.)
-    return @call(.never_inline, runHost, .{init});
+    @call(.never_inline, runHost, .{init}) catch |e| return e;
+    // app.relaunch() 가 호출됐으면 cef 메시지 루프 종료(앱 quit) 후 현재 argv 로
+    // 새 인스턴스 spawn(detached) — Electron app.relaunch(quit 후 재시작) 동작.
+    if (g_should_relaunch) @call(.never_inline, relaunchSelf, .{init});
+}
+
+/// app.relaunch() 가 set. cef 메시지 루프 종료(quit) 후 main 이 relaunchSelf 로 재시작.
+var g_should_relaunch: bool = false;
+
+/// 현재 실행 파일을 현재 argv 로 재실행(detached) 후 반환 — 부모는 직후 종료.
+/// Electron app.relaunch. args/execPath 옵션 미지원(현재 argv 그대로 — 정직 경계).
+fn relaunchSelf(init: std.process.Init) void {
+    // SUJI_E2E_NO_RELAUNCH — e2e 전용 spawn 우회. e2e 가 graceful 종료(SIGTERM)하면
+    // cef 루프가 정상 종료해 이 spawn 이 고아 프로세스를 남기므로, e2e 는 이 env 로 실
+    // spawn 을 막고 app_relaunch wire(success)만 검증한다. de-elevation self-relaunch
+    // (SUJI_NO_RELAUNCH, cefDebug 게이트)와 분리한 전용 env — ambient SUJI_NO_RELAUNCH
+    // 가 프로덕션 relaunch 를 silent no-op 시키는 footgun 회피.
+    if (runtime.env("SUJI_E2E_NO_RELAUNCH") != null) return;
+    // init.minimal.args.vector 는 C argv([]const [*:0]const u8) — spawn 은 []const
+    // []const u8 을 요구하므로 span 으로 변환. 256 상한(앱 인자 통상 소수; 초과 시 truncate).
+    var argv_buf: [256][]const u8 = undefined;
+    const vec = init.minimal.args.vector;
+    const n = @min(vec.len, argv_buf.len);
+    for (vec[0..n], 0..) |arg, i| argv_buf[i] = std.mem.span(arg);
+    _ = std.process.spawn(init.io, .{ .argv = argv_buf[0..n] }) catch return;
+    // wait 안 함 — 부모는 직후 종료, 자식은 OS reparent(detached).
 }
 
 fn runHost(init: std.process.Init) !void {
@@ -2689,6 +2714,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         var raw_buf: [8 * 1024]u8 = undefined;
         const bytes = cef.nativeImageFileIconPng(path_buf[0..path_n], &raw_buf);
         return respondBase64Data(response_buf, cmd, bytes);
+    }
+    // Electron app.relaunch() — quit 후 재시작 등록(flag). quit 은 별도 호출(app.quit/
+    // exit). main 이 cef 메시지 루프 종료 후 g_should_relaunch 면 현재 argv 로 재실행.
+    if (std.mem.eql(u8, cmd, "app_relaunch")) {
+        g_should_relaunch = true;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_relaunch\",\"success\":true}}", .{}) catch null;
     }
     if (std.mem.eql(u8, cmd, "app_exit")) {
         cef.quit();
