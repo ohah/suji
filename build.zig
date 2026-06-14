@@ -1498,17 +1498,34 @@ pub fn build(b: *std.Build) void {
         });
         python_runtime_test_mod.addImport("python_config", python_options.createModule());
         python_runtime_test_mod.addImport("runtime", runtime_module);
-        const py_inc = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
-        python_runtime_test_mod.addIncludePath(.{ .cwd_relative = py_inc });
-        const py_lib = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
-        python_runtime_test_mod.addLibraryPath(.{ .cwd_relative = py_lib });
-        // 테스트는 python_available 게이트 안에서만 빌드되므로 libpython 존재가
-        // 보장된다 → hard-link(정직한 의존). rpath 는 cache 디렉토리에서 실행되는
-        // 테스트가 staging libpython 을 찾도록 절대경로.
-        python_runtime_test_mod.linkSystemLibrary("python3.13", .{});
-        python_runtime_test_mod.addRPathSpecial(py_lib);
+        // main module(위 python 링크, line 580+)과 동형 — Windows 는 PBS 레이아웃
+        // (헤더 include/ 직접, import-lib libs/python<abi>.lib → python<abi>.dll),
+        // POSIX 는 include/python<minor> + lib/ + linkSystemLibrary + rpath.
+        // 테스트는 python_available 게이트 안에서만 빌드되므로 libpython 존재 보장.
+        switch (os_tag) {
+            .windows => {
+                const py_inc = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
+                python_runtime_test_mod.addIncludePath(.{ .cwd_relative = py_inc });
+                const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python{s}.lib", .{ python_path, python_abi }) catch @panic("OOM");
+                python_runtime_test_mod.addObjectFile(.{ .cwd_relative = import_lib });
+            },
+            else => {
+                const py_inc = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
+                python_runtime_test_mod.addIncludePath(.{ .cwd_relative = py_inc });
+                const py_lib = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
+                python_runtime_test_mod.addLibraryPath(.{ .cwd_relative = py_lib });
+                // rpath: cache 디렉토리에서 실행되는 테스트가 staging libpython 을 찾도록.
+                python_runtime_test_mod.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "python{s}", .{python_minor}) catch @panic("OOM"), .{});
+                python_runtime_test_mod.addRPathSpecial(py_lib);
+            },
+        }
         const python_runtime_test = b.addTest(.{ .root_module = python_runtime_test_mod });
-        dependOnTestWithProjectCwd(b, test_step, python_runtime_test);
+        // Windows 는 rpath 부재 → python<abi>.dll(+vcruntime140*.dll, python_path 에 동반)을
+        // run step PATH 로 노출. cwd=project root(인라인 test 가 main.py 상대경로 로드).
+        const py_test_run = b.addRunArtifact(python_runtime_test);
+        py_test_run.setCwd(b.path("."));
+        if (os_tag == .windows) py_test_run.addPathDir(python_path);
+        test_step.dependOn(&py_test_run.step);
     }
 
     // CEF IPC tests (순수 함수 — CEF 런타임 불필요)

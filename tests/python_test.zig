@@ -20,13 +20,17 @@ test "build.zig: Python staging + weak-link auto-detect + packaging install step
     const a = std.testing.allocator;
     const b = try slurp(a, "build.zig");
     defer a.free(b);
-    // staging 경로(libnode 패턴) + auto-detect 게이트.
-    try expectContains(b, ".suji/python/3.13.13");
+    // 버전 단일 출처 상수 + auto-detect 게이트. (staging 경로는 `{s}/.suji/python/{s}`
+    // 포맷 + python_version 상수로 조립되므로 리터럴 풀패스가 아니라 **상수**를 검사 —
+    // 버전 bump 시 build.zig 한 곳만 바뀌고 이 계약은 그대로 따라온다.)
+    try expectContains(b, "python_version = \"3.13.13\"");
     try expectContains(b, "python_available");
     // weak-link: python staging 머신 빌드여도 비-python 앱 graceful(심볼 null).
-    try expectContains(b, "linkSystemLibrary(\"python3.13\", .{ .weak = true })");
-    // Windows 는 MSVC import lib 게이트(node .dll.a 동형).
-    try expectContains(b, "libs/python3.lib");
+    // 링크 대상은 python_minor 파생(`python{s}`) — 버전 상수 단일 출처.
+    try expectContains(b, "\"python{s}\", .{python_minor}");
+    try expectContains(b, ".{ .weak = true }");
+    // Windows 는 MSVC import lib 게이트(node .dll.a 동형) — python_abi 파생(python313.lib).
+    try expectContains(b, "libs/python{s}.lib");
     // packaging: end-user 머신 Python 미설치 대응 — libpython+stdlib 동반.
     try expectContains(b, "addInstallPythonRuntimeStep");
 }
