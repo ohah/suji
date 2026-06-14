@@ -937,6 +937,49 @@ jobs:
           export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
           bash tests/e2e/run-badge-count.sh
 
+      # ── Windows embedded CPython (dev + packaged) ──
+      # dev(run-python-e2e.sh)는 staged ~/.suji/python 을 PYTHONHOME 으로 쓰지만,
+      # packaged 는 `suji build` 가 python313.dll + python/{Lib,DLLs} 를 번들하고
+      # 런타임이 sentinel-gated <exe_dir>/python 으로 해석한다 — 별도 경로라 dev
+      # 통과만으론 packaged 회귀를 못 잡으므로 두 가드를 모두 돈다. 두 e2e 스크립트가
+      # 각자 stage-python.sh + zig build(python auto-enable)를 수행하지만, staging
+      # 다운로드를 가시적/캐시 가능한 별도 스텝으로 분리(PYTHON_VERSION/PYTHON_PBS_TAG
+      # 는 workflow env). python 빌드는 Debug zig-out 을 덮어쓰므로 위 Windows e2e
+      # 스텝(비-python Debug 빌드 대상)들 뒤, 아래 ReleaseSafe 재빌드 앞에 위치.
+      - name: Stage embedded CPython (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/stage-python.sh
+
+      - name: Install python-backend frontend dependencies (Windows)
+        if: runner.os == 'Windows'
+        working-directory: examples/python-backend/frontend
+        run: bun install
+
+      - name: E2E — Python backend invoke (dev, Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-python.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-python-e2e.sh
+
+      - name: E2E — Python backend packaged (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-python-packaged.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-python-packaged.sh
+
       # #60 part 2 회귀 가드 — 반드시 마지막 Windows 스텝(ReleaseSafe 재빌드로
       # Debug zig-out 을 덮어쓰므로). 최적화 빌드에서 렌더러 V8 부트스트랩이
       # window.__suji__ 를 바인딩하는지 검증 — 재발 시 getMainPage 타임아웃으로 fail.

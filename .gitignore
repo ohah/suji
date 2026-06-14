@@ -62,6 +62,20 @@ test-results/
 # npm pack artifacts
 *.tgz
 
+# suji build packaging output (examples) — macOS .app 는 위 `*.app/` 가 커버.
+# Windows/Linux 는 `<AppName>-<ver>-<plat>-x64/` 디렉토리 + 동명 .zip 으로 떨어진다.
+# run-python-packaged.sh 등 packaged e2e 가드가 생성하므로 트리 오염 방지.
+examples/*/*-windows-x64/
+examples/*/*-windows-x64.zip
+examples/*/*-linux-x64/
+examples/*/*-linux-x64.zip
+# Windows Go 백엔드 (macOS/Linux .dylib/.h 는 위에서 이미 무시)
+examples/*/backends/go/*.dll
+# 예제 프런트엔드 빌드 출력 (suji build / packaged e2e 가 생성)
+examples/*/frontend/dist/
+# e2e CI 로그 아티팩트 디렉토리 (e2e.yml Windows arm 이 여기에 기록)
+e2e-logs/
+
 # website docs 의 reference/ 페이지는 위 광범위 `reference/` 무시에서 제외
 # (그 패턴은 Claude 스크래치 dir 용 — docs 사이트 콘텐츠와 무관).
 !website/src/content/docs/reference/
