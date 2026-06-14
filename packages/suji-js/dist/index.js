@@ -1470,8 +1470,9 @@ export const session = {
      * `handler` 가 throw 하거나 비-bool 반환 시 **거부**(deny, 안전 기본). `null` 전달 시
      * 핸들러 해제(이후 CEF 기본 처리). 한 번에 1 핸들러만 active — 재등록 시 이전 detach.
      *
-     * 정직 경계: camera/mic(getUserMedia)는 별도 CEF 경로(media access)라 이 핸들러
-     * 미포함 — on_show_permission_prompt 가 덮는 권한군 대상.
+     * camera/mic(getUserMedia)도 이 핸들러가 받는다(permission "media", details.mediaTypes
+     * 에 ["audio"]/["video"]). handler 가 true 면 요청된 미디어 타입을 모두 grant, false 면
+     * deny. 정직 경계: media 실 grant 검증은 실 카메라+권한 다이얼로그라 헤드리스 e2e 불가.
      */
     async setPermissionRequestHandler(handler) {
         if (activePermissionOff) {
@@ -1482,7 +1483,7 @@ export const session = {
             await coreCall({ cmd: "session_set_permission_handler", enabled: false });
             return;
         }
-        activePermissionOff = on("session:permission-request", (payload) => {
+        const offPrompt = on("session:permission-request", (payload) => {
             let ev;
             try {
                 ev = typeof payload === "string" ? JSON.parse(payload) : payload;
@@ -1508,6 +1509,48 @@ export const session = {
                 .then((granted) => respond(granted === true))
                 .catch(() => respond(false));
         });
+        // getUserMedia(camera/mic) — 별도 CEF 경로지만 같은 handler 로 통합(Electron 패리티).
+        const offMedia = on("session:media-access-request", (payload) => {
+            let raw;
+            try {
+                raw = typeof payload === "string" ? JSON.parse(payload) : payload;
+            }
+            catch {
+                return;
+            }
+            const mediaTypes = [];
+            if (raw.audio)
+                mediaTypes.push("audio");
+            if (raw.video)
+                mediaTypes.push("video");
+            const ev = {
+                permissionId: -1, // media 는 prompt id 없음
+                origin: raw.origin ?? "",
+                permissions: ["media"],
+                mediaTypes,
+            };
+            let settled = false;
+            const respond = (granted) => {
+                if (settled)
+                    return;
+                settled = true;
+                void coreCall({
+                    cmd: "session_media_access_response",
+                    mediaRequestId: raw.mediaRequestId,
+                    // granted 면 요청된 타입만 grant(allowed 는 requested 의 부분집합이어야 — CEF 계약).
+                    audio: granted && raw.audio === true,
+                    video: granted && raw.video === true,
+                });
+            };
+            Promise.resolve()
+                .then(() => handler(ev))
+                .then((granted) => respond(granted === true))
+                .catch(() => respond(false));
+        });
+        activePermissionOff = () => {
+            offPrompt();
+            offMedia();
+        };
         await coreCall({ cmd: "session_set_permission_handler", enabled: true });
     },
     /**

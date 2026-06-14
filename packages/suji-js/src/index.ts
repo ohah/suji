@@ -2139,12 +2139,15 @@ export interface CookieFilter {
 
 /** 렌더러(웹 콘텐츠)가 권한을 요청할 때 핸들러가 받는 정보. */
 export interface PermissionRequestDetails {
-  /** 응답 매칭용 CEF prompt id. */
+  /** 응답 매칭용 CEF prompt id. getUserMedia(media) 요청은 -1(별도 경로). */
   permissionId: number;
   /** 요청 origin (예: "https://example.com"). file:// 페이지는 빈 문자열일 수 있음. */
   origin: string;
-  /** 요청된 권한 이름 배열 (예: ["geolocation"], ["notifications","clipboard"]). */
+  /** 요청된 권한 이름 배열 (예: ["geolocation"], ["notifications","clipboard"], ["media"]). */
   permissions: string[];
+  /** getUserMedia(camera/mic) 요청 시 요청된 미디어 타입 (["audio"], ["video"], 또는 둘 다).
+   *  permissions 에 "media" 가 포함된 경우에만 존재. handler 가 true 면 요청된 타입 모두 grant. */
+  mediaTypes?: string[];
 }
 
 /** 권한 요청 핸들러 — true 반환 시 허용(grant), false 반환 시 거부(deny).
@@ -2215,8 +2218,9 @@ export const session = {
    * `handler` 가 throw 하거나 비-bool 반환 시 **거부**(deny, 안전 기본). `null` 전달 시
    * 핸들러 해제(이후 CEF 기본 처리). 한 번에 1 핸들러만 active — 재등록 시 이전 detach.
    *
-   * 정직 경계: camera/mic(getUserMedia)는 별도 CEF 경로(media access)라 이 핸들러
-   * 미포함 — on_show_permission_prompt 가 덮는 권한군 대상.
+   * camera/mic(getUserMedia)도 이 핸들러가 받는다(permission "media", details.mediaTypes
+   * 에 ["audio"]/["video"]). handler 가 true 면 요청된 미디어 타입을 모두 grant, false 면
+   * deny. 정직 경계: media 실 grant 검증은 실 카메라+권한 다이얼로그라 헤드리스 e2e 불가.
    */
   async setPermissionRequestHandler(
     handler: PermissionRequestHandler | null,
@@ -2229,7 +2233,7 @@ export const session = {
       await coreCall({ cmd: "session_set_permission_handler", enabled: false });
       return;
     }
-    activePermissionOff = on("session:permission-request", (payload) => {
+    const offPrompt = on("session:permission-request", (payload) => {
       let ev: PermissionRequestDetails;
       try {
         ev = typeof payload === "string" ? JSON.parse(payload) : payload;
@@ -2253,6 +2257,44 @@ export const session = {
         .then((granted) => respond(granted === true))
         .catch(() => respond(false));
     });
+    // getUserMedia(camera/mic) — 별도 CEF 경로지만 같은 handler 로 통합(Electron 패리티).
+    const offMedia = on("session:media-access-request", (payload) => {
+      let raw: { mediaRequestId: number; origin: string; audio: boolean; video: boolean };
+      try {
+        raw = typeof payload === "string" ? JSON.parse(payload) : payload;
+      } catch {
+        return;
+      }
+      const mediaTypes: string[] = [];
+      if (raw.audio) mediaTypes.push("audio");
+      if (raw.video) mediaTypes.push("video");
+      const ev: PermissionRequestDetails = {
+        permissionId: -1, // media 는 prompt id 없음
+        origin: raw.origin ?? "",
+        permissions: ["media"],
+        mediaTypes,
+      };
+      let settled = false;
+      const respond = (granted: boolean) => {
+        if (settled) return;
+        settled = true;
+        void coreCall({
+          cmd: "session_media_access_response",
+          mediaRequestId: raw.mediaRequestId,
+          // granted 면 요청된 타입만 grant(allowed 는 requested 의 부분집합이어야 — CEF 계약).
+          audio: granted && raw.audio === true,
+          video: granted && raw.video === true,
+        });
+      };
+      Promise.resolve()
+        .then(() => handler(ev))
+        .then((granted) => respond(granted === true))
+        .catch(() => respond(false));
+    });
+    activePermissionOff = () => {
+      offPrompt();
+      offMedia();
+    };
     await coreCall({ cmd: "session_set_permission_handler", enabled: true });
   },
 

@@ -46,32 +46,43 @@ func SetProxy(mode, proxyRules, proxyBypassRules, pacScript string) string {
 // PermissionRequest is the renderer (web content) permission request passed to
 // the handler registered via SetPermissionRequestHandler.
 type PermissionRequest struct {
-	// PermissionID matches the response to the CEF prompt.
+	// PermissionID matches the response to the CEF prompt. getUserMedia(media) → 0.
 	PermissionID uint64 `json:"permissionId"`
 	// Origin of the requester (may be "" for file:// pages).
 	Origin string `json:"origin"`
-	// Permissions requested, e.g. ["geolocation"].
+	// Permissions requested, e.g. ["geolocation"], ["media"].
 	Permissions []string `json:"permissions"`
+	// MediaTypes requested for getUserMedia (["audio"]/["video"]); empty for non-media.
+	MediaTypes []string `json:"mediaTypes,omitempty"`
 }
 
-// activePermissionListener holds the current `session:permission-request`
-// listener id so re-registration detaches the previous one (1 handler active,
-// matching JS/Node). 0 = none.
-var activePermissionListener uint64
+// activePermissionListener / activeMediaListener hold the current
+// `session:permission-request` / `session:media-access-request` listener ids so
+// re-registration detaches the previous ones (1 handler active, matching JS/Node).
+var (
+	activePermissionListener uint64
+	activeMediaListener      uint64
+)
 
 // SetPermissionRequestHandler registers a permission handler (Electron
 // `session.setPermissionRequestHandler`). When the renderer requests a
 // permission (geolocation/notifications/clipboard/...), handler is called and
-// returns true to grant, false to deny. Pass nil to clear (CEF default after).
-// Re-registering detaches the previous handler (1 handler active).
+// returns true to grant, false to deny. camera/mic (getUserMedia) is also routed
+// here (Permissions=["media"], MediaTypes=["audio"]/["video"]; true grants the
+// requested types). Pass nil to clear. Re-registering detaches the previous handler.
 //
-// Subscribes `session:permission-request` and responds via
-// `session_permission_response` (same wire as JS/Node/Rust). Honest boundary:
-// camera/mic (getUserMedia) is a separate CEF media-access path — not covered.
+// Subscribes `session:permission-request` + `session:media-access-request` and
+// responds via `session_permission_response` / `session_media_access_response`
+// (same wire as JS/Node/Rust). Honest boundary: media real grant needs a real
+// camera + permission dialog → not headless-e2e verifiable.
 func SetPermissionRequestHandler(handler func(PermissionRequest) bool) {
 	if activePermissionListener != 0 {
 		suji.Off(activePermissionListener)
 		activePermissionListener = 0
+	}
+	if activeMediaListener != 0 {
+		suji.Off(activeMediaListener)
+		activeMediaListener = 0
 	}
 	if handler == nil {
 		suji.Invoke("__core__", `{"cmd":"session_set_permission_handler","enabled":false}`)
@@ -87,6 +98,37 @@ func SetPermissionRequestHandler(handler func(PermissionRequest) bool) {
 			"cmd":          "session_permission_response",
 			"permissionId": d.PermissionID,
 			"granted":      granted,
+		})
+		suji.Invoke("__core__", string(resp))
+	})
+	activeMediaListener = suji.On("session:media-access-request", func(_ string, data string) {
+		var raw struct {
+			MediaRequestID uint64 `json:"mediaRequestId"`
+			Origin         string `json:"origin"`
+			Audio          bool   `json:"audio"`
+			Video          bool   `json:"video"`
+		}
+		if err := json.Unmarshal([]byte(data), &raw); err != nil {
+			return
+		}
+		var mediaTypes []string
+		if raw.Audio {
+			mediaTypes = append(mediaTypes, "audio")
+		}
+		if raw.Video {
+			mediaTypes = append(mediaTypes, "video")
+		}
+		granted := handler(PermissionRequest{
+			PermissionID: 0,
+			Origin:       raw.Origin,
+			Permissions:  []string{"media"},
+			MediaTypes:   mediaTypes,
+		})
+		resp, _ := json.Marshal(map[string]any{
+			"cmd":            "session_media_access_response",
+			"mediaRequestId": raw.MediaRequestID,
+			"audio":          granted && raw.Audio,
+			"video":          granted && raw.Video,
 		})
 		suji.Invoke("__core__", string(resp))
 	})

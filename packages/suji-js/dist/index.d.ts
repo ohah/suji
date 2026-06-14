@@ -1106,12 +1106,15 @@ export interface CookieFilter {
 }
 /** 렌더러(웹 콘텐츠)가 권한을 요청할 때 핸들러가 받는 정보. */
 export interface PermissionRequestDetails {
-    /** 응답 매칭용 CEF prompt id. */
+    /** 응답 매칭용 CEF prompt id. getUserMedia(media) 요청은 -1(별도 경로). */
     permissionId: number;
     /** 요청 origin (예: "https://example.com"). file:// 페이지는 빈 문자열일 수 있음. */
     origin: string;
-    /** 요청된 권한 이름 배열 (예: ["geolocation"], ["notifications","clipboard"]). */
+    /** 요청된 권한 이름 배열 (예: ["geolocation"], ["notifications","clipboard"], ["media"]). */
     permissions: string[];
+    /** getUserMedia(camera/mic) 요청 시 요청된 미디어 타입 (["audio"], ["video"], 또는 둘 다).
+     *  permissions 에 "media" 가 포함된 경우에만 존재. handler 가 true 면 요청된 타입 모두 grant. */
+    mediaTypes?: string[];
 }
 /** 권한 요청 핸들러 — true 반환 시 허용(grant), false 반환 시 거부(deny).
  *  async 가능(커스텀 UI 등). 한 번에 1 핸들러만 active. */
@@ -1152,8 +1155,9 @@ export declare const session: {
      * `handler` 가 throw 하거나 비-bool 반환 시 **거부**(deny, 안전 기본). `null` 전달 시
      * 핸들러 해제(이후 CEF 기본 처리). 한 번에 1 핸들러만 active — 재등록 시 이전 detach.
      *
-     * 정직 경계: camera/mic(getUserMedia)는 별도 CEF 경로(media access)라 이 핸들러
-     * 미포함 — on_show_permission_prompt 가 덮는 권한군 대상.
+     * camera/mic(getUserMedia)도 이 핸들러가 받는다(permission "media", details.mediaTypes
+     * 에 ["audio"]/["video"]). handler 가 true 면 요청된 미디어 타입을 모두 grant, false 면
+     * deny. 정직 경계: media 실 grant 검증은 실 카메라+권한 다이얼로그라 헤드리스 e2e 불가.
      */
     setPermissionRequestHandler(handler: PermissionRequestHandler | null): Promise<void>;
     /**

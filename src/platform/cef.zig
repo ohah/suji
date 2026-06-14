@@ -136,6 +136,7 @@ pub const PermissionEmitFn = cef_public_api.PermissionEmitFn;
 pub const setPermissionEmitHandler = cef_public_api.setPermissionEmitHandler;
 pub const permissionSetHandlerEnabled = cef_public_api.permissionSetHandlerEnabled;
 pub const permissionRespond = cef_public_api.permissionRespond;
+pub const mediaAccessRespond = cef_public_api.mediaAccessRespond;
 pub const getPermissionHandler = cef_public_api.getPermissionHandler;
 pub const DownloadEmitFn = cef_public_api.DownloadEmitFn;
 pub const setDownloadEmitHandler = cef_public_api.setDownloadEmitHandler;

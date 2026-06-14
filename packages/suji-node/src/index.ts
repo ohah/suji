@@ -2604,12 +2604,14 @@ export interface CookieFilter {
 
 /** 렌더러(웹 콘텐츠)가 권한을 요청할 때 핸들러가 받는 정보. */
 export interface PermissionRequestDetails {
-  /** 응답 매칭용 CEF prompt id. */
+  /** 응답 매칭용 CEF prompt id. getUserMedia(media) 요청은 -1. */
   permissionId: number;
   /** 요청 origin. file:// 페이지는 빈 문자열일 수 있음. */
   origin: string;
-  /** 요청된 권한 이름 배열 (예: ["geolocation"]). */
+  /** 요청된 권한 이름 배열 (예: ["geolocation"], ["media"]). */
   permissions: string[];
+  /** getUserMedia 요청 시 요청된 미디어 타입 (["audio"]/["video"]). "media" 포함 시에만 존재. */
+  mediaTypes?: string[];
 }
 
 /** 권한 요청 핸들러 — true 반환 시 허용, false 반환 시 거부. async 가능. 1 핸들러만 active. */
@@ -2670,7 +2672,8 @@ export const session = {
    * Electron `session.setPermissionRequestHandler(handler)` 동등. 렌더러가 geolocation/
    * notifications/clipboard 등 권한을 요청하면 handler 가 호출돼 true(허용)/false(거부) 결정.
    * async 가능(타임아웃 없음). throw/비-bool → 거부(안전 기본). null → 핸들러 해제.
-   * 1 핸들러만 active. 정직 경계: camera/mic(getUserMedia)는 별도 CEF 경로라 미포함.
+   * 1 핸들러만 active. camera/mic(getUserMedia)도 이 핸들러가 받는다(permission "media",
+   * details.mediaTypes). 정직 경계: media 실 grant 검증은 헤드리스 e2e 불가.
    */
   async setPermissionRequestHandler(
     handler: PermissionRequestHandler | null,
@@ -2683,7 +2686,7 @@ export const session = {
       await invoke('__core__', { cmd: 'session_set_permission_handler', enabled: false });
       return;
     }
-    activePermissionOff = on<PermissionRequestDetails>(
+    const offPrompt = on<PermissionRequestDetails>(
       'session:permission-request',
       (ev) => {
         let settled = false;
@@ -2702,6 +2705,40 @@ export const session = {
           .catch(() => respond(false));
       },
     );
+    // getUserMedia(camera/mic) — 별도 CEF 경로지만 같은 handler 로 통합(Electron 패리티).
+    const offMedia = on<{ mediaRequestId: number; origin: string; audio: boolean; video: boolean }>(
+      'session:media-access-request',
+      (raw) => {
+        const mediaTypes: string[] = [];
+        if (raw.audio) mediaTypes.push('audio');
+        if (raw.video) mediaTypes.push('video');
+        const ev: PermissionRequestDetails = {
+          permissionId: -1,
+          origin: raw.origin ?? '',
+          permissions: ['media'],
+          mediaTypes,
+        };
+        let settled = false;
+        const respond = (granted: boolean) => {
+          if (settled) return;
+          settled = true;
+          void invoke('__core__', {
+            cmd: 'session_media_access_response',
+            mediaRequestId: raw.mediaRequestId,
+            audio: granted && raw.audio === true,
+            video: granted && raw.video === true,
+          });
+        };
+        Promise.resolve()
+          .then(() => handler(ev))
+          .then((granted) => respond(granted === true))
+          .catch(() => respond(false));
+      },
+    );
+    activePermissionOff = () => {
+      offPrompt();
+      offMedia();
+    };
     await invoke('__core__', { cmd: 'session_set_permission_handler', enabled: true });
   },
 
