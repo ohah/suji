@@ -78,6 +78,21 @@ const impl = if (builtin.os.tag == .windows) struct {
         return .{ @floatFromInt(p.x), @floatFromInt(p.y) };
     }
 
+    /// 연결된 모니터 수 (EnumDisplayMonitors). screen 변경 이벤트의 count-diff 용.
+    pub fn displayCount() i32 {
+        const CountCtx = struct { n: i32 = 0 };
+        const proc = struct {
+            fn cb(_: ?*anyopaque, _: ?*anyopaque, _: *RECT, lp: isize) callconv(.winapi) i32 {
+                const ctx: *CountCtx = @ptrFromInt(@as(usize, @intCast(lp)));
+                ctx.n += 1;
+                return 1;
+            }
+        }.cb;
+        var ctx: CountCtx = .{};
+        _ = EnumDisplayMonitors(null, null, &proc, @intCast(@intFromPtr(&ctx)));
+        return ctx.n;
+    }
+
     pub fn displayNearestPoint(x: f64, y: f64) i32 {
         const p: POINT = .{ .x = @intFromFloat(x), .y = @intFromFloat(y) };
         // macOS `screenGetDisplayNearestPoint` 는 contained-only (못 찾으면 -1).
@@ -152,9 +167,14 @@ const impl = if (builtin.os.tag == .windows) struct {
     pub fn displayMatching(_: f64, _: f64, _: f64, _: f64) i32 {
         return -1;
     }
+
+    pub fn displayCount() i32 {
+        return 0;
+    }
 };
 
 pub const getAllDisplays = impl.getAllDisplays;
 pub const cursorPoint = impl.cursorPoint;
 pub const displayNearestPoint = impl.displayNearestPoint;
 pub const displayMatching = impl.displayMatching;
+pub const displayCount = impl.displayCount;

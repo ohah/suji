@@ -6,6 +6,7 @@ const linux_screen = @import("cef_screen_linux.zig");
 const windows_screen = @import("cef_screen_windows.zig");
 const screen_model = @import("screen_model.zig");
 const cef = @import("cef.zig");
+const win_pump = @import("cef_win_pump.zig").win_pump;
 
 const is_macos = builtin.os.tag == .macos;
 const is_linux = builtin.os.tag == .linux;
@@ -171,8 +172,11 @@ pub const ScreenEmitHandler = *const fn (event: [*:0]const u8) void;
 var g_screen_emit: ?ScreenEmitHandler = null;
 var g_prev_display_count: i32 = -1;
 
-/// 현재 연결된 디스플레이 수 (macOS NSScreen.screens.count). 비-macOS 0.
+/// 현재 연결된 디스플레이 수. macOS NSScreen.screens.count / Windows EnumDisplayMonitors /
+/// Linux RandR XRRGetMonitors(fallback XScreenCount).
 fn screenDisplayCount() i32 {
+    if (comptime builtin.os.tag == .windows) return windows_screen.displayCount();
+    if (comptime is_linux) return linux_screen.displayCount();
     if (!comptime is_macos) return 0;
     const NSScreen = getClass("NSScreen") orelse return 0;
     const screens = msgSend(NSScreen, "screens") orelse return 0;
@@ -195,16 +199,39 @@ fn screenChangedC() callconv(.c) void {
     }
 }
 
-/// screen display 변경 옵저버 설치. macOS only(Linux/Win 후속).
+// Windows screen 변경 콜백 — win_pump WM_DISPLAYCHANGE 가 호출(nativeTheme 패턴 동형).
+pub var g_screen_cb_windows: ?*const fn () callconv(.c) void = null;
+
+/// screen display 변경 옵저버 설치. macOS: NSApplicationDidChangeScreenParameters(screen.m).
+/// Windows: win_pump WM_DISPLAYCHANGE. Linux: X11 RandR RRScreenChangeNotify 스레드.
 /// 정직 경계: count-based diff — 동시 add+remove(수 동일)는 metrics-changed 로 보고.
 pub fn screenInstall(handler: ScreenEmitHandler) void {
-    if (!comptime is_macos) return;
     g_screen_emit = handler;
     g_prev_display_count = screenDisplayCount(); // baseline (옵저버 활성 전).
+    if (comptime builtin.os.tag == .windows) {
+        g_screen_cb_windows = &screenChangedC;
+        win_pump.ensureRunning();
+        return;
+    }
+    if (comptime is_linux) {
+        linux_screen.installChangeListener(&screenChangedC);
+        return;
+    }
+    if (!comptime is_macos) return;
     suji_screen_install(&screenChangedC);
 }
 
 pub fn screenUninstall() void {
+    if (comptime builtin.os.tag == .windows) {
+        g_screen_cb_windows = null;
+        g_screen_emit = null;
+        return;
+    }
+    if (comptime is_linux) {
+        linux_screen.uninstallChangeListener();
+        g_screen_emit = null;
+        return;
+    }
     if (!comptime is_macos) return;
     suji_screen_uninstall();
     g_screen_emit = null;

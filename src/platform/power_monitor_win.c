@@ -3,8 +3,13 @@
 // A message-only window receives:
 //   - WM_POWERBROADCAST/PBT_APMSUSPEND -> suspend
 //   - WM_POWERBROADCAST/PBT_APMRESUMEAUTOMATIC or PBT_APMRESUMESUSPEND -> resume
+//   - WM_POWERBROADCAST/PBT_APMPOWERSTATUSCHANGE -> on-battery / on-ac (GetSystemPowerStatus)
 //   - WM_WTSSESSION_CHANGE/WTS_SESSION_LOCK -> lock-screen
 //   - WM_WTSSESSION_CHANGE/WTS_SESSION_UNLOCK -> unlock-screen
+//
+// shutdown 이벤트(macOS power:shutdown 패리티)는 message-only window 가
+// WM_QUERYENDSESSION/WM_ENDSESSION broadcast 를 수신하지 못해(top-level window 필요)
+// 정직 경계로 미지원 — 기존 power monitor 의 message-only 설계를 깨지 않기 위함.
 
 #if defined(_WIN32)
 
@@ -35,6 +40,15 @@ static LRESULT CALLBACK suji_power_wndproc(HWND hwnd, UINT msg, WPARAM wparam, L
             }
             if (wparam == PBT_APMRESUMEAUTOMATIC || wparam == PBT_APMRESUMESUSPEND) {
                 emit_event("resume");
+                return TRUE;
+            }
+            if (wparam == PBT_APMPOWERSTATUSCHANGE) {
+                SYSTEM_POWER_STATUS sps;
+                if (GetSystemPowerStatus(&sps)) {
+                    // ACLineStatus: 0=offline(배터리), 1=online(AC), 255=unknown.
+                    if (sps.ACLineStatus == 0) emit_event("on-battery");
+                    else if (sps.ACLineStatus == 1) emit_event("on-ac");
+                }
                 return TRUE;
             }
             break;

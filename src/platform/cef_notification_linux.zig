@@ -17,14 +17,19 @@ pub fn requestPermission() bool {
     return linux_notify.requestPermission();
 }
 
-pub fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+pub fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool, group: []const u8) bool {
     if (comptime !is_linux) return false;
-    return linux_notify.show(id, title, body, silent);
+    return linux_notify.show(id, title, body, silent, group);
 }
 
 pub fn close(id: []const u8) bool {
     if (comptime !is_linux) return false;
     return linux_notify.close(id);
+}
+
+pub fn removeGroup(group: []const u8) bool {
+    if (comptime !is_linux) return false;
+    return linux_notify.removeGroup(group);
 }
 
 const linux_notify = if (is_linux) struct {
@@ -56,6 +61,8 @@ const linux_notify = if (is_linux) struct {
         id_len: usize = 0,
         id: [64]u8 = [_]u8{0} ** 64,
         dbus_id: u32 = 0,
+        group_len: usize = 0,
+        group: [64]u8 = [_]u8{0} ** 64,
     };
     var entries: [64]Entry = [_]Entry{.{}} ** 64;
 
@@ -107,10 +114,20 @@ const linux_notify = if (is_linux) struct {
         return null;
     }
 
-    fn remember(id: []const u8, dbus_id: u32) bool {
+    fn setGroup(entry: *Entry, group: []const u8) void {
+        if (group.len > 0 and group.len <= entry.group.len) {
+            entry.group_len = group.len;
+            @memcpy(entry.group[0..group.len], group);
+        } else {
+            entry.group_len = 0;
+        }
+    }
+
+    fn remember(id: []const u8, dbus_id: u32, group: []const u8) bool {
         if (id.len == 0 or id.len > 63) return false;
         if (findEntry(id)) |entry| {
             entry.dbus_id = dbus_id;
+            setGroup(entry, group);
             return true;
         }
 
@@ -124,7 +141,22 @@ const linux_notify = if (is_linux) struct {
         @memcpy(slot.id[0..id.len], id);
         slot.id[id.len] = 0;
         slot.dbus_id = dbus_id;
+        setGroup(slot, group);
         return true;
+    }
+
+    /// 같은 group 의 마지막으로 알려진 dbus_id (freedesktop replaces_id 로 사용 → 갱신).
+    /// 없으면 0(새 알림). group 미지정(빈) 시 0.
+    fn lastDbusIdForGroup(group: []const u8) u32 {
+        if (group.len == 0 or group.len > 64) return 0;
+        for (&entries) |*entry| {
+            if (entry.used and entry.group_len == group.len and
+                std.mem.eql(u8, entry.group[0..entry.group_len], group))
+            {
+                return entry.dbus_id;
+            }
+        }
+        return 0;
     }
 
     fn makeHints(silent: bool, hint_entry_type: ?*anyopaque) ?*anyopaque {
@@ -155,13 +187,18 @@ const linux_notify = if (is_linux) struct {
         return arr;
     }
 
-    fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool) bool {
+    fn show(id: []const u8, title: []const u8, body: []const u8, silent: bool, group: []const u8) bool {
         var id_buf: [64]u8 = undefined;
         var title_buf: [4096]u8 = undefined;
         var body_buf: [4096]u8 = undefined;
         _ = writeCStr(id, &id_buf) orelse return false;
         const title_z = writeCStr(title, &title_buf) orelse return false;
         const body_z = writeCStr(body, &body_buf) orelse return false;
+
+        // groupId(suji 확장 = macOS threadIdentifier) → freedesktop replaces_id 매핑:
+        // 같은 group 의 이전 알림을 교체(갱신). macOS 의 스택 그룹화와 의미는 다른
+        // 근사(교체) — daemon 이 같은 슬롯에 갱신 표시. 정직 경계.
+        const replaces_id = lastDbusIdForGroup(group);
 
         const hint_entry_type = g_variant_type_new("{sv}") orelse return false;
         defer g_variant_type_free(hint_entry_type);
@@ -184,7 +221,7 @@ const linux_notify = if (is_linux) struct {
             return false;
         };
         n += 1;
-        collected[n] = g_variant_new_uint32(0) orelse {
+        collected[n] = g_variant_new_uint32(replaces_id) orelse {
             cleanupOnFail(&collected, n);
             return false;
         };
@@ -230,12 +267,11 @@ const linux_notify = if (is_linux) struct {
         const child = g_variant_get_child_value(reply, 0) orelse return false;
         defer g_variant_unref(child);
         const dbus_id = g_variant_get_uint32(child);
-        return remember(id, dbus_id);
+        return remember(id, dbus_id, group);
     }
 
-    fn close(id: []const u8) bool {
-        const entry = findEntry(id) orelse return false;
-        const dbus_id = entry.dbus_id;
+    /// CloseNotification(dbus_id) D-Bus 호출. close/removeGroup 공용.
+    fn closeDbusId(dbus_id: u32) bool {
         const child = g_variant_new_uint32(dbus_id) orelse return false;
         const children = [_]?*anyopaque{child};
         const parameters = g_variant_new_tuple(&children, children.len) orelse {
@@ -244,7 +280,28 @@ const linux_notify = if (is_linux) struct {
         };
         const reply = call("CloseNotification", parameters, NOTIFY_TIMEOUT_MS) orelse return false;
         g_variant_unref(reply);
+        return true;
+    }
+
+    fn close(id: []const u8) bool {
+        const entry = findEntry(id) orelse return false;
+        if (!closeDbusId(entry.dbus_id)) return false;
         entry.used = false;
         return true;
+    }
+
+    /// Electron Notification.removeGroup — 같은 group 의 모든 표시 알림 CloseNotification.
+    fn removeGroup(group: []const u8) bool {
+        if (group.len == 0 or group.len > 64) return false;
+        var any = false;
+        for (&entries) |*entry| {
+            if (entry.used and entry.group_len == group.len and
+                std.mem.eql(u8, entry.group[0..entry.group_len], group))
+            {
+                if (closeDbusId(entry.dbus_id)) any = true;
+                entry.* = .{};
+            }
+        }
+        return any;
     }
 } else struct {};
