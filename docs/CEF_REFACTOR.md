@@ -20,7 +20,11 @@ PLAN.md 의 "후속 refactor 후보" 노트가 이 문서를 가리킨다.
 | powerSaveBlocker | ✅ 완료 | `cef_power_save_blocker.zig` (~258줄) |
 | desktopCapturer | ✅ 완료 | `cef_desktop_capturer.zig` (~203줄) |
 | sessionCookies | ✅ 완료 | `cef_session_cookies.zig` (~323줄) |
-| singleInstance | ✅ 완료 (platform split) | `cef_single_instance.zig` (~250줄; 공유 락 state(g_has_lock/spinlock) + 플랫폼 라우팅 + POSIX 유닛 테스트) + `cef_single_instance_state.zig` (~35줄; second-instance argv 공유 콜백/launch/dispatch) + `cef_single_instance_posix.zig` (~120줄; flock + Unix 소켓) + `cef_single_instance_windows.zig` (~140줄; named mutex + named pipe) |
+| sessionProxy | ✅ 완료 | `cef_session_proxy.zig` (~159줄; Chromium "proxy" pref — session.setProxy) |
+| sessionPermission | ✅ 완료 | `cef_session_permission.zig` (~485줄; CEF cef_permission_handler_t — session.setPermissionRequestHandler) |
+| downloadHandler | ✅ 완료 | `cef_download_handler.zig` (~155줄; CEF cef_download_handler_t — session.setDownloadPath / session:will-download) |
+| protocolClient | ✅ 완료 | `cef_protocol_client.zig` (~29줄; macOS Launch Services — setAsDefaultProtocolClient 외 2) |
+| singleInstance | ✅ 완료 (platform split) | `cef_single_instance.zig` (~212줄; 공유 락 state(g_has_lock/spinlock) + 플랫폼 라우팅 + POSIX 유닛 테스트) + `cef_single_instance_state.zig` (~33줄; second-instance argv 공유 콜백/launch/dispatch) + `cef_single_instance_posix.zig` (~113줄; flock + Unix 소켓) + `cef_single_instance_windows.zig` (~137줄; named mutex + named pipe) |
 | securityScopedBookmark | ✅ 완료 | `cef_security_scoped_bookmark.zig` (~136줄) |
 | requestUserAttention | ✅ 완료 | `cef_request_user_attention.zig` (~44줄) |
 | menu | ✅ 완료 | `cef_menu.zig` (~152줄; public routing + macOS) + `cef_menu_{types,linux}.zig` |
@@ -77,7 +81,9 @@ PLAN.md 의 "후속 refactor 후보" 노트가 이 문서를 가리킨다.
 | coreFoundation | ✅ 완료 | `cef_core_foundation.zig` (~6줄) |
 | **코어** (re-export hub) | — 유지 | `cef.zig` |
 
-clipboard + shell + dialog + screen + safeStorage + dock + powerSaveBlocker + desktopCapturer + sessionCookies + securityScopedBookmark + requestUserAttention + menu + tray + notification + globalShortcut + winPump + windowLifecycleEvents + nativeImage + appProgress + powerMonitor + nativeTheme + appPathMeta + crashReporter + webRequest + dragHandler + windowDisplayHandlers + requestHandler + keyboardHandler + devTools + lifeSpanHandler + schemeHandler + renderHandler + viewsDelegate + browserIpc + appHandler + macAppMenu + macWindow + objc + util + clientHandler + pageOutput + pageOutputConstants + pendingCleanup + publicApi + initialLoad + webContents + webContentsView + windowState + windowVisuals + windowRuntime + windowCreation + runtime + browserState + messageLoop + nativeWindowHandles + nativeRegistry + browserControl + nativeRefs + nativeEntry + nativeVtable + native + cImport + coreFoundation 분리 후 cef.zig 13,362 → 326줄.
+clipboard + shell + dialog + screen + safeStorage + dock + powerSaveBlocker + desktopCapturer + sessionCookies + securityScopedBookmark + requestUserAttention + menu + tray + notification + globalShortcut + winPump + windowLifecycleEvents + nativeImage + appProgress + powerMonitor + nativeTheme + appPathMeta + crashReporter + webRequest + dragHandler + windowDisplayHandlers + requestHandler + keyboardHandler + devTools + lifeSpanHandler + schemeHandler + renderHandler + viewsDelegate + browserIpc + appHandler + macAppMenu + macWindow + objc + util + clientHandler + pageOutput + pageOutputConstants + pendingCleanup + publicApi + initialLoad + webContents + webContentsView + windowState + windowVisuals + windowRuntime + windowCreation + runtime + browserState + messageLoop + nativeWindowHandles + nativeRegistry + browserControl + nativeRefs + nativeEntry + nativeVtable + native + cImport + coreFoundation 분리 후 cef.zig 13,362 → 394줄(순수 re-export
+hub — 실제 facade 집계는 `cef_public_api.zig`, 그 아래 도메인 모듈 113개+). 위
+표의 줄 수는 추출 시점 근사치라 이후 기능 추가로 일부 모듈은 더 커졌다.
 
 ## 재사용 기반 (clipboard PR 에서 마련)
 
