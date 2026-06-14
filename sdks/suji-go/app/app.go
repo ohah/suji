@@ -20,6 +20,13 @@ func buildGetPathRequest(name string) string {
 	return fmt.Sprintf(`{"cmd":"app_get_path","name":"%s"}`, jsonesc.Full(name))
 }
 
+// GetFileIcon returns the file's system icon as PNG base64 (Electron
+// `app.getFileIcon`, macOS NSWorkspace.iconForFile). Response: `{"data":"<base64>"}`.
+// 파일 없거나 Win/Linux는 빈 문자열.
+func GetFileIcon(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_get_file_icon","path":"%s"}`, jsonesc.Full(path)))
+}
+
 // GetName returns suji.json app.name. raw JSON: `{"name":"..."}`.
 func GetName() string {
 	return suji.Invoke("__core__", `{"cmd":"app_get_name"}`)

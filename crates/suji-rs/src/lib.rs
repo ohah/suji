@@ -3263,6 +3263,12 @@ pub fn get_path(name: &str) -> Option<String> {
     invoke("__core__", &get_path_request(name))
 }
 
+/// Electron `app.getFileIcon(path)` — 파일 시스템 아이콘 PNG base64
+/// (macOS NSWorkspace.iconForFile). raw JSON: `{"data":"<base64>"}`.
+pub fn get_file_icon(path: &str) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_get_file_icon", "path": path }).to_string())
+}
+
 /// suji.json `app.name` 반환. raw JSON: `{"name":"..."}`.
 pub fn get_name() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_get_name"}"#)

@@ -200,6 +200,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.nativeImage.getSize("/path/to/img.png")  — {width, height} (NSImage)
 //   / toPng(path) / toJpeg(path, quality)        — base64 인코딩 (raw ~8KB)
 //   / isEmpty(path) / isTemplateImage(path)       — 빈 이미지/template 여부 (macOS NSImage)
+//   / fileIcon(path)                              — 파일 시스템 아이콘 PNG base64
+//     (Electron app.getFileIcon, macOS NSWorkspace.iconForFile 32x32, raw ~8KB)
 // suji.screen.getCursorScreenPoint()      — 플랫폼 native cursor point
 // suji.dialog.messageBoxSimple("info", "안녕", &.{ "OK", "Cancel" })   — 응답 raw JSON
 // suji.dialog.showOpenDialog("\"properties\":[\"openFile\"]")          — raw fields
@@ -545,6 +547,8 @@ suji.platform                                                // "macos" | "linux
 // await app.setBadgeCount(5) / app.getBadgeCount()                        (Electron app badge count)
 //   macOS dock label / Linux libunity / Windows taskbar overlay best-effort
 // await app.getPath("userData" | "home" | "documents" | ...)              — Electron app.getPath
+// await app.getFileIcon("/path/to/file")  — 파일 시스템 아이콘 PNG base64
+//   (Electron app.getFileIcon, macOS NSWorkspace.iconForFile 32x32; Win/Linux 빈 문자열)
 // await app.setAsDefaultProtocolClient("myapp") / isDefaultProtocolClient("myapp")
 //   / removeAsDefaultProtocolClient("myapp")     — Electron 기본 URL scheme 핸들러 (전 5 SDK)
 //   macOS Launch Services. scheme 등록 자체는 suji.json app.deepLinkSchemes(CFBundleURLTypes)가

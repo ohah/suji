@@ -121,6 +121,7 @@ pub const securityScopedAccessStart = cef_public_api.securityScopedAccessStart;
 pub const securityScopedAccessStop = cef_public_api.securityScopedAccessStop;
 pub const NSBitmapImageFileType = cef_public_api.NSBitmapImageFileType;
 pub const nativeImageEncodeFromPath = cef_public_api.nativeImageEncodeFromPath;
+pub const nativeImageFileIconPng = cef_public_api.nativeImageFileIconPng;
 pub const nativeImageGetSize = cef_public_api.nativeImageGetSize;
 pub const nativeImageIsEmpty = cef_public_api.nativeImageIsEmpty;
 pub const nativeImageIsTemplate = cef_public_api.nativeImageIsTemplate;
