@@ -350,7 +350,10 @@ pub fn build(b: *std.Build) void {
     // 으로 만든 bridge.cc 와 C++ name mangling 불일치 + MSVC CRT 와 mingw libc
     // CFG 심볼 충돌. MSYS2 패키지에서 가져온 mingw libnode 는 zig 와 동일 ABI
     // (`_ZN2v86Object3NewEPNS_7IsolateE` Itanium mangling) 라 link 가능.
-    const node_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/node/24.14.1", .{home}) catch @panic("OOM");
+    // 임베드 libnode 버전 — **단일 출처**. 버전 변경 시 여기 + .github/workflows/
+    // build-libnode.yml / e2e.yml (NODE_VERSION) 만 맞추면 된다.
+    const node_version = "24.14.1";
+    const node_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/node/{s}", .{ home, node_version }) catch @panic("OOM");
     const node_lib_name: []const u8 = switch (os_tag) {
         .macos => "libnode.dylib",
         .windows => "libnode.dll",
@@ -528,20 +531,42 @@ pub fn build(b: *std.Build) void {
     // Lua 처럼 vendor 정적 컴파일이 아니라(CPython 은 거대) staged dynamic lib.
     // ⚠️ Python 임베드 API 는 순수 C ABI 라 node 와 달리 bridge.cc/mingw/외부 g++
     // 불필요 — src/platform/python.zig 의 @cImport(Python.h)를 zig 가 직접 컴파일.
-    const python_minor = "3.13";
-    const python_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/python/3.13.13", .{home}) catch @panic("OOM");
+    // 임베드 CPython 버전 — **단일 출처**. 버전 변경 시 여기 + scripts/stage-python.sh
+    // (PYTHON_VERSION/PBS_TAG) + .github/workflows/e2e.yml 만 맞추면 된다. minor/abi/
+    // 경로/DLL/lib 명은 전부 여기서 파생(흩어진 "3.13.13"/"3.13"/"313" 리터럴 제거).
+    const python_version = "3.13.13"; // X.Y.Z (python-build-standalone install_only)
+    const python_minor = blk: { // "3.13" — python_version 의 major.minor
+        var dots: usize = 0;
+        for (python_version, 0..) |ch, i| if (ch == '.') {
+            dots += 1;
+            if (dots == 2) break :blk python_version[0..i];
+        };
+        break :blk python_version;
+    };
+    const python_path = std.fmt.allocPrint(b.allocator, "{s}/.suji/python/{s}", .{ home, python_version }) catch @panic("OOM");
+    // Windows DLL/import-lib 명명(`3.13` → 점 제거 → `python313`).
+    const python_abi = blk: {
+        const buf = b.allocator.alloc(u8, python_minor.len) catch @panic("OOM");
+        var n: usize = 0;
+        for (python_minor) |ch| if (ch != '.') {
+            buf[n] = ch;
+            n += 1;
+        };
+        break :blk buf[0..n];
+    };
+    const python_dll = std.fmt.allocPrint(b.allocator, "python{s}.dll", .{python_abi}) catch @panic("OOM");
     const python_lib_rel: []const u8 = switch (os_tag) {
-        .macos => "lib/libpython3.13.dylib",
-        .windows => "python313.dll",
-        else => "lib/libpython3.13.so",
+        .macos => std.fmt.allocPrint(b.allocator, "lib/libpython{s}.dylib", .{python_minor}) catch @panic("OOM"),
+        .windows => python_dll,
+        else => std.fmt.allocPrint(b.allocator, "lib/libpython{s}.so", .{python_minor}) catch @panic("OOM"),
     };
     const python_available = blk: {
-        // ⚠️ Windows 는 1차 미지원(정직 경계). python3.lib 는 import-lib hard-link 라
-        // python_available 을 켜면 python313.dll 동반 staging(addInstallPythonRuntimeStep
-        // Windows 분기 — PBS Windows 레이아웃 Lib/+DLLs/) 없이는 launch 시 crash 한다.
-        // staging 이 있어도 Windows 는 off 로 강제 → 깨진 exe footgun 방지. macOS/Linux
-        // 패키징·실 .app 런 검증 후, Windows CI 반복으로 별도 활성화.
-        if (os_tag == .windows) break :blk false;
+        // staging(~/.suji/python/<ver>) 이 있으면 활성화. Windows 도 지원 — python313.lib
+        // (import-lib) 를 hard-link 하고, addInstallPythonRuntimeStep Windows 분기가
+        // python313.dll + python3.dll + vcruntime140*.dll (+ packaged 시 Lib/+DLLs/) 를
+        // exe 옆에 stage 하므로 launch 시 DLL resolve 된다. (link 가 import-lib hard 라
+        // python staging 머신의 비-python 앱도 python313.dll 을 요구 — install step 이 항상
+        // 동반 stage. 진짜 weak/delay-load 은 후속.)
         const lib_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ python_path, python_lib_rel }) catch break :blk false;
         if (!absolutePathExists(b, lib_path)) break :blk false;
         break :blk true;
@@ -555,13 +580,14 @@ pub fn build(b: *std.Build) void {
     if (python_available) {
         root_module.link_libc = true;
         switch (os_tag) {
-            // ⚠️ UNREACHABLE: python_available 가 Windows 에서 false 로 강제됨(위 gate).
-            // Windows 활성화(addInstallPythonRuntimeStep Windows 분기 + CI 반복) 시
-            // 복구할 MSVC import-lib 링크 레시피 — 현재는 의도적 미실행.
+            // Windows: PBS 레이아웃은 헤더가 include/ 직접, import-lib 는 libs/.
+            // python313.lib(full API → python313.dll). MinGW zig 가 MSVC import-lib 를
+            // 링크하는 것은 libcef(MSVC)와 동일 선례. python.zig 의 c.Py* 직접 호출이
+            // 전체 C API 라 stable-ABI python3.lib 가 아닌 python313.lib 사용.
             .windows => {
                 const py_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
                 root_module.addIncludePath(.{ .cwd_relative = py_include });
-                const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python3.lib", .{python_path}) catch @panic("OOM");
+                const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python{s}.lib", .{ python_path, python_abi }) catch @panic("OOM");
                 root_module.addObjectFile(.{ .cwd_relative = import_lib });
             },
             else => {
@@ -571,7 +597,7 @@ pub fn build(b: *std.Build) void {
                 root_module.addLibraryPath(.{ .cwd_relative = py_libdir });
                 // weak-link: python staging 머신에서 빌드해도 비-python 앱은
                 // libpython 부재 시 graceful(심볼 null, start 미호출이면 무영향).
-                root_module.linkSystemLibrary("python3.13", .{ .weak = true });
+                root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "python{s}", .{python_minor}) catch @panic("OOM"), .{ .weak = true });
                 switch (os_tag) {
                     // @executable_path/$ORIGIN: packaged 시 addInstallPythonRuntimeStep 이
                     // libpython 을 exe 옆에 둔다. py_libdir: dev(zig-out/bin/suji dev) 가
@@ -724,6 +750,34 @@ pub fn build(b: *std.Build) void {
             copy_dlls.setEnvironmentVariable("SUJI_MINGW_BIN", std.fmt.allocPrint(b.allocator, "{s}\\bin", .{windowsMingwRoot(b)}) catch @panic("OOM"));
             copy_dlls.step.dependOn(&install_artifact.step);
             b.getInstallStep().dependOn(&copy_dlls.step);
+        }
+
+        // Windows: embedded CPython 런타임 DLL 을 exe 옆으로 stage. python313.lib
+        // (import-lib) hard-link 가 가리키는 python313.dll + stable-ABI forwarder
+        // python3.dll + MSVC 런타임(vcruntime140*.dll, python313.dll 의존)을 복사.
+        // stdlib(Lib/)·확장모듈(DLLs/)은 dev 에선 config.home(~/.suji/python staging)
+        // 에서 로드. packaged 번들 stdlib staging 은 package_desktop 후속.
+        if (python_available and os_tag == .windows) {
+            const copy_py = b.addSystemCommand(&.{
+                "pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
+                \\$ErrorActionPreference = 'Stop'
+                \\New-Item -ItemType Directory -Force -Path $env:SUJI_BIN_DIR | Out-Null
+                \\$src = $env:SUJI_PY_DIR
+                \\# python{abi}.dll = 버전별(python_minor 파생), 나머지는 버전 무관.
+                \\foreach ($d in @($env:SUJI_PY_DLL, 'python3.dll', 'vcruntime140.dll', 'vcruntime140_1.dll')) {
+                \\  $p = Join-Path $src $d
+                \\  if (Test-Path $p) { Copy-Item -Force -LiteralPath $p -Destination $env:SUJI_BIN_DIR }
+                \\  elseif ($d -eq $env:SUJI_PY_DLL) { throw "missing embedded python DLL: $p (stage via scripts/stage-python.sh)" }
+                \\}
+                ,
+            });
+            const py_dir_w = b.allocator.dupe(u8, python_path) catch @panic("OOM");
+            std.mem.replaceScalar(u8, py_dir_w, '/', '\\');
+            copy_py.setEnvironmentVariable("SUJI_PY_DIR", py_dir_w);
+            copy_py.setEnvironmentVariable("SUJI_PY_DLL", python_dll);
+            copy_py.setEnvironmentVariable("SUJI_BIN_DIR", b.getInstallPath(.bin, ""));
+            copy_py.step.dependOn(&install_artifact.step);
+            b.getInstallStep().dependOn(&copy_py.step);
         }
     }
 
