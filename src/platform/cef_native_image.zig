@@ -100,11 +100,11 @@ pub fn nativeImageFileIconPng(path: []const u8, out_buf: []u8) []const u8 {
     const rep_raw = obj0_fn(NSBitmapImageRep, @ptrCast(objc.sel_registerName("alloc"))) orelse return out_buf[0..0];
     const init_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
     const rep = init_fn(rep_raw, @ptrCast(objc.sel_registerName("initWithCGImage:")), cg) orelse return out_buf[0..0];
-    // rep 은 alloc+init(retain +1) — Zig 는 ARC 아니므로 명시적 release(누수 방지).
-    defer {
-        const rel_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
-        rel_fn(rep, @ptrCast(objc.sel_registerName("release")));
-    }
+    // rep 은 alloc+init(retain +1). nativeImageEncodeFromPath 의 imageRepWithData(autoreleased)
+    // 와 일관되게 autorelease 로 등록(cefHandleCore=UI 스레드 autorelease pool 보유) — defer
+    // release 는 init 실패(rep null, 위 orelse return) 시 alloc 된 rep_raw 의 정리 경로가
+    // 갈려 모호했으나, init 성공 후 단일 autorelease 로 누수/이중해제 없이 일관 정리.
+    _ = obj0_fn(rep, @ptrCast(objc.sel_registerName("autorelease")));
     return encodeRepToBuf(rep, .png, null, out_buf);
 }
 

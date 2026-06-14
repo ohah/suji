@@ -3068,6 +3068,26 @@ pub mod session {
         pub media_types: Vec<String>,
     }
 
+    /// 등록된 (permission listener id, media listener id, leaked handler ptr usize).
+    /// 재등록/해제 시 이전 listener off + Box drop — 이전엔 clear 가 core cmd 만 보내고
+    /// `on()` 으로 건 두 trampoline 이 잔존해, 재set 시 trampoline 이 누적돼 한 요청에
+    /// 응답을 두 번 보내고(double-respond) 이전 핸들러 Box 도 누수했다.
+    static PERMISSION_LISTENERS: std::sync::Mutex<Option<(u64, u64, usize)>> =
+        std::sync::Mutex::new(None);
+
+    fn clear_permission_listeners() {
+        if let Some((id1, id2, arg)) = PERMISSION_LISTENERS.lock().unwrap().take() {
+            crate::off(id1);
+            crate::off(id2);
+            // set 에서 Box::into_raw 로 leak 한 핸들러 회수.
+            unsafe {
+                drop(Box::from_raw(
+                    arg as *mut Box<dyn Fn(PermissionRequest) -> bool + Send + Sync>,
+                ));
+            }
+        }
+    }
+
     /// Electron `session.setPermissionRequestHandler(handler)` 동등. 렌더러가 geolocation/
     /// notifications/clipboard 등 권한을 요청하면 `handler` 가 호출돼 `true`(허용)/`false`(거부)
     /// 를 반환한다. 한 번 등록(앱 수명). camera/mic(getUserMedia)도 이 핸들러가 받는다
@@ -3076,7 +3096,8 @@ pub mod session {
     ///
     /// `session:permission-request`/`session:media-access-request` 를 구독해 결정 후
     /// `session_permission_response`/`session_media_access_response` 로 응답한다(JS/Node SDK
-    /// 와 동일 wire). 핸들러는 leak 되어 앱 수명 동안 유지(두 trampoline 이 공유).
+    /// 와 동일 wire). 핸들러(두 trampoline 공유)는 PERMISSION_LISTENERS 에 저장돼
+    /// clear/재set 시 listener off + Box 회수(재set 누적/double-respond/누수 방지).
     pub fn set_permission_request_handler<F>(handler: F)
     where
         F: Fn(PermissionRequest) -> bool + Send + Sync + 'static,
@@ -3084,9 +3105,12 @@ pub mod session {
         type BoxedHandler = Box<dyn Fn(PermissionRequest) -> bool + Send + Sync>;
         let boxed: Box<BoxedHandler> = Box::new(Box::new(handler));
         let arg = Box::into_raw(boxed) as *mut std::os::raw::c_void;
-        // 같은 leaked handler 를 두 이벤트에 등록(빌림만 — arg 소유권 미이전, 앱 수명 유지).
-        crate::on("session:permission-request", permission_trampoline, arg);
-        crate::on("session:media-access-request", media_trampoline, arg);
+        // 재등록 시 이전 listener off + leaked Box 회수(trampoline 누적/double-respond 방지).
+        clear_permission_listeners();
+        // 같은 handler 를 두 이벤트에 등록. listener id + arg 를 저장해 clear/재set 시 해제.
+        let id1 = crate::on("session:permission-request", permission_trampoline, arg);
+        let id2 = crate::on("session:media-access-request", media_trampoline, arg);
+        *PERMISSION_LISTENERS.lock().unwrap() = Some((id1, id2, arg as usize));
         invoke(
             "__core__",
             r#"{"cmd":"session_set_permission_handler","enabled":true}"#,
@@ -3095,6 +3119,8 @@ pub mod session {
 
     /// 권한 핸들러 해제(이후 CEF 기본 처리).
     pub fn clear_permission_request_handler() {
+        // event listener off + leaked Box 회수(이전: core cmd 만 보내 trampoline 잔존).
+        clear_permission_listeners();
         invoke(
             "__core__",
             r#"{"cmd":"session_set_permission_handler","enabled":false}"#,
