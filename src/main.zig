@@ -126,14 +126,46 @@ fn relaunchSelf(init: std.process.Init) void {
     // (SUJI_NO_RELAUNCH, cefDebug 게이트)와 분리한 전용 env — ambient SUJI_NO_RELAUNCH
     // 가 프로덕션 relaunch 를 silent no-op 시키는 footgun 회피.
     if (runtime.env("SUJI_E2E_NO_RELAUNCH") != null) return;
-    // init.minimal.args.vector 는 C argv([]const [*:0]const u8) — spawn 은 []const
-    // []const u8 을 요구하므로 span 으로 변환. 256 상한(앱 인자 통상 소수; 초과 시 truncate).
+    if (builtin.os.tag == .windows) {
+        // Windows: args.vector 는 UTF-16 PEB 커맨드라인(u16 원소)이라 POSIX argv 변환
+        // 불가. 현재 커맨드라인 그대로 CreateProcessW 로 재실행(detached, wait 안 함).
+        // 부모는 직후 main 반환으로 종료, 자식은 정상 startup(de-elevation 포함) 경로.
+        const w = std.os.windows;
+        const cmdline_w = w.peb().ProcessParameters.CommandLine.slice();
+        var new_cmdline: [4096]u16 = undefined;
+        if (cmdline_w.len + 1 > new_cmdline.len) return;
+        @memcpy(new_cmdline[0..cmdline_w.len], cmdline_w);
+        new_cmdline[cmdline_w.len] = 0;
+        var startup: w.STARTUPINFOW = std.mem.zeroes(w.STARTUPINFOW);
+        startup.cb = @sizeOf(w.STARTUPINFOW);
+        var info: w.PROCESS.INFORMATION = undefined;
+        const flags: w.CreateProcessFlags = .{ .create_unicode_environment = true };
+        const ok = w.kernel32.CreateProcessW(
+            null,
+            @ptrCast(&new_cmdline),
+            null,
+            null,
+            w.BOOL.FALSE, // detached restart — 핸들 상속 불필요(fresh app instance)
+            flags,
+            null,
+            null,
+            &startup,
+            &info,
+        );
+        if (ok.toBool()) {
+            w.CloseHandle(info.hThread);
+            w.CloseHandle(info.hProcess);
+        }
+        return;
+    }
+    // POSIX: init.minimal.args.vector 는 C argv([]const [*:0]const u8) — spawn 은
+    // []const []const u8 을 요구하므로 span 으로 변환. 256 상한(앱 인자 통상 소수;
+    // 초과 시 truncate). wait 안 함 — 부모는 직후 종료, 자식은 OS reparent(detached).
     var argv_buf: [256][]const u8 = undefined;
     const vec = init.minimal.args.vector;
     const n = @min(vec.len, argv_buf.len);
     for (vec[0..n], 0..) |arg, i| argv_buf[i] = std.mem.span(arg);
     _ = std.process.spawn(init.io, .{ .argv = argv_buf[0..n] }) catch return;
-    // wait 안 함 — 부모는 직후 종료, 자식은 OS reparent(detached).
 }
 
 fn runHost(init: std.process.Init) !void {
