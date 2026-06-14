@@ -189,6 +189,26 @@ pub fn loadFromConfig(allocator: std.mem.Allocator, config: *const suji.Config, 
     }
 }
 
+/// 디렉터리형 Node 백엔드 entry 의 진입 파일 해석. `main.js` 우선(기존 앱 호환),
+/// 없고 `main.ts` 가 있으면 `main.ts` 를 쓴다 — Node 24 가 require(.ts) 를 타입
+/// 스트리핑으로 빌드 없이 실행하므로 TS 백엔드를 그대로 돌릴 수 있다(dev·패키지 동일).
+/// 둘 다 판정 불가면 기존 동작대로 `main.js` 경로(다운스트림 not-found 메시지 일관).
+/// 반환값은 caller 가 free.
+fn resolveNodeDirMain(allocator: std.mem.Allocator, dir: []const u8) ![]u8 {
+    const js = try std.fs.path.join(allocator, &.{ dir, "main.js" });
+    if (std.Io.Dir.cwd().access(runtime.io, js, .{})) |_| {
+        return js; // main.js 존재 → 사용(기본).
+    } else |_| {}
+    const ts = try std.fs.path.join(allocator, &.{ dir, "main.ts" });
+    if (std.Io.Dir.cwd().access(runtime.io, ts, .{})) |_| {
+        allocator.free(js);
+        return ts; // main.js 없고 main.ts 있음 → TS 엔트리.
+    } else |_| {
+        allocator.free(ts);
+        return js; // 둘 다 없음 → 기존대로 main.js.
+    }
+}
+
 pub fn startNode(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
     if (!node_enabled) {
         std.debug.print("[suji] Node.js backend not available (libnode not installed)\n", .{});
@@ -197,7 +217,8 @@ pub fn startNode(allocator: std.mem.Allocator, entry: [:0]const u8) !void {
     // entry 경로를 절대 경로로 변환 (createRequire가 절대 경로 필요)
     const abs_entry = try std.Io.Dir.cwd().realPathFileAlloc(runtime.io, entry, allocator);
     defer allocator.free(abs_entry);
-    const entry_js_str = try std.fmt.allocPrint(allocator, "{s}/main.js", .{abs_entry});
+    // 진입 파일: main.js 우선, 없으면 main.ts(TS 백엔드).
+    const entry_js_str = try resolveNodeDirMain(allocator, abs_entry);
     defer allocator.free(entry_js_str);
     const entry_js = try allocator.dupeZ(u8, entry_js_str);
     // entry_js는 NodeRuntime이 소유 (해제하지 않음)
@@ -354,10 +375,12 @@ pub fn startPython(allocator: std.mem.Allocator, backend_name: [:0]const u8, ent
 
 pub fn nodeRunEntryCandidate(allocator: std.mem.Allocator, entry_arg: []const u8) ![]u8 {
     if (entry_arg.len == 0) return error.InvalidNodeEntry;
-    if (std.mem.endsWith(u8, entry_arg, ".js")) {
+    // 파일을 직접 가리키면 그대로 — Node 24 는 .ts 도 타입 스트리핑으로 실행한다.
+    if (std.mem.endsWith(u8, entry_arg, ".js") or std.mem.endsWith(u8, entry_arg, ".ts")) {
         return allocator.dupe(u8, entry_arg);
     }
-    return std.fs.path.join(allocator, &.{ entry_arg, "main.js" });
+    // 디렉터리면 main.js 우선, 없으면 main.ts.
+    return resolveNodeDirMain(allocator, entry_arg);
 }
 
 pub fn standaloneNodeQuit() void {
@@ -414,6 +437,11 @@ test "nodeRunEntryCandidate resolves file and directory forms" {
     const file = try nodeRunEntryCandidate(allocator, "main.js");
     defer allocator.free(file);
     try std.testing.expectEqualStrings("main.js", file);
+
+    // .ts 파일을 직접 가리키면 그대로 통과(Node 24 타입 스트리핑 실행).
+    const ts_file = try nodeRunEntryCandidate(allocator, "main.ts");
+    defer allocator.free(ts_file);
+    try std.testing.expectEqualStrings("main.ts", ts_file);
 
     const dir = try nodeRunEntryCandidate(allocator, "backends/node");
     defer allocator.free(dir);
