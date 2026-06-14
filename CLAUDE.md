@@ -341,6 +341,12 @@ suji::export_handlers!(ping);
 // suji::dock::{set_badge("99"), get_badge()}
 // suji::get_path("userData") / get_path("home") ...
 // suji::web_request::set_blocked_urls(&["https://*.ad/*"])  — URL glob blocklist
+// suji::auto_updater::{check_for_updates(cur,latest,url,sha256,notes,pub_date),
+//   verify_file(path,sha256), download_artifact(url,path,sha256),
+//   prepare_install(path,target,stage_dir,format,sha256),
+//   quit_and_install(path,target,sha256,relaunch,helper_path)}  — Electron autoUpdater
+//   (manifest check + download + SHA-256 verify + quit-and-install; raw Option<String>.
+//    backend SDK 라 manifest fetch 없이 명시 파라미터로 core 호출 — JS/Node 와 동일 5 커맨드)
 // suji::request_user_attention(true) / suji::cancel_user_attention_request(id)
 // suji::quit()                 — 앱 종료 (Electron app.quit())
 // suji::exit()                 — 앱 강제 종료 (Electron app.exit, code 무시)
@@ -391,6 +397,12 @@ var _ = suji.Bind(&App{})
 // screen.GetAllDisplays()
 // import "github.com/ohah/suji-go/powersaveblocker"
 // powersaveblocker.Start("prevent_display_sleep") / Stop(id)
+// import "github.com/ohah/suji-go/autoupdater"
+// autoupdater.CheckForUpdates(cur, latest, url, sha256, notes, pubDate) / VerifyFile(path, sha256)
+//   / DownloadArtifact(url, path, sha256) / PrepareInstall(path, target, stageDir, format, sha256)
+//   / QuitAndInstall(path, target, sha256, relaunch, helperPath)  — Electron autoUpdater
+//   (manifest check + download + SHA-256 verify + quit-and-install; raw JSON. backend SDK 라
+//    manifest fetch 없이 명시 파라미터로 core 호출 — JS/Node 와 동일 5 커맨드)
 // import "github.com/ohah/suji-go/safestorage"
 // safestorage.SetItem(svc, acc, "v") / GetItem(svc, acc) / DeleteItem(svc, acc)
 // import "github.com/ohah/suji-go/dock"

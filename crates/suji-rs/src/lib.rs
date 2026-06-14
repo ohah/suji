@@ -2902,6 +2902,138 @@ pub mod crash_reporter {
     }
 }
 
+/// Electron `autoUpdater` — manifest check + download + SHA-256 verify +
+/// prepare/quit-and-install. JS/Node SDK 와 동일한 5개 `auto_updater_*` core
+/// 커맨드를 호출하되, backend SDK 라 manifest fetch/`app.getVersion()` 같은
+/// 클라이언트 작업 없이 **명시 파라미터**로 core 를 호출한다(다른 raw 바인딩 패턴).
+pub mod auto_updater {
+    use crate::{invoke, serde_json};
+
+    pub(crate) fn check_update_request(
+        current_version: &str,
+        latest_version: &str,
+        url: &str,
+        sha256: &str,
+        notes: &str,
+        pub_date: &str,
+    ) -> String {
+        serde_json::json!({
+            "cmd": "auto_updater_check_update",
+            "currentVersion": current_version,
+            "latestVersion": latest_version,
+            "url": url,
+            "sha256": sha256,
+            "notes": notes,
+            "pubDate": pub_date,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn verify_file_request(path: &str, sha256: &str) -> String {
+        serde_json::json!({ "cmd": "auto_updater_verify_file", "path": path, "sha256": sha256 })
+            .to_string()
+    }
+
+    pub(crate) fn download_artifact_request(url: &str, path: &str, sha256: &str) -> String {
+        serde_json::json!({
+            "cmd": "auto_updater_download_artifact",
+            "url": url,
+            "path": path,
+            "sha256": sha256,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn prepare_install_request(
+        path: &str,
+        target: &str,
+        stage_dir: &str,
+        format: &str,
+        sha256: &str,
+    ) -> String {
+        serde_json::json!({
+            "cmd": "auto_updater_prepare_install",
+            "path": path,
+            "target": target,
+            "stageDir": stage_dir,
+            "format": format,
+            "sha256": sha256,
+        })
+        .to_string()
+    }
+
+    pub(crate) fn quit_and_install_request(
+        path: &str,
+        target: &str,
+        sha256: &str,
+        relaunch: bool,
+        helper_path: &str,
+    ) -> String {
+        serde_json::json!({
+            "cmd": "auto_updater_quit_and_install",
+            "path": path,
+            "target": target,
+            "sha256": sha256,
+            "relaunch": relaunch,
+            "helperPath": helper_path,
+        })
+        .to_string()
+    }
+
+    /// manifest 의 latest 버전/URL 을 current 버전과 비교 → updateAvailable 등 raw JSON.
+    pub fn check_for_updates(
+        current_version: &str,
+        latest_version: &str,
+        url: &str,
+        sha256: &str,
+        notes: &str,
+        pub_date: &str,
+    ) -> Option<String> {
+        invoke(
+            "__core__",
+            &check_update_request(current_version, latest_version, url, sha256, notes, pub_date),
+        )
+    }
+
+    /// 다운로드된 파일의 SHA-256 검증(mismatch 면 success=false + actualSha256).
+    pub fn verify_file(path: &str, sha256: &str) -> Option<String> {
+        invoke("__core__", &verify_file_request(path, sha256))
+    }
+
+    /// artifact URL 을 지정 경로로 다운로드 + optional SHA-256 검증.
+    pub fn download_artifact(url: &str, path: &str, sha256: &str) -> Option<String> {
+        invoke("__core__", &download_artifact_request(url, path, sha256))
+    }
+
+    /// artifact 포맷(zip/dmg/app/AppImage/deb 또는 "auto")을 install 입력으로 정규화.
+    pub fn prepare_install(
+        path: &str,
+        target: &str,
+        stage_dir: &str,
+        format: &str,
+        sha256: &str,
+    ) -> Option<String> {
+        invoke(
+            "__core__",
+            &prepare_install_request(path, target, stage_dir, format, sha256),
+        )
+    }
+
+    /// staged artifact 를 종료 후 target 으로 교체하고 quit 요청(relaunch 옵션).
+    pub fn quit_and_install(
+        path: &str,
+        target: &str,
+        sha256: &str,
+        relaunch: bool,
+        helper_path: &str,
+    ) -> Option<String> {
+        invoke(
+            "__core__",
+            &quit_and_install_request(path, target, sha256, relaunch, helper_path),
+        )
+    }
+}
+
 pub mod power_save_blocker {
     use crate::{invoke, serde_json};
 
@@ -3935,6 +4067,53 @@ mod tests {
                 .unwrap();
         assert_eq!(remove["cmd"], "crash_reporter_remove_extra_parameter");
         assert_eq!(remove["key"], "suite");
+    }
+
+    #[test]
+    fn auto_updater_requests_build_valid_json() {
+        let check: serde_json::Value = serde_json::from_str(&crate::auto_updater::check_update_request(
+            "1.0.0",
+            "1.1.0",
+            "https://example.test/app.zip",
+            "abc",
+            "notes",
+            "2026-05-25T00:00:00Z",
+        ))
+        .unwrap();
+        assert_eq!(check["cmd"], "auto_updater_check_update");
+        assert_eq!(check["currentVersion"], "1.0.0");
+        assert_eq!(check["latestVersion"], "1.1.0");
+        assert_eq!(check["url"], "https://example.test/app.zip");
+        assert_eq!(check["pubDate"], "2026-05-25T00:00:00Z");
+
+        let verify: serde_json::Value =
+            serde_json::from_str(&crate::auto_updater::verify_file_request("/tmp/app.zip", "abc"))
+                .unwrap();
+        assert_eq!(verify["cmd"], "auto_updater_verify_file");
+        assert_eq!(verify["path"], "/tmp/app.zip");
+        assert_eq!(verify["sha256"], "abc");
+
+        let download: serde_json::Value = serde_json::from_str(
+            &crate::auto_updater::download_artifact_request("https://x/app.zip", "/tmp/app.zip", ""),
+        )
+        .unwrap();
+        assert_eq!(download["cmd"], "auto_updater_download_artifact");
+        assert_eq!(download["url"], "https://x/app.zip");
+
+        let prepare: serde_json::Value = serde_json::from_str(
+            &crate::auto_updater::prepare_install_request("/tmp/app.zip", "", "", "auto", ""),
+        )
+        .unwrap();
+        assert_eq!(prepare["cmd"], "auto_updater_prepare_install");
+        assert_eq!(prepare["format"], "auto");
+
+        let quit: serde_json::Value = serde_json::from_str(
+            &crate::auto_updater::quit_and_install_request("/tmp/app.zip", "/Applications/X.app", "", true, ""),
+        )
+        .unwrap();
+        assert_eq!(quit["cmd"], "auto_updater_quit_and_install");
+        assert_eq!(quit["target"], "/Applications/X.app");
+        assert_eq!(quit["relaunch"], true);
     }
 
     #[test]
