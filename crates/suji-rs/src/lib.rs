@@ -1777,6 +1777,12 @@ pub mod clipboard {
         )
     }
 
+    /// Find 펜보드 텍스트 읽기 raw JSON: `{"text":"..."}` (Electron clipboard.readFindText).
+    /// write_find_text 대칭. macOS only(Win/Linux 빈 문자열).
+    pub fn read_find_text() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"clipboard_read_find_text"}"#)
+    }
+
     /// 여러 포맷 한 번에 쓰기(Electron clipboard.write). 빈 문자열 필드 skip.
     /// macOS=atomic, Win/Linux=best-effort 단일(text 우선).
     pub fn write(text: &str, html: &str, rtf: &str) -> Option<String> {
@@ -1812,6 +1818,12 @@ pub mod power_monitor {
     /// 배터리 전원 여부 raw JSON: `{"onBattery":bool}` (Electron `powerMonitor.isOnBatteryPower`).
     pub fn is_on_battery() -> Option<String> {
         invoke("__core__", r#"{"cmd":"power_monitor_is_on_battery"}"#)
+    }
+
+    /// 현재 열 상태 raw JSON: `{"thermalState":"nominal"|"fair"|"serious"|"critical"|"unknown"}`
+    /// (Electron `powerMonitor.getCurrentThermalState`). macOS NSProcessInfo.thermalState; Win/Linux "unknown".
+    pub fn get_current_thermal_state() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"power_monitor_thermal_state"}"#)
     }
 }
 
@@ -1880,6 +1892,19 @@ pub mod native_image {
         )
     }
 
+    /// 이미지 파일 → data URL (Electron `nativeImage.toDataURL`). to_png 의 PNG base64 에
+    /// `data:image/png;base64,` 접두. 빈/실패 이미지는 빈 문자열. (다른 메서드의 raw JSON 과
+    /// 달리 data URL 문자열 자체를 반환 — toDataURL 의미상 자연스러움.)
+    pub fn to_data_url(path: &str) -> Option<String> {
+        let raw = to_png(path)?;
+        let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+        let data = v.get("data").and_then(|d| d.as_str()).unwrap_or("");
+        if data.is_empty() {
+            return Some(String::new());
+        }
+        Some(format!("data:image/png;base64,{data}"))
+    }
+
     /// 이미지 파일 → JPEG base64. quality는 0~100.
     pub fn to_jpeg(path: &str, quality: f64) -> Option<String> {
         invoke(
@@ -1937,6 +1962,16 @@ pub mod native_theme {
     /// 투명도 감소 선호 raw JSON: `{"reducedTransparency":bool}` (macOS; Win/Linux false).
     pub fn prefers_reduced_transparency() -> Option<String> {
         invoke("__core__", r#"{"cmd":"native_theme_reduced_transparency"}"#)
+    }
+
+    /// 색상 반전 사용 여부 raw JSON: `{"invertedColorScheme":bool}` (macOS; Win/Linux false).
+    pub fn should_use_inverted_color_scheme() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"native_theme_inverted_color_scheme"}"#)
+    }
+
+    /// 색상 없이 구분 선호 raw JSON: `{"differentiateWithoutColor":bool}` (macOS; Win/Linux false).
+    pub fn should_differentiate_without_color() -> Option<String> {
+        invoke("__core__", r#"{"cmd":"native_theme_differentiate_without_color"}"#)
     }
 }
 
@@ -2983,6 +3018,11 @@ pub mod session {
         pub expires_unix_sec: f64,
     }
 
+    /// 세션 영속성 여부 (Electron `session.isPersistent`). Suji 는 항상 영속 프로필 → true.
+    pub fn is_persistent() -> bool {
+        true
+    }
+
     /// 모든 cookie 삭제. 실 cleanup은 비동기.
     pub fn clear_cookies() -> Option<String> {
         invoke("__core__", r#"{"cmd":"session_clear_cookies"}"#)
@@ -3277,6 +3317,26 @@ pub fn focus() -> Option<String> {
 /// 앱 모든 윈도우 hide (macOS Cmd+H). raw JSON: `{"success":bool}`.
 pub fn hide() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_hide"}"#)
+}
+
+/// hide 상태에서 다시 표시 (Electron `app.show()`). raw JSON: `{"success":bool}`. macOS only.
+pub fn show() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_show"}"#)
+}
+
+/// 앱 frontmost(활성) 여부 (Electron `app.isActive`). raw JSON: `{"active":bool}`. macOS only(Win/Linux false).
+pub fn is_active() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_is_active"}"#)
+}
+
+/// 앱 hide 여부 (Electron `app.isHidden`). raw JSON: `{"hidden":bool}`. macOS only(Win/Linux false).
+pub fn is_hidden() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_is_hidden"}"#)
+}
+
+/// 이모지 패널 지원 여부 (Electron `app.isEmojiPanelSupported`). raw JSON: `{"supported":bool}`. macOS true.
+pub fn is_emoji_panel_supported() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_is_emoji_panel_supported"}"#)
 }
 
 pub(crate) fn attention_request_json(critical: bool) -> String {

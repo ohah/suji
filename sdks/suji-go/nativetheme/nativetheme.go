@@ -37,3 +37,15 @@ func ShouldUseHighContrastColors() string {
 func PrefersReducedTransparency() string {
 	return suji.Invoke("__core__", `{"cmd":"native_theme_reduced_transparency"}`)
 }
+
+// ShouldUseInvertedColorScheme returns raw JSON: `{"invertedColorScheme":bool}`.
+// macOS NSWorkspace.accessibilityDisplayShouldInvertColors. Win/Linux false.
+func ShouldUseInvertedColorScheme() string {
+	return suji.Invoke("__core__", `{"cmd":"native_theme_inverted_color_scheme"}`)
+}
+
+// ShouldDifferentiateWithoutColor returns raw JSON: `{"differentiateWithoutColor":bool}`.
+// macOS NSWorkspace.accessibilityDisplayShouldDifferentiateWithoutColor. Win/Linux false.
+func ShouldDifferentiateWithoutColor() string {
+	return suji.Invoke("__core__", `{"cmd":"native_theme_differentiate_without_color"}`)
+}

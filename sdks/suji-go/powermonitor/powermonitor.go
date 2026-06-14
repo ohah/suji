@@ -25,3 +25,10 @@ func GetSystemIdleState(threshold int64) string {
 func IsOnBatteryPower() string {
 	return suji.Invoke("__core__", `{"cmd":"power_monitor_is_on_battery"}`)
 }
+
+// GetCurrentThermalState reports the thermal state (Electron powerMonitor.getCurrentThermalState).
+// Response: `{"thermalState":"nominal"|"fair"|"serious"|"critical"|"unknown"}`.
+// macOS NSProcessInfo.thermalState; Win/Linux "unknown".
+func GetCurrentThermalState() string {
+	return suji.Invoke("__core__", `{"cmd":"power_monitor_thermal_state"}`)
+}

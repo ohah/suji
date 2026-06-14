@@ -188,11 +188,17 @@ pub fn appGetLocale(out_buf: []u8) []const u8 {
     return raw;
 }
 
+/// NSApplication.sharedApplication 접근 헬퍼 — app 활성/표시 메서드 공용.
+/// 호출부가 is_macos 가드 → 비-macOS 컨텍스트에서 호출되지 않음.
+fn sharedNSApp() ?*anyopaque {
+    const NSApplication = getClass("NSApplication") orelse return null;
+    return msgSend(NSApplication, "sharedApplication");
+}
+
 /// 앱을 frontmost로 (Electron `app.focus()`). NSApp `activateIgnoringOtherApps:`.
 pub fn appFocus() bool {
     if (!comptime is_macos) return false;
-    const NSApplication = getClass("NSApplication") orelse return false;
-    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const app = sharedNSApp() orelse return false;
     const f: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
     f(app, @ptrCast(objc.sel_registerName("activateIgnoringOtherApps:")), 1);
     return true;
@@ -201,8 +207,38 @@ pub fn appFocus() bool {
 /// 앱 모든 윈도우 hide (Electron `app.hide()` macOS-only — Cmd+H 동등).
 pub fn appHide() bool {
     if (!comptime is_macos) return false;
-    const NSApplication = getClass("NSApplication") orelse return false;
-    const app = msgSend(NSApplication, "sharedApplication") orelse return false;
+    const app = sharedNSApp() orelse return false;
     msgSendVoid1(app, "hide:", null);
     return true;
+}
+
+/// 앱이 frontmost(활성)인지 (Electron `app.isActive()`). NSApplication.isActive.
+/// macOS only(Win/Linux false — CEF 가 창 활성 상태를 노출 안 함, 정직 경계).
+pub fn appIsActive() bool {
+    if (!comptime is_macos) return false;
+    const app = sharedNSApp() orelse return false;
+    return cef.msgSendBool(app, "isActive");
+}
+
+/// 앱이 hide 상태인지 (Electron `app.isHidden()`). NSApplication.isHidden. macOS only(Win/Linux false).
+pub fn appIsHidden() bool {
+    if (!comptime is_macos) return false;
+    const app = sharedNSApp() orelse return false;
+    return cef.msgSendBool(app, "isHidden");
+}
+
+/// 앱 표시 (Electron `app.show()` macOS — hide 반대). NSApp unhide: + activate.
+pub fn appShow() bool {
+    if (!comptime is_macos) return false;
+    const app = sharedNSApp() orelse return false;
+    msgSendVoid1(app, "unhide:", null);
+    const f: *const fn (?*anyopaque, ?*anyopaque, u8) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(app, @ptrCast(objc.sel_registerName("activateIgnoringOtherApps:")), 1);
+    return true;
+}
+
+/// 이모지/심볼 패널 지원 여부 (Electron `app.isEmojiPanelSupported()`). macOS 10.12+ → true,
+/// Win/Linux false(OS 이모지 패널을 프로그래밍적으로 띄우는 표준 경로 없음).
+pub fn appIsEmojiPanelSupported() bool {
+    return comptime is_macos;
 }

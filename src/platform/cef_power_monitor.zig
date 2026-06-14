@@ -59,6 +59,8 @@ const win_power = if (is_windows) struct {
 
 // macOS: IOKit IOPS (power_monitor.m). 1=배터리 전원.
 extern "c" fn suji_power_monitor_is_on_battery() i32;
+// macOS: NSProcessInfo.thermalState (power_monitor.m). 0=nominal..3=critical, -1=unknown.
+extern "c" fn suji_power_monitor_thermal_state() i32;
 
 // libc 파일 I/O — zig 0.16 std.posix 엔 open/openZ 가 없음(read 만 존재). io 불요한
 // /sys 단발 읽기라 libc open/read/close 직접 사용(XOpenDisplay 등과 동일 extern 패턴).
@@ -99,6 +101,14 @@ pub fn powerMonitorIsOnBattery() bool {
     }
     if (comptime is_linux) return linuxAcOnline() orelse false;
     return false;
+}
+
+/// 열 상태 (Electron `powerMonitor.getCurrentThermalState`). macOS NSProcessInfo.thermalState:
+/// 0=nominal 1=fair 2=serious 3=critical. 비-macOS 는 -1(unknown — Win/Linux 표준 API 부재).
+/// power_monitor.m C extern(@available 가드) — 형제 suji_power_monitor_is_on_battery 패턴.
+pub fn powerMonitorThermalState() i32 {
+    if (comptime is_macos) return suji_power_monitor_thermal_state();
+    return -1;
 }
 
 /// 시스템 유휴 시간 (초). 활성 입력이 발생할 때마다 0으로 리셋.

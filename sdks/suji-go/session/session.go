@@ -8,6 +8,12 @@ import (
 	suji "github.com/ohah/suji-go"
 )
 
+// IsPersistent reports session persistence (Electron session.isPersistent).
+// Suji always uses a persistent on-disk profile → always true.
+func IsPersistent() bool {
+	return true
+}
+
 // ClearCookies removes all cookies (fire-and-forget). Response: `{"success":bool}`.
 func ClearCookies() string {
 	return suji.Invoke("__core__", `{"cmd":"session_clear_cookies"}`)

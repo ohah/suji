@@ -144,6 +144,22 @@ pub fn clipboardWriteFindText(text: []const u8) bool {
     return pbSetString(pb, text, PASTEBOARD_TYPE_STRING);
 }
 
+/// Electron `clipboard.readFindText()` — macOS Find pasteboard("Apple Find Pasteboard") 읽기.
+/// writeFindText 대칭. macOS only(Win/Linux 개념 없음 → 빈 slice). non-text면 빈 slice.
+pub fn clipboardReadFindText(buf: []u8) []const u8 {
+    if (!comptime is_macos) return buf[0..0];
+    const NSPasteboard = getClass("NSPasteboard") orelse return buf[0..0];
+    const ns_name = nsStringFromCstr("Apple Find Pasteboard") orelse return buf[0..0];
+    const nameFn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const pb = nameFn(NSPasteboard, @ptrCast(objc.sel_registerName("pasteboardWithName:")), ns_name) orelse return buf[0..0];
+    const ns_type = nsStringFromCstr(PASTEBOARD_TYPE_STRING) orelse return buf[0..0];
+    const stringForType: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque =
+        @ptrCast(&objc.objc_msgSend);
+    const ns_str = stringForType(pb, @ptrCast(objc.sel_registerName("stringForType:")), ns_type) orelse return buf[0..0];
+    return nsStringToUtf8Buf(ns_str, buf);
+}
+
 /// Electron `clipboard.write({text,html,rtf})` — 여러 포맷 atomic write(clear 1회).
 /// 빈 문자열 필드는 skip. macOS=실 atomic; Win/Linux=best-effort 단일 포맷(text 우선,
 /// 멀티-포맷 atomic 미지원 — honest 경계). 하나라도 쓰면 true.

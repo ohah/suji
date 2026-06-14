@@ -2073,6 +2073,17 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = if (util.unescapeJsonStr(raw, &unesc_buf)) |n| cef.clipboardWriteFindText(unesc_buf[0..n]) else false;
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_write_find_text\",\"success\":{}}}", .{ok}) catch null;
     }
+    if (std.mem.eql(u8, cmd, "clipboard_read_find_text")) {
+        var raw_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const text = cef.clipboardReadFindText(&raw_buf);
+        var esc_buf: [util.MAX_RESPONSE]u8 = undefined;
+        const esc_len = util.escapeJsonStrFull(text, &esc_buf) orelse return null;
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"clipboard_read_find_text\",\"text\":\"{s}\"}}",
+            .{esc_buf[0..esc_len]},
+        ) catch null;
+    }
     if (std.mem.eql(u8, cmd, "clipboard_write")) {
         var t_buf: [util.MAX_RESPONSE]u8 = undefined;
         var h_buf: [util.MAX_RESPONSE]u8 = undefined;
@@ -2152,6 +2163,20 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_is_on_battery\",\"onBattery\":{}}}",
             .{cef.powerMonitorIsOnBattery()},
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "power_monitor_thermal_state")) {
+        const name = switch (cef.powerMonitorThermalState()) {
+            0 => "nominal",
+            1 => "fair",
+            2 => "serious",
+            3 => "critical",
+            else => "unknown",
+        };
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"power_monitor_thermal_state\",\"thermalState\":\"{s}\"}}",
+            .{name},
         ) catch null;
     }
     if (std.mem.eql(u8, cmd, "power_monitor_get_idle_state")) {
@@ -2273,6 +2298,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const high_contrast = std.mem.eql(u8, cmd, "native_theme_high_contrast");
         const val = if (high_contrast) cef.nativeThemeHighContrast() else cef.nativeThemeReducedTransparency();
         const field = if (high_contrast) "highContrast" else "reducedTransparency";
+        return std.fmt.bufPrint(
+            response_buf,
+            "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"{s}\":{}}}",
+            .{ cmd, field, val },
+        ) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "native_theme_inverted_color_scheme") or std.mem.eql(u8, cmd, "native_theme_differentiate_without_color")) {
+        const inverted = std.mem.eql(u8, cmd, "native_theme_inverted_color_scheme");
+        const val = if (inverted) cef.nativeThemeInvertedColorScheme() else cef.nativeThemeDifferentiateWithoutColor();
+        const field = if (inverted) "invertedColorScheme" else "differentiateWithoutColor";
         return std.fmt.bufPrint(
             response_buf,
             "{{\"from\":\"zig-core\",\"cmd\":\"{s}\",\"{s}\":{}}}",
@@ -2788,6 +2823,19 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     if (std.mem.eql(u8, cmd, "app_hide")) {
         const ok = cef.appHide();
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_hide\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_show")) {
+        const ok = cef.appShow();
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_show\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_is_active")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_active\",\"active\":{}}}", .{cef.appIsActive()}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_is_hidden")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_hidden\",\"hidden\":{}}}", .{cef.appIsHidden()}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_is_emoji_panel_supported")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_emoji_panel_supported\",\"supported\":{}}}", .{cef.appIsEmojiPanelSupported()}) catch null;
     }
     // clipboard image — request/response buffer가 16KB라 raw PNG 한도 ~8KB. 더 큰 이미지는
     // 후속 (전용 binary IPC 또는 buffer 확장 필요). e2e용 1x1 transparent PNG (~67B)는 충분.
