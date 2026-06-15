@@ -68,10 +68,10 @@ const win = if (is_windows) struct {
     const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x00000008;
 } else struct {};
 
-const WinDynLib = struct {
+pub const WinDynLib = struct {
     handle: std.os.windows.HMODULE,
 
-    fn open(path: [:0]const u8) !WinDynLib {
+    pub fn open(path: [:0]const u8) !WinDynLib {
         var buf: [std.os.windows.PATH_MAX_WIDE + 1]u16 = undefined;
         const len = std.unicode.utf8ToUtf16Le(buf[0..], path) catch return error.BadPathName;
         buf[len] = 0;
@@ -80,18 +80,20 @@ const WinDynLib = struct {
         return .{ .handle = h };
     }
 
-    fn lookup(self: *WinDynLib, comptime T: type, name: [:0]const u8) ?T {
+    pub fn lookup(self: *WinDynLib, comptime T: type, name: [:0]const u8) ?T {
         const p = win.GetProcAddress(self.handle, name.ptr) orelse return null;
         return @ptrCast(@alignCast(p));
     }
 
-    fn close(self: *WinDynLib) void {
+    pub fn close(self: *WinDynLib) void {
         _ = win.FreeLibrary(self.handle);
     }
 };
 
-/// 크로스 플랫폼 동적 라이브러리 핸들. 호출부(load/deinit)는 동일 API 사용.
-const DynLib = if (is_windows) WinDynLib else std.DynLib;
+/// 크로스 플랫폼 동적 라이브러리 핸들. 호출부(open/lookup/close)는 동일 API 사용.
+/// POSIX=std.DynLib, Windows=WinDynLib(kernel32). BackendRegistry 외에 `suji types`
+/// (cli/types_cmd.zig)도 백엔드 dlopen→backend_dump_schema 에 재사용(단일 출처).
+pub const DynLib = if (is_windows) WinDynLib else std.DynLib;
 
 /// C ABI 백엔드 인터페이스
 pub const Backend = struct {
