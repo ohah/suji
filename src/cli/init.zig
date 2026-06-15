@@ -1,7 +1,7 @@
 const std = @import("std");
 const init_mod = @import("../core/init.zig");
 
-const INIT_USAGE = "Usage: suji init <project-name> [--backend=none|zig|rust|go|node|lua|multi] [--frontend=react|vue|svelte|solid|preact|vanilla|next] [--toolchain=vite|rsbuild|next] [--pm=npm|pnpm|bun|vp] [--install]\n";
+const INIT_USAGE = "Usage: suji init <project-name> [--backend=none|zig|rust|go|node|lua|python|multi] [--frontend=react|vue|svelte|solid|preact|vanilla|next] [--toolchain=vite|rsbuild|next] [--pm=npm|pnpm|bun|vp] [--install]\n";
 
 pub fn run(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void {
     var name: []const u8 = "";
@@ -20,7 +20,7 @@ pub fn run(allocator: std.mem.Allocator, init_args: []const [:0]const u8) !void 
         if (std.mem.startsWith(u8, arg, backend_prefix)) {
             const lang_str = arg[backend_prefix.len..];
             backend = init_mod.BackendLang.fromString(lang_str) orelse {
-                std.debug.print("Unknown backend: {s}. Use: none, zig, rust, go, node, lua, multi\n", .{lang_str});
+                std.debug.print("Unknown backend: {s}. Use: none, zig, rust, go, node, lua, python, multi\n", .{lang_str});
                 return;
             };
         } else if (std.mem.startsWith(u8, arg, frontend_prefix)) {
