@@ -2286,6 +2286,13 @@ pub fn selectClientCertificateRespond(id: u64, index: i64) ?[]const u8 {
     return coreCmd("select_client_certificate_respond", fields);
 }
 
+/// auth 이벤트 핸들러 활성 (이벤트 구독 후) — 미활성 시 CEF 기본 fallback. 응답 `{"success":bool}`.
+pub fn setAuthHandlerEnabled(enabled: bool) ?[]const u8 {
+    var fb: [32]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"enabled\":{}", .{enabled}) catch return null;
+    return coreCmd("auth_set_handler_enabled", fields);
+}
+
 /// Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 응답:
 /// `{"success":bool,"bookmark":"<base64>"}`. 비-sandbox 빌드에선 일반 bookmark.
 pub fn createSecurityScopedBookmark(path: []const u8) ?[]const u8 {

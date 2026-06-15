@@ -17,6 +17,14 @@ pub fn setAuthEmitHandler(fn_ptr: AuthEmitFn) void {
     g_emit_fn = fn_ptr;
 }
 
+/// app 이 auth 이벤트를 구독했는지 게이트 (cef_session_permission g_have_handler 동형).
+/// 미등록(false) 시 3 핸들러가 return 0 = CEF 기본(cert 차단 / auth 취소 / client-cert 기본 선택)
+/// 으로 fallback — 미구독 앱에서 콜백 영구 hold(무한 대기 + pending leak/DoS) 방지.
+var g_auth_handler_enabled: std.atomic.Value(bool) = .init(false);
+pub fn setAuthHandlerEnabled(enabled: bool) void {
+    g_auth_handler_enabled.store(enabled, .release);
+}
+
 const MAX_PENDING: usize = 32;
 var g_next_id: std.atomic.Value(u64) = .init(1);
 fn nextId() u64 {
@@ -30,6 +38,73 @@ fn lock() void {
 }
 fn unlock() void {
     g_lock.store(false, .release);
+}
+
+// emit 을 UI 스레드로 마샬 — get_auth_credentials 는 IO 스레드 콜백이라(cert/client-cert 는 UI),
+// emit→EventBus→execute_java_script(UI-전용)를 IO 에서 호출하면 cross-thread UB. UI 면 inline, 아니면 post.
+const EmitTask = struct {
+    task: c.cef_task_t = undefined,
+    allocator: std.mem.Allocator,
+    ref_count: std.atomic.Value(u32) = .init(1),
+    channel: [64]u8 = undefined,
+    channel_len: usize = 0,
+    info: [3072]u8 = undefined,
+    info_len: usize = 0,
+};
+fn emitTaskFromBase(base: ?*c.cef_base_ref_counted_t) ?*EmitTask {
+    return @ptrCast(@alignCast(base orelse return null));
+}
+fn emitTaskFromSelf(self: ?*c._cef_task_t) ?*EmitTask {
+    return @ptrCast(@alignCast(self orelse return null));
+}
+fn emitTaskAddRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) void {
+    const t = emitTaskFromBase(base) orelse return;
+    _ = t.ref_count.fetchAdd(1, .acq_rel);
+}
+fn emitTaskRelease(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const t = emitTaskFromBase(base) orelse return 0;
+    if (t.ref_count.fetchSub(1, .acq_rel) != 1) return 0;
+    t.allocator.destroy(t);
+    return 1;
+}
+fn emitTaskHasOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const t = emitTaskFromBase(base) orelse return 0;
+    return if (t.ref_count.load(.acquire) == 1) 1 else 0;
+}
+fn emitTaskHasAtLeastOneRef(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
+    const t = emitTaskFromBase(base) orelse return 0;
+    return if (t.ref_count.load(.acquire) >= 1) 1 else 0;
+}
+fn emitTaskExecute(self: ?*c._cef_task_t) callconv(.c) void {
+    const t = emitTaskFromSelf(self) orelse return;
+    if (g_emit_fn) |emit| emit(@ptrCast(&t.channel), &t.info, t.info_len);
+}
+
+/// channel(cstr) + info 를 UI 스레드에서 emit. UI 면 inline, 아니면 EmitTask post(채널/info 복사).
+fn emitOnUi(channel: [*:0]const u8, info: []const u8) void {
+    const emit = g_emit_fn orelse return;
+    if (c.cef_currently_on(c.TID_UI) == 1) {
+        emit(channel, info.ptr, info.len);
+        return;
+    }
+    const t = c_allocator.create(EmitTask) catch return;
+    const ch = std.mem.span(channel);
+    t.* = .{ .allocator = c_allocator };
+    t.channel_len = @min(ch.len, t.channel.len - 1);
+    @memcpy(t.channel[0..t.channel_len], ch[0..t.channel_len]);
+    t.channel[t.channel_len] = 0; // null-term
+    t.info_len = @min(info.len, t.info.len);
+    @memcpy(t.info[0..t.info_len], info[0..t.info_len]);
+    @memset(std.mem.asBytes(&t.task), 0);
+    t.task.base.size = @sizeOf(c.cef_task_t);
+    t.task.base.add_ref = &emitTaskAddRef;
+    t.task.base.release = &emitTaskRelease;
+    t.task.base.has_one_ref = &emitTaskHasOneRef;
+    t.task.base.has_at_least_one_ref = &emitTaskHasAtLeastOneRef;
+    t.task.execute = &emitTaskExecute;
+    if (c.cef_post_task(c.TID_UI, &t.task) != 1) {
+        _ = emitTaskRelease(&t.task.base);
+    }
 }
 
 /// CEF 콜백 ref 해제 + return 0 — hold(add_ref) 후 early-return(push/emit/json 실패) 공용.
@@ -150,7 +225,7 @@ pub fn onCertificateError(
     _: ?*c._cef_sslinfo_t,
     callback: ?*c._cef_callback_t,
 ) callconv(.c) c_int {
-    const emit = g_emit_fn orelse return 0;
+    if (g_emit_fn == null or !g_auth_handler_enabled.load(.acquire)) return 0; // 미구독/미주입 시 CEF 기본
     const cb = callback orelse return 0;
     // hold past 동기 핸들러 반환 — add_ref(respond 의 release 와 짝). 모든 early-return-0 에서 release.
     if (cb.base.add_ref) |ar| ar(&cb.base);
@@ -168,7 +243,7 @@ pub fn onCertificateError(
         _ = certTake(id);
         return releaseCb(&cb.base);
     };
-    emit("app:certificate-error", json.ptr, json.len);
+    emitOnUi("app:certificate-error", json);
     return 1; // hold — certificateErrorRespond 가 cont/cancel
 }
 
@@ -224,7 +299,7 @@ const AuthTask = struct {
     allocator: std.mem.Allocator,
     ref_count: std.atomic.Value(u32) = .init(1),
     callback: *c.cef_auth_callback_t,
-    user: [256]u8 = undefined,
+    user: [256]u8 = undefined, // ⚠️ off-UI 워커 경로만 256 절단(UI 직접 경로 무제한) — 비대칭, 정직 경계
     user_len: usize = 0,
     pass: [256]u8 = undefined,
     pass_len: usize = 0,
@@ -302,7 +377,7 @@ pub fn getAuthCredentials(
     scheme: [*c]const c.cef_string_t,
     callback: ?*c._cef_auth_callback_t,
 ) callconv(.c) c_int {
-    const emit = g_emit_fn orelse return 0;
+    if (g_emit_fn == null or !g_auth_handler_enabled.load(.acquire)) return 0; // 미구독/미주입 시 CEF 기본
     const cb = callback orelse return 0;
     if (cb.base.add_ref) |ar| ar(&cb.base);
     const id = nextId();
@@ -325,7 +400,7 @@ pub fn getAuthCredentials(
     const sn = util.escapeJsonStrFull(scheme_s, &se) orelse return failAuth(id);
     var info: [3000]u8 = undefined;
     const json = std.fmt.bufPrint(&info, "{{\"id\":{d},\"url\":\"{s}\",\"isProxy\":{},\"host\":\"{s}\",\"port\":{d},\"realm\":\"{s}\",\"scheme\":\"{s}\"}}", .{ id, ue[0..un], is_proxy != 0, he[0..hn], port, ree[0..rn], se[0..sn] }) catch return failAuth(id);
-    emit("app:login", json.ptr, json.len);
+    emitOnUi("app:login", json);
     return 1;
 }
 fn failAuth(id: u64) c_int {
@@ -472,7 +547,7 @@ pub fn onSelectClientCertificate(
     certificates: [*c]const ?*c.cef_x509_certificate_t,
     callback: ?*c._cef_select_client_certificate_callback_t,
 ) callconv(.c) c_int {
-    const emit = g_emit_fn orelse return 0;
+    if (g_emit_fn == null or !g_auth_handler_enabled.load(.acquire)) return 0; // 미구독/미주입 시 CEF 기본
     const cb = callback orelse return 0;
     if (certificates_count == 0) return 0; // cert 없음 → CEF 기본
     // callback + 각 cert hold(add_ref) — clientReleaseOnly/clientSelectAndRelease 가 짝 release.
@@ -505,6 +580,6 @@ pub fn onSelectClientCertificate(
         clientReleaseOnly(p);
         return 0;
     };
-    emit("app:select-client-certificate", json.ptr, json.len);
+    emitOnUi("app:select-client-certificate", json);
     return 1;
 }

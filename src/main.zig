@@ -2861,6 +2861,13 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         // base64 알파벳은 JSON-safe — icon 추가 escape 불필요.
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_application_info_for_protocol\",\"name\":\"{s}\",\"path\":\"{s}\",\"icon\":\"{s}\"}}", .{ name_esc[0..ne], path_esc[0..pe], icon_b64 }) catch null;
     }
+    // app 이 auth 이벤트 구독 토글 (deferred hold 게이트) — 미등록 시 cert/auth/client-cert 콜백이
+    // CEF 기본(차단/취소/기본선택)으로 fallback. Electron app.on 등록을 명시 enable 로 대체(정직 경계).
+    if (std.mem.eql(u8, cmd, "auth_set_handler_enabled")) {
+        const enabled = util.extractJsonBool(req_clean, "enabled") orelse false;
+        cef.setAuthHandlerEnabled(enabled);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"auth_set_handler_enabled\",\"success\":true}}", .{}) catch null;
+    }
     // app:certificate-error 응답 — Electron event 의 callback(allow/deny) deferred 적용.
     if (std.mem.eql(u8, cmd, "certificate_error_respond")) {
         const id_n = util.extractJsonInt(req_clean, "id") orelse 0;

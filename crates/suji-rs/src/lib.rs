@@ -3713,6 +3713,11 @@ pub fn select_client_certificate_respond(id: u64, index: i64) -> Option<String> 
     invoke("__core__", &serde_json::json!({ "cmd": "select_client_certificate_respond", "id": id, "index": index }).to_string())
 }
 
+/// auth 이벤트 핸들러 활성 (이벤트 구독 후) — 미활성 시 CEF 기본 fallback. 응답 `{"success":bool}`.
+pub fn set_auth_handler_enabled(enabled: bool) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "auth_set_handler_enabled", "enabled": enabled }).to_string())
+}
+
 pub(crate) fn scoped_bookmark_create_json(path: &str) -> String {
     serde_json::json!({ "cmd": "security_scoped_bookmark_create", "path": path }).to_string()
 }

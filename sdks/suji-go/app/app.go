@@ -252,6 +252,12 @@ func SelectClientCertificateRespond(id uint64, index int64) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"select_client_certificate_respond","id":%d,"index":%d}`, id, index))
 }
 
+// SetAuthHandlerEnabled — auth 이벤트 핸들러 활성(이벤트 구독 후). 미활성 시 CEF 기본 fallback.
+// raw JSON: `{"success":bool}`.
+func SetAuthHandlerEnabled(enabled bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"auth_set_handler_enabled","enabled":%t}`, enabled))
+}
+
 // CreateSecurityScopedBookmark creates a security-scoped bookmark for App
 // Sandbox persistent file access. Response:
 // `{"success":bool,"bookmark":"<base64>"}` (비-sandbox 빌드에선 일반 bookmark).

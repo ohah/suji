@@ -3346,6 +3346,12 @@ export const app = {
     return r.success === true;
   },
 
+  /** auth 이벤트(certificate-error/login/select-client-certificate) 핸들러 활성. 이벤트 구독 후 호출
+   *  — 미활성(기본) 시 CEF 기본(cert 차단/auth 취소/client-cert 기본 선택)으로 fallback. */
+  async setAuthHandlerEnabled(enabled: boolean): Promise<void> {
+    await coreCall({ cmd: "auth_set_handler_enabled", enabled });
+  },
+
   /**
    * Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 실패 시 null.
    * 비-sandbox 빌드에선 일반 bookmark 로 동작 (sandbox escapement no-op).
