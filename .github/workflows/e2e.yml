@@ -215,6 +215,9 @@ jobs:
             ~/Library/Application Support/Multi Backend Example/Cache/debug.log
           if-no-files-found: ignore
 
+  # Linux runtime E2E. Windows 는 별도 webcontentsview-windows job(아래). macOS 는
+  # 상단 e2e job. 단일 항목 matrix 유지 — Linux step 들이 ${{ matrix.cef_platform }} 등을
+  # 그대로 참조(불필요한 step 수정 회피).
   webcontentsview-cross-platform:
     name: WebContentsView runtime E2E (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -226,10 +229,6 @@ jobs:
             cef_platform: linux-x86_64
             cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_linux64_minimal.tar.bz2"
             node_platform: linux-x86_64
-          - os: windows-latest
-            cef_platform: windows-x86_64
-            cef_file: "cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_windows64_minimal.tar.bz2"
-            node_platform: windows-x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -253,52 +252,6 @@ jobs:
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Install Windows MinGW runtime
-        if: runner.os == 'Windows'
-        id: msys2
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          update: true
-          install: >-
-            mingw-w64-x86_64-gcc
-            mingw-w64-x86_64-c-ares
-            mingw-w64-x86_64-openssl
-            mingw-w64-x86_64-icu
-            mingw-w64-x86_64-zlib
-            mingw-w64-x86_64-nodejs
-
-      - name: Export Windows MinGW root
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $msys2Location = "${{ steps.msys2.outputs['msys2-location'] }}"
-          $roots = @()
-          if ($msys2Location) {
-            $roots += Join-Path $msys2Location "mingw64"
-            $roots += Join-Path $msys2Location "ucrt64"
-          }
-          $roots += "$env:RUNNER_TEMP\msys64\mingw64"
-          $roots += "$env:RUNNER_TEMP\msys64\ucrt64"
-          $roots += "C:\msys64\mingw64"
-          $roots += "C:\msys64\ucrt64"
-
-          $root = $roots | Where-Object { $_ -and (Test-Path (Join-Path $_ "bin\g++.exe")) } | Select-Object -First 1
-          if (-not $root) {
-            $gpp = Get-Command g++.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($gpp) {
-              $candidate = Split-Path (Split-Path $gpp.Source -Parent) -Parent
-              if (Test-Path (Join-Path $candidate "bin\g++.exe")) {
-                $root = $candidate
-              }
-            }
-          }
-          if (-not $root) {
-            throw "MSYS2 MinGW g++ not found; checked: $($roots -join ', ')"
-          }
-          Write-Host "Using MinGW root: $root"
-          "SUJI_MINGW_ROOT=$root" >> $env:GITHUB_ENV
 
       - name: Install Linux runtime dependencies
         if: runner.os == 'Linux'
@@ -332,22 +285,6 @@ jobs:
           cp -R "$CEF_DIR/Release/"* ~/.suji/cef/${{ matrix.cef_platform }}/Release/ || true
           cp -R "$CEF_DIR/Resources/"* ~/.suji/cef/${{ matrix.cef_platform }}/Resources/ || true
 
-      - name: Download CEF (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $cefDir = "$env:USERPROFILE\.suji\cef\windows-x86_64"
-          New-Item -ItemType Directory -Force -Path "$cefDir\Release"
-          New-Item -ItemType Directory -Force -Path "$cefDir\Resources\locales"
-          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.suji\cef\cache"
-          $url = "https://cef-builds.spotifycdn.com/${{ matrix.cef_file }}"
-          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\cef.tar.bz2"
-          tar xjf "$env:TEMP\cef.tar.bz2" -C "$env:TEMP"
-          $extracted = Get-ChildItem "$env:TEMP\cef_binary_*" -Directory | Select-Object -First 1
-          Copy-Item -Recurse "$($extracted.FullName)\include" "$cefDir\" -Force
-          Copy-Item "$($extracted.FullName)\Release\*" "$cefDir\Release\" -Force -ErrorAction SilentlyContinue
-          Copy-Item "$($extracted.FullName)\Resources\*" "$cefDir\Resources\" -Recurse -Force -ErrorAction SilentlyContinue
-
       - name: Download libnode (Unix)
         if: runner.os != 'Windows'
         run: |
@@ -359,29 +296,6 @@ jobs:
             tar xzf /tmp/libnode.tar.gz -C "$NODE_DIR" && \
             echo "libnode installed: $NODE_DIR" || \
             echo "libnode not available for ${{ matrix.node_platform }}, continuing without Node backend"
-
-      - name: Stage libnode from MSYS2 (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          if (-not $env:SUJI_MINGW_ROOT) {
-            throw "SUJI_MINGW_ROOT is not set"
-          }
-          $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
-          New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
-          New-Item -ItemType Directory -Force -Path "$nodeDir\include" | Out-Null
-          $runtimeDll = Join-Path $env:SUJI_MINGW_ROOT "bin\libnode.dll"
-          $importLib = Join-Path $env:SUJI_MINGW_ROOT "lib\libnode.dll.a"
-          $includeDir = Join-Path $env:SUJI_MINGW_ROOT "include\node"
-          foreach ($path in @($runtimeDll, $importLib, $includeDir)) {
-            if (-not (Test-Path $path)) {
-              throw "MSYS2 libnode artifact missing: $path"
-            }
-          }
-          Copy-Item -Force -LiteralPath $runtimeDll -Destination "$nodeDir\libnode.dll"
-          Copy-Item -Force -LiteralPath $importLib -Destination "$nodeDir\libnode.dll.a"
-          Copy-Item -Recurse -Force -Path "$includeDir\*" -Destination "$nodeDir\include\"
-          Write-Host "libnode staged from MSYS2: $nodeDir"
 
       - name: Build suji
         run: zig build
@@ -850,151 +764,6 @@ jobs:
             xvfb-run -a --server-args="-screen 0 1280x1024x24 -ac +extension GLX +render -noreset" \
             dbus-run-session -- bash tests/e2e/run-badge-count.sh
 
-      - name: E2E — clipboard text/HTML (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-clipboard-text-runtime.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-clipboard-text-runtime.sh
-
-      - name: E2E — WebContentsView lifecycle (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-view-lifecycle.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-view-lifecycle.sh
-
-      # Windows frameless `frame:false` + `-webkit-app-region: drag` 런타임 검증.
-      # CEF Views 공유 경로라 macOS/Linux 와 동일 동작 — Windows 도 커버리지 추가
-      # (이전엔 PLAN.md 상 'Windows는 후속/미검증'이었음).
-      - name: E2E — frameless drag region (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-frameless-drag-region.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-frameless-drag-region.sh
-
-      - name: E2E — safeStorage (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-safe-storage.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-safe-storage.sh
-
-      - name: E2E — powerMonitor idle (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-power-monitor.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-power-monitor.sh
-
-      - name: E2E — powerSaveBlocker (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-power-save-blocker.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-power-save-blocker.sh
-
-      - name: E2E — badge count (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-badge-count.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-badge-count.sh
-
-      # ── Windows embedded CPython (dev + packaged) ──
-      # dev(run-python-e2e.sh)는 staged ~/.suji/python 을 PYTHONHOME 으로 쓰지만,
-      # packaged 는 `suji build` 가 python313.dll + python/{Lib,DLLs} 를 번들하고
-      # 런타임이 sentinel-gated <exe_dir>/python 으로 해석한다 — 별도 경로라 dev
-      # 통과만으론 packaged 회귀를 못 잡으므로 두 가드를 모두 돈다. 두 e2e 스크립트가
-      # 각자 stage-python.sh + zig build(python auto-enable)를 수행하지만, staging
-      # 다운로드를 가시적/캐시 가능한 별도 스텝으로 분리(PYTHON_VERSION/PYTHON_PBS_TAG
-      # 는 workflow env). python 빌드는 Debug zig-out 을 덮어쓰므로 위 Windows e2e
-      # 스텝(비-python Debug 빌드 대상)들 뒤, 아래 ReleaseSafe 재빌드 앞에 위치.
-      - name: Stage embedded CPython (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: bash scripts/stage-python.sh
-
-      - name: Install python-backend frontend dependencies (Windows)
-        if: runner.os == 'Windows'
-        working-directory: examples/python-backend/frontend
-        run: bun install
-
-      - name: E2E — Python backend invoke (dev, Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-python.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-python-e2e.sh
-
-      - name: E2E — Python backend packaged (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-python-packaged.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-python-packaged.sh
-
-      # #60 part 2 회귀 가드 — 반드시 마지막 Windows 스텝(ReleaseSafe 재빌드로
-      # Debug zig-out 을 덮어쓰므로). 최적화 빌드에서 렌더러 V8 부트스트랩이
-      # window.__suji__ 를 바인딩하는지 검증 — 재발 시 getMainPage 타임아웃으로 fail.
-      - name: E2E — ReleaseSafe renderer boot (#60 part 2 guard, Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        env:
-          SUJI_CEF_CI: "1"
-          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-rs-renderer-boot.log
-        run: |
-          mkdir -p e2e-logs
-          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
-          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
-          bash tests/e2e/run-releasesafe-renderer-boot.sh
-
       - name: Collect cross-platform suji logs on failure
         if: failure()
         shell: bash
@@ -1025,5 +794,300 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: suji-webcontentsview-e2e-${{ runner.os }}-logs
+          path: e2e-logs/**
+          if-no-files-found: ignore
+
+  # Windows runtime E2E — 전용 job(이전엔 webcontentsview-cross-platform 매트릭스의
+  # Windows arm 으로, Linux 와 zig-out 을 암묵 공유했다). 분리로 (1) python 빌드가
+  # Debug zig-out 을 덮어쓰는 ordering 결합 제거, (2) step 별 `if: runner.os == 'Windows'`
+  # 게이트 제거, (3) Windows/Linux 병렬 실행. 잡 내부 step 순서만 load-bearing:
+  # 비-python Debug e2e → python(Debug 재빌드) → ReleaseSafe 가드(ReleaseSafe 재빌드, 마지막).
+  webcontentsview-windows:
+    name: WebContentsView runtime E2E (windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Windows MinGW runtime
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-c-ares
+            mingw-w64-x86_64-openssl
+            mingw-w64-x86_64-icu
+            mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-nodejs
+
+      - name: Export Windows MinGW root
+        shell: pwsh
+        run: |
+          $msys2Location = "${{ steps.msys2.outputs['msys2-location'] }}"
+          $roots = @()
+          if ($msys2Location) {
+            $roots += Join-Path $msys2Location "mingw64"
+            $roots += Join-Path $msys2Location "ucrt64"
+          }
+          $roots += "$env:RUNNER_TEMP\msys64\mingw64"
+          $roots += "$env:RUNNER_TEMP\msys64\ucrt64"
+          $roots += "C:\msys64\mingw64"
+          $roots += "C:\msys64\ucrt64"
+
+          $root = $roots | Where-Object { $_ -and (Test-Path (Join-Path $_ "bin\g++.exe")) } | Select-Object -First 1
+          if (-not $root) {
+            $gpp = Get-Command g++.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($gpp) {
+              $candidate = Split-Path (Split-Path $gpp.Source -Parent) -Parent
+              if (Test-Path (Join-Path $candidate "bin\g++.exe")) {
+                $root = $candidate
+              }
+            }
+          }
+          if (-not $root) {
+            throw "MSYS2 MinGW g++ not found; checked: $($roots -join ', ')"
+          }
+          Write-Host "Using MinGW root: $root"
+          "SUJI_MINGW_ROOT=$root" >> $env:GITHUB_ENV
+
+      - name: Download CEF (Windows)
+        shell: pwsh
+        run: |
+          $cefDir = "$env:USERPROFILE\.suji\cef\windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "$cefDir\Release"
+          New-Item -ItemType Directory -Force -Path "$cefDir\Resources\locales"
+          New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.suji\cef\cache"
+          $url = "https://cef-builds.spotifycdn.com/cef_binary_146.0.9%2Bg3ca6a87%2Bchromium-146.0.7680.165_windows64_minimal.tar.bz2"
+          Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\cef.tar.bz2"
+          tar xjf "$env:TEMP\cef.tar.bz2" -C "$env:TEMP"
+          $extracted = Get-ChildItem "$env:TEMP\cef_binary_*" -Directory | Select-Object -First 1
+          Copy-Item -Recurse "$($extracted.FullName)\include" "$cefDir\" -Force
+          Copy-Item "$($extracted.FullName)\Release\*" "$cefDir\Release\" -Force -ErrorAction SilentlyContinue
+          Copy-Item "$($extracted.FullName)\Resources\*" "$cefDir\Resources\" -Recurse -Force -ErrorAction SilentlyContinue
+
+      - name: Stage libnode from MSYS2 (Windows)
+        shell: pwsh
+        run: |
+          if (-not $env:SUJI_MINGW_ROOT) {
+            throw "SUJI_MINGW_ROOT is not set"
+          }
+          $nodeDir = "$env:USERPROFILE\.suji\node\${{ env.NODE_VERSION }}"
+          New-Item -ItemType Directory -Force -Path $nodeDir | Out-Null
+          New-Item -ItemType Directory -Force -Path "$nodeDir\include" | Out-Null
+          $runtimeDll = Join-Path $env:SUJI_MINGW_ROOT "bin\libnode.dll"
+          $importLib = Join-Path $env:SUJI_MINGW_ROOT "lib\libnode.dll.a"
+          $includeDir = Join-Path $env:SUJI_MINGW_ROOT "include\node"
+          foreach ($path in @($runtimeDll, $importLib, $includeDir)) {
+            if (-not (Test-Path $path)) {
+              throw "MSYS2 libnode artifact missing: $path"
+            }
+          }
+          Copy-Item -Force -LiteralPath $runtimeDll -Destination "$nodeDir\libnode.dll"
+          Copy-Item -Force -LiteralPath $importLib -Destination "$nodeDir\libnode.dll.a"
+          Copy-Item -Recurse -Force -Path "$includeDir\*" -Destination "$nodeDir\include\"
+          Write-Host "libnode staged from MSYS2: $nodeDir"
+
+      - name: Build suji
+        run: zig build
+
+      - name: Verify CEF runtime layout
+        shell: bash
+        run: |
+          bin="zig-out/bin"
+          test -f "$bin/suji.exe"
+          test -f "$bin/libcef.dll"
+          for file in \
+            icudtl.dat \
+            resources.pak \
+            chrome_100_percent.pak \
+            chrome_200_percent.pak \
+            v8_context_snapshot.bin; do
+            test -f "$bin/$file"
+          done
+          test -d "$bin/locales"
+
+      - name: Install root e2e dependencies
+        run: bun install
+
+      - name: Install frontend dependencies
+        working-directory: examples/multi-backend/frontend
+        run: bun install
+
+      - name: E2E — clipboard text/HTML
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-clipboard-text-runtime.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-clipboard-text-runtime.sh
+
+      - name: E2E — WebContentsView lifecycle
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-view-lifecycle.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-view-lifecycle.sh
+
+      # Windows frameless `frame:false` + `-webkit-app-region: drag` 런타임 검증.
+      # CEF Views 공유 경로라 macOS/Linux 와 동일 동작.
+      - name: E2E — frameless drag region
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-frameless-drag-region.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-frameless-drag-region.sh
+
+      - name: E2E — safeStorage
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-safe-storage.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-safe-storage.sh
+
+      - name: E2E — powerMonitor idle
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-power-monitor.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-power-monitor.sh
+
+      - name: E2E — powerSaveBlocker
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-power-save-blocker.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-power-save-blocker.sh
+
+      - name: E2E — badge count
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-badge-count.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-badge-count.sh
+
+      # ── Windows embedded CPython (dev + packaged) ──
+      # dev(run-python-e2e.sh)는 staged ~/.suji/python 을 PYTHONHOME 으로 쓰지만,
+      # packaged 는 `suji build` 가 python313.dll + python/{Lib,DLLs} 를 번들하고
+      # 런타임이 sentinel-gated <exe_dir>/python 으로 해석한다 — 별도 경로라 dev
+      # 통과만으론 packaged 회귀를 못 잡으므로 두 가드를 모두 돈다. python 빌드가 Debug
+      # zig-out 을 덮어쓰므로 위 비-python Debug e2e 뒤, 아래 ReleaseSafe 재빌드 앞.
+      - name: Stage embedded CPython
+        shell: bash
+        run: bash scripts/stage-python.sh
+
+      - name: Install python-backend frontend dependencies
+        working-directory: examples/python-backend/frontend
+        run: bun install
+
+      - name: E2E — Python backend invoke (dev)
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-python.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-python-e2e.sh
+
+      - name: E2E — Python backend packaged
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-python-packaged.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-python-packaged.sh
+
+      # #60 part 2 회귀 가드 — 반드시 마지막 step(ReleaseSafe 재빌드로 Debug zig-out
+      # 을 덮어쓰므로). 최적화 빌드에서 렌더러 V8 부트스트랩이 window.__suji__ 를
+      # 바인딩하는지 검증 — 재발 시 getMainPage 타임아웃으로 fail.
+      - name: E2E — ReleaseSafe renderer boot (#60 part 2 guard)
+        shell: bash
+        env:
+          SUJI_CEF_CI: "1"
+          SUJI_LOG: ${{ github.workspace }}/e2e-logs/suji-e2e-rs-renderer-boot.log
+        run: |
+          mkdir -p e2e-logs
+          export SUJI_CEF_LOG="$(cygpath -w "$PWD/e2e-logs/cef-debug.log")"
+          export PATH="$(cygpath -u "$USERPROFILE/.suji/cef/windows-x86_64/Release"):$PATH"
+          bash tests/e2e/run-releasesafe-renderer-boot.sh
+
+      - name: Collect suji logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p e2e-logs
+          cp /tmp/suji-e2e-*.log e2e-logs/ 2>/dev/null || true
+          cp "$RUNNER_TEMP"/suji-e2e-*.log e2e-logs/ 2>/dev/null || true
+          cp "$HOME"/.suji/logs/suji-*.log e2e-logs/ 2>/dev/null || true
+          cp zig-out/bin/debug.log e2e-logs/cef-default-debug.log 2>/dev/null || true
+          npm_logs="$(cygpath -u "$LOCALAPPDATA/npm-cache/_logs" 2>/dev/null || true)"
+          if [ -n "${npm_logs:-}" ]; then
+            cp "$npm_logs"/*.log e2e-logs/ 2>/dev/null || true
+          fi
+          app_debug="$(cygpath -u "$APPDATA/Multi Backend Example/Cache/debug.log" 2>/dev/null || true)"
+          if [ -n "${app_debug:-}" ]; then
+            cp "$app_debug" e2e-logs/debug.log 2>/dev/null || true
+          fi
+          find e2e-logs -maxdepth 2 -type f -print -exec tail -80 {} \; || true
+
+      - name: Upload suji logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: suji-webcontentsview-e2e-windows-logs
           path: e2e-logs/**
           if-no-files-found: ignore
