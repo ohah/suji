@@ -53,6 +53,10 @@ pub fn showMessageBox(opts: MessageBoxOpts) MessageBoxResult {
     if (opts.detail.len > 0) {
         if (nsStringFromSlice(opts.detail)) |ns| msgSendVoid1(alert, "setInformativeText:", ns);
     }
+    // 커스텀 아이콘 (Electron MessageBoxOptions.icon). 이미지 경로 → NSImage → NSAlert.setIcon.
+    if (opts.icon.len > 0) {
+        if (cef.loadNSImageFromFile(opts.icon)) |img| msgSendVoid1(alert, "setIcon:", img);
+    }
 
     // NSAlertStyle: warning=0, info=1, critical=2. question/none → warning(0).
     const style: u64 = switch (opts.style) {

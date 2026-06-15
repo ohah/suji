@@ -15,6 +15,9 @@ pub const MessageBoxOpts = struct {
     cancel_id: ?usize = null,
     checkbox_label: []const u8 = "",
     checkbox_checked: bool = false,
+    /// 커스텀 아이콘 이미지 경로 (Electron MessageBoxOptions.icon) — NSAlert.setIcon (NSImage).
+    /// 빈 문자열이면 기본 스타일 아이콘. macOS only.
+    icon: []const u8 = "",
     /// 부모 창 NSWindow 포인터 — null이면 free-floating runModal, 있으면 sheet.
     parent_window: ?*anyopaque = null,
 };

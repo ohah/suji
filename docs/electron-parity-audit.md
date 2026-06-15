@@ -232,9 +232,9 @@
 - **[low]** `app.getGPUInfo(infoType)` — Add app.getGPUInfo(infoType: 'basic'|'complete') to Suji's app module. Implementation: (1) Expose CEF GPU info getter in src/platform/cef.zig (CEF BrowserHost has GetVisibleNavigationEntry → GPU conte
 - **[low]** `getLoginItemSettings(options?)` — Add app.getLoginItemSettings([options?]) to both @suji/api (frontend) and @suji/node (backend). Implement platform-specific handlers: (1) macOS: query NSWorkspace / LaunchServices / UserDefaults for a
 - **[low]** `app.setLoginItemSettings(settings)` — Add app.setLoginItemSettings(settings) and app.getLoginItemSettings() methods to /Users/yoonhb/Documents/workspace/suji/packages/suji-js/src/index.ts and /packages/suji-node/src/index.ts, mirroring th
-- **[low]** `app.isAccessibilitySupportEnabled()` — Add `isAccessibilitySupportEnabled(): Promise<boolean>` to the `app` module in both packages/suji-node/src/index.ts (line ~1620) and packages/suji-js/src/index.ts. Implementation: async invoke of a ne
+- **[보류]** `app.isAccessibilitySupportEnabled()` — CEF 가 Chromium accessibility(screen reader) 활성 상태를 노출 안 함; NSWorkspace 엔 시각 접근성 플래그(고대비/투명도)만 있고 VoiceOver 상태는 부재 → Electron 의미(screen reader 감지)로 정확 구현 불가(정직 경계). Add `isAccessibilitySupportEnabled(): Promise<boolean>` to the `app` module in both packages/suji-node/src/index.ts (line ~1620) and packages/suji-js/src/index.ts. Implementation: async invoke of a ne
 - **[low]** `app.setAccessibilitySupportEnabled(enabled: boolean) and app.isAccessibilitySupportEnabled()` — Add accessibility support methods to the app namespace in /packages/suji-js/src/index.ts: setAccessibilitySupportEnabled(enabled: boolean) -> coreCall with cmd "app_set_accessibility_support_enabled",
-- **[low]** `app.getAccessibilitySupportFeatures()` — Add app.getAccessibilitySupportFeatures() method returning string[] to all 5 SDK surfaces. Implementation would query CEF for active accessibility modes (screen reader, native APIs, etc.) and map to E
+- **[보류]** `app.getAccessibilitySupportFeatures()` — CEF accessibility 상태 미노출(isAccessibilitySupportEnabled 와 동일 사유, 정직 경계). Add app.getAccessibilitySupportFeatures() method returning string[] to all 5 SDK surfaces. Implementation would query CEF for active accessibility modes (screen reader, native APIs, etc.) and map to E
 - **[low]** `setAccessibilitySupportFeatures` — Add setAccessibilitySupportFeatures(features: string[]): Promise<boolean> method to the app module in both @suji/js (packages/suji-js/src/index.ts around line 1523 where app object is defined) and @su
 - **[low]** `app.setAboutPanelOptions(options) / app.showAboutPanel()` — Add two methods to the app namespace: 1. app.setAboutPanelOptions(options) — accepts {applicationName?, applicationVersion?, copyright?, credits?, version?, authors?, website?, iconPath?} 2. app.showA
 - **[low]** `app.isEmojiPanelSupported()` — Add app.isEmojiPanelSupported() method to all SDK layers (suji-js, suji-node, Rust, Go) — follows the pattern of other app.* boolean checks like isPackaged()/isReady(). Backend: Zig core should expose
@@ -244,14 +244,14 @@
 
 ### clipboard
 
-- **[low]** `clipboard.readFindText()` — Add readFindText(): Promise<string> to clipboard module. Implement in Zig core (src/main.zig): add clipboard_read_find_text command handler that calls new cef.clipboardReadFindText() function. In cef.
+- ~~**[low]** `clipboard.readFindText()`~~ ✅ (이미 구현 — cef_clipboard.zig clipboardReadFindText + main.zig dispatch + JS/Go SDK; audit outdated) — Add readFindText(): Promise<string> to clipboard module. Implement in Zig core (src/main.zig): add clipboard_read_find_text command handler that calls new cef.clipboardReadFindText() function. In cef.
 - ~~**[low]** `clipboard.has(format[, type])`~~ ✅ — Add optional `type?: 'clipboard' | 'selection'` parameter to `clipboard.has()` in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts. Update Zig handler at src/main.zig:2204 to extract 
 
 ### dialog
 
-- **[low]** `dialog.showMessageBox() — option: 'icon' (custom icon)` — Add optional 'icon' field to MessageBoxOptions interfaces (suji-js and suji-node packages), add corresponding 'icon: []const u8 = ""' field to MessageBoxOpts struct in src/platform/cef.zig (line 3675)
-- **[low]** `dialog.showSaveDialog() — option: 'securityScopedBookmarks' (macOS/MAS)` — Add `securityScopedBookmarks?: boolean` to SaveDialogOptions in packages/suji-js/src/index.ts (line 1229) and packages/suji-node/src/index.ts (line 1190). Add field to SaveDialogJson struct in src/mai
-- **[low]** `dialog.showOpenDialog() / dialog.showSaveDialog() — properties: 'dontAddToRecent'` — Add "dontAddToRecent" as a string literal to OpenDialogProperty (line 1202-1209 in packages/suji-js/src/index.ts) and SaveDialogProperty (line 1224-1227). This matches Electron's current API which exp
+- ~~**[low]** `dialog.showMessageBox() — option: 'icon' (custom icon)`~~ ✅ (PR2 — MessageBoxOpts.icon → 이미지경로 NSImage → NSAlert.setIcon, 전 5 SDK + rendererPathFsGate) — Add optional 'icon' field to MessageBoxOptions interfaces (suji-js and suji-node packages), add corresponding 'icon: []const u8 = ""' field to MessageBoxOpts struct in src/platform/cef.zig (line 3675)
+- **[보류]** `dialog.showSaveDialog() — option: 'securityScopedBookmarks' (macOS/MAS)` — MAS(App Sandbox) 전용 — 비-sandbox 빌드에선 무의미하고, app.createSecurityScopedBookmark(이미 구현)로 저장 경로 bookmark 가능(정직 경계). Add `securityScopedBookmarks?: boolean` to SaveDialogOptions in packages/suji-js/src/index.ts (line 1229) and packages/suji-node/src/index.ts (line 1190). Add field to SaveDialogJson struct in src/mai
+- **[보류]** `dialog.showOpenDialog() / dialog.showSaveDialog() — properties: 'dontAddToRecent'` — macOS NSOpenPanel/NSSavePanel 은 자동으로 recent 에 추가하지 않음 → no-op (Windows JumpList 전용 개념, 정직 경계). Add "dontAddToRecent" as a string literal to OpenDialogProperty (line 1202-1209 in packages/suji-js/src/index.ts) and SaveDialogProperty (line 1224-1227). This matches Electron's current API which exp
 
 ### ipc
 

@@ -539,7 +539,8 @@ suji.platform                                                // "macos" | "linux
 // await clipboard.readHTML() / writeHTML(html)                            (macOS NSPasteboard / Linux GTK text/html / Windows CF_HTML)
 // await shell.openExternal(url) / showItemInFolder(path) / beep() / trashItem(path)
 //   (macOS NSWorkspace + NSFileManager, Linux GIO/FileManager1, Windows ShellExecute/explorer/MessageBeep/SHFileOperation)
-// await dialog.showMessageBox({ type, message, buttons, defaultId, ... }) (macOS NSAlert / Linux GTK / Windows TaskDialog)
+// await dialog.showMessageBox({ type, message, buttons, defaultId, icon?, ... }) (macOS NSAlert / Linux GTK / Windows TaskDialog)
+//   icon=커스텀 아이콘 이미지 경로 → NSAlert.setIcon (macOS only, fs sandbox gate)
 // await dialog.showMessageBox(windowId, options)  — macOS sheet, Linux/Windows free-floating
 // await dialog.showOpenDialog({ properties:['openFile','multiSelections'], filters }) (NSOpenPanel / GTK FileChooser / Win32 file dialog)
 // await dialog.showOpenDialog(windowId, options) — macOS sheet, Linux/Windows free-floating

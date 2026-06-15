@@ -25,6 +25,7 @@ type MessageBoxOpts struct {
 	CancelID         *int
 	CheckboxLabel    string
 	CheckboxChecked  bool
+	Icon             string // 커스텀 아이콘 이미지 경로 (macOS NSAlert.setIcon)
 }
 
 // ShowMessageBox displays modal message box.
@@ -60,6 +61,9 @@ func ShowMessageBox(opts MessageBoxOpts) string {
 	}
 	if opts.CheckboxChecked {
 		m["checkboxChecked"] = true
+	}
+	if opts.Icon != "" {
+		m["icon"] = opts.Icon
 	}
 	b, _ := json.Marshal(m)
 	return suji.Invoke("__core__", string(b))

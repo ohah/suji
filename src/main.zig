@@ -3550,6 +3550,7 @@ const MessageBoxJson = struct {
     cancelId: ?usize = null,
     checkboxLabel: []const u8 = "",
     checkboxChecked: bool = false,
+    icon: []const u8 = "",
     windowId: ?u32 = null,
 };
 
@@ -3647,6 +3648,10 @@ fn handleDialogShowMessageBox(req_clean: []const u8, response_buf: []u8) ?[]cons
     defer parsed.deinit();
     const opts = parsed.value;
 
+    // icon 경로 fs gate (이미지 로드 = 렌더러-제어 경로 읽기 sink — tray_create.iconPath 동일).
+    if (opts.icon.len > 0) {
+        if (rendererPathFsGate(response_buf, "dialog_show_message_box", opts.icon)) |e| return e;
+    }
     const r = cef.showMessageBox(.{
         .style = parseStyleString(opts.type),
         .title = opts.title,
@@ -3657,6 +3662,7 @@ fn handleDialogShowMessageBox(req_clean: []const u8, response_buf: []u8) ?[]cons
         .cancel_id = opts.cancelId,
         .checkbox_label = opts.checkboxLabel,
         .checkbox_checked = opts.checkboxChecked,
+        .icon = opts.icon,
         .parent_window = dialogParentNSWindow(opts.windowId),
     });
 
@@ -4279,7 +4285,7 @@ fn rendererPathAllowed(path: []const u8) bool {
 ///  - 읽기: native_image_get_size / native_image_to_png|jpeg (임의 파일을
 ///    base64 로 인코딩해 렌더러로 반환 = 파일내용 유출) /
 ///    native_image_is_empty|is_template (파일 존재·디코드·메타 유출)
-///  - 파일 probe/read sink: tray_create.iconPath
+///  - 파일 probe/read sink: tray_create.iconPath / dialog_show_message_box.icon
 /// (menu_set_application_menu 의 MenuItem.icon 은 per-item drop 이라 menuIconPathAllowed 로 별도 게이트)
 /// **opt-in**: fs.allowedRoots 미설정/빈이면 레거시 무제한(비파괴 — 이 API
 /// 들은 그동안 무제한 출하), 설정 시 `fs.*` 와 동일 경계로 enforce(설정한 fs

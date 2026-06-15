@@ -2629,6 +2629,8 @@ pub mod dialog {
         pub cancel_id: Option<usize>,
         pub checkbox_label: Option<&'a str>,
         pub checkbox_checked: bool,
+        /// 커스텀 아이콘 이미지 경로 (macOS NSAlert.setIcon).
+        pub icon: Option<&'a str>,
     }
 
     pub fn show_message_box(opts: MessageBoxOpts) -> Option<String> {
@@ -2675,6 +2677,9 @@ pub mod dialog {
         }
         if opts.checkbox_checked {
             req.insert("checkboxChecked".into(), serde_json::Value::Bool(true));
+        }
+        if let Some(ic) = opts.icon {
+            req.insert("icon".into(), serde_json::Value::String(ic.into()));
         }
         invoke("__core__", &serde_json::Value::Object(req).to_string())
     }
