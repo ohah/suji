@@ -242,3 +242,101 @@ pub fn appShow() bool {
 pub fn appIsEmojiPanelSupported() bool {
     return comptime is_macos;
 }
+
+/// flashFrame 상태 추적 — flash=true 시 critical request id 저장, false 시 그 id cancel.
+var g_flash_request_id: u32 = 0;
+
+/// 창/dock 으로 주의 끌기 (Electron `BrowserWindow.flashFrame(flag)`). macOS 는 앱 단위
+/// dock bounce 가 대응 — flag=true 면 NSApp requestUserAttention(critical, 활성화까지 반복),
+/// false 면 저장된 request 를 cancel. Win/Linux 는 후속(honest false).
+/// ⚠️ app-scoped(dock 은 앱당 하나) — 멀티 윈도우라도 단일 g_flash_request_id, 마지막 호출 우선.
+/// 앱이 이미 frontmost 면 requestUserAttention 이 0(주의 불필요)을 줘도 요청 자체는 정상이라 true.
+pub fn appFlashFrame(flash: bool) bool {
+    if (!comptime is_macos) return false;
+    if (flash) {
+        g_flash_request_id = cef.appRequestUserAttention(true);
+        return true;
+    }
+    if (g_flash_request_id != 0) {
+        _ = cef.appCancelUserAttentionRequest(g_flash_request_id);
+        g_flash_request_id = 0;
+    }
+    return true;
+}
+
+/// setAboutPanelOptions 로 저장된 NSDictionary (retain 됨). null 이면 기본 시스템 패널.
+var g_about_options: ?*anyopaque = null;
+
+/// dict[key] = val 설정 (val 이 null/빈 문자열이면 skip). setAboutPanelOptions 내부 헬퍼.
+/// cef.msgSendVoid2 재사용 — cef_safe_storage 의 NSMutableDictionary 빌드와 동일 경로.
+fn setAboutKey(dict: ?*anyopaque, key: [*:0]const u8, val: ?[]const u8) void {
+    const v = val orelse return;
+    if (v.len == 0) return;
+    const ns_val = cef.nsStringFromSlice(v) orelse return;
+    const ns_key = cef.nsStringFromCstr(key) orelse return;
+    cef.msgSendVoid2(dict, "setObject:forKey:", ns_val, ns_key);
+}
+
+/// About 패널 옵션 설정 (Electron `app.setAboutPanelOptions(options)`). applicationName/
+/// applicationVersion/version(빌드)/copyright 4 키 지원(credits NSAttributedString 은 후속).
+/// macOS only(Win/Linux false). 다음 showAboutPanel 호출에 적용.
+pub fn appSetAboutPanelOptions(name: ?[]const u8, version: ?[]const u8, build_version: ?[]const u8, copyright: ?[]const u8) bool {
+    if (!comptime is_macos) return false;
+    const NSMutableDictionary = getClass("NSMutableDictionary") orelse return false;
+    const dict = msgSend(NSMutableDictionary, "dictionary") orelse return false;
+    setAboutKey(dict, "ApplicationName", name);
+    setAboutKey(dict, "ApplicationVersion", version);
+    setAboutKey(dict, "Version", build_version);
+    setAboutKey(dict, "Copyright", copyright);
+    // dictionary 는 autoreleased — retain 해서 다음 show 까지 보관, 이전 옵션은 release.
+    _ = msgSend(dict, "retain");
+    if (g_about_options) |old| _ = msgSend(old, "release");
+    g_about_options = dict;
+    return true;
+}
+
+/// About 패널 표시 (Electron `app.showAboutPanel()`). 저장된 옵션이 있으면
+/// orderFrontStandardAboutPanelWithOptions:, 없으면 기본 orderFrontStandardAboutPanel:.
+/// macOS only(Win/Linux false).
+pub fn appShowAboutPanel() bool {
+    if (!comptime is_macos) return false;
+    const app = sharedNSApp() orelse return false;
+    if (g_about_options) |opts| {
+        msgSendVoid1(app, "orderFrontStandardAboutPanelWithOptions:", opts);
+    } else {
+        msgSendVoid1(app, "orderFrontStandardAboutPanel:", null);
+    }
+    return true;
+}
+
+/// 최근 문서 목록에 추가 (Electron `app.addRecentDocument(path)`). NSDocumentController
+/// noteNewRecentDocumentURL:(NSURL fileURLWithPath:). macOS only(Win/Linux false).
+pub fn appAddRecentDocument(path: []const u8) bool {
+    if (!comptime is_macos) return false;
+    const ns_path = cef.nsStringFromSlice(path) orelse return false;
+    const NSURL = getClass("NSURL") orelse return false;
+    const url_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const url = url_fn(NSURL, @ptrCast(objc.sel_registerName("fileURLWithPath:")), ns_path) orelse return false;
+    const NSDocumentController = getClass("NSDocumentController") orelse return false;
+    const dc = msgSend(NSDocumentController, "sharedDocumentController") orelse return false;
+    msgSendVoid1(dc, "noteNewRecentDocumentURL:", url);
+    return true;
+}
+
+/// 최근 문서 목록 비우기 (Electron `app.clearRecentDocuments()`). macOS only(Win/Linux false).
+pub fn appClearRecentDocuments() bool {
+    if (!comptime is_macos) return false;
+    const NSDocumentController = getClass("NSDocumentController") orelse return false;
+    const dc = msgSend(NSDocumentController, "sharedDocumentController") orelse return false;
+    msgSendVoid1(dc, "clearRecentDocuments:", null);
+    return true;
+}
+
+/// `.app` 번들이 /Applications 아래 있는지 (Electron `app.isInApplicationsFolder()`).
+/// bundlePath 에 "/Applications/" 포함 검사 — 순수 Zig. macOS only(Win/Linux false).
+pub fn appIsInApplicationsFolder() bool {
+    if (!comptime is_macos) return false;
+    var buf: [1024]u8 = undefined;
+    const path = appGetBundlePath(&buf);
+    return std.mem.indexOf(u8, path, "/Applications/") != null;
+}

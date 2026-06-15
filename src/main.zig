@@ -2008,6 +2008,16 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
         return window_ipc.handleSetKiosk(win_id, util.extractJsonBool(req_clean, "kiosk") orelse false, response_buf, wm);
     }
+    if (std.mem.eql(u8, cmd, "set_content_protection")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetContentProtection(win_id, util.extractJsonBool(req_clean, "contentProtected") orelse false, response_buf, wm);
+    }
+    if (std.mem.eql(u8, cmd, "set_skip_taskbar")) {
+        const wm = window_mod.WindowManager.global orelse return null;
+        const win_id: u32 = util.nonNegU32(util.extractJsonInt(req_clean, "windowId") orelse return null);
+        return window_ipc.handleSetSkipTaskbar(win_id, util.extractJsonBool(req_clean, "skip") orelse false, response_buf, wm);
+    }
     // getAllWindows/getFocusedWindow 는 windowId 입력이 없어 전용 분기.
     if (std.mem.eql(u8, cmd, "get_all_windows")) {
         const wm = window_mod.WindowManager.global orelse return null;
@@ -2044,6 +2054,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         .{ "is_enabled", &window_ipc.handleIsEnabled },
         .{ "is_fullscreenable", &window_ipc.handleIsFullscreenable },
         .{ "is_kiosk", &window_ipc.handleIsKiosk },
+        .{ "is_content_protected", &window_ipc.handleIsContentProtected },
     }) |entry| {
         if (std.mem.eql(u8, cmd, entry[0])) {
             const wm = window_mod.WindowManager.global orelse return null;
@@ -2697,6 +2708,56 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             "{{\"from\":\"zig-core\",\"cmd\":\"app_get_app_path\",\"path\":\"{s}\"}}",
             .{esc_buf[0..esc_n]},
         ) catch null;
+    }
+    // app.flashFrame — dock/창 주의 끌기 (Electron BrowserWindow.flashFrame). macOS dock bounce.
+    if (std.mem.eql(u8, cmd, "app_flash_frame")) {
+        const flash = util.extractJsonBool(req_clean, "flash") orelse true;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_flash_frame\",\"success\":{}}}", .{cef.appFlashFrame(flash)}) catch null;
+    }
+    // app.showAboutPanel / setAboutPanelOptions (Electron). macOS NSApp orderFrontStandardAboutPanel.
+    if (std.mem.eql(u8, cmd, "app_show_about_panel")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_show_about_panel\",\"success\":{}}}", .{cef.appShowAboutPanel()}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_set_about_panel_options")) {
+        var n_buf: [256]u8 = undefined;
+        var v_buf: [256]u8 = undefined;
+        var b_buf: [256]u8 = undefined;
+        var c_buf: [512]u8 = undefined;
+        const ok = cef.appSetAboutPanelOptions(
+            unescapeField(req_clean, "applicationName", &n_buf, false),
+            unescapeField(req_clean, "applicationVersion", &v_buf, false),
+            unescapeField(req_clean, "version", &b_buf, false),
+            unescapeField(req_clean, "copyright", &c_buf, false),
+        );
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_set_about_panel_options\",\"success\":{}}}", .{ok}) catch null;
+    }
+    // app.addRecentDocument / clearRecentDocuments (Electron). macOS NSDocumentController.
+    if (std.mem.eql(u8, cmd, "app_add_recent_document")) {
+        var path_buf: [4096]u8 = undefined;
+        const path = unescapeField(req_clean, "path", &path_buf, true) orelse "";
+        const ok = if (path.len > 0) cef.appAddRecentDocument(path) else false;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_add_recent_document\",\"success\":{}}}", .{ok}) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_clear_recent_documents")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_clear_recent_documents\",\"success\":{}}}", .{cef.appClearRecentDocuments()}) catch null;
+    }
+    // app.isInApplicationsFolder (Electron). macOS bundlePath /Applications 검사.
+    if (std.mem.eql(u8, cmd, "app_is_in_applications_folder")) {
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_is_in_applications_folder\",\"inApplications\":{}}}", .{cef.appIsInApplicationsFolder()}) catch null;
+    }
+    // app.getLoginItemSettings / setLoginItemSettings (Electron). macOS plist / Linux desktop (Win 후속).
+    if (std.mem.eql(u8, cmd, "app_get_login_item_settings")) {
+        const app_name: []const u8 = if (g_config) |c| c.app.name else "Suji";
+        const open_at_login = cef.loginItemEnabled(app_name);
+        // wasOpenedAtLogin 은 openAtLogin alias — 이번 실행이 실제 로그인으로 spawn 됐는지(launch
+        // context)는 미추적(항목 파일 존재 여부만 본다, 정직 경계). openAsHidden/restoreState 미지원.
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_login_item_settings\",\"openAtLogin\":{},\"openAsHidden\":false,\"wasOpenedAtLogin\":{},\"wasOpenedAsHidden\":false,\"restoreState\":false}}", .{ open_at_login, open_at_login }) catch null;
+    }
+    if (std.mem.eql(u8, cmd, "app_set_login_item_settings")) {
+        const app_name: []const u8 = if (g_config) |c| c.app.name else "Suji";
+        const open_at_login = util.extractJsonBool(req_clean, "openAtLogin") orelse false;
+        const ok = cef.setLoginItem(app_name, open_at_login);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_set_login_item_settings\",\"success\":{}}}", .{ok}) catch null;
     }
     if (std.mem.eql(u8, cmd, "native_image_get_size")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
@@ -5059,7 +5120,7 @@ fn windowFindResultHandler(handle: u64, identifier: i32, count: i32, active_matc
     const win_id = windowIdFromHandle(handle) orelse return;
     emitToBus(
         window_mod.events.find_result,
-        "{{\"windowId\":{d},\"identifier\":{d},\"count\":{d},\"activeMatchOrdinal\":{d}}}",
+        "{{\"windowId\":{d},\"identifier\":{d},\"count\":{d},\"activeMatchOrdinal\":{d},\"finalUpdate\":true}}",
         .{ win_id, identifier, count, active_match_ordinal },
     );
 }

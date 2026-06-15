@@ -288,6 +288,22 @@ const win_enable = if (is_windows) struct {
     extern "user32" fn EnableWindow(hWnd: ?*anyopaque, bEnable: i32) callconv(.winapi) i32;
 } else struct {};
 
+// contentProtection(SetWindowDisplayAffinity) / skipTaskbar(WS_EX_TOOLWINDOW) Win32 표면.
+const win_caps = if (is_windows) struct {
+    extern "user32" fn SetWindowDisplayAffinity(hWnd: ?*anyopaque, dwAffinity: u32) callconv(.winapi) i32;
+    extern "user32" fn GetWindowLongPtrW(hWnd: ?*anyopaque, nIndex: i32) callconv(.winapi) isize;
+    extern "user32" fn SetWindowLongPtrW(hWnd: ?*anyopaque, nIndex: i32, dwNewLong: isize) callconv(.winapi) isize;
+    const GWL_EXSTYLE: i32 = -20;
+    const WS_EX_TOOLWINDOW: isize = 0x00000080;
+    const WDA_NONE: u32 = 0x00;
+    const WDA_EXCLUDEFROMCAPTURE: u32 = 0x11;
+    fn setToolWindow(hwnd: ?*anyopaque, on: bool) void {
+        const cur = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+        const next: isize = if (on) (cur | WS_EX_TOOLWINDOW) else (cur & ~WS_EX_TOOLWINDOW);
+        _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, next);
+    }
+} else struct {};
+
 pub fn setMovableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
     assertUiThread();
     const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
@@ -326,6 +342,37 @@ pub fn setEnabledImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
 pub fn isEnabledImpl(ctx: ?*anyopaque, handle: u64) bool {
     const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return true;
     return if (entry.views_window_delegate) |d| d.constraints.enabled else true;
+}
+
+pub fn setContentProtectionImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.content_protected = on;
+    if (is_macos) {
+        // NSWindowSharingNone=0(캡처 차단) / NSWindowSharingReadOnly=1(기본).
+        if (entry.ns_window) |ns| cef.setMacWindowSharingType(ns, if (on) 0 else 1);
+    } else if (is_windows) {
+        // ⚠️ WDA_EXCLUDEFROMCAPTURE 는 Win10 2004+ 필요 — 구버전은 무시되어 tracked 값(true)과
+        // 실제 캡처 가능 여부가 괴리될 수 있음(isContentProtected 가 거짓 true, 정직 경계).
+        if (cef.windowsEntryHwnd(entry)) |hwnd|
+            _ = win_caps.SetWindowDisplayAffinity(hwnd, if (on) win_caps.WDA_EXCLUDEFROMCAPTURE else win_caps.WDA_NONE);
+    }
+    // Linux: tracked-only (X11 캡처 보호 표준 부재, 정직 경계).
+}
+pub fn isContentProtectedImpl(ctx: ?*anyopaque, handle: u64) bool {
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return false;
+    return if (entry.views_window_delegate) |d| d.constraints.content_protected else false;
+}
+
+pub fn setSkipTaskbarImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {
+    assertUiThread();
+    const entry = fromCtx(ctx).browsers.getPtr(handle) orelse return;
+    if (entry.views_window_delegate) |d| d.constraints.skip_taskbar = on;
+    if (is_windows) {
+        // WS_EX_TOOLWINDOW 토글 — 작업표시줄에서 제거.
+        if (cef.windowsEntryHwnd(entry)) |hwnd| win_caps.setToolWindow(hwnd, on);
+    }
+    // macOS: 작업표시줄 개념 부재(no-op). Linux: _NET_WM_STATE_SKIP_TASKBAR 후속(tracked-only).
 }
 
 pub fn setFullscreenableImpl(ctx: ?*anyopaque, handle: u64, on: bool) void {

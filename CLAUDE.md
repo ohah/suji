@@ -511,6 +511,11 @@ suji.platform                                                // "macos" | "linux
 //   collectionBehavior, kiosk=CEF Views fullscreen(presentation-options 미포함). 전 6개 언어 +
 //   BrowserWindow 클래스. ⚠️ 정직 경계: focusable=tracked-only, Win/Linux 다수 tracked, 실
 //   enforcement 은 real-runner 천장
+// await windows.setContentProtection(id, bool) / isContentProtected(id)  — 화면 캡처/녹화 보호
+//   (macOS NSWindowSharingNone / Win SetWindowDisplayAffinity WDA_EXCLUDEFROMCAPTURE; Linux tracked).
+//   getter=추적값. ⚠️ Win10 2004+ 필요(구버전은 무시되어 tracked 와 괴리 가능)
+// await windows.setSkipTaskbar(id, bool)  — 작업표시줄에서 창 숨김 (Win WS_EX_TOOLWINDOW /
+//   Linux skip-taskbar; macOS no-op — 개념 부재). Electron 처럼 getter 없음(set only)
 // await windows.destroy(id)  — Electron BrowserWindow.destroy() 강제 파괴. close 와 달리
 //   window:close(취소 hook) 스킵, window:closed 만 발화(listener 가 막을 수 없음). 전 6개 언어
 // const { success } = await windows.printToPDF(id, "/tmp/x.pdf")  (Phase 4-D)
@@ -575,6 +580,15 @@ suji.platform                                                // "macos" | "linux
 //   ⚠️ 실 .app 번들에서만 동작(dev=번들 ID 부재 → false, 검증 천장)
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
+// const ok = await app.flashFrame(true)                                   — dock/창 주의 끌기 (macOS dock
+//                                       bounce, false=중단; app-scoped 단일 dock, 멀티 윈도우는 마지막 우선)
+// await app.showAboutPanel() / setAboutPanelOptions({applicationName,applicationVersion,version,copyright})
+//                                       — macOS NSApp orderFrontStandardAboutPanel (Win/Linux no-op)
+// await app.addRecentDocument(path) / app.clearRecentDocuments()          — macOS NSDocumentController (Win/Linux no-op)
+// await app.isInApplicationsFolder()                                      — .app 이 /Applications 아래인지 (macOS only)
+// const s = await app.getLoginItemSettings()                             → {openAtLogin,openAsHidden,wasOpenedAtLogin,...}
+// await app.setLoginItemSettings({openAtLogin:true})                      — 로그인 자동 실행 (macOS plist /
+//                                       Linux desktop; Win 후속. wasOpenedAtLogin=openAtLogin alias, 정직 경계)
 // const bm = await app.createSecurityScopedBookmark(path)                 — App Sandbox 영속 파일 접근
 // const acc = await app.startAccessingSecurityScopedResource(bm)          → {id,path,stale}
 // await app.stopAccessingSecurityScopedResource(acc.id)                   (NSURL bookmark; 비-sandbox=일반)

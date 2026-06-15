@@ -1155,6 +1155,15 @@ pub fn handleSetEnabled(window_id: u32, value: bool, response_buf: []u8, wm: *wi
 pub fn handleIsEnabled(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     return handleStateGet("is_enabled", "enabled", &window.WindowManager.isEnabled, window_id, response_buf, wm);
 }
+pub fn handleSetContentProtection(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_content_protection", &window.WindowManager.setContentProtection, window_id, value, response_buf, wm);
+}
+pub fn handleIsContentProtected(window_id: u32, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleStateGet("is_content_protected", "contentProtected", &window.WindowManager.isContentProtected, window_id, response_buf, wm);
+}
+pub fn handleSetSkipTaskbar(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
+    return handleBoolSet("set_skip_taskbar", &window.WindowManager.setSkipTaskbar, window_id, value, response_buf, wm);
+}
 pub fn handleSetFullscreenable(window_id: u32, value: bool, response_buf: []u8, wm: *window.WindowManager) ?[]const u8 {
     return handleBoolSet("set_fullscreenable", &window.WindowManager.setFullscreenable, window_id, value, response_buf, wm);
 }

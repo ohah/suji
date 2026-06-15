@@ -350,6 +350,14 @@ pub fn setMacCollectionBehaviorBit(window: ?*anyopaque, bit: u64, on: bool) void
     setFn(window, @ptrCast(setSel), next);
 }
 
+/// 화면 캡처/녹화 보호 (Electron setContentProtection). NSWindow.sharingType —
+/// NSWindowSharingNone=0(캡처 차단) / NSWindowSharingReadOnly=1(기본 허용). u64 인자.
+pub fn setMacWindowSharingType(window: ?*anyopaque, sharing_type: u64) void {
+    const sel = objc.sel_registerName("setSharingType:");
+    const f: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) void = @ptrCast(&objc.objc_msgSend);
+    f(window, @ptrCast(sel), sharing_type);
+}
+
 pub fn applyBackgroundColor(window: ?*anyopaque, hex: []const u8) void {
     if (hex.len < 7 or hex[0] != '#' or (hex.len != 7 and hex.len != 9)) {
         log.warn("backgroundColor: invalid format '{s}' (expected #RRGGBB or #RRGGBBAA)", .{hex});
