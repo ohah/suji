@@ -163,9 +163,41 @@ pub fn unescapeJsonStr(src: []const u8, dst: []u8) ?usize {
                 i += 5;
                 continue;
             }
-            // 비-ASCII codepoint: dst에 UTF-8 인코딩 (최대 3바이트, BMP 가정).
+            // 비-ASCII codepoint → UTF-8 인코딩. 서로게이트 페어(high 0xD800–0xDBFF +
+            // 이어지는 \uXXXX low 0xDC00–0xDFFF)는 결합해 non-BMP 코드포인트로 — std.json
+            // 과 동일(allowlist 비교 정합: 경로에 emoji/CJK-ext 같은 non-BMP 가 있어도
+            // stringUnescaped 결과가 std.json 파싱 결과와 일치). 짝 없는 surrogate 는
+            // utf8Encode 가 실패하므로 literal 백슬래시 보존(아래 catch).
+            var cp: u21 = code;
+            if (code >= 0xD800 and code <= 0xDBFF) {
+                // 뒤따르는 \uXXXX low surrogate 탐색(\uXXXX\uYYYY = 12바이트).
+                if (i + 11 < src.len and src[i + 6] == '\\' and src[i + 7] == 'u') {
+                    const lo = std.fmt.parseInt(u16, src[i + 8 .. i + 12], 16) catch 0;
+                    if (lo >= 0xDC00 and lo <= 0xDFFF) {
+                        cp = 0x10000 + (@as(u21, code - 0xD800) << 10) + (lo - 0xDC00);
+                        i += 6; // low surrogate \uYYYY 추가 소비(아래 i += 5 와 합쳐 11)
+                    } else {
+                        // 짝 없는 high surrogate — literal 백슬래시 보존(기존 동작).
+                        if (w >= dst.len) return null;
+                        dst[w] = b;
+                        w += 1;
+                        continue;
+                    }
+                } else {
+                    if (w >= dst.len) return null;
+                    dst[w] = b;
+                    w += 1;
+                    continue;
+                }
+            } else if (code >= 0xDC00 and code <= 0xDFFF) {
+                // 단독 low surrogate — literal 백슬래시 보존.
+                if (w >= dst.len) return null;
+                dst[w] = b;
+                w += 1;
+                continue;
+            }
             var utf8_buf: [4]u8 = undefined;
-            const utf8_len = std.unicode.utf8Encode(code, &utf8_buf) catch {
+            const utf8_len = std.unicode.utf8Encode(cp, &utf8_buf) catch {
                 if (w >= dst.len) return null;
                 dst[w] = b;
                 w += 1;
@@ -436,6 +468,27 @@ test "unescapeJsonStr: \\u#### ASCII fast-path" {
     var dst: [32]u8 = undefined;
     const n = unescapeJsonStr("a\\u0041b\\u0020c", &dst).?;
     try std.testing.expectEqualStrings("aAb c", dst[0..n]);
+}
+
+test "unescapeJsonStr: BMP \\u#### → UTF-8" {
+    var dst: [32]u8 = undefined;
+    // U+00E9 (é) = 2바이트, U+AC00 (가) = 3바이트.
+    const n = unescapeJsonStr("\\u00e9\\uac00", &dst).?;
+    try std.testing.expectEqualStrings("\u{00e9}\u{ac00}", dst[0..n]);
+}
+
+test "unescapeJsonStr: surrogate pair \\uD83D\\uDE00 → non-BMP UTF-8 (std.json 정합)" {
+    var dst: [32]u8 = undefined;
+    // U+1F600 😀 = 😀 → 4바이트 UTF-8. std.json 과 동일하게 결합돼야.
+    const n = unescapeJsonStr("x\\uD83D\\uDE00y", &dst).?;
+    try std.testing.expectEqualStrings("x\u{1F600}y", dst[0..n]);
+}
+
+test "unescapeJsonStr: 짝 없는 high surrogate 는 literal 백슬래시 보존" {
+    var dst: [32]u8 = undefined;
+    // 뒤에 low surrogate 없음 → utf8Encode 불가 → 백슬래시 그대로(기존 동작 유지).
+    const n = unescapeJsonStr("\\uD83Dz", &dst).?;
+    try std.testing.expectEqualStrings("\\uD83Dz", dst[0..n]);
 }
 
 test "unescapeJsonStr: round-trip with escapeJsonStrFull" {

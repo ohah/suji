@@ -577,44 +577,9 @@ pub fn build(b: *std.Build) void {
     python_options.addOption([]const u8, "python_home", python_path);
     python_options.addOption([]const u8, "python_minor", python_minor);
     root_module.addImport("python_config", python_options.createModule());
-    if (python_available) {
-        root_module.link_libc = true;
-        switch (os_tag) {
-            // Windows: PBS 레이아웃은 헤더가 include/ 직접, import-lib 는 libs/.
-            // python313.lib(full API → python313.dll). MinGW zig 가 MSVC import-lib 를
-            // 링크하는 것은 libcef(MSVC)와 동일 선례. python.zig 의 c.Py* 직접 호출이
-            // 전체 C API 라 stable-ABI python3.lib 가 아닌 python313.lib 사용.
-            .windows => {
-                const py_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
-                root_module.addIncludePath(.{ .cwd_relative = py_include });
-                const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python{s}.lib", .{ python_path, python_abi }) catch @panic("OOM");
-                root_module.addObjectFile(.{ .cwd_relative = import_lib });
-            },
-            else => {
-                const py_include = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
-                root_module.addIncludePath(.{ .cwd_relative = py_include });
-                const py_libdir = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
-                root_module.addLibraryPath(.{ .cwd_relative = py_libdir });
-                // weak-link: python staging 머신에서 빌드해도 비-python 앱은
-                // libpython 부재 시 graceful(심볼 null, start 미호출이면 무영향).
-                root_module.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "python{s}", .{python_minor}) catch @panic("OOM"), .{ .weak = true });
-                switch (os_tag) {
-                    // @executable_path/$ORIGIN: packaged 시 addInstallPythonRuntimeStep 이
-                    // libpython 을 exe 옆에 둔다. py_libdir: dev(zig-out/bin/suji dev) 가
-                    // staging libpython 을 바로 찾도록 하는 절대경로 폴백.
-                    .macos => {
-                        root_module.addRPathSpecial("@executable_path");
-                        root_module.addRPathSpecial(py_libdir);
-                    },
-                    .linux => {
-                        root_module.addRPathSpecial("$ORIGIN");
-                        root_module.addRPathSpecial(py_libdir);
-                    },
-                    else => {},
-                }
-            },
-        }
-    }
+    // weak=true: python staging 머신에서 빌드해도 비-python 앱은 libpython 부재 시
+    // graceful(심볼 null, start 미호출이면 무영향). 인라인 test 모듈도 같은 헬퍼 사용.
+    if (python_available) linkPythonModule(b, root_module, os_tag, python_path, python_minor, python_abi, true);
 
     const exe = b.addExecutable(.{
         .name = "suji",
@@ -1498,27 +1463,11 @@ pub fn build(b: *std.Build) void {
         });
         python_runtime_test_mod.addImport("python_config", python_options.createModule());
         python_runtime_test_mod.addImport("runtime", runtime_module);
-        // main module(위 python 링크, line 580+)과 동형 — Windows 는 PBS 레이아웃
-        // (헤더 include/ 직접, import-lib libs/python<abi>.lib → python<abi>.dll),
-        // POSIX 는 include/python<minor> + lib/ + linkSystemLibrary + rpath.
-        // 테스트는 python_available 게이트 안에서만 빌드되므로 libpython 존재 보장.
-        switch (os_tag) {
-            .windows => {
-                const py_inc = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
-                python_runtime_test_mod.addIncludePath(.{ .cwd_relative = py_inc });
-                const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python{s}.lib", .{ python_path, python_abi }) catch @panic("OOM");
-                python_runtime_test_mod.addObjectFile(.{ .cwd_relative = import_lib });
-            },
-            else => {
-                const py_inc = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
-                python_runtime_test_mod.addIncludePath(.{ .cwd_relative = py_inc });
-                const py_lib = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
-                python_runtime_test_mod.addLibraryPath(.{ .cwd_relative = py_lib });
-                // rpath: cache 디렉토리에서 실행되는 테스트가 staging libpython 을 찾도록.
-                python_runtime_test_mod.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "python{s}", .{python_minor}) catch @panic("OOM"), .{});
-                python_runtime_test_mod.addRPathSpecial(py_lib);
-            },
-        }
+        // main module 과 동일 헬퍼 — 링크 레시피 단일 출처(weak=false: 테스트는
+        // python_available 게이트 안에서만 빌드돼 libpython 존재가 보장되므로 hard-link).
+        // 헬퍼의 @executable_path/$ORIGIN rpath 는 cache-dir 테스트에선 무해(절대 py_libdir
+        // rpath 가 staging libpython 을 해석). Windows DLL 은 아래 run-step PATH 로 노출.
+        linkPythonModule(b, python_runtime_test_mod, os_tag, python_path, python_minor, python_abi, false);
         const python_runtime_test = b.addTest(.{ .root_module = python_runtime_test_mod });
         // Windows 는 rpath 부재 → python<abi>.dll(+vcruntime140*.dll, python_path 에 동반)을
         // run step PATH 로 노출. cwd=project root(인라인 test 가 main.py 상대경로 로드).
@@ -1541,6 +1490,19 @@ pub fn build(b: *std.Build) void {
     });
     const clipboard_cf_html_test = b.addTest(.{ .root_module = clipboard_cf_html_test_mod });
     test_step.dependOn(&b.addRunArtifact(clipboard_cf_html_test).step);
+
+    // core util 인라인 테스트(matchGlob/pathHasRootBoundary/unescapeJsonStr surrogate 등) —
+    // 그동안 `zig build test` 에 미배선이라 직접 `zig test` 로만 돌았다. CEF-free leaf 라
+    // 안전하게 스위트에 포함(unescapeJsonStr surrogate 페어 회귀 등을 CI 가 가드).
+    const util_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/core/util.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const util_test = b.addTest(.{ .root_module = util_test_mod });
+    test_step.dependOn(&b.addRunArtifact(util_test).step);
+
     cef_ipc_test_mod.addImport("clipboard_cf_html", clipboard_cf_html_test_mod);
     const cef_ipc_test = b.addTest(.{ .root_module = cef_ipc_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_ipc_test).step);
@@ -1640,6 +1602,50 @@ pub fn build(b: *std.Build) void {
 // 런타임에 PYTHONHOME=`<exe>/python`(backend_lifecycle.startPython)으로 가리킨다.
 // dev 는 이 복사본을 쓰지 않고 staging(python_config.python_home)을 직접 참조하므로
 // 큰 stdlib 복사는 `dest` 가 이미 있으면 skip(증분 빌드 비용 0).
+/// Embedded CPython 링크 레시피 — main 모듈(exe)과 인라인 test 모듈이 공유(단일 출처).
+/// Windows: PBS 레이아웃(헤더 include/ 직접, import-lib libs/python<abi>.lib → python<abi>.dll;
+///   MinGW zig 가 MSVC import-lib 링크 = libcef 선례, python.zig c.Py* 전체 C API 라 python<abi>.lib).
+/// POSIX: include/python<minor> + lib/ + linkSystemLibrary("python<minor>") + rpath
+///   (@executable_path/$ORIGIN = packaged exe 옆 libpython, py_libdir = dev staging 절대경로 폴백).
+/// weak=true(메인): 비-python 앱 graceful. weak=false(테스트): python_available 게이트 안이라 보장.
+fn linkPythonModule(
+    b: *std.Build,
+    mod: *std.Build.Module,
+    os_tag: std.Target.Os.Tag,
+    python_path: []const u8,
+    python_minor: []const u8,
+    python_abi: []const u8,
+    weak: bool,
+) void {
+    mod.link_libc = true;
+    switch (os_tag) {
+        .windows => {
+            const py_include = std.fmt.allocPrint(b.allocator, "{s}/include", .{python_path}) catch @panic("OOM");
+            mod.addIncludePath(.{ .cwd_relative = py_include });
+            const import_lib = std.fmt.allocPrint(b.allocator, "{s}/libs/python{s}.lib", .{ python_path, python_abi }) catch @panic("OOM");
+            mod.addObjectFile(.{ .cwd_relative = import_lib });
+        },
+        else => {
+            const py_include = std.fmt.allocPrint(b.allocator, "{s}/include/python{s}", .{ python_path, python_minor }) catch @panic("OOM");
+            mod.addIncludePath(.{ .cwd_relative = py_include });
+            const py_libdir = std.fmt.allocPrint(b.allocator, "{s}/lib", .{python_path}) catch @panic("OOM");
+            mod.addLibraryPath(.{ .cwd_relative = py_libdir });
+            mod.linkSystemLibrary(std.fmt.allocPrint(b.allocator, "python{s}", .{python_minor}) catch @panic("OOM"), .{ .weak = weak });
+            switch (os_tag) {
+                .macos => {
+                    mod.addRPathSpecial("@executable_path");
+                    mod.addRPathSpecial(py_libdir);
+                },
+                .linux => {
+                    mod.addRPathSpecial("$ORIGIN");
+                    mod.addRPathSpecial(py_libdir);
+                },
+                else => {},
+            }
+        },
+    }
+}
+
 fn addInstallPythonRuntimeStep(b: *std.Build, python_path: []const u8, python_minor: []const u8, ext: []const u8, bin_dir: []const u8) *std.Build.Step {
     const copy = b.addSystemCommand(&.{
         "sh",

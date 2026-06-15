@@ -41,18 +41,34 @@ echo "[pkg-py] installing python-backend frontend deps"
 ( cd "$EXAMPLE/frontend" && bun install >/dev/null 2>&1 )
 
 echo "[pkg-py] suji build (package)"
+# stale 패키지 출력 제거 — 이전 빌드의 잔존 디렉토리를 잘못 선택하지 않도록(전부 gitignored 산출물).
+rm -rf "$EXAMPLE"/*-windows-x64 "$EXAMPLE"/*-windows-x64.zip \
+       "$EXAMPLE"/*-linux-x64 "$EXAMPLE"/*-linux-x64.tar.gz \
+       "$EXAMPLE"/*.app 2>/dev/null || true
 ( cd "$EXAMPLE" && "$SUJI_BIN" build )
 
-# 패키지 디렉토리 + exe 탐색 (현재 OS).
-plat="windows-x64"
-[ "$WIN" = 1 ] || plat="$(uname -s | tr '[:upper:]' '[:lower:]')-x64"
-PKG="$(ls -d "$EXAMPLE"/*"${plat}" 2>/dev/null | head -1 || true)"
-[ -n "$PKG" ] || { echo "FAIL: package dir (*${plat}) not found under $EXAMPLE"; ls "$EXAMPLE"; exit 1; }
-if [ "$WIN" = 1 ]; then
-  EXE="$(ls "$PKG"/*.exe 2>/dev/null | grep -ivE "subprocess|crashpad" | head -1 || true)"
-else
-  EXE="$(find "$PKG" -maxdepth 3 -type f -perm -u+x 2>/dev/null | grep -ivE "Helper|crashpad|\.so|\.dylib" | head -1 || true)"
-fi
+# 패키지 디렉토리 + exe 탐색 — suji build 출력은 OS마다 다르다:
+#   Windows: <name>-<ver>-windows-x64/  + .exe                 (packageWindows)
+#   Linux:   <name>-<ver>-linux-x64/    + bin/<name>            (packageLinux stage dir, 아카이브 후 잔존)
+#   macOS:   <name>.app                 + Contents/MacOS/<name> (bundle_macos.createBundle)
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    PKG="$(ls -d "$EXAMPLE"/*-windows-x64 2>/dev/null | head -1 || true)"
+    [ -n "$PKG" ] || { echo "FAIL: Windows package dir (*-windows-x64) not found under $EXAMPLE"; ls "$EXAMPLE"; exit 1; }
+    EXE="$(ls "$PKG"/*.exe 2>/dev/null | grep -ivE "subprocess|crashpad" | head -1 || true)"
+    ;;
+  Darwin)
+    PKG="$(ls -d "$EXAMPLE"/*.app 2>/dev/null | head -1 || true)"
+    [ -n "$PKG" ] || { echo "FAIL: macOS package (*.app) not found under $EXAMPLE"; ls "$EXAMPLE"; exit 1; }
+    # BSD find: -perm +111 = any exec bit. Contents/MacOS 의 main 바이너리(헬퍼 제외).
+    EXE="$(find "$PKG/Contents/MacOS" -maxdepth 1 -type f -perm +111 2>/dev/null | grep -ivE "Helper|crashpad" | head -1 || true)"
+    ;;
+  *)
+    PKG="$(ls -d "$EXAMPLE"/*-linux-x64 2>/dev/null | head -1 || true)"
+    [ -n "$PKG" ] || { echo "FAIL: Linux package dir (*-linux-x64) not found under $EXAMPLE"; ls "$EXAMPLE"; exit 1; }
+    EXE="$(find "$PKG/bin" -maxdepth 1 -type f -perm -u+x 2>/dev/null | grep -ivE "Helper|crashpad|\.so" | head -1 || true)"
+    ;;
+esac
 [ -n "$EXE" ] || { echo "FAIL: packaged executable not found in $PKG"; ls "$PKG"; exit 1; }
 
 echo "[pkg-py] launching packaged app: $EXE"
