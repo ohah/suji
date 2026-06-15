@@ -5,7 +5,7 @@ pub fn printUsage() void {
         \\Suji - Zig core multi-backend desktop framework
         \\
         \\Usage:
-        \\  suji init <name> [--backend=none|zig|rust|go|node|lua|multi]
+        \\  suji init <name> [--backend=none|zig|rust|go|node|lua|python|multi]
         \\         [--frontend=react|vue|svelte|solid|preact|vanilla|next]
         \\         [--toolchain=vite|rsbuild|next]
         \\         [--pm=npm|pnpm|bun|vp] [--install]
