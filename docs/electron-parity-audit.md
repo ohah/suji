@@ -255,12 +255,12 @@
 
 ### ipc
 
-- **[low]** `ipcRenderer.addListener(channel, listener)` — Add a single export line to /Users/yoonhb/Documents/workspace/suji/packages/suji-js/src/index.ts after the `on()` export (line 107): `export const addListener = on;`. This mirrors Electron's EventEmit
-- **[low]** `ipcMain.addListener(channel, listener)` — Add the alias to both @suji/node and @suji/js packages immediately after their respective on() function exports. For @suji/node (after line 279): export const addListener = on; For @suji/js (after lin
+- ~~**[low]** `ipcRenderer.addListener(channel, listener)`~~ ✅ (구현됨 — addListener=on 별칭) — Add a single export line to /Users/yoonhb/Documents/workspace/suji/packages/suji-js/src/index.ts after the `on()` export (line 107): `export const addListener = on;`. This mirrors Electron's EventEmit
+- ~~**[low]** `ipcMain.addListener(channel, listener)`~~ ✅ (구현됨 — addListener=on 별칭) — Add the alias to both @suji/node and @suji/js packages immediately after their respective on() function exports. For @suji/node (after line 279): export const addListener = on; For @suji/js (after lin
 
 ### menu
 
-- **[low]** `MenuItem.id property` — Add `id?: string` field to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts (~lines 934-954). Apply the same addition to the Rust/Go/Node SDK MenuItem
+- ~~**[low]** `MenuItem.id property`~~ ✅ (구현됨 — MenuItem.id 전 SDK+cef_menu_types) — Add `id?: string` field to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts (~lines 934-954). Apply the same addition to the Rust/Go/Node SDK MenuItem
 - **[low]** `MenuItem.sublabel property` — Add optional `sublabel?: string` field to MenuCommandItem and MenuCheckboxItem TypeScript interfaces. Add `sublabel: []const u8 = ""` to Zig's ApplicationMenuItem.item and .checkbox structs. In cef.zi
 - **[low]** `MenuItem.toolTip property` — Add optional `toolTip?: string` field to MenuCommandItem and MenuCheckboxItem interfaces in packages/suji-js/src/index.ts (lines 934-947). Update Zig ApplicationMenuItem union in src/platform/cef.zig 
 - **[low]** `MenuItem.before/after positioning` — Add optional `before?: string[]` and `after?: string[]` fields to MenuCommandItem, MenuCheckboxItem, and MenuSubmenuItem interfaces in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts
@@ -269,16 +269,16 @@
 
 ### nativeImage
 
-- **[low]** `nativeImage.toDataURL()` — Add nativeImage.toDataURL(path, options?) method to @suji/api (packages/suji-js/src/index.ts) and @suji/node (packages/suji-node/src/index.ts) that wraps the return value of toPng with 'data:image/png
+- ~~**[low]** `nativeImage.toDataURL()`~~ ✅ (구현됨 — 전 SDK toDataURL base64) — Add nativeImage.toDataURL(path, options?) method to @suji/api (packages/suji-js/src/index.ts) and @suji/node (packages/suji-node/src/index.ts) that wraps the return value of toPng with 'data:image/png
 
 ### nativeTheme
 
-- **[low]** `nativeTheme.shouldUseInvertedColorScheme` — Add `shouldUseInvertedColorScheme(): Promise<boolean>` method to nativeTheme in both @suji/api (packages/suji-js/src/index.ts, line ~1089) and @suji/node (packages/suji-node/src/index.ts, line ~927). 
-- **[low]** `shouldDifferentiateWithoutColor` — Add shouldDifferentiateWithoutColor as async boolean property to nativeTheme across all 5 SDK layers: (1) cef.zig: add pub fn nativeThemeGetShouldDifferentiateWithoutColor() -> bool, call NSWorkspace.
+- ~~**[low]** `nativeTheme.shouldUseInvertedColorScheme`~~ ✅ (구현됨 — NSWorkspace accessibility) — Add `shouldUseInvertedColorScheme(): Promise<boolean>` method to nativeTheme in both @suji/api (packages/suji-js/src/index.ts, line ~1089) and @suji/node (packages/suji-node/src/index.ts, line ~927). 
+- ~~**[low]** `shouldDifferentiateWithoutColor`~~ ✅ (구현됨 — NSWorkspace accessibility) — Add shouldDifferentiateWithoutColor as async boolean property to nativeTheme across all 5 SDK layers: (1) cef.zig: add pub fn nativeThemeGetShouldDifferentiateWithoutColor() -> bool, call NSWorkspace.
 
 ### notification
 
-- **[low]** `NotificationOptions.groupId` — Add groupId?: string to NotificationOptions in packages/suji-js/src/index.ts (line 835-840) and packages/suji-node/src/index.ts (line 1017-1021). Pass groupId through to the native notification_show h
+- ~~**[low]** `NotificationOptions.groupId`~~ ✅ (구현됨 — NotificationOptions.groupId) — Add groupId?: string to NotificationOptions in packages/suji-js/src/index.ts (line 835-840) and packages/suji-node/src/index.ts (line 1017-1021). Pass groupId through to the native notification_show h
 - **[low]** `NotificationOptions.subtitle` — Add `subtitle?: string` field to NotificationOptions interface in both packages/suji-js/src/index.ts (line 835-840) and packages/suji-node/src/index.ts (line 1017-1021). Update src/platform/notificati
 - **[low]** `NotificationOptions.sound` — Add optional sound?: string property to NotificationOptions interface in packages/suji-js/src/index.ts and packages/suji-node/src/index.ts. Update notification show methods to pass sound parameter thr
 - **[low]** `notification — 'close' event` — Add 'notification:close' event emission: (1) extend SujiNotificationDelegate in notification.m to implement userNotificationCenter:didDismissNotification: or track dismissal state in willPresentNotifi
@@ -286,7 +286,7 @@
 
 ### powerMonitor
 
-- **[low]** `powerMonitor.getCurrentThermalState()` — Add macOS-only method getCurrentThermalState() to powerMonitor. Implement as: (1) Native Zig wrapper around NSProcessInfo.thermalState (iOS 11.2+/macOS 10.14+) in src/platform/cef.zig, (2) IPC command
+- ~~**[low]** `powerMonitor.getCurrentThermalState()`~~ ✅ (구현됨 — NSProcessInfo.thermalState) — Add macOS-only method getCurrentThermalState() to powerMonitor. Implement as: (1) Native Zig wrapper around NSProcessInfo.thermalState (iOS 11.2+/macOS 10.14+) in src/platform/cef.zig, (2) IPC command
 
 ### safeStorage
 
@@ -296,7 +296,7 @@
 
 - **[low]** `session.flushStorageData()` — Add session.flushStorageData() method to packages/suji-js/src/index.ts (lines 1293-1297) and packages/suji-node/src/index.ts (lines 1394-1397). Implement as a wrapper over an IPC command (e.g., sessio
 - **[low]** `session.setUSBProtectedClassesHandler(handler)` — Add `setUSBProtectedClassesHandler(handler: ((details: {protectedClasses: string[]}) => string[]) | null): Promise<void>` to the session export in both packages/suji-js/src/index.ts and packages/suji-
-- **[low]** `session.isPersistent()` — Add isPersistent() method to session object in both packages/suji-js/src/index.ts (line 1284+) and packages/suji-node/src/index.ts (line 1386+). Implementation: return true (Suji only supports persist
+- ~~**[low]** `session.isPersistent()`~~ ✅ (구현됨 — session.isPersistent) — Add isPersistent() method to session object in both packages/suji-js/src/index.ts (line 1284+) and packages/suji-node/src/index.ts (line 1386+). Implementation: return true (Suji only supports persist
 - **[low]** `session.spell-checker properties and methods` — Add spell-checker support to Suji session API: (1) Implement cef_spellcheck_handler_t wrapper in src/platform/cef.zig with setSpellCheckerEnabled, setSpellCheckerLanguages, getSpellCheckerLanguages, s
 - **[low]** `session.getBlobData(identifier)` — Add session.getBlobData(identifier: string) → Promise<Buffer> to 5 SDK entry points (Frontend @suji/api, Node @suji/node, Zig, Rust, Go). Implement as thin IPC wrapper: (1) Add `session_get_blob_data`
 - **[low]** `session.clearHostResolverCache()` — Add async clearHostResolverCache(): Promise<void> method to session module in packages/suji-js/src/index.ts and corresponding backend handler in src/main.zig via CEF request_context host resolver call
