@@ -3,6 +3,7 @@
 const std = @import("std");
 const cef = @import("cef.zig");
 const cef_web_request = @import("cef_web_request.zig");
+const cef_auth_handler = @import("cef_auth_handler.zig");
 
 const c = cef.c;
 const zeroCefStruct = cef.zeroCefStruct;
@@ -17,6 +18,9 @@ fn ensureRequestHandler() void {
     zeroCefStruct(c.cef_request_handler_t, &g_request_handler);
     initBaseRefCounted(&g_request_handler.base);
     g_request_handler.get_resource_request_handler = &cef_web_request.getResourceRequestHandler;
+    g_request_handler.on_certificate_error = &cef_auth_handler.onCertificateError;
+    g_request_handler.get_auth_credentials = &cef_auth_handler.getAuthCredentials;
+    g_request_handler.on_select_client_certificate = &cef_auth_handler.onSelectClientCertificate;
     if (cef.cefDebug()) {
         // CEF 디버그 모드 — 렌더러 crash(on_render_process_terminated)/navigation 추적.
         g_request_handler.on_render_process_terminated = &onRenderProcessTerminatedDiag;

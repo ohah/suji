@@ -758,6 +758,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setWindowOpenEmitHandler(&windowOpenEmitHandler);
     cef.setBeforeQuitHandler(&beforeQuitHandler);
     cef.installOpenURLHandler(&openURLHandler);
+    cef.setAuthEmitHandler(&authEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -954,6 +955,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setWindowOpenEmitHandler(&windowOpenEmitHandler);
     cef.setBeforeQuitHandler(&beforeQuitHandler);
     cef.installOpenURLHandler(&openURLHandler);
+    cef.setAuthEmitHandler(&authEmitHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -2858,6 +2860,31 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const pe = util.escapeJsonStrFull(bundle, &path_esc) orelse 0;
         // base64 알파벳은 JSON-safe — icon 추가 escape 불필요.
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_application_info_for_protocol\",\"name\":\"{s}\",\"path\":\"{s}\",\"icon\":\"{s}\"}}", .{ name_esc[0..ne], path_esc[0..pe], icon_b64 }) catch null;
+    }
+    // app:certificate-error 응답 — Electron event 의 callback(allow/deny) deferred 적용.
+    if (std.mem.eql(u8, cmd, "certificate_error_respond")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        const allow = util.extractJsonBool(req_clean, "allow") orelse false;
+        const ok = if (id_n > 0) cef.certificateErrorRespond(@intCast(id_n), allow) else false;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"certificate_error_respond\",\"success\":{}}}", .{ok}) catch null;
+    }
+    // app:login 응답 — basic auth credentials(ok=true 면 username/password, false 면 cancel).
+    if (std.mem.eql(u8, cmd, "login_respond")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        const ok = util.extractJsonBool(req_clean, "ok") orelse false;
+        var u_buf: [256]u8 = undefined;
+        var p_buf: [256]u8 = undefined;
+        const user = unescapeField(req_clean, "username", &u_buf, false) orelse "";
+        const pass = unescapeField(req_clean, "password", &p_buf, false) orelse "";
+        const success = if (id_n > 0) cef.loginRespond(@intCast(id_n), user, pass, ok) else false;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"login_respond\",\"success\":{}}}", .{success}) catch null;
+    }
+    // app:select-client-certificate 응답 — index(0-based) 선택, -1/범위밖 = 기본(select null).
+    if (std.mem.eql(u8, cmd, "select_client_certificate_respond")) {
+        const id_n = util.extractJsonInt(req_clean, "id") orelse 0;
+        const index = util.extractJsonInt(req_clean, "index") orelse -1;
+        const ok = if (id_n > 0) cef.selectClientCertificateRespond(@intCast(id_n), index) else false;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"select_client_certificate_respond\",\"success\":{}}}", .{ok}) catch null;
     }
     if (std.mem.eql(u8, cmd, "native_image_get_size")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";
@@ -5163,6 +5190,12 @@ fn openURLHandler(url_ptr: [*]const u8, url_len: usize) callconv(.c) void {
     var data_buf: [4400]u8 = undefined;
     const data = std.fmt.bufPrint(&data_buf, "{{\"url\":\"{s}\"}}", .{esc[0..en]}) catch return;
     emitBusRaw("app:open-url", data);
+}
+
+/// Electron auth 이벤트(certificate-error/login/select-client-certificate) emit — cef_auth_handler 가
+/// (channel, info_json) 으로 호출. info 에 id 포함 → 그대로 EventBus 발신.
+fn authEmitHandler(channel: [*:0]const u8, info_ptr: [*]const u8, info_len: usize) callconv(.c) void {
+    emitBusRaw(std.mem.span(channel), info_ptr[0..info_len]);
 }
 
 /// Electron webContents.setWindowOpenHandler — popup 마다 web-contents:new-window 발신.

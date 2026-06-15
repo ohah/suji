@@ -3328,6 +3328,24 @@ export const app = {
     return { name: r.name ?? "", path: r.path ?? "", icon: r.icon ?? "" };
   },
 
+  /** app:certificate-error 응답 — allow=true 허용 / false 거부 (Electron event callback). */
+  async certificateErrorRespond(id: number, allow: boolean): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "certificate_error_respond", id, allow });
+    return r.success === true;
+  },
+
+  /** app:login(basic auth) 응답 — ok=true 면 {username,password}, false 면 취소. */
+  async loginRespond(id: number, ok: boolean, username = "", password = ""): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "login_respond", id, ok, username, password });
+    return r.success === true;
+  },
+
+  /** app:select-client-certificate 응답 — index(0-based) 선택, -1=기본(select null). */
+  async selectClientCertificateRespond(id: number, index: number): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "select_client_certificate_respond", id, index });
+    return r.success === true;
+  },
+
   /**
    * Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 실패 시 null.
    * 비-sandbox 빌드에선 일반 bookmark 로 동작 (sandbox escapement no-op).

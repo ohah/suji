@@ -2261,6 +2261,31 @@ pub fn getApplicationInfoForProtocol(url: []const u8) ?[]const u8 {
     return coreCmd("app_get_application_info_for_protocol", fields);
 }
 
+/// app:certificate-error 응답 (allow=true 허용/false 거부). 응답 `{"success":bool}`.
+pub fn certificateErrorRespond(id: u64, allow: bool) ?[]const u8 {
+    var fb: [64]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"id\":{d},\"allow\":{}", .{ id, allow }) catch return null;
+    return coreCmd("certificate_error_respond", fields);
+}
+
+/// app:login(basic auth) 응답 (ok=true 면 username/password, false 면 취소). 응답 `{"success":bool}`.
+pub fn loginRespond(id: u64, ok: bool, username: []const u8, password: []const u8) ?[]const u8 {
+    var ue: [256]u8 = undefined;
+    var pe: [256]u8 = undefined;
+    const un = util.escapeJsonStrFull(username, &ue) orelse return null;
+    const pn = util.escapeJsonStrFull(password, &pe) orelse return null;
+    var fb: [600]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"id\":{d},\"ok\":{},\"username\":\"{s}\",\"password\":\"{s}\"", .{ id, ok, ue[0..un], pe[0..pn] }) catch return null;
+    return coreCmd("login_respond", fields);
+}
+
+/// app:select-client-certificate 응답 (index 0-based, -1=기본). 응답 `{"success":bool}`.
+pub fn selectClientCertificateRespond(id: u64, index: i64) ?[]const u8 {
+    var fb: [64]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"id\":{d},\"index\":{d}", .{ id, index }) catch return null;
+    return coreCmd("select_client_certificate_respond", fields);
+}
+
 /// Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 응답:
 /// `{"success":bool,"bookmark":"<base64>"}`. 비-sandbox 빌드에선 일반 bookmark.
 pub fn createSecurityScopedBookmark(path: []const u8) ?[]const u8 {
