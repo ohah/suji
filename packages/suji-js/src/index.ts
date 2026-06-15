@@ -2072,6 +2072,8 @@ export interface MessageBoxOptions {
   checkboxLabel?: string;
   /** 체크박스 초기 상태. */
   checkboxChecked?: boolean;
+  /** 커스텀 아이콘 이미지 경로 (Electron MessageBoxOptions.icon — macOS NSAlert.setIcon). */
+  icon?: string;
 }
 
 export interface FileFilter {
