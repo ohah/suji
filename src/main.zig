@@ -757,6 +757,7 @@ fn runDev(allocator: std.mem.Allocator) !void {
     cef.setDownloadEmitHandler(&downloadEmitHandler);
     cef.setWindowOpenEmitHandler(&windowOpenEmitHandler);
     cef.setBeforeQuitHandler(&beforeQuitHandler);
+    cef.installOpenURLHandler(&openURLHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -952,6 +953,7 @@ fn runProd(allocator: std.mem.Allocator) !void {
     cef.setDownloadEmitHandler(&downloadEmitHandler);
     cef.setWindowOpenEmitHandler(&windowOpenEmitHandler);
     cef.setBeforeQuitHandler(&beforeQuitHandler);
+    cef.installOpenURLHandler(&openURLHandler);
     cef.setWindowLifecycleHandlers(window_lifecycle_handlers);
     cef.setWindowDisplayHandlers(.{
         .ready_to_show = &windowReadyToShowHandler,
@@ -1176,6 +1178,10 @@ fn openWindow(
 
     std.debug.print("[suji] CEF window opened ({s}), {d} window(s)\n", .{ if (mode == .dev) "dev" else "production", config.windows.len });
     cef.run();
+
+    // Electron app.on('will-quit') — message loop 종료(모든 창 닫힘) 후, 백엔드 종료 직전 1회.
+    // before-quit(quit 요청 시) → 창 닫기 → will-quit(여기). preventDefault 미지원(before-quit 동일 경계).
+    emitBusRaw("app:will-quit", "{}");
 
     // Node runtime 종료 (별도 스레드 join). 이게 빠지면 Cmd+Q로 CEF가 quit한 뒤
     // libnode event loop가 계속 돌아 프로세스가 exit 못하고 hang한다. node::Stop이
@@ -5145,6 +5151,18 @@ fn downloadEmitHandler(channel: [*:0]const u8, payload: [*:0]const u8) callconv(
 /// Electron `app.on('before-quit')` — quit 직전 1회 발신(cef.quit chokepoint).
 fn beforeQuitHandler() callconv(.c) void {
     emitBusRaw("app:before-quit", "{}");
+}
+
+/// Electron `app.on('open-url')` — deep-link 수신(NSAppleEventManager kAEGetURL) → app:open-url emit.
+fn openURLHandler(url_ptr: [*]const u8, url_len: usize) callconv(.c) void {
+    const url = url_ptr[0..url_len];
+    var esc: [4200]u8 = undefined;
+    const en = util.escapeJsonStrFull(url, &esc) orelse return;
+    // emitToBus 의 1KB 버퍼로는 긴 deep-link URL(OAuth callback 등)이 잘려 drop 되므로
+    // 로컬 큰 버퍼 + emitBusRaw 직접 사용.
+    var data_buf: [4400]u8 = undefined;
+    const data = std.fmt.bufPrint(&data_buf, "{{\"url\":\"{s}\"}}", .{esc[0..en]}) catch return;
+    emitBusRaw("app:open-url", data);
 }
 
 /// Electron webContents.setWindowOpenHandler — popup 마다 web-contents:new-window 발신.

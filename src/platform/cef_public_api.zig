@@ -33,6 +33,7 @@ const cef_power_monitor = @import("cef_power_monitor.zig");
 const cef_power_save_blocker = @import("cef_power_save_blocker.zig");
 const cef_request_user_attention = @import("cef_request_user_attention.zig");
 const cef_login_item = @import("cef_login_item.zig");
+const cef_open_url = @import("cef_open_url.zig");
 const cef_runtime = @import("cef_runtime.zig");
 const cef_safe_storage = @import("cef_safe_storage.zig");
 const cef_screen = @import("cef_screen.zig");
@@ -245,6 +246,8 @@ pub const appGetApplicationNameForProtocol = cef_app.appGetApplicationNameForPro
 pub const appGetApplicationBundleForProtocol = cef_app.appGetApplicationBundleForProtocol;
 pub const loginItemEnabled = cef_login_item.loginItemEnabled;
 pub const setLoginItem = cef_login_item.setLoginItem;
+pub const OpenURLFn = cef_open_url.OpenURLFn;
+pub const installOpenURLHandler = cef_open_url.installOpenURLHandler;
 
 pub const clipboardReadText = cef_clipboard.clipboardReadText;
 pub const clipboardWriteText = cef_clipboard.clipboardWriteText;
