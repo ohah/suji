@@ -128,7 +128,9 @@ suji init <name> --backend=none|zig|rust|go|node|lua|python|multi \
   --toolchain=vite|rsbuild|next \
   --pm=npm|pnpm|bun|vp   # vp = VoidZero Vite+
 suji dev
-suji build
+suji build                    # 프로덕션 빌드 + 패키지
+  # [--sign=none|adhoc|identity] [--identity=<name>] [--notarize] [--dmg] [--deb] [--appimage] [--sandbox] [--strict]
+  # (각 플래그는 env 로도: SUJI_SIGN/SUJI_SIGN_IDENTITY/SUJI_NOTARIZE/SUJI_DMG/SUJI_DEB/SUJI_APPIMAGE/SUJI_SANDBOX/SUJI_STRICT_PACKAGING)
 suji run                      # 프로덕션 앱 실행
 suji run main.js              # CEF 없이 embedded Node.js 파일 실행
 suji types [--out <path>]   # zig 백엔드 .schema() → SujiHandlers .d.ts (stdout/파일)
@@ -637,7 +639,7 @@ suji.platform                                                // "macos" | "linux
 
 설정은 **정적 `suji.json` 단일 출처**입니다. Zig 코어가 `suji.json`을 직접 파싱하므로 node 없이도 모든 백엔드 언어(zig/rust/go/node/lua)가 동일하게 읽습니다. `suji init`(네이티브·`@suji/cli` 동형)이 `suji.json`을 생성하고, 프로덕션 빌드는 이 파일을 `.app`/패키지 Resources 에 복사합니다. JSON Schema 제공: [`suji.schema.json`](./suji.schema.json) — IDE 자동완성 + 검증 지원.
 
-> ⚠️ `suji.config.ts`/`defineConfig`/JS·TS config loader/빌드 훅/`dev.env`/플랫폼별 빌드는 **제거됨** — node 런타임이 있어야 평가 가능해 node 없는 go/rust/zig 프로젝트가 쓸 수 없었다. 서명·공증·dmg·sandbox 등 빌드 옵션은 CLI 플래그(`--sign`/`--identity`/`--notarize`/`--dmg`/`--sandbox`) 또는 env(`SUJI_SIGN`/`SUJI_NOTARIZE`/…)로 지정한다. 회귀: `tests/config_test.zig`(suji.json 파싱).
+> ⚠️ `suji.config.ts`/`defineConfig`/JS·TS config loader/빌드 훅/`dev.env`/플랫폼별 빌드는 **제거됨** — node 런타임이 있어야 평가 가능해 node 없는 go/rust/zig 프로젝트가 쓸 수 없었다. 서명·공증·패키징 빌드 옵션은 CLI 플래그(`--sign=none|adhoc|identity`/`--identity`/`--notarize`/`--dmg`/`--deb`/`--appimage`/`--sandbox`/`--strict`) 또는 env(`SUJI_SIGN`/`SUJI_SIGN_IDENTITY`/`SUJI_NOTARIZE`/`SUJI_DMG`/`SUJI_DEB`/`SUJI_APPIMAGE`/`SUJI_SANDBOX`/`SUJI_STRICT_PACKAGING`; notarize 자격 `SUJI_NOTARIZE_APPLE_ID`/`_TEAM_ID`/`_PASSWORD`/`_KEYCHAIN_PROFILE`, Windows 서명 `SUJI_WIN_SIGN_CERT`/`_PASSWORD`)로 지정한다. 회귀: `tests/config_test.zig`(suji.json 파싱).
 
 ```json
 {
