@@ -273,7 +273,8 @@ fn onAllClosed(_: suji.Event) void {
 // suji.getPath("home"|"appData"|"userData"|"temp"|"desktop"|"documents"|"downloads")
 // suji.screen.getCursorScreenPoint() / suji.screen.getDisplayNearestPoint(x, y)
 // suji.requestUserAttention(true) / cancelUserAttentionRequest(id)
-//                                       — dock 바운스 (macOS NSApp `requestUserAttention:`)
+//                                       — dock 바운스(macOS NSApp `requestUserAttention:`) /
+//                                         메인 창 taskbar flash(Windows FlashWindowEx; Linux 후속)
 // suji.createSecurityScopedBookmark(path) → base64 / startAccessingSecurityScoped
 //   Resource(bm) → {id,path,stale} / stopAccessingSecurityScopedResource(id)
 //                                       — App Sandbox 영속 파일 접근 (NSURL bookmark,
