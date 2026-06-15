@@ -2137,6 +2137,74 @@ pub fn cancelUserAttentionRequest(id: u32) ?[]const u8 {
     return coreCmd("app_attention_cancel", fields);
 }
 
+/// flashFrame — dock/창 주의 끌기. flash=false 면 중단. 응답 `{"success":bool}`.
+pub fn flashFrame(flash: bool) ?[]const u8 {
+    var fields_buf: [32]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"flash\":{}", .{flash}) catch return null;
+    return coreCmd("app_flash_frame", fields);
+}
+
+/// 시스템 About 패널 표시 (Electron app.showAboutPanel). 응답 `{"success":bool}`.
+pub fn showAboutPanel() ?[]const u8 {
+    return coreCmd("app_show_about_panel", "");
+}
+
+/// About 패널 옵션 설정 (Electron app.setAboutPanelOptions). 빈 문자열 인자는 네이티브에서 skip.
+pub fn setAboutPanelOptions(name: []const u8, version: []const u8, build_version: []const u8, copyright: []const u8) ?[]const u8 {
+    var nb: [256]u8 = undefined;
+    var vb: [256]u8 = undefined;
+    var bb: [256]u8 = undefined;
+    var cb: [512]u8 = undefined;
+    const nn = util.escapeJsonStrFull(name, &nb) orelse return null;
+    const vn = util.escapeJsonStrFull(version, &vb) orelse return null;
+    const bn = util.escapeJsonStrFull(build_version, &bb) orelse return null;
+    const cn = util.escapeJsonStrFull(copyright, &cb) orelse return null;
+    var fb: [2048]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"applicationName\":\"{s}\",\"applicationVersion\":\"{s}\",\"version\":\"{s}\",\"copyright\":\"{s}\"", .{ nb[0..nn], vb[0..vn], bb[0..bn], cb[0..cn] }) catch return null;
+    return coreCmd("app_set_about_panel_options", fields);
+}
+
+/// 최근 문서 목록에 추가 (Electron app.addRecentDocument). 응답 `{"success":bool}`.
+pub fn addRecentDocument(path: []const u8) ?[]const u8 {
+    var p_buf: [4096]u8 = undefined;
+    const p_n = util.escapeJsonStrFull(path, &p_buf) orelse return null;
+    var fields_buf: [4200]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"path\":\"{s}\"", .{p_buf[0..p_n]}) catch return null;
+    return coreCmd("app_add_recent_document", fields);
+}
+
+/// 최근 문서 목록 비우기 (Electron app.clearRecentDocuments). 응답 `{"success":bool}`.
+pub fn clearRecentDocuments() ?[]const u8 {
+    return coreCmd("app_clear_recent_documents", "");
+}
+
+/// `.app` 이 /Applications 아래인지 (Electron app.isInApplicationsFolder). 응답 `{"inApplications":bool}`.
+pub fn isInApplicationsFolder() ?[]const u8 {
+    return coreCmd("app_is_in_applications_folder", "");
+}
+
+/// 앱이 frontmost(활성)인지 (Electron app.isActive). 응답 `{"active":bool}`.
+pub fn isActive() ?[]const u8 {
+    return coreCmd("app_is_active", "");
+}
+
+/// 앱이 hide 상태인지 (Electron app.isHidden). 응답 `{"hidden":bool}`.
+pub fn isHidden() ?[]const u8 {
+    return coreCmd("app_is_hidden", "");
+}
+
+/// 로그인 자동 실행 설정 조회 (Electron app.getLoginItemSettings). 응답 `{"openAtLogin":bool,...}`.
+pub fn getLoginItemSettings() ?[]const u8 {
+    return coreCmd("app_get_login_item_settings", "");
+}
+
+/// 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). 응답 `{"success":bool}`.
+pub fn setLoginItemSettings(open_at_login: bool) ?[]const u8 {
+    var fields_buf: [32]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fields_buf, "\"openAtLogin\":{}", .{open_at_login}) catch return null;
+    return coreCmd("app_set_login_item_settings", fields);
+}
+
 /// Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 응답:
 /// `{"success":bool,"bookmark":"<base64>"}`. 비-sandbox 빌드에선 일반 bookmark.
 pub fn createSecurityScopedBookmark(path: []const u8) ?[]const u8 {

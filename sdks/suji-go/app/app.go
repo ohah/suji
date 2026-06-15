@@ -163,6 +163,55 @@ func IsEmojiPanelSupported() string {
 	return suji.Invoke("__core__", `{"cmd":"app_is_emoji_panel_supported"}`)
 }
 
+// FlashFrame draws attention via dock/window (Electron BrowserWindow.flashFrame). macOS dock
+// bounce — flash=false stops it. raw JSON: `{"success":bool}`.
+func FlashFrame(flash bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_flash_frame","flash":%t}`, flash))
+}
+
+// ShowAboutPanel shows the system About panel (Electron app.showAboutPanel). macOS only. raw JSON: `{"success":bool}`.
+func ShowAboutPanel() string {
+	return suji.Invoke("__core__", `{"cmd":"app_show_about_panel"}`)
+}
+
+// SetAboutPanelOptions sets About panel options (Electron app.setAboutPanelOptions).
+// 빈 문자열 필드는 네이티브에서 skip. macOS only. raw JSON: `{"success":bool}`.
+func SetAboutPanelOptions(applicationName, applicationVersion, version, copyright string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(
+		`{"cmd":"app_set_about_panel_options","applicationName":"%s","applicationVersion":"%s","version":"%s","copyright":"%s"}`,
+		jsonesc.Full(applicationName), jsonesc.Full(applicationVersion), jsonesc.Full(version), jsonesc.Full(copyright)))
+}
+
+// AddRecentDocument adds a path to the recent documents list (Electron app.addRecentDocument). macOS only.
+// raw JSON: `{"success":bool}`.
+func AddRecentDocument(path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_add_recent_document","path":"%s"}`, jsonesc.Full(path)))
+}
+
+// ClearRecentDocuments clears the recent documents list (Electron app.clearRecentDocuments). macOS only.
+// raw JSON: `{"success":bool}`.
+func ClearRecentDocuments() string {
+	return suji.Invoke("__core__", `{"cmd":"app_clear_recent_documents"}`)
+}
+
+// IsInApplicationsFolder reports whether the .app is under /Applications (Electron
+// app.isInApplicationsFolder). raw JSON: `{"inApplications":bool}`. macOS only.
+func IsInApplicationsFolder() string {
+	return suji.Invoke("__core__", `{"cmd":"app_is_in_applications_folder"}`)
+}
+
+// GetLoginItemSettings queries login-item auto-launch (Electron app.getLoginItemSettings).
+// macOS plist / Linux desktop. raw JSON: `{"openAtLogin":bool,"openAsHidden":false,...}`.
+func GetLoginItemSettings() string {
+	return suji.Invoke("__core__", `{"cmd":"app_get_login_item_settings"}`)
+}
+
+// SetLoginItemSettings sets login-item auto-launch (Electron app.setLoginItemSettings).
+// macOS/Linux, Windows 후속. raw JSON: `{"success":bool}`.
+func SetLoginItemSettings(openAtLogin bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_login_item_settings","openAtLogin":%t}`, openAtLogin))
+}
+
 // CreateSecurityScopedBookmark creates a security-scoped bookmark for App
 // Sandbox persistent file access. Response:
 // `{"success":bool,"bookmark":"<base64>"}` (비-sandbox 빌드에선 일반 bookmark).

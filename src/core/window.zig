@@ -130,6 +130,10 @@ pub const Constraints = struct {
     max_height: u32 = 0,
     /// 시작 시 전체화면.
     fullscreen: bool = false,
+    /// true면 화면 캡처/녹화에서 창 내용 보호 (macOS NSWindowSharingNone / Win SetWindowDisplayAffinity).
+    content_protected: bool = false,
+    /// true면 작업표시줄에서 창 숨김 (Win WS_EX_TOOLWINDOW / Linux skip-taskbar; macOS no-op — 개념 부재).
+    skip_taskbar: bool = false,
 };
 
 /// min > max (max > 0인 경우만)면 max를 0(제한 없음)으로 reset.
@@ -321,6 +325,10 @@ pub const Native = struct {
         is_fullscreenable: *const fn (ctx: ?*anyopaque, handle: u64) bool,
         set_kiosk: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
         is_kiosk: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        // contentProtection(화면 캡처 보호) / skipTaskbar(작업표시줄 숨김) — tracked + best-effort 네이티브.
+        set_content_protection: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
+        is_content_protected: *const fn (ctx: ?*anyopaque, handle: u64) bool,
+        set_skip_taskbar: *const fn (ctx: ?*anyopaque, handle: u64, on: bool) void,
         // Phase 4-E: 편집 (6 trivial — main frame에 위임) + 검색
         undo: *const fn (ctx: ?*anyopaque, handle: u64) void,
         redo: *const fn (ctx: ?*anyopaque, handle: u64) void,
@@ -520,6 +528,15 @@ pub const Native = struct {
     }
     pub fn isEnabled(self: Native, handle: u64) bool {
         return self.vtable.is_enabled(self.ctx, handle);
+    }
+    pub fn setContentProtection(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_content_protection(self.ctx, handle, on);
+    }
+    pub fn isContentProtected(self: Native, handle: u64) bool {
+        return self.vtable.is_content_protected(self.ctx, handle);
+    }
+    pub fn setSkipTaskbar(self: Native, handle: u64, on: bool) void {
+        self.vtable.set_skip_taskbar(self.ctx, handle, on);
     }
     pub fn setFullscreenable(self: Native, handle: u64, on: bool) void {
         self.vtable.set_fullscreenable(self.ctx, handle, on);
@@ -1687,6 +1704,24 @@ pub const WindowManager = struct {
         defer self.lock.unlock(self.io);
         const win = try self.getLiveWindowLocked(id);
         return self.native.isEnabled(win.native_handle);
+    }
+    pub fn setContentProtection(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setContentProtection(win.native_handle, on);
+    }
+    pub fn isContentProtected(self: *WindowManager, id: u32) Error!bool {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        return self.native.isContentProtected(win.native_handle);
+    }
+    pub fn setSkipTaskbar(self: *WindowManager, id: u32, on: bool) Error!void {
+        self.lock.lockUncancelable(self.io);
+        defer self.lock.unlock(self.io);
+        const win = try self.getLiveWindowLocked(id);
+        self.native.setSkipTaskbar(win.native_handle, on);
     }
     pub fn setFullscreenable(self: *WindowManager, id: u32, on: bool) Error!void {
         self.lock.lockUncancelable(self.io);

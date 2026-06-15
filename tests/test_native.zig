@@ -79,6 +79,8 @@ pub const TestNative = struct {
     stub_movable: bool = true,
     stub_focusable: bool = true,
     stub_enabled: bool = true,
+    stub_content_protected: bool = false,
+    stub_skip_taskbar: bool = false,
     stub_fullscreenable: bool = true,
     stub_kiosk: bool = false,
 
@@ -203,6 +205,9 @@ pub const TestNative = struct {
         .is_focusable = isFocusable,
         .set_enabled = setEnabled,
         .is_enabled = isEnabled,
+        .set_content_protection = setContentProtection,
+        .is_content_protected = isContentProtected,
+        .set_skip_taskbar = setSkipTaskbar,
         .set_fullscreenable = setFullscreenable,
         .is_fullscreenable = isFullscreenable,
         .set_kiosk = setKiosk,
@@ -492,6 +497,15 @@ pub const TestNative = struct {
     }
     fn isEnabled(ctx: ?*anyopaque, _: u64) bool {
         return fromCtx(ctx).stub_enabled;
+    }
+    fn setContentProtection(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_content_protected = on;
+    }
+    fn isContentProtected(ctx: ?*anyopaque, _: u64) bool {
+        return fromCtx(ctx).stub_content_protected;
+    }
+    fn setSkipTaskbar(ctx: ?*anyopaque, _: u64, on: bool) void {
+        fromCtx(ctx).stub_skip_taskbar = on;
     }
     fn setFullscreenable(ctx: ?*anyopaque, _: u64, on: bool) void {
         fromCtx(ctx).stub_fullscreenable = on;

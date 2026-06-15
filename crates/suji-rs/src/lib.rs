@@ -921,6 +921,17 @@ pub mod windows {
     pub fn is_enabled(window_id: u32) -> Option<String> {
         invoke("__core__", &window_op_request("is_enabled", window_id))
     }
+    /// Electron BrowserWindow.setContentProtection — macOS NSWindowSharingNone / Win SetWindowDisplayAffinity.
+    pub fn set_content_protection(window_id: u32, enable: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_content_protection", window_id, "contentProtected", enable))
+    }
+    pub fn is_content_protected(window_id: u32) -> Option<String> {
+        invoke("__core__", &window_op_request("is_content_protected", window_id))
+    }
+    /// Electron BrowserWindow.setSkipTaskbar — Win WS_EX_TOOLWINDOW / Linux skip-taskbar (macOS no-op).
+    pub fn set_skip_taskbar(window_id: u32, skip: bool) -> Option<String> {
+        invoke("__core__", &set_bool_request("set_skip_taskbar", window_id, "skip", skip))
+    }
     pub fn set_fullscreenable(window_id: u32, fullscreenable: bool) -> Option<String> {
         invoke("__core__", &set_bool_request("set_fullscreenable", window_id, "fullscreenable", fullscreenable))
     }
@@ -1375,6 +1386,15 @@ pub mod windows {
         }
         pub fn is_enabled(&self) -> Option<String> {
             is_enabled(self.id)
+        }
+        pub fn set_content_protection(&self, enable: bool) -> Option<String> {
+            set_content_protection(self.id, enable)
+        }
+        pub fn is_content_protected(&self) -> Option<String> {
+            is_content_protected(self.id)
+        }
+        pub fn set_skip_taskbar(&self, skip: bool) -> Option<String> {
+            set_skip_taskbar(self.id, skip)
         }
         pub fn set_fullscreenable(&self, fullscreenable: bool) -> Option<String> {
             set_fullscreenable(self.id, fullscreenable)
@@ -3450,6 +3470,67 @@ pub fn request_user_attention(critical: bool) -> Option<String> {
 /// 응답: `{"success":bool}`.
 pub fn cancel_user_attention_request(id: u32) -> Option<String> {
     invoke("__core__", &attention_cancel_json(id))
+}
+
+/// flashFrame — dock/창 주의 끌기 (Electron BrowserWindow.flashFrame). macOS dock bounce.
+/// flash=false 면 중단. 응답 `{"success":bool}`.
+pub fn flash_frame(flash: bool) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_flash_frame", "flash": flash }).to_string())
+}
+
+/// 시스템 About 패널 표시 (Electron app.showAboutPanel). macOS only. 응답 `{"success":bool}`.
+pub fn show_about_panel() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_show_about_panel"}"#)
+}
+
+/// About 패널 옵션 설정 (Electron app.setAboutPanelOptions). None 인자는 skip. macOS only.
+pub fn set_about_panel_options(
+    application_name: Option<&str>,
+    application_version: Option<&str>,
+    version: Option<&str>,
+    copyright: Option<&str>,
+) -> Option<String> {
+    let mut m = serde_json::Map::new();
+    m.insert("cmd".into(), serde_json::Value::from("app_set_about_panel_options"));
+    if let Some(v) = application_name {
+        m.insert("applicationName".into(), serde_json::Value::from(v));
+    }
+    if let Some(v) = application_version {
+        m.insert("applicationVersion".into(), serde_json::Value::from(v));
+    }
+    if let Some(v) = version {
+        m.insert("version".into(), serde_json::Value::from(v));
+    }
+    if let Some(v) = copyright {
+        m.insert("copyright".into(), serde_json::Value::from(v));
+    }
+    invoke("__core__", &serde_json::Value::Object(m).to_string())
+}
+
+/// 최근 문서 목록에 추가 (Electron app.addRecentDocument). macOS only. 응답 `{"success":bool}`.
+pub fn add_recent_document(path: &str) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_add_recent_document", "path": path }).to_string())
+}
+
+/// 최근 문서 목록 비우기 (Electron app.clearRecentDocuments). macOS only. 응답 `{"success":bool}`.
+pub fn clear_recent_documents() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_clear_recent_documents"}"#)
+}
+
+/// `.app` 이 /Applications 아래인지 (Electron app.isInApplicationsFolder). 응답 `{"inApplications":bool}`.
+pub fn is_in_applications_folder() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_is_in_applications_folder"}"#)
+}
+
+/// 로그인 자동 실행 설정 조회 (Electron app.getLoginItemSettings). macOS plist / Linux desktop.
+/// 응답 `{"openAtLogin":bool,"openAsHidden":false,...}`.
+pub fn get_login_item_settings() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_login_item_settings"}"#)
+}
+
+/// 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). macOS/Linux, Win 후속. 응답 `{"success":bool}`.
+pub fn set_login_item_settings(open_at_login: bool) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_set_login_item_settings", "openAtLogin": open_at_login }).to_string())
 }
 
 pub(crate) fn scoped_bookmark_create_json(path: &str) -> String {

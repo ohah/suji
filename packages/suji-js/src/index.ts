@@ -290,6 +290,10 @@ export interface IsEnabledResponse extends WindowOpResponse {
   cmd: "is_enabled";
   enabled: boolean;
 }
+export interface IsContentProtectedResponse extends WindowOpResponse {
+  cmd: "is_content_protected";
+  contentProtected: boolean;
+}
 export interface IsFullScreenableResponse extends WindowOpResponse {
   cmd: "is_fullscreenable";
   fullscreenable: boolean;
@@ -748,6 +752,18 @@ export const windows = {
   isEnabled(windowId: number): Promise<IsEnabledResponse> {
     return coreCall<IsEnabledResponse>({ cmd: "is_enabled", windowId });
   },
+  /** Electron BrowserWindow.setContentProtection(enable). macOS NSWindowSharingNone / Win SetWindowDisplayAffinity (Linux tracked). */
+  setContentProtection(windowId: number, enable: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_content_protection", windowId, contentProtected: enable });
+  },
+  /** Electron BrowserWindow.isContentProtected(). tracked 값. */
+  isContentProtected(windowId: number): Promise<IsContentProtectedResponse> {
+    return coreCall<IsContentProtectedResponse>({ cmd: "is_content_protected", windowId });
+  },
+  /** Electron BrowserWindow.setSkipTaskbar(skip). Win WS_EX_TOOLWINDOW / Linux skip-taskbar (macOS no-op). */
+  setSkipTaskbar(windowId: number, skip: boolean): Promise<WindowOpResponse> {
+    return coreCall<WindowOpResponse>({ cmd: "set_skip_taskbar", windowId, skip });
+  },
   /** Electron BrowserWindow.setFullScreenable(fullscreenable). macOS collectionBehavior, 그 외 tracked. */
   setFullScreenable(windowId: number, fullscreenable: boolean): Promise<WindowOpResponse> {
     return coreCall<WindowOpResponse>({ cmd: "set_fullscreenable", windowId, fullscreenable });
@@ -814,7 +830,8 @@ export const windows = {
   },
 
   /** 페이지 텍스트 검색. 첫 호출은 findNext=false, 이후 같은 단어 다음 매치는 true.
-   *  결과 보고는 cef_find_handler_t로 (현재 미노출 — 추후 이벤트). */
+   *  결과는 `suji.on("window:find-result", ({windowId, identifier, count, activeMatchOrdinal}) => …)`
+   *  로 수신 (CEF on_find_result 의 finalUpdate 만 forward). */
   findInPage(
     windowId: number,
     text: string,
@@ -1180,6 +1197,15 @@ export class BrowserWindow {
   }
   isEnabled() {
     return windows.isEnabled(this.#id);
+  }
+  setContentProtection(enable: boolean) {
+    return windows.setContentProtection(this.#id, enable);
+  }
+  isContentProtected() {
+    return windows.isContentProtected(this.#id);
+  }
+  setSkipTaskbar(skip: boolean) {
+    return windows.setSkipTaskbar(this.#id, skip);
   }
   setFullScreenable(fullscreenable: boolean) {
     return windows.setFullScreenable(this.#id, fullscreenable);
@@ -3202,6 +3228,72 @@ export const app = {
   async cancelUserAttentionRequest(id: number): Promise<boolean> {
     const r = await coreCall<{ success: boolean }>({ cmd: "app_attention_cancel", id });
     return r.success === true;
+  },
+
+  /** dock/창 으로 주의 끌기 (Electron BrowserWindow.flashFrame). macOS dock bounce — flag=false 면 중단. */
+  async flashFrame(flag = true): Promise<boolean> {
+    const r = await coreCall<{ success: boolean }>({ cmd: "app_flash_frame", flash: flag });
+    return r.success === true;
+  },
+
+  /** 시스템 About 패널 표시 (Electron app.showAboutPanel). macOS only(Win/Linux no-op). */
+  async showAboutPanel(): Promise<void> {
+    await coreCall({ cmd: "app_show_about_panel" });
+  },
+
+  /** About 패널 옵션 설정 (Electron app.setAboutPanelOptions). 다음 showAboutPanel 에 적용. macOS only. */
+  async setAboutPanelOptions(options: {
+    applicationName?: string;
+    applicationVersion?: string;
+    version?: string;
+    copyright?: string;
+  }): Promise<void> {
+    await coreCall({ cmd: "app_set_about_panel_options", ...options });
+  },
+
+  /** 최근 문서 목록에 추가 (Electron app.addRecentDocument). macOS only. */
+  async addRecentDocument(path: string): Promise<void> {
+    await coreCall({ cmd: "app_add_recent_document", path });
+  },
+
+  /** 최근 문서 목록 비우기 (Electron app.clearRecentDocuments). macOS only. */
+  async clearRecentDocuments(): Promise<void> {
+    await coreCall({ cmd: "app_clear_recent_documents" });
+  },
+
+  /** `.app` 이 /Applications 아래 있는지 (Electron app.isInApplicationsFolder). macOS only(Win/Linux false). */
+  async isInApplicationsFolder(): Promise<boolean> {
+    const r = await coreCall<{ inApplications: boolean }>({ cmd: "app_is_in_applications_folder" });
+    return r.inApplications === true;
+  },
+
+  /** 로그인 자동 실행 설정 조회 (Electron app.getLoginItemSettings). macOS plist / Linux desktop. */
+  async getLoginItemSettings(): Promise<{
+    openAtLogin: boolean;
+    openAsHidden: boolean;
+    wasOpenedAtLogin: boolean;
+    wasOpenedAsHidden: boolean;
+    restoreState: boolean;
+  }> {
+    const r = await coreCall<{
+      openAtLogin: boolean;
+      openAsHidden: boolean;
+      wasOpenedAtLogin: boolean;
+      wasOpenedAsHidden: boolean;
+      restoreState: boolean;
+    }>({ cmd: "app_get_login_item_settings" });
+    return {
+      openAtLogin: r.openAtLogin === true,
+      openAsHidden: r.openAsHidden === true,
+      wasOpenedAtLogin: r.wasOpenedAtLogin === true,
+      wasOpenedAsHidden: r.wasOpenedAsHidden === true,
+      restoreState: r.restoreState === true,
+    };
+  },
+
+  /** 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). macOS/Linux 동작, Windows 후속. */
+  async setLoginItemSettings(settings: { openAtLogin?: boolean }): Promise<void> {
+    await coreCall({ cmd: "app_set_login_item_settings", openAtLogin: settings.openAtLogin ?? false });
   },
 
   /**

@@ -360,6 +360,24 @@ func SetEnabled(windowID uint32, enabled bool) string {
 func IsEnabled(windowID uint32) string {
 	return suji.Invoke("__core__", windowOpRequest("is_enabled", windowID))
 }
+
+// SetContentProtection — Electron BrowserWindow.setContentProtection. macOS NSWindowSharingNone /
+// Win SetWindowDisplayAffinity (Linux tracked). raw JSON: `{"ok":bool}`.
+func SetContentProtection(windowID uint32, contentProtected bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_content_protection", windowID, "contentProtected", contentProtected))
+}
+
+// IsContentProtected — Electron BrowserWindow.isContentProtected (tracked). raw JSON: `{"contentProtected":bool}`.
+func IsContentProtected(windowID uint32) string {
+	return suji.Invoke("__core__", windowOpRequest("is_content_protected", windowID))
+}
+
+// SetSkipTaskbar — Electron BrowserWindow.setSkipTaskbar. Win WS_EX_TOOLWINDOW / Linux skip-taskbar
+// (macOS no-op). raw JSON: `{"ok":bool}`.
+func SetSkipTaskbar(windowID uint32, skip bool) string {
+	return suji.Invoke("__core__", setBoolRequest("set_skip_taskbar", windowID, "skip", skip))
+}
+
 func SetFullScreenable(windowID uint32, fullscreenable bool) string {
 	return suji.Invoke("__core__", setBoolRequest("set_fullscreenable", windowID, "fullscreenable", fullscreenable))
 }
