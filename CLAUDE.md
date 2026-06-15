@@ -296,6 +296,11 @@ fn onAllClosed(_: suji.Event) void {
 //   → quit 직전 `app:before-quit` 이벤트 1회 발신(모든 quit 경로: Cmd+Q/suji.quit/
 //     all-closed/IPC 가 cef.quit chokepoint 경유). suji.on("app:before-quit", cb) 로 정리/저장.
 //     ⚠️ preventDefault(종료 취소)는 IPC 비동기상 미지원(window:close 렌더러 경계 동일, 정직 경계)
+//   → quit 후 모든 창 닫힘 → `app:will-quit` 1회 발신(백엔드 종료 직전). suji.on("app:will-quit", cb).
+//     before-quit→창닫기→will-quit 순(Electron). preventDefault 미지원(동일 경계)
+// suji.on("app:open-url", ({url})) — deep-link 수신 (macOS NSAppleEventManager kAEGetURL Apple Event).
+//   deepLinkSchemes(suji.json)로 등록된 scheme(myapp://)으로 앱 열릴 때 발화. ⚠️ 실 deep-link 검증은
+//   .app 번들+scheme 등록+실제 열기 필요(빌드+wire 검증, 정직 경계)
 // suji.exit()                  — 앱 강제 종료 (Electron app.exit(), code 무시)
 // suji.relaunch()              — quit 후 현재 앱 재시작 등록 (Electron app.relaunch).
 //   이후 quit/exit 시 cef 메시지 루프 종료 후 현재 argv 로 새 인스턴스 spawn(detached).

@@ -209,8 +209,8 @@
 
 ### app
 
-- **[low]** `app.on('will-quit', ...)` — Emit 'app:will-quit' event in suji/src/main.zig cef.quit() cleanup phase (after all windows destroyed, before process exit). Implement as cancellable event via EventSink.preventDefault() pattern match
-- **[low]** `open-url event` — Add deep-link URL event emission: (1) Define `pub const app_open_url = "app:open-url"` event constant in src/core/window.zig or src/core/events.zig alongside existing window events; (2) In src/platfor
+- ~~**[low]** `app.on('will-quit', ...)`~~ ✅ (PR3 — cef.run() 반환 후(모든 창 닫힘, 백엔드 종료 직전) emitBusRaw("app:will-quit"). preventDefault 미지원 — before-quit 동일 경계, IPC 비동기) — Emit 'app:will-quit' event in suji/src/main.zig cef.quit() cleanup phase (after all windows destroyed, before process exit). Implement as cancellable event via EventSink.preventDefault() pattern match
+- ~~**[low]** `open-url event`~~ ✅ (PR3 — NSAppleEventManager kAEGetURL Apple Event handler: cef_open_url.zig 의 SujiOpenURLTarget objc dynamic class(SujiQuitTarget 패턴) → app:open-url{url}. ⚠️ 실 deep-link 검증은 .app+scheme 등록+실제 열기 필요 → 빌드+wire 검증, 정직 경계) — Add deep-link URL event emission: (1) Define `pub const app_open_url = "app:open-url"` event constant in src/core/window.zig or src/core/events.zig alongside existing window events; (2) In src/platfor
 - **[low]** `certificate-error event` — Expose app:certificate-error event on TLS cert verification failure. (1) Hook CEF's certificate verification callback in cef.zig (if not already wired). (2) Fire app:certificate-error IPC event with p
 - **[low]** `select-client-certificate event` — To add select-client-certificate parity: (1) Design an app-level event listener API in Suji's core (e.g., core emitting 'app:select-client-certificate' events). (2) Hook CEF's cef_request_handler_t.on
 - **[low]** `app.on('login') — HTTP basic auth event` — Wire cef_auth_callback_t into request handler (src/platform/cef.zig line 4739-4780). Register on_auth callback, emit app:login or webRequest:auth-required event following webRequest:before-request pat
