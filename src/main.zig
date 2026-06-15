@@ -1827,9 +1827,11 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         // 그대로 CEF·응답·event 로 흘러 path 라운드트립이 깨진다(JS 단 single
         // backslash ≠ echo double). unescape 로 실제 경로 복원(deferred-response
         // event 매칭 + FS gate 정확도). macOS 경로(`/`)는 unescape no-op.
-        var pdf_path_buf: [2048]u8 = undefined;
-        const pdf_raw = util.extractJsonString(req_clean, "path") orelse "";
-        const pdf_path = if (util.unescapeJsonStr(pdf_raw, &pdf_path_buf)) |n| pdf_path_buf[0..n] else pdf_raw;
+        // path unescape: 렌더러-경로 게이트 공용 primitive(extractUnescapedField).
+        // raw escaped 경로(Windows `\\`) → 실제 경로(FS gate 정확도 + deferred-response
+        // event path 매칭). macOS 경로(`/`)는 no-op.
+        var pdf_path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+        const pdf_path = extractUnescapedField(req_clean, "path", &pdf_path_buf) orelse "";
         if (rendererPathFsGate(response_buf, "print_to_pdf", pdf_path)) |e| return e;
         return window_ipc.handlePrintToPDF(.{
             .window_id = win_id,
@@ -1855,9 +1857,9 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
             null;
         // print_to_pdf 와 동일 — raw escaped 경로를 unescape 해 Windows `\\`
         // 라운드트립 + event path 매칭 정상화.
-        var cap_path_buf: [2048]u8 = undefined;
-        const cap_raw = util.extractJsonString(req_clean, "path") orelse "";
-        const cap_path = if (util.unescapeJsonStr(cap_raw, &cap_path_buf)) |n| cap_path_buf[0..n] else cap_raw;
+        // print_to_pdf 와 동일 — extractUnescapedField 공용 primitive 로 unescape.
+        var cap_path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
+        const cap_path = extractUnescapedField(req_clean, "path", &cap_path_buf) orelse "";
         if (rendererPathFsGate(response_buf, "capture_page", cap_path)) |e| return e;
         return window_ipc.handleCapturePage(.{
             .window_id = win_id,
@@ -2470,13 +2472,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     }
     if (std.mem.eql(u8, cmd, "desktop_capturer_capture_thumbnail")) {
         const source_id = util.extractJsonString(req_clean, "sourceId") orelse "";
-        // 다른 게이트 호출부(native_image / print_to_pdf / shell_* 등)와 동일하게 path 를
-        // unescape 한 뒤 게이트/캡처에 사용 — extractJsonString 은 raw(미-unescape)라 Windows
-        // 경로가 `C:\\…`(이중 백슬래시)로 남아 allowedRoots(config std.json, unescaped)와 어긋나
-        // (opt-in fs.allowedRoots 설정 시) 정상 경로가 forbidden 된다. 이 호출부만 누락돼 있었다.
-        const raw_path = util.extractJsonString(req_clean, "path") orelse "";
+        // path 는 extractUnescapedField(렌더러-경로 게이트 공용 primitive)로 unescape —
+        // extractJsonString 은 raw(미-unescape)라 Windows `C:\\…`(이중 백슬래시)가
+        // allowedRoots(std.json, unescaped)와 어긋나 forbidden 됨. helper 는 overflow/실패
+        // 시 null → "" → 아래 path.len 체크가 거부(escaped raw 통과 방지).
         var dc_path_buf: [FS_MAX_PATH_BYTES]u8 = undefined;
-        const path = if (util.unescapeJsonStr(raw_path, &dc_path_buf)) |n| dc_path_buf[0..n] else raw_path;
+        const path = extractUnescapedField(req_clean, "path", &dc_path_buf) orelse "";
         if (rendererPathFsGate(response_buf, "desktop_capturer_capture_thumbnail", path)) |e| return e;
         const ok = source_id.len > 0 and path.len > 0 and
             cef.desktopCapturerCaptureThumbnail(source_id, path);

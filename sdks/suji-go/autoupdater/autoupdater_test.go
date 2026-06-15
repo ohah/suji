@@ -7,7 +7,14 @@ import (
 
 func TestBuildCheckUpdateRequest(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildCheckUpdateRequest("1.0.0", "1.1.0", "https://example.test/app.zip", "abc", "notes", "2026-05-25T00:00:00Z")), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildCheckUpdateRequest(CheckUpdateArgs{
+		CurrentVersion: "1.0.0",
+		LatestVersion:  "1.1.0",
+		URL:            "https://example.test/app.zip",
+		Sha256:         "abc",
+		Notes:          "notes",
+		PubDate:        "2026-05-25T00:00:00Z",
+	})), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "auto_updater_check_update" {
@@ -23,7 +30,7 @@ func TestBuildCheckUpdateRequest(t *testing.T) {
 
 func TestBuildVerifyFileRequest(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildVerifyFileRequest("/tmp/app.zip", "abc")), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildVerifyFileRequest(VerifyFileArgs{Path: "/tmp/app.zip", Sha256: "abc"})), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "auto_updater_verify_file" {
@@ -36,7 +43,7 @@ func TestBuildVerifyFileRequest(t *testing.T) {
 
 func TestBuildDownloadArtifactRequest(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildDownloadArtifactRequest("https://x/app.zip", "/tmp/app.zip", "")), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildDownloadArtifactRequest(DownloadArtifactArgs{URL: "https://x/app.zip", Path: "/tmp/app.zip"})), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "auto_updater_download_artifact" {
@@ -49,7 +56,7 @@ func TestBuildDownloadArtifactRequest(t *testing.T) {
 
 func TestBuildPrepareInstallRequest(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildPrepareInstallRequest("/tmp/app.zip", "", "", "auto", "")), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildPrepareInstallRequest(PrepareInstallArgs{Path: "/tmp/app.zip", Format: "auto"})), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "auto_updater_prepare_install" {
@@ -62,7 +69,7 @@ func TestBuildPrepareInstallRequest(t *testing.T) {
 
 func TestBuildQuitAndInstallRequest(t *testing.T) {
 	var got map[string]any
-	if err := json.Unmarshal([]byte(buildQuitAndInstallRequest("/tmp/app.zip", "/Applications/X.app", "", true, "")), &got); err != nil {
+	if err := json.Unmarshal([]byte(buildQuitAndInstallRequest(QuitAndInstallArgs{Path: "/tmp/app.zip", Target: "/Applications/X.app", Relaunch: true})), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got["cmd"] != "auto_updater_quit_and_install" {

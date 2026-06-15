@@ -222,9 +222,11 @@ pub const Request = struct {
     /// 파싱된 값(예: allowlist root)과 startsWith 비교하면 항상 어긋난다("forbidden path").
     /// **실제 문자열로** 비교/사용해야 하는 경로·escape 포함 값은 이걸 쓴다.
     /// 키 부재 시 null, alloc 실패 시 raw(string()) 폴백(best-effort, 비파괴).
-    /// macOS/Linux 경로엔 escape가 없어 사실상 string()과 동일(복사만).
+    /// 백슬래시 부재(escape 없음 = macOS/Linux 경로 등 일반 케이스)면 alloc/copy 없이
+    /// raw 슬라이스 그대로 반환(zero-alloc fast-path) — string()과 동일.
     pub fn stringUnescaped(self: *const Request, key: []const u8) ?[]const u8 {
         const raw = extractStringField(self.raw, key) orelse return null;
+        if (std.mem.indexOfScalar(u8, raw, '\\') == null) return raw;
         const buf = self.arena.alloc(u8, raw.len) catch return raw;
         const n = util.unescapeJsonStr(raw, buf) orelse return raw;
         return buf[0..n];
