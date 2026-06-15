@@ -3668,7 +3668,7 @@ pub fn get_login_item_settings() -> Option<String> {
     invoke("__core__", r#"{"cmd":"app_get_login_item_settings"}"#)
 }
 
-/// 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). macOS/Linux, Win 후속. 응답 `{"success":bool}`.
+/// 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). macOS plist / Linux desktop / Windows registry. 응답 `{"success":bool}`.
 pub fn set_login_item_settings(open_at_login: bool) -> Option<String> {
     invoke("__core__", &serde_json::json!({ "cmd": "app_set_login_item_settings", "openAtLogin": open_at_login }).to_string())
 }
