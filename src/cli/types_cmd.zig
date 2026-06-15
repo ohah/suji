@@ -3,15 +3,14 @@ const builtin = @import("builtin");
 const runtime = @import("runtime");
 const suji = @import("../root.zig");
 const backend_build = @import("../core/backend_build.zig");
+const loader = @import("loader");
 
 /// `suji types [--out <path>]` — zig 백엔드의 `.schema()` 체인을 SujiHandlers
 /// `.d.ts` 로 자동 생성(수동 augment 불요). 빌드→dlopen→`backend_dump_schema`.
 /// zig 백엔드만 — Rust=specta 수동/Go·Node=수동 augment(정직 한계, 후속).
+/// dlopen 은 loader.DynLib(POSIX std.DynLib / Windows kernel32 WinDynLib) — Windows
+/// 도 backend .dll 로드 가능(이전엔 std.DynLib Windows 부재로 차단했었음).
 fn dumpZigSchema(allocator: std.mem.Allocator, entry: []const u8, out: *std.ArrayList(u8)) void {
-    if (builtin.os.tag == .windows) {
-        std.debug.print("[suji types] Windows dlopen 경로는 후속 — macOS/Linux 사용\n", .{});
-        return;
-    }
     backend_build.buildByLang(allocator, "zig", entry, false) catch |err| {
         std.debug.print("[suji types] {s} 빌드 실패: {}\n", .{ entry, err });
         return;
@@ -20,7 +19,7 @@ fn dumpZigSchema(allocator: std.mem.Allocator, entry: []const u8, out: *std.Arra
     defer allocator.free(path);
     const path_z = allocator.dupeZ(u8, path) catch return;
     defer allocator.free(path_z);
-    var lib = std.DynLib.open(path_z) catch |err| {
+    var lib = loader.DynLib.open(path_z) catch |err| {
         std.debug.print("[suji types] dlopen 실패 {s}: {}\n", .{ path, err });
         return;
     };
@@ -76,19 +75,24 @@ pub fn run(allocator: std.mem.Allocator, types_args: []const [:0]const u8) !void
         std.debug.print("[suji types] 생성할 schema 없음 (zig 백엔드 + `.schema()` 필요).\n", .{});
         return;
     }
-    // 생성된 .d.ts 는 stdout(`suji types > suji.d.ts`) 또는 --out 파일.
-    // 진단/빌드로그는 std.debug.print=stderr 라 .d.ts 와 안 섞임. Zig 0.16
-    // std.fs.File/posix.write 부재 → 코드베이스 std.Io 경로 재사용(stdout 은
-    // `/dev/stdout` 특수파일, Windows 는 dumpZigSchema 가 이미 차단).
-    const target = out_path orelse "/dev/stdout";
-    const f = std.Io.Dir.cwd().createFile(runtime.io, target, .{}) catch |err| {
-        std.debug.print("[suji types] {s} 쓰기 실패: {}\n", .{ target, err });
-        return;
-    };
-    defer f.close(runtime.io);
+    // 생성된 .d.ts 는 stdout(`suji types > suji.d.ts`) 또는 --out 파일. 진단/빌드로그는
+    // std.debug.print=stderr 라 .d.ts 와 안 섞임. stdout 은 std.Io.File.stdout()(크로스
+    // 플랫폼 — 이전 `/dev/stdout` 은 POSIX 전용이라 Windows 차단 사유였음). stdout 은
+    // 프로세스 핸들이라 close 하지 않는다(파일만 close).
     var wbuf: [4096]u8 = undefined;
-    var fw = f.writer(runtime.io, &wbuf);
-    fw.interface.writeAll(out.items) catch return;
-    fw.interface.flush() catch return;
-    if (out_path) |p| std.debug.print("[suji types] → {s} ({d} bytes)\n", .{ p, out.items.len });
+    if (out_path) |p| {
+        const f = std.Io.Dir.cwd().createFile(runtime.io, p, .{}) catch |err| {
+            std.debug.print("[suji types] {s} 쓰기 실패: {}\n", .{ p, err });
+            return;
+        };
+        defer f.close(runtime.io);
+        var fw = f.writer(runtime.io, &wbuf);
+        fw.interface.writeAll(out.items) catch return;
+        fw.interface.flush() catch return;
+        std.debug.print("[suji types] → {s} ({d} bytes)\n", .{ p, out.items.len });
+    } else {
+        var fw = std.Io.File.stdout().writer(runtime.io, &wbuf);
+        fw.interface.writeAll(out.items) catch return;
+        fw.interface.flush() catch return;
+    }
 }

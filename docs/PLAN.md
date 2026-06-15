@@ -1136,9 +1136,11 @@ app.on("ready", () => {
       유일한 CI 자동 *기능* 커버리지. 검증: `run.sh` **68/68**(python 3 케이스 포함).
 - 핫 리로드(정직): node/lua/python 임베드 런타임 모두 in-process 핫 리로드 미지원
       (dev 재시작) — python 특이 결함 아님. Py init·finalize 프로세스당 1회라 구조적.
-- 정직 경계(후속): Windows packaging(import-lib hard-link → build gate 에서 python off
-      강제, footgun 방지; PBS Windows 레이아웃 + Windows CI 반복 필요) / iOS·Android
-      실기기(시뮬레이터/에뮬레이터 검증 천장 — clipboard 모바일 e2e 와 동일 바) /
+- Windows packaging 완료: import-lib(python313.lib) hard-link + addInstallPythonRuntimeStep
+      Windows pwsh 분기(python313.dll/python3.dll/vcruntime140*.dll + packaged 시 Lib/DLLs),
+      python_available 게이트 staging-기반 활성(강제-off 제거), webcontentsview-windows CI job
+      이 dev+packaged 가드. 남은 후속은 released CLI(release.yml 이 아직 Windows staging off).
+- 정직 경계(후속): iOS·Android 실기기(시뮬레이터/에뮬레이터 검증 천장 — clipboard 모바일 e2e 와 동일 바) /
       Android gradle apk 빌드는 AGP 호환 JDK(17~21) 필요 / lib-dynload filesDir dlopen
       은 최신 Android W^X 제약(json 등 pure-python 폴백이라 무영향).
 
@@ -1729,9 +1731,9 @@ scheme-handler IO-스레드 결함 규명(업스트림 수정/정확 API 사용 
 8. ✅ **macOS App Sandbox 자동화** (CEF Helper entitlements) — Mac App Store 진출 시 필수
 9. ✅ **보안 모델** (Phase 7: fs sandbox + cache 격리 + IPC 검증 + CSP + contextIsolation audit) — Phase 7 핵심 완료
 10. ✅ **CLI 배포** (`npx @suji/cli init my-app` / Homebrew tap / curl) — `@suji/cli` 스캐폴더, Homebrew Formula 생성/검증, curl installer 완료. npm publish/tap push는 토큰 보유 환경에서 수행
-11. **Windows frameless drag region 후속** — macOS/Linux `frame:false`
-    drag/no-drag는 E2E 완료. Linux 잔여 창 옵션(`transparent`/`parent` 등)은 CEF Views
-    native path로 완료. Windows frameless parity는 후속.
+11. ✅ **Frameless drag region** — macOS/Linux/Windows `frame:false` drag/no-drag E2E
+    완료(Windows 는 webcontentsview-windows CI job 의 run-frameless-drag-region — CEF Views
+    공유 경로라 동형). Linux 잔여 창 옵션(`transparent`/`parent` 등)도 CEF Views native path 로 완료.
 12. **앱 패키징** (Windows .msi, Linux .AppImage, macOS notarize 자동화) — 배포 단계
 13. 🟡 **자동 업데이트** — manifest check + artifact download + SHA-256 verify + macOS/Linux/Windows prepareInstall/quit-and-install 1차 완료. macOS `.zip/.dmg` stage, Windows `.zip` PowerShell stage/helper, Linux `.AppImage`/raw 교체 입력, `.deb` package-manager handoff 정책까지 문서화/검증(macOS `.zip` + Linux `.AppImage` E2E). 남은 것: Windows 실제 교체 E2E/인스톨러 연계
 14. ✅ **`child_process` / HTTP / SQLite SDK** — child_process(`suji.process.run`)와 backend 전용 HTTP(`suji.http.fetch`) 완료. renderer-safe HTTP는 `@suji/plugin-http` 공식 플러그인으로 완료. SQLite는 `plugins/sqlite` 공식 플러그인으로 완료.

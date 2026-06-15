@@ -1438,7 +1438,7 @@ test "powerSaveBlocker IPC — start/stop + 두 type 모두 노출" {
     inline for (.{
         "E2E — powerSaveBlocker",
         "E2E — powerSaveBlocker (Linux)",
-        "E2E — powerSaveBlocker (Windows)",
+        "webcontentsview-windows", // Windows e2e 는 전용 job (이전 매트릭스 `(Windows)` 스텝에서 분리)
         "run-power-save-blocker.sh",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
@@ -1768,7 +1768,7 @@ test "powerMonitor — install hook + 4 이벤트 채널 emit 패턴" {
     inline for (.{
         "E2E — powerMonitor",
         "E2E — powerMonitor idle (Linux)",
-        "E2E — powerMonitor idle (Windows)",
+        "webcontentsview-windows", // Windows e2e 는 전용 job (이전 매트릭스 `(Windows)` 스텝에서 분리)
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
@@ -2139,19 +2139,23 @@ test "clipboard.has/availableFormats + app.isReady/focus/hide IPC" {
     defer std.testing.allocator.free(workflow_src);
     inline for (.{
         "E2E — clipboard text/HTML (Linux)",
-        "E2E — clipboard text/HTML (Windows)",
+        "webcontentsview-windows", // Windows e2e 는 전용 job (이전 매트릭스 `(Windows)` 스텝에서 분리)
         "bash tests/e2e/run-clipboard-text-runtime.sh",
     }) |needle| {
         try std.testing.expect(std.mem.indexOf(u8, workflow_src, needle) != null);
     }
+    // Linux job(matrix): deps → clipboard → autoUpdater 순서.
     const matrix_job_pos = std.mem.indexOf(u8, workflow_src, "webcontentsview-cross-platform:").?;
     const deps_pos = std.mem.indexOfPos(u8, workflow_src, matrix_job_pos, "Install frontend dependencies").?;
     const linux_clip_pos = std.mem.indexOfPos(u8, workflow_src, matrix_job_pos, "E2E — clipboard text/HTML (Linux)").?;
     const linux_auto_pos = std.mem.indexOf(u8, workflow_src, "E2E — autoUpdater prepare/quit (Linux)").?;
-    const windows_clip_pos = std.mem.indexOf(u8, workflow_src, "E2E — clipboard text/HTML (Windows)").?;
-    const windows_wcv_pos = std.mem.indexOf(u8, workflow_src, "E2E — WebContentsView lifecycle (Windows)").?;
     try std.testing.expect(deps_pos < linux_clip_pos);
     try std.testing.expect(linux_clip_pos < linux_auto_pos);
+    // Windows e2e 는 전용 webcontentsview-windows job — 그 안에서 clipboard → WebContentsView 순서
+    // (스텝명은 job 이 Windows 전용이라 `(Windows)` 접미사 없음; job 시작 위치 기준 탐색).
+    const win_job_pos = std.mem.indexOf(u8, workflow_src, "webcontentsview-windows:").?;
+    const windows_clip_pos = std.mem.indexOfPos(u8, workflow_src, win_job_pos, "E2E — clipboard text/HTML").?;
+    const windows_wcv_pos = std.mem.indexOfPos(u8, workflow_src, win_job_pos, "E2E — WebContentsView lifecycle").?;
     try std.testing.expect(windows_clip_pos < windows_wcv_pos);
 }
 

@@ -149,8 +149,9 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - 현재 SujiKeyableWindow.sendEvent: override는 NSWindow 직접 관리 전제
 - CefWindow가 만든 NSWindow에 같은 override 주입 가능한지 검증
 - 안 되면 CEF의 drag handler 콜백 활용 우회
-- macOS는 NSWindow hit-test override, Linux는 CEF Views `set_draggable_regions` 경로로
-  `run-frameless-drag-region.sh` runtime E2E 검증. Windows는 별도 후속.
+- macOS는 NSWindow hit-test override, Linux/Windows는 CEF Views `set_draggable_regions`
+  경로로 `run-frameless-drag-region.sh` runtime E2E 검증(Windows는 webcontentsview-windows
+  CI job — CEF Views 공유 경로라 동형).
 
 ### 17-B.5 — multi-WebContentsView 검증 (완료)
 - host는 `CefWindow + CefBrowserView`, child WebContentsView는 CEF-managed child
@@ -168,7 +169,7 @@ macOS에서 `NSWindow` 직접 관리 코드(Phase 1~5의 자산)를 `CefWindow` 
 - Linux top-level 창 옵션은 `frame:false`, drag/no-drag, `transparent`, `parent`,
   alwaysOnTop/resizable/min·max/fullscreen/backgroundColor까지 CEF Views native path로 배선.
   `parent`는 `CefWindowDelegate::GetParentWindow` + non-modal dialog로 부모 컨트롤을 비활성화하지 않음.
-  Windows frameless parity는 별도 후속.
+  Windows frameless drag/no-drag parity도 완료(webcontentsview-windows CI job 검증).
 - 17-A에서 빠진 native 백엔드 SDK (Rust/Go/Node) view API 노출 완료
 - CEF-free 단위 테스트로 platform default와 child path 선택을 고정
   - macOS 기본: attached child `CefWindow`
