@@ -1516,6 +1516,17 @@ pub fn build(b: *std.Build) void {
     const cef_drag_region_test = b.addTest(.{ .root_module = cef_drag_region_test_mod });
     test_step.dependOn(&b.addRunArtifact(cef_drag_region_test).step);
 
+    // cef_login_item: Windows HKCU\…\Run 레지스트리 round-trip 테스트(Windows 만 실행,
+    // macOS/Linux skip). runtime import 필요(모듈이 runtime.io 참조 — 테스트는 advapi32 만).
+    const cef_login_item_test_mod = b.createModule(.{
+        .root_source_file = b.path("src/platform/cef_login_item.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cef_login_item_test_mod.addImport("runtime", runtime_module);
+    const cef_login_item_test = b.addTest(.{ .root_module = cef_login_item_test_mod });
+    test_step.dependOn(&b.addRunArtifact(cef_login_item_test).step);
+
     // CEF Views platform policy tests (CEF 런타임/헤더 불필요).
     const cef_views_policy_test_mod = b.createModule(.{
         .root_source_file = b.path("src/platform/cef_views_policy.zig"),
