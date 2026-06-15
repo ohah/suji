@@ -251,6 +251,7 @@ pub const OpenURLFn = cef_open_url.OpenURLFn;
 pub const installOpenURLHandler = cef_open_url.installOpenURLHandler;
 pub const AuthEmitFn = cef_auth_handler.AuthEmitFn;
 pub const setAuthEmitHandler = cef_auth_handler.setAuthEmitHandler;
+pub const setAuthHandlerEnabled = cef_auth_handler.setAuthHandlerEnabled;
 pub const certificateErrorRespond = cef_auth_handler.certificateErrorRespond;
 pub const loginRespond = cef_auth_handler.loginRespond;
 pub const selectClientCertificateRespond = cef_auth_handler.selectClientCertificateRespond;

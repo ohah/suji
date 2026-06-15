@@ -310,6 +310,9 @@ fn onAllClosed(_: suji.Event) void {
 //   app.selectClientCertificateRespond(id, index) 로 선택(index 0-based, -1=기본 select null).
 //   ⚠️ 셋 다 CEF request_handler deferred 콜백(pending pool + UI-thread RespondTask) — 실 TLS/auth/
 //   client-cert 검증은 헤드리스 불가(빌드+wire 검증, 정직 경계). 전 5 SDK.
+//   app.setAuthHandlerEnabled(true) 로 게이트 활성(이벤트 구독 후 호출) — 미활성(기본)=CEF 기본
+//   (cert 차단/auth 취소/client-cert 기본)으로 fallback(미구독 시 콜백 영구 hold/DoS 방지).
+//   getAuthCredentials(IO 스레드) emit 은 UI 로 marshal(execute_java_script cross-thread UB 방지).
 // suji.exit()                  — 앱 강제 종료 (Electron app.exit(), code 무시)
 // suji.relaunch()              — quit 후 현재 앱 재시작 등록 (Electron app.relaunch).
 //   이후 quit/exit 시 cef 메시지 루프 종료 후 현재 argv 로 새 인스턴스 spawn(detached).
