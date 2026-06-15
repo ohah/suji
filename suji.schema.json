@@ -318,6 +318,65 @@
         }
       },
       "additionalProperties": false
+    },
+    "fs": {
+      "type": "object",
+      "description": "File system sandbox (Electron webPreferences.sandbox 대응). frontend(renderer)에서 호출되는 fs.* cmd 검증 대상. backend 는 항상 무제한.",
+      "properties": {
+        "allowedRoots": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "허용 path prefix. 빈 배열/미설정 = frontend fs 완전 차단(default-deny). [\"*\"] = unrestricted(escape hatch; ../ traversal 은 항상 차단). ~ 는 $HOME 으로 사전 확장."
+        }
+      },
+      "additionalProperties": false
+    },
+    "shell": {
+      "type": "object",
+      "description": "renderer shell.* allowlist (opt-in — 키 부재 시 레거시 무제한, 비파괴). 키 존재 시 enforce: [] = 전부 차단, [\"*\"] = 전부 허용.",
+      "properties": {
+        "allowedPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "shell.openPath/showItemInFolder/trashItem 의 path (fs 동일 prefix+boundary, ../ 차단)."
+        },
+        "allowedExternalUrls": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "shell.openExternal 의 url glob (util.matchGlob, ~ expand 안 함)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dialog": {
+      "type": "object",
+      "description": "renderer dialog.* allowlist (opt-in, shell 과 동일 semantics). open/save 의 defaultPath 만 제약 — 빈 defaultPath 는 무제약(사용자 중재).",
+      "properties": {
+        "allowedPaths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "dialog open/save defaultPath 의 허용 prefix (fs 동일 boundary)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "security": {
+      "type": "object",
+      "description": "보안 정책 — suji:// custom protocol 응답 헤더에 적용.",
+      "properties": {
+        "csp": {
+          "type": "string",
+          "description": "Content-Security-Policy. 미설정 = cef 기본 CSP(iframeAllowedOrigins 로 frame-src 합성). \"disabled\" = CSP 비활성화."
+        },
+        "iframeAllowedOrigins": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "iframe 허용 origin. 빈 배열 = 모든 iframe 차단, [\"*\"] = 무제한."
+        }
+      },
+      "additionalProperties": false
     }
   },
   "oneOf": [
