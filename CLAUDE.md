@@ -589,6 +589,11 @@ suji.platform                                                // "macos" | "linux
 // const s = await app.getLoginItemSettings()                             → {openAtLogin,openAsHidden,wasOpenedAtLogin,...}
 // await app.setLoginItemSettings({openAtLogin:true})                      — 로그인 자동 실행 (macOS plist /
 //                                       Linux desktop; Win 후속. wasOpenedAtLogin=openAtLogin alias, 정직 경계)
+// await app.setPath(name, path)         — getPath 경로 런타임 오버라이드(이후 getPath 우선 반영, 정적 16슬롯)
+// await app.getLocaleCountryCode()       — 시스템 지역 코드 ISO 3166 (NSLocale.countryCode, macOS only)
+// await app.getRecentDocuments()        → string[] 최근 문서 경로 (NSDocumentController, macOS only)
+// await app.getApplicationNameForProtocol("https://")  → 기본 핸들러 앱 이름 (NSWorkspace, macOS only)
+// await app.getApplicationInfoForProtocol("https://")  → {name, path, icon(base64 PNG)} (macOS only)
 // const bm = await app.createSecurityScopedBookmark(path)                 — App Sandbox 영속 파일 접근
 // const acc = await app.startAccessingSecurityScopedResource(bm)          → {id,path,stale}
 // await app.stopAccessingSecurityScopedResource(acc.id)                   (NSURL bookmark; 비-sandbox=일반)

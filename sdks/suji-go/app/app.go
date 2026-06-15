@@ -212,6 +212,31 @@ func SetLoginItemSettings(openAtLogin bool) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_login_item_settings","openAtLogin":%t}`, openAtLogin))
 }
 
+// SetPath — Electron app.setPath. getPath 경로 런타임 오버라이드. raw JSON: `{"success":bool}`.
+func SetPath(name, path string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_path","name":"%s","path":"%s"}`, jsonesc.Full(name), jsonesc.Full(path)))
+}
+
+// GetLocaleCountryCode — Electron app.getLocaleCountryCode. ISO 3166. macOS only. raw JSON: `{"countryCode":"..."}`.
+func GetLocaleCountryCode() string {
+	return suji.Invoke("__core__", `{"cmd":"app_get_locale_country_code"}`)
+}
+
+// GetRecentDocuments — Electron app.getRecentDocuments. macOS only. raw JSON: `{"documents":["..."]}`.
+func GetRecentDocuments() string {
+	return suji.Invoke("__core__", `{"cmd":"app_get_recent_documents"}`)
+}
+
+// GetApplicationNameForProtocol — Electron app.getApplicationNameForProtocol. macOS only. raw JSON: `{"name":"..."}`.
+func GetApplicationNameForProtocol(url string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_get_application_name_for_protocol","url":"%s"}`, jsonesc.Full(url)))
+}
+
+// GetApplicationInfoForProtocol — Electron app.getApplicationInfoForProtocol. macOS only. raw JSON: `{"name","path","icon"}`.
+func GetApplicationInfoForProtocol(url string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_get_application_info_for_protocol","url":"%s"}`, jsonesc.Full(url)))
+}
+
 // CreateSecurityScopedBookmark creates a security-scoped bookmark for App
 // Sandbox persistent file access. Response:
 // `{"success":bool,"bookmark":"<base64>"}` (비-sandbox 빌드에선 일반 bookmark).
