@@ -3126,7 +3126,7 @@ export const app = {
     };
   },
 
-  /** 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). macOS/Linux 동작, Windows 후속. */
+  /** 로그인 자동 실행 설정 (Electron app.setLoginItemSettings). macOS plist / Linux desktop / Windows registry Run 키. */
   async setLoginItemSettings(settings: { openAtLogin?: boolean }): Promise<void> {
     await invoke('__core__', { cmd: 'app_set_login_item_settings', openAtLogin: settings.openAtLogin ?? false });
   },

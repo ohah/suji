@@ -599,14 +599,14 @@ suji.platform                                                // "macos" | "linux
 // const reqId = await app.requestUserAttention(true)                      (macOS NSApp `requestUserAttention:`)
 // await app.cancelUserAttentionRequest(reqId)
 // const ok = await app.flashFrame(true)                                   — dock/창 주의 끌기 (macOS dock
-//                                       bounce, false=중단; app-scoped 단일 dock, 멀티 윈도우는 마지막 우선)
+//                                       bounce / Windows 메인 창 taskbar FlashWindowEx; false=중단, app-scoped)
 // await app.showAboutPanel() / setAboutPanelOptions({applicationName,applicationVersion,version,copyright})
 //                                       — macOS NSApp orderFrontStandardAboutPanel (Win/Linux no-op)
 // await app.addRecentDocument(path) / app.clearRecentDocuments()          — macOS NSDocumentController (Win/Linux no-op)
 // await app.isInApplicationsFolder()                                      — .app 이 /Applications 아래인지 (macOS only)
 // const s = await app.getLoginItemSettings()                             → {openAtLogin,openAsHidden,wasOpenedAtLogin,...}
 // await app.setLoginItemSettings({openAtLogin:true})                      — 로그인 자동 실행 (macOS plist /
-//                                       Linux desktop; Win 후속. wasOpenedAtLogin=openAtLogin alias, 정직 경계)
+//                                       Linux desktop / Windows HKCU\…\Run 레지스트리. wasOpenedAtLogin=openAtLogin alias)
 // await app.setPath(name, path)         — getPath 경로 런타임 오버라이드(이후 getPath 우선 반영, 정적 16슬롯)
 // await app.getLocaleCountryCode()       — 시스템 지역 코드 ISO 3166 (NSLocale.countryCode, macOS only)
 // await app.getRecentDocuments()        → string[] 최근 문서 경로 (NSDocumentController, macOS only)

@@ -207,7 +207,7 @@ func GetLoginItemSettings() string {
 }
 
 // SetLoginItemSettings sets login-item auto-launch (Electron app.setLoginItemSettings).
-// macOS/Linux, Windows 후속. raw JSON: `{"success":bool}`.
+// macOS plist / Linux desktop / Windows registry Run 키. raw JSON: `{"success":bool}`.
 func SetLoginItemSettings(openAtLogin bool) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_set_login_item_settings","openAtLogin":%t}`, openAtLogin))
 }
