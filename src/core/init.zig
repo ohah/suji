@@ -252,9 +252,15 @@ pub fn run(allocator: std.mem.Allocator, opts: InitOptions) !void {
             defer go_dir.close(io);
             try scaffoldGo(allocator, go_dir, name);
 
-            // lua/python 임베드 런타임은 채널을 router 에 자동 등록하므로(rust/go raw
+            // node/lua/python 임베드 런타임은 채널을 router 에 자동 등록하므로(rust/go raw
             // dylib 과 달리) zig 의 ping/greet 와 충돌하지 않도록 네임스페이스 채널
-            // 템플릿(lua-ping/python-ping)을 쓴다.
+            // 템플릿(node-ping/lua-ping/python-ping)을 쓴다.
+            try backends_dir.createDir(io, "node", .default_dir);
+            var multi_node_dir = try backends_dir.openDir(io, "node", .{});
+            defer multi_node_dir.close(io);
+            try writeFileContent(multi_node_dir, "package.json", @embedFile("../templates/node_package.json"));
+            try writeFileContent(multi_node_dir, "main.js", @embedFile("../templates/multi_node_main.js"));
+
             try backends_dir.createDir(io, "lua", .default_dir);
             var multi_lua_dir = try backends_dir.openDir(io, "lua", .{});
             defer multi_lua_dir.close(io);
@@ -334,6 +340,7 @@ fn writeConfig(allocator: std.mem.Allocator, dir: Dir, name: []const u8, backend
             \\    {{ "name": "zig", "lang": "zig", "entry": "backends/zig" }},
             \\    {{ "name": "rust", "lang": "rust", "entry": "backends/rust" }},
             \\    {{ "name": "go", "lang": "go", "entry": "backends/go" }},
+            \\    {{ "name": "node", "lang": "node", "entry": "backends/node" }},
             \\    {{ "name": "lua", "lang": "lua", "entry": "backends/lua" }},
             \\    {{ "name": "python", "lang": "python", "entry": "backends/python" }}
             \\  ],
@@ -371,7 +378,7 @@ fn backendLabel(backend: BackendLang) []const u8 {
         .node => "Node.js",
         .lua => "Lua",
         .python => "Python",
-        .multi => "Zig · Rust · Go (multi)",
+        .multi => "Zig · Rust · Go · Node · Lua · Python (multi)",
     };
 }
 
