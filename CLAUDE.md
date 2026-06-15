@@ -1256,13 +1256,19 @@ curl-install 시 그 sibling 들을 함께 설치. CLI suji 는 sentinel 없이 
 빌트인 `suji` 모듈용 `.pyi`(handle/invoke/send/on). IDE/mypy/pyright 용, 런타임 코드
 없음. PyPI 발행만 후속(토큰 대기).
 
-**정직 경계(후속)**: ① **Windows packaging** — Windows 는 `python3.lib` import-lib
-hard-link 라 `python313.dll`+`Lib`/`DLLs` 동반 staging(PBS Windows 레이아웃)이
-필요해 build gate 에서 **python off 로 강제**(깨진 exe footgun 방지). `addInstall
-PythonRuntimeStep` Windows pwsh 분기 + Windows CI 반복이 필요한 별도 작업. CI/release
-의 python staging 도 macOS/Linux 한정. ② **iOS**: V8 처럼 CPython JIT 아닌
-인터프리터라 가능성은 있으나 iOS 용 python-build-standalone + 코드서명/샌드박스 +
-모바일 호스트(examples/ios) 배선이 필요 — 모바일 트랙 별도 작업, 미배선.
+**Windows packaging(완료)**: Windows 도 packaged python 동작 — `python313.lib` import-lib
+hard-link + `addInstallPythonRuntimeStep` Windows pwsh 분기가 `python313.dll`+`python3.dll`+
+`vcruntime140*.dll`(+ packaged 시 `Lib/`+`DLLs/`)를 exe 옆에 동반하고, `build.zig`
+python_available 게이트는 staging 존재만으로 활성(Windows 강제-off 제거 — macOS/Linux 동형).
+`suji build`→패키지 exe→번들 libpython init + frontend bind 를 `webcontentsview-windows`
+CI job 이 dev(`run-python-e2e.sh`) + packaged(`run-python-packaged.sh`) 양쪽으로 가드.
+
+**정직 경계(후속)**: ① **released Windows CLI 의 python 번들** — `release.yml` 은 아직
+Windows 에서 python off(`if: runner.os != 'Windows'` staging gate). 구현 블로커(Windows
+install step)는 해소됐고 release 아티팩트 경로(staging→번들→released `suji` 자립 해석) 검증만
+후속이라 release 에선 보수적으로 off. ② **iOS**: V8 처럼 CPython JIT 아닌 인터프리터라
+가능성은 있으나 iOS 용 python-build-standalone + 코드서명/샌드박스 + 모바일 호스트(examples/ios)
+배선이 필요 — 모바일 트랙 별도 작업, 미배선.
 
 ## 배포 / 설치
 
