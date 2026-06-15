@@ -301,6 +301,14 @@ fn onAllClosed(_: suji.Event) void {
 // suji.on("app:open-url", ({url})) — deep-link 수신 (macOS NSAppleEventManager kAEGetURL Apple Event).
 //   deepLinkSchemes(suji.json)로 등록된 scheme(myapp://)으로 앱 열릴 때 발화. ⚠️ 실 deep-link 검증은
 //   .app 번들+scheme 등록+실제 열기 필요(빌드+wire 검증, 정직 경계)
+// suji.on("app:certificate-error", ({id,url,errorCode})) — TLS 인증서 검증 실패 (Electron app.on
+//   'certificate-error'). app.certificateErrorRespond(id, allow) 로 허용/거부 (deferred callback).
+// suji.on("app:login", ({id,url,host,port,realm,scheme,isProxy})) — HTTP basic/proxy auth 요구.
+//   app.loginRespond(id, ok, username, password) 로 자격증명 제공/취소.
+// suji.on("app:select-client-certificate", ({id,isProxy,host,port,certCount})) — client cert 요구.
+//   app.selectClientCertificateRespond(id, index) 로 선택(index 0-based, -1=기본 select null).
+//   ⚠️ 셋 다 CEF request_handler deferred 콜백(pending pool + UI-thread RespondTask) — 실 TLS/auth/
+//   client-cert 검증은 헤드리스 불가(빌드+wire 검증, 정직 경계). 전 5 SDK.
 // suji.exit()                  — 앱 강제 종료 (Electron app.exit(), code 무시)
 // suji.relaunch()              — quit 후 현재 앱 재시작 등록 (Electron app.relaunch).
 //   이후 quit/exit 시 cef 메시지 루프 종료 후 현재 argv 로 새 인스턴스 spawn(detached).

@@ -3698,6 +3698,21 @@ pub fn get_application_info_for_protocol(url: &str) -> Option<String> {
     invoke("__core__", &serde_json::json!({ "cmd": "app_get_application_info_for_protocol", "url": url }).to_string())
 }
 
+/// app:certificate-error 응답 — allow=true 허용 / false 거부. 응답 `{"success":bool}`.
+pub fn certificate_error_respond(id: u64, allow: bool) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "certificate_error_respond", "id": id, "allow": allow }).to_string())
+}
+
+/// app:login(basic auth) 응답 — ok=true 면 username/password, false 면 취소. 응답 `{"success":bool}`.
+pub fn login_respond(id: u64, ok: bool, username: &str, password: &str) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "login_respond", "id": id, "ok": ok, "username": username, "password": password }).to_string())
+}
+
+/// app:select-client-certificate 응답 — index(0-based) 선택, -1=기본. 응답 `{"success":bool}`.
+pub fn select_client_certificate_respond(id: u64, index: i64) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "select_client_certificate_respond", "id": id, "index": index }).to_string())
+}
+
 pub(crate) fn scoped_bookmark_create_json(path: &str) -> String {
     serde_json::json!({ "cmd": "security_scoped_bookmark_create", "path": path }).to_string()
 }

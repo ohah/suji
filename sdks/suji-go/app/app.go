@@ -237,6 +237,21 @@ func GetApplicationInfoForProtocol(url string) string {
 	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"app_get_application_info_for_protocol","url":"%s"}`, jsonesc.Full(url)))
 }
 
+// CertificateErrorRespond — app:certificate-error 응답 (allow=true 허용). raw JSON: `{"success":bool}`.
+func CertificateErrorRespond(id uint64, allow bool) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"certificate_error_respond","id":%d,"allow":%t}`, id, allow))
+}
+
+// LoginRespond — app:login(basic auth) 응답 (ok=true 면 username/password). raw JSON: `{"success":bool}`.
+func LoginRespond(id uint64, ok bool, username, password string) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"login_respond","id":%d,"ok":%t,"username":"%s","password":"%s"}`, id, ok, jsonesc.Full(username), jsonesc.Full(password)))
+}
+
+// SelectClientCertificateRespond — app:select-client-certificate 응답 (index, -1=기본). raw JSON: `{"success":bool}`.
+func SelectClientCertificateRespond(id uint64, index int64) string {
+	return suji.Invoke("__core__", fmt.Sprintf(`{"cmd":"select_client_certificate_respond","id":%d,"index":%d}`, id, index))
+}
+
 // CreateSecurityScopedBookmark creates a security-scoped bookmark for App
 // Sandbox persistent file access. Response:
 // `{"success":bool,"bookmark":"<base64>"}` (비-sandbox 빌드에선 일반 bookmark).
