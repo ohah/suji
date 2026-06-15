@@ -3,6 +3,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const runtime = @import("runtime");
+const util = @import("util");
 const cef = @import("cef.zig");
 
 const is_macos = builtin.os.tag == .macos;
@@ -339,4 +340,89 @@ pub fn appIsInApplicationsFolder() bool {
     var buf: [1024]u8 = undefined;
     const path = appGetBundlePath(&buf);
     return std.mem.indexOf(u8, path, "/Applications/") != null;
+}
+
+/// 시스템 지역 코드 (Electron `app.getLocaleCountryCode()`). NSLocale.countryCode (ISO 3166, "US"/"KR").
+/// macOS only(Win/Linux 빈 문자열).
+pub fn appGetLocaleCountryCode(out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const NSLocale = getClass("NSLocale") orelse return out_buf[0..0];
+    const locale = msgSend(NSLocale, "currentLocale") orelse return out_buf[0..0];
+    const cc = msgSend(locale, "countryCode") orelse return out_buf[0..0];
+    return nsStringToUtf8Buf(cc, out_buf);
+}
+
+/// 최근 문서 경로들 JSON 배열 (Electron `app.getRecentDocuments()`). NSDocumentController.recentDocumentURLs.
+/// clipboardAvailableFormats 패턴(std.Io.Writer.fixed + util.escapeJsonStrFull). macOS only(Win/Linux "[]").
+pub fn appGetRecentDocuments(out_buf: []u8) []const u8 {
+    var w: std.Io.Writer = .fixed(out_buf);
+    w.writeByte('[') catch return out_buf[0..1];
+    if (!comptime is_macos) {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    }
+    const NSDocumentController = getClass("NSDocumentController") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const dc = msgSend(NSDocumentController, "sharedDocumentController") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const urls = msgSend(dc, "recentDocumentURLs") orelse {
+        w.writeByte(']') catch {};
+        return w.buffered();
+    };
+    const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) u64 = @ptrCast(&objc.objc_msgSend);
+    const count = count_fn(urls, @ptrCast(objc.sel_registerName("count")));
+    const at_fn: *const fn (?*anyopaque, ?*anyopaque, u64) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    var first = true;
+    var i: u64 = 0;
+    while (i < count) : (i += 1) {
+        const url = at_fn(urls, @ptrCast(objc.sel_registerName("objectAtIndex:")), i) orelse continue;
+        const path_obj = msgSend(url, "path") orelse continue;
+        var tmp: [1024]u8 = undefined;
+        const p = nsStringToUtf8Buf(path_obj, &tmp);
+        if (p.len == 0) continue;
+        var esc: [4096]u8 = undefined;
+        const en = util.escapeJsonStrFull(p, &esc) orelse continue;
+        // 닫는 ']' 공간 확보 — 오버플로우 시 닫힘 누락(malformed JSON) 방지.
+        if (w.buffered().len + en + 4 > out_buf.len) break;
+        if (!first) w.writeByte(',') catch break;
+        first = false;
+        w.print("\"{s}\"", .{esc[0..en]}) catch break;
+    }
+    w.writeByte(']') catch return w.buffered();
+    return w.buffered();
+}
+
+/// protocol URL 의 기본 핸들러 앱 NSURL (NSWorkspace URLForApplicationToOpenURL:). null=핸들러 없음.
+/// getApplicationName/InfoForProtocol 공용 헬퍼.
+fn appUrlForProtocol(url_str: []const u8) ?*anyopaque {
+    const ns_url_str = cef.nsStringFromSlice(url_str) orelse return null;
+    const NSURL = getClass("NSURL") orelse return null;
+    const url_fn: *const fn (?*anyopaque, ?*anyopaque, ?*anyopaque) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
+    const url = url_fn(NSURL, @ptrCast(objc.sel_registerName("URLWithString:")), ns_url_str) orelse return null;
+    const NSWorkspace = getClass("NSWorkspace") orelse return null;
+    const ws = msgSend(NSWorkspace, "sharedWorkspace") orelse return null;
+    return url_fn(ws, @ptrCast(objc.sel_registerName("URLForApplicationToOpenURL:")), url);
+}
+
+/// protocol URL 을 처리하는 기본 앱 이름 (Electron `app.getApplicationNameForProtocol(url)`).
+/// 예: "https://" → "Safari". 핸들러 없으면 빈 문자열. macOS only(Win/Linux 빈).
+pub fn appGetApplicationNameForProtocol(url_str: []const u8, out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const app_url = appUrlForProtocol(url_str) orelse return out_buf[0..0];
+    const last = msgSend(app_url, "lastPathComponent") orelse return out_buf[0..0];
+    const name = nsStringToUtf8Buf(last, out_buf);
+    return if (std.mem.endsWith(u8, name, ".app")) name[0 .. name.len - 4] else name;
+}
+
+/// protocol URL 을 처리하는 기본 앱 번들 경로 (getApplicationInfoForProtocol 의 path/icon 용).
+/// 핸들러 없으면 빈 문자열. macOS only.
+pub fn appGetApplicationBundleForProtocol(url_str: []const u8, out_buf: []u8) []const u8 {
+    if (!comptime is_macos) return out_buf[0..0];
+    const app_url = appUrlForProtocol(url_str) orelse return out_buf[0..0];
+    const path = msgSend(app_url, "path") orelse return out_buf[0..0];
+    return nsStringToUtf8Buf(path, out_buf);
 }

@@ -1374,6 +1374,44 @@ fn respondBase64Data(response_buf: []u8, cmd: []const u8, raw_bytes: []const u8)
     ) catch null;
 }
 
+/// app.setPath 런타임 경로 오버라이드 (Electron app.setPath → 이후 app.getPath 가 우선 반영).
+/// 정적 16 슬롯 — config.app.name 기반 표준 경로를 런타임에 덮어쓴다.
+const PathOverride = struct {
+    name: [64]u8 = undefined,
+    name_len: usize = 0,
+    path: [1024]u8 = undefined,
+    path_len: usize = 0,
+};
+var g_path_overrides: [16]PathOverride = [_]PathOverride{.{}} ** 16;
+var g_path_override_count: usize = 0;
+
+fn pathOverrideGet(name: []const u8) ?[]const u8 {
+    for (g_path_overrides[0..g_path_override_count]) |*o| {
+        if (std.mem.eql(u8, o.name[0..o.name_len], name)) return o.path[0..o.path_len];
+    }
+    return null;
+}
+
+fn pathOverrideSet(name: []const u8, path: []const u8) bool {
+    if (name.len == 0 or name.len > 64 or path.len > 1024) return false;
+    for (g_path_overrides[0..g_path_override_count]) |*o| {
+        if (std.mem.eql(u8, o.name[0..o.name_len], name)) {
+            @memcpy(o.path[0..path.len], path);
+            o.path_len = path.len;
+            return true;
+        }
+    }
+    if (g_path_override_count >= g_path_overrides.len) return false;
+    const o = &g_path_overrides[g_path_override_count];
+    @memcpy(o.name[0..name.len], name);
+    o.name_len = name.len;
+    @memcpy(o.path[0..path.len], path);
+    o.path_len = path.len;
+    g_path_override_count += 1;
+    return true;
+}
+
+
 const MAX_CRASH_PARAMS: usize = 64;
 const CrashParam = struct {
     key_buf: [crash_reporter.MAX_KEY_BYTES]u8 = undefined,
@@ -2445,9 +2483,12 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
     // app.getPath — Electron 표준 키 7개. config.app.name이 userData 경로에 들어감.
     if (std.mem.eql(u8, cmd, "app_get_path")) {
         const name = util.extractJsonString(req_clean, "name") orelse "";
-        const app_name: []const u8 = if (g_config) |c| c.app.name else "Suji";
         var path_buf: [1024]u8 = undefined;
-        const path = cef.appGetPath(&path_buf, name, app_name) orelse "";
+        // setPath 로 등록된 오버라이드가 있으면 우선, 없으면 표준 경로 (Electron setPath/getPath).
+        const path = pathOverrideGet(name) orelse blk: {
+            const app_name: []const u8 = if (g_config) |c| c.app.name else "Suji";
+            break :blk cef.appGetPath(&path_buf, name, app_name) orelse "";
+        };
         var esc_buf: [2048]u8 = undefined;
         const esc_n = util.escapeJsonStrFull(path, &esc_buf) orelse return coreError(response_buf, "app_get_path", "encode");
         return std.fmt.bufPrint(
@@ -2758,6 +2799,59 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const open_at_login = util.extractJsonBool(req_clean, "openAtLogin") orelse false;
         const ok = cef.setLoginItem(app_name, open_at_login);
         return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_set_login_item_settings\",\"success\":{}}}", .{ok}) catch null;
+    }
+    // app.setPath — Electron getPath 경로 런타임 오버라이드 (정적 테이블에 저장).
+    if (std.mem.eql(u8, cmd, "app_set_path")) {
+        const name = util.extractJsonString(req_clean, "name") orelse "";
+        var p_buf: [1024]u8 = undefined;
+        const path = unescapeField(req_clean, "path", &p_buf, true) orelse "";
+        const ok = pathOverrideSet(name, path);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_set_path\",\"success\":{}}}", .{ok}) catch null;
+    }
+    // app.getLocaleCountryCode — NSLocale.countryCode (ISO 3166, "US"/"KR").
+    if (std.mem.eql(u8, cmd, "app_get_locale_country_code")) {
+        var cc_buf: [16]u8 = undefined;
+        const cc = cef.appGetLocaleCountryCode(&cc_buf);
+        var esc_buf: [32]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(cc, &esc_buf) orelse 0;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_locale_country_code\",\"countryCode\":\"{s}\"}}", .{esc_buf[0..esc_n]}) catch null;
+    }
+    // app.getRecentDocuments — NSDocumentController.recentDocumentURLs (네이티브가 JSON 배열 빌드).
+    if (std.mem.eql(u8, cmd, "app_get_recent_documents")) {
+        var rd_buf: [8192]u8 = undefined;
+        const arr = cef.appGetRecentDocuments(&rd_buf);
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_recent_documents\",\"documents\":{s}}}", .{arr}) catch null;
+    }
+    // app.getApplicationNameForProtocol — NSWorkspace 기본 핸들러 앱 이름.
+    if (std.mem.eql(u8, cmd, "app_get_application_name_for_protocol")) {
+        var u_buf: [2048]u8 = undefined;
+        const url = unescapeField(req_clean, "url", &u_buf, true) orelse "";
+        var name_buf: [512]u8 = undefined;
+        const name = cef.appGetApplicationNameForProtocol(url, &name_buf);
+        var esc_buf: [1024]u8 = undefined;
+        const esc_n = util.escapeJsonStrFull(name, &esc_buf) orelse 0;
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_application_name_for_protocol\",\"name\":\"{s}\"}}", .{esc_buf[0..esc_n]}) catch null;
+    }
+    // app.getApplicationInfoForProtocol — {name, path, icon(base64 PNG)}.
+    if (std.mem.eql(u8, cmd, "app_get_application_info_for_protocol")) {
+        var u_buf: [2048]u8 = undefined;
+        const url = unescapeField(req_clean, "url", &u_buf, true) orelse "";
+        var bundle_buf: [1024]u8 = undefined;
+        const bundle = cef.appGetApplicationBundleForProtocol(url, &bundle_buf);
+        // name 은 appGetApplicationNameForProtocol 재사용(.app-strip 단일 출처 — basename 중복 제거).
+        var name_buf2: [512]u8 = undefined;
+        const name = cef.appGetApplicationNameForProtocol(url, &name_buf2);
+        var icon_raw: [8 * 1024]u8 = undefined;
+        const icon_bytes = if (bundle.len > 0) cef.nativeImageFileIconPng(bundle, &icon_raw) else icon_raw[0..0];
+        var b64_buf: [12 * 1024]u8 = undefined;
+        const enc_size = std.base64.standard.Encoder.calcSize(icon_bytes.len);
+        const icon_b64 = if (enc_size <= b64_buf.len) std.base64.standard.Encoder.encode(b64_buf[0..enc_size], icon_bytes) else "";
+        var name_esc: [512]u8 = undefined;
+        var path_esc: [2048]u8 = undefined;
+        const ne = util.escapeJsonStrFull(name, &name_esc) orelse 0;
+        const pe = util.escapeJsonStrFull(bundle, &path_esc) orelse 0;
+        // base64 알파벳은 JSON-safe — icon 추가 escape 불필요.
+        return std.fmt.bufPrint(response_buf, "{{\"from\":\"zig-core\",\"cmd\":\"app_get_application_info_for_protocol\",\"name\":\"{s}\",\"path\":\"{s}\",\"icon\":\"{s}\"}}", .{ name_esc[0..ne], path_esc[0..pe], icon_b64 }) catch null;
     }
     if (std.mem.eql(u8, cmd, "native_image_get_size")) {
         const raw = util.extractJsonString(req_clean, "path") orelse "";

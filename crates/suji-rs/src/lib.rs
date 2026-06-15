@@ -3668,6 +3668,31 @@ pub fn set_login_item_settings(open_at_login: bool) -> Option<String> {
     invoke("__core__", &serde_json::json!({ "cmd": "app_set_login_item_settings", "openAtLogin": open_at_login }).to_string())
 }
 
+/// Electron app.setPath — getPath 경로 런타임 오버라이드. 응답 `{"success":bool}`.
+pub fn set_path(name: &str, path: &str) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_set_path", "name": name, "path": path }).to_string())
+}
+
+/// Electron app.getLocaleCountryCode — ISO 3166. macOS only. 응답 `{"countryCode":"..."}`.
+pub fn get_locale_country_code() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_locale_country_code"}"#)
+}
+
+/// Electron app.getRecentDocuments. macOS only. 응답 `{"documents":["..."]}`.
+pub fn get_recent_documents() -> Option<String> {
+    invoke("__core__", r#"{"cmd":"app_get_recent_documents"}"#)
+}
+
+/// Electron app.getApplicationNameForProtocol. macOS only. 응답 `{"name":"..."}`.
+pub fn get_application_name_for_protocol(url: &str) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_get_application_name_for_protocol", "url": url }).to_string())
+}
+
+/// Electron app.getApplicationInfoForProtocol. macOS only. 응답 `{"name","path","icon"}`.
+pub fn get_application_info_for_protocol(url: &str) -> Option<String> {
+    invoke("__core__", &serde_json::json!({ "cmd": "app_get_application_info_for_protocol", "url": url }).to_string())
+}
+
 pub(crate) fn scoped_bookmark_create_json(path: &str) -> String {
     serde_json::json!({ "cmd": "security_scoped_bookmark_create", "path": path }).to_string()
 }

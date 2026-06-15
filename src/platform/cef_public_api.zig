@@ -239,6 +239,10 @@ pub const appShowAboutPanel = cef_app.appShowAboutPanel;
 pub const appAddRecentDocument = cef_app.appAddRecentDocument;
 pub const appClearRecentDocuments = cef_app.appClearRecentDocuments;
 pub const appIsInApplicationsFolder = cef_app.appIsInApplicationsFolder;
+pub const appGetLocaleCountryCode = cef_app.appGetLocaleCountryCode;
+pub const appGetRecentDocuments = cef_app.appGetRecentDocuments;
+pub const appGetApplicationNameForProtocol = cef_app.appGetApplicationNameForProtocol;
+pub const appGetApplicationBundleForProtocol = cef_app.appGetApplicationBundleForProtocol;
 pub const loginItemEnabled = cef_login_item.loginItemEnabled;
 pub const setLoginItem = cef_login_item.setLoginItem;
 

@@ -3129,6 +3129,36 @@ export const app = {
     await invoke('__core__', { cmd: 'app_set_login_item_settings', openAtLogin: settings.openAtLogin ?? false });
   },
 
+  /** Electron getPath 경로 런타임 오버라이드 (app.setPath). 이후 getPath(name) 이 반영. */
+  async setPath(name: string, path: string): Promise<boolean> {
+    const r = await invoke<{ success: boolean }>('__core__', { cmd: 'app_set_path', name, path });
+    return r.success === true;
+  },
+
+  /** 시스템 지역 코드 (Electron app.getLocaleCountryCode). ISO 3166 "US"/"KR". macOS only. */
+  async getLocaleCountryCode(): Promise<string> {
+    const r = await invoke<{ countryCode: string }>('__core__', { cmd: 'app_get_locale_country_code' });
+    return r.countryCode ?? '';
+  },
+
+  /** 최근 문서 경로 목록 (Electron app.getRecentDocuments). macOS only. */
+  async getRecentDocuments(): Promise<string[]> {
+    const r = await invoke<{ documents: string[] }>('__core__', { cmd: 'app_get_recent_documents' });
+    return r.documents ?? [];
+  },
+
+  /** protocol URL 의 기본 핸들러 앱 이름 (Electron app.getApplicationNameForProtocol). macOS only. */
+  async getApplicationNameForProtocol(url: string): Promise<string> {
+    const r = await invoke<{ name: string }>('__core__', { cmd: 'app_get_application_name_for_protocol', url });
+    return r.name ?? '';
+  },
+
+  /** protocol URL 핸들러 앱 정보 {name, path, icon(base64 PNG)} (Electron app.getApplicationInfoForProtocol). macOS only. */
+  async getApplicationInfoForProtocol(url: string): Promise<{ name: string; path: string; icon: string }> {
+    const r = await invoke<{ name: string; path: string; icon: string }>('__core__', { cmd: 'app_get_application_info_for_protocol', url });
+    return { name: r.name ?? '', path: r.path ?? '', icon: r.icon ?? '' };
+  },
+
   /**
    * Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 실패 시 null.
    * 비-sandbox 빌드에선 일반 bookmark 로 동작 (sandbox escapement no-op).

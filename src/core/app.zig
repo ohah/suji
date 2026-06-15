@@ -2222,6 +2222,45 @@ pub fn setLoginItemSettings(open_at_login: bool) ?[]const u8 {
     return coreCmd("app_set_login_item_settings", fields);
 }
 
+/// Electron app.setPath — getPath 경로 런타임 오버라이드. 응답 `{"success":bool}`.
+pub fn setPath(name: []const u8, path: []const u8) ?[]const u8 {
+    var nb: [128]u8 = undefined;
+    var pb: [4096]u8 = undefined;
+    const nn = util.escapeJsonStrFull(name, &nb) orelse return null;
+    const pn = util.escapeJsonStrFull(path, &pb) orelse return null;
+    var fb: [4300]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"name\":\"{s}\",\"path\":\"{s}\"", .{ nb[0..nn], pb[0..pn] }) catch return null;
+    return coreCmd("app_set_path", fields);
+}
+
+/// Electron app.getLocaleCountryCode (ISO 3166). 응답 `{"countryCode":"..."}`.
+pub fn getLocaleCountryCode() ?[]const u8 {
+    return coreCmd("app_get_locale_country_code", "");
+}
+
+/// Electron app.getRecentDocuments. 응답 `{"documents":["..."]}`.
+pub fn getRecentDocuments() ?[]const u8 {
+    return coreCmd("app_get_recent_documents", "");
+}
+
+/// Electron app.getApplicationNameForProtocol. 응답 `{"name":"..."}`.
+pub fn getApplicationNameForProtocol(url: []const u8) ?[]const u8 {
+    var ub: [2048]u8 = undefined;
+    const un = util.escapeJsonStrFull(url, &ub) orelse return null;
+    var fb: [2100]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"url\":\"{s}\"", .{ub[0..un]}) catch return null;
+    return coreCmd("app_get_application_name_for_protocol", fields);
+}
+
+/// Electron app.getApplicationInfoForProtocol. 응답 `{"name","path","icon"}`.
+pub fn getApplicationInfoForProtocol(url: []const u8) ?[]const u8 {
+    var ub: [2048]u8 = undefined;
+    const un = util.escapeJsonStrFull(url, &ub) orelse return null;
+    var fb: [2100]u8 = undefined;
+    const fields = std.fmt.bufPrint(&fb, "\"url\":\"{s}\"", .{ub[0..un]}) catch return null;
+    return coreCmd("app_get_application_info_for_protocol", fields);
+}
+
 /// Security-scoped bookmark 생성 (App Sandbox 영속 파일 접근). 응답:
 /// `{"success":bool,"bookmark":"<base64>"}`. 비-sandbox 빌드에선 일반 bookmark.
 pub fn createSecurityScopedBookmark(path: []const u8) ?[]const u8 {
