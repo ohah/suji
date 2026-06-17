@@ -22,6 +22,10 @@ const ResourceHandlerData = struct {
     is_partial: bool,
     range_start: usize,
     range_end: usize,
+    // cross-origin fetch 허용 여부 — true 면 응답에 Access-Control-Allow-Origin:* 를 단다.
+    // suji://app 페이지가 suji-video:// 영상을 fetch(내보내기 zip)할 때 필요. 앱 자산(suji://app)은
+    // same-origin 이라 false.
+    cors: bool,
 };
 
 // per-request 동적 객체 — 글로벌 no-op refcount(release 항상 1)를 쓰면 안 됨.
@@ -56,7 +60,7 @@ fn rhHasAtLeastOneRefCb(base: ?*c.cef_base_ref_counted_t) callconv(.c) i32 {
     return if (rh.ref_count.load(.acquire) >= 1) 1 else 0;
 }
 
-fn initResourceHandler(rh: *ResourceHandlerData, data: []u8, mime: [:0]const u8, status: i32) void {
+fn initResourceHandler(rh: *ResourceHandlerData, data: []u8, mime: [:0]const u8, status: i32, cors: bool) void {
     zeroCefStruct(c.cef_resource_handler_t, &rh.handler);
     // base 는 글로벌 no-op 대신 인스턴스별 refcount (UAF 방지).
     rh.handler.base.add_ref = &rhAddRef;
@@ -77,11 +81,12 @@ fn initResourceHandler(rh: *ResourceHandlerData, data: []u8, mime: [:0]const u8,
     rh.is_partial = false;
     rh.range_start = 0;
     rh.range_end = if (data.len > 0) data.len - 1 else 0;
+    rh.cors = cors;
 }
 
-pub fn createResourceHandler(data: []u8, path: []const u8) ?*c.cef_resource_handler_t {
+pub fn createResourceHandler(data: []u8, path: []const u8, cors: bool) ?*c.cef_resource_handler_t {
     const rh = std.heap.page_allocator.create(ResourceHandlerData) catch return null;
-    initResourceHandler(rh, data, mimeTypeForPath(path), 200);
+    initResourceHandler(rh, data, mimeTypeForPath(path), 200, cors);
     return &rh.handler;
 }
 
@@ -91,7 +96,7 @@ pub fn createErrorHandler(status: i32) ?*c.cef_resource_handler_t {
         std.heap.page_allocator.free(body);
         return null;
     };
-    initResourceHandler(rh, body, "text/plain", status);
+    initResourceHandler(rh, body, "text/plain", status, false);
     return &rh.handler;
 }
 
@@ -166,6 +171,12 @@ fn rhGetResponseHeaders(
     setRespHeader(resp, "Accept-Ranges", "bytes");
 
     cef_scheme_security.setSecurityHeaders(resp);
+
+    // cross-origin fetch(내보내기 zip)용 — suji-video 응답에만 ACAO. 미디어 seek 헤더도 노출.
+    if (rh.cors) {
+        setRespHeader(resp, "Access-Control-Allow-Origin", "*");
+        setRespHeader(resp, "Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+    }
 
     if (rh.is_partial) {
         resp.set_status.?(resp, 206);

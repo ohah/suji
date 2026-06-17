@@ -28,7 +28,8 @@ const DEFAULT_CSP_TEMPLATE =
     "script-src 'self' suji: 'unsafe-inline'; " ++
     "style-src 'self' suji: 'unsafe-inline'; " ++
     "img-src 'self' suji: data: blob:; " ++
-    "connect-src 'self' suji: ws: wss: http: https:; " ++
+    "media-src 'self' suji: suji-video: blob:; " ++
+    "connect-src 'self' suji: suji-video: ws: wss: http: https:; " ++
     "font-src 'self' suji: data:; " ++
     "frame-src " ++ CSP_FRAME_SRC_SENTINEL ++ ";";
 

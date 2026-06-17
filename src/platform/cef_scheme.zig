@@ -143,8 +143,8 @@ fn schemeFactoryCreate(
         return cef_scheme_resource.createErrorHandler(404);
     };
 
-    // ResourceHandler 생성
-    return cef_scheme_resource.createResourceHandler(data, path) orelse {
+    // ResourceHandler 생성 (앱 자산 — same-origin 이라 cors 불필요)
+    return cef_scheme_resource.createResourceHandler(data, path, false) orelse {
         std.heap.page_allocator.free(data);
         return null;
     };
@@ -191,7 +191,8 @@ fn videoSchemeFactoryCreate(
         std.debug.print("[suji] suji-video 404: {s}\n", .{abspath});
         return cef_scheme_resource.createErrorHandler(404);
     };
-    return cef_scheme_resource.createResourceHandler(data, abspath) orelse {
+    // cross-origin fetch(내보내기 zip) 허용 — suji://app 페이지가 fetch 하므로 cors=true.
+    return cef_scheme_resource.createResourceHandler(data, abspath, true) orelse {
         std.heap.page_allocator.free(data);
         return null;
     };
