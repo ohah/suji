@@ -55,6 +55,12 @@ pub fn onRegisterCustomSchemes(
         c.CEF_SCHEME_OPTION_CSP_BYPASSING;
     const result = reg.add_custom_scheme.?(reg, &scheme_name, options);
     std.debug.print("[suji] register scheme 'suji': {d}\n", .{result});
+
+    // suji-video — 로컬 영상 파일 전용 스킴(앱 페이지 suji 와 분리). 동일 옵션.
+    var video_scheme: c.cef_string_t = .{};
+    setCefString(&video_scheme, "suji-video");
+    const vresult = reg.add_custom_scheme.?(reg, &video_scheme, options);
+    std.debug.print("[suji] register scheme 'suji-video': {d}\n", .{vresult});
 }
 
 /// cef_initialize 후 호출 — scheme handler factory 등록
@@ -67,6 +73,15 @@ pub fn registerSchemeHandlerFactory() void {
     initSchemeHandlerFactory();
     const result = c.cef_register_scheme_handler_factory(&scheme_name, &domain_name, &g_scheme_factory);
     std.debug.print("[suji] register scheme handler factory: {d}\n", .{result});
+
+    // suji-video://localhost — 로컬 영상 파일 전용 factory.
+    var video_scheme: c.cef_string_t = .{};
+    setCefString(&video_scheme, "suji-video");
+    var video_domain: c.cef_string_t = .{};
+    setCefString(&video_domain, "localhost");
+    initVideoSchemeHandlerFactory();
+    const vresult = c.cef_register_scheme_handler_factory(&video_scheme, &video_domain, &g_video_factory);
+    std.debug.print("[suji] register suji-video factory: {d}\n", .{vresult});
 }
 
 // --- Scheme Handler Factory ---
@@ -112,26 +127,6 @@ fn schemeFactoryCreate(
 
     std.debug.print("[suji] scheme request: {s} → {s}\n", .{ url, path });
 
-    // 로컬파일 라우트 — `suji://app/__localfile__<절대경로>` → 디스크의 임의 파일(QA 녹화
-    // 영상 등) 서빙. webview 가 file:// 을 못 쓰는 대신 등록된 suji 스킴으로 로컬 파일을
-    // 로드한다(dev http/프로덕션 suji 페이지 모두 가능). 보안상 suji.json `app.allowFileAccess`
-    // (=SUJI_ALLOW_FILE_ACCESS env) 가 켜진 경우에만 허용.
-    const LOCAL_PREFIX = "/__localfile__";
-    if (std.mem.startsWith(u8, path, LOCAL_PREFIX)) {
-        if (runtime.env("SUJI_ALLOW_FILE_ACCESS") == null)
-            return cef_scheme_resource.createErrorHandler(403);
-        const abspath = path[LOCAL_PREFIX.len..];
-        const lf_max: usize = 512 * 1024 * 1024;
-        const lf_data = std.Io.Dir.cwd().readFileAlloc(runtime.io, abspath, std.heap.page_allocator, .limited(lf_max)) catch {
-            std.debug.print("[suji] localfile 404: {s}\n", .{abspath});
-            return cef_scheme_resource.createErrorHandler(404);
-        };
-        return cef_scheme_resource.createResourceHandler(lf_data, abspath) orelse {
-            std.heap.page_allocator.free(lf_data);
-            return null;
-        };
-    }
-
     // dist 경로 + 요청 경로 → 파일 시스템 경로
     const dist = getDistPath();
     if (dist.len == 0) return null;
@@ -150,6 +145,53 @@ fn schemeFactoryCreate(
 
     // ResourceHandler 생성
     return cef_scheme_resource.createResourceHandler(data, path) orelse {
+        std.heap.page_allocator.free(data);
+        return null;
+    };
+}
+
+// --- suji-video:// 로컬 영상 파일 전용 스킴 (suji://app 앱 페이지와 분리) ---
+// `suji-video://localhost<절대경로>` → 디스크 파일(QA 녹화 영상 등) 서빙. Range/skip 은
+// cef_scheme_resource 가 처리. webview 가 file:// 을 못 쓰는 대신 등록된 suji-video 스킴으로
+// 로드한다. 보안상 SUJI_ALLOW_FILE_ACCESS(=suji.json app.allowFileAccess) 가 켜진 경우에만 허용.
+var g_video_factory: c.cef_scheme_handler_factory_t = undefined;
+var g_video_factory_initialized: bool = false;
+
+fn initVideoSchemeHandlerFactory() void {
+    if (g_video_factory_initialized) return;
+    zeroCefStruct(c.cef_scheme_handler_factory_t, &g_video_factory);
+    initBaseRefCounted(&g_video_factory.base);
+    g_video_factory.create = &videoSchemeFactoryCreate;
+    g_video_factory_initialized = true;
+}
+
+fn videoSchemeFactoryCreate(
+    _: ?*c._cef_scheme_handler_factory_t,
+    _: ?*c._cef_browser_t,
+    _: ?*c._cef_frame_t,
+    _: [*c]const c.cef_string_t,
+    request: ?*c._cef_request_t,
+) callconv(.c) ?*c._cef_resource_handler_t {
+    const req = request orelse return null;
+    if (runtime.env("SUJI_ALLOW_FILE_ACCESS") == null)
+        return cef_scheme_resource.createErrorHandler(403);
+
+    const url_userfree = req.get_url.?(req);
+    var url_buf: [2048]u8 = undefined;
+    const url = cefUserfreeToUtf8(url_userfree, &url_buf);
+
+    // suji-video://localhost<절대경로> 에서 절대경로 추출.
+    const MARK = "suji-video://localhost";
+    const idx = std.mem.indexOf(u8, url, MARK) orelse return cef_scheme_resource.createErrorHandler(404);
+    const abspath = url[idx + MARK.len ..];
+    if (abspath.len == 0 or abspath[0] != '/') return cef_scheme_resource.createErrorHandler(404);
+
+    const max: usize = 512 * 1024 * 1024;
+    const data = std.Io.Dir.cwd().readFileAlloc(runtime.io, abspath, std.heap.page_allocator, .limited(max)) catch {
+        std.debug.print("[suji] suji-video 404: {s}\n", .{abspath});
+        return cef_scheme_resource.createErrorHandler(404);
+    };
+    return cef_scheme_resource.createResourceHandler(data, abspath) orelse {
         std.heap.page_allocator.free(data);
         return null;
     };

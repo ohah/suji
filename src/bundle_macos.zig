@@ -554,7 +554,7 @@ fn codesignBundle(allocator: std.mem.Allocator, app_name: []const u8, name: []co
     // Resources/plugins/<name>/<basename> 각각 sign. inherit entitlements
     // 라(receiver process), 명시적 entitlements 없이.  --deep 대신 명시 sign
     // (Apple 권장; --deep 은 deprecated). 디렉토리 부재면 skip.
-    try codesignDylibsIn(allocator, app_name, "Contents/Resources/backends", opts);
+    try codesignMachOTree(allocator, app_name, "Contents/Resources/backends", opts);
     try codesignDylibsIn(allocator, app_name, "Contents/Resources/plugins", opts);
 
     // 2.7. Contents/MacOS 의 동반 dylib(libnode/libpython) — 메인 exe 서명 전에 개별
@@ -589,6 +589,44 @@ fn codesignDylibsIn(allocator: std.mem.Allocator, app_name: []const u8, sub_path
             const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ child, f.name });
             defer allocator.free(path);
             try codesignNoEntitlements(allocator, path, opts);
+        }
+    }
+}
+
+/// backends 처럼 임의 깊이 디렉토리를 재귀 순회하며 Mach-O(dylib + 확장자 없는 실행 바이너리)만
+/// 서명한다. codesignDylibsIn 은 2단계(root/child/file)만 봐서 bin/sck-recorder(3단계)나
+/// node_modules/ffmpeg-static/ffmpeg(4단계) 같은 깊은 실행 바이너리를 빠뜨려, 공증이
+/// "valid Developer ID 아님 + secure timestamp 없음" 으로 reject 한다. magic 으로 Mach-O 만
+/// 골라 서명(텍스트/JSON 등은 skip). inherit entitlements 라 명시 entitlements 없이.
+fn codesignMachOTree(allocator: std.mem.Allocator, app_name: []const u8, sub_path: []const u8, opts: BundleOptions) !void {
+    const root = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ app_name, sub_path });
+    defer allocator.free(root);
+    try codesignMachOTreeAt(allocator, root, opts);
+}
+
+fn codesignMachOTreeAt(allocator: std.mem.Allocator, dir_path: []const u8, opts: BundleOptions) !void {
+    var dir = Dir.cwd().openDir(runtime.io, dir_path, .{ .iterate = true }) catch return;
+    defer dir.close(runtime.io);
+    var it = dir.iterate();
+    while (try it.next(runtime.io)) |entry| {
+        const path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ dir_path, entry.name });
+        defer allocator.free(path);
+        switch (entry.kind) {
+            .directory => try codesignMachOTreeAt(allocator, path, opts),
+            .file => {
+                // Mach-O 후보만 서명 — 확장자 없는 실행 바이너리(sck-recorder/ffmpeg) + .dylib/.node/.so.
+                // 텍스트/JS/JSON 등은 codesign 이 실패하므로 무시(catch). readFileAlloc(.limited(4)) 로
+                // magic 을 읽으려 했으나, .limited 는 "파일이 N 바이트보다 크면 에러"라 큰 Mach-O 가
+                // 죄다 판별 실패했다 → 확장자 기반 필터로 대체.
+                const dot = std.mem.lastIndexOfScalar(u8, entry.name, '.');
+                const candidate = dot == null or
+                    std.mem.endsWith(u8, entry.name, ".dylib") or
+                    std.mem.endsWith(u8, entry.name, ".node") or
+                    std.mem.endsWith(u8, entry.name, ".so");
+                if (candidate)
+                    codesignNoEntitlements(allocator, path, opts) catch {};
+            },
+            else => {},
         }
     }
 }
