@@ -58,6 +58,10 @@ pub const Config = struct {
         /// macOS `CFBundleURLTypes`). 비어있으면 미주입. 예: `["myapp"]` →
         /// `myapp://...` 가 OS 레벨에서 이 앱으로 라우팅(.app 번들 한정).
         deep_link_schemes: []const [:0]const u8 = &.{},
+        /// 로컬 파일(file://) 접근 허용 — webview 페이지가 디스크 파일을 직접 로드
+        /// (예: QA 녹화 영상 `<video src=file://…>`). CEF `--allow-file-access-from-files`
+        /// + `--disable-web-security` 를 켠다. 보안상 기본 false. QA/내부 도구 전용.
+        allow_file_access: bool = false,
         /// CEF Crashpad/Breakpad startup config. CEF는 initialize 전에
         /// `crash_reporter.cfg`를 읽으므로 설정이 있으면 시작 전 cfg를 생성한다.
         crash_reporter: ?CrashReporter = null,
@@ -399,6 +403,9 @@ pub const Config = struct {
                         }
                         config.app.deep_link_schemes = list.toOwnedSlice(a) catch &.{};
                     }
+                }
+                if (app.get("allowFileAccess")) |afa_val| {
+                    if (afa_val == .bool) config.app.allow_file_access = afa_val.bool;
                 }
             }
         }

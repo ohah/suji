@@ -112,6 +112,26 @@ fn schemeFactoryCreate(
 
     std.debug.print("[suji] scheme request: {s} → {s}\n", .{ url, path });
 
+    // 로컬파일 라우트 — `suji://app/__localfile__<절대경로>` → 디스크의 임의 파일(QA 녹화
+    // 영상 등) 서빙. webview 가 file:// 을 못 쓰는 대신 등록된 suji 스킴으로 로컬 파일을
+    // 로드한다(dev http/프로덕션 suji 페이지 모두 가능). 보안상 suji.json `app.allowFileAccess`
+    // (=SUJI_ALLOW_FILE_ACCESS env) 가 켜진 경우에만 허용.
+    const LOCAL_PREFIX = "/__localfile__";
+    if (std.mem.startsWith(u8, path, LOCAL_PREFIX)) {
+        if (runtime.env("SUJI_ALLOW_FILE_ACCESS") == null)
+            return cef_scheme_resource.createErrorHandler(403);
+        const abspath = path[LOCAL_PREFIX.len..];
+        const lf_max: usize = 512 * 1024 * 1024;
+        const lf_data = std.Io.Dir.cwd().readFileAlloc(runtime.io, abspath, std.heap.page_allocator, .limited(lf_max)) catch {
+            std.debug.print("[suji] localfile 404: {s}\n", .{abspath});
+            return cef_scheme_resource.createErrorHandler(404);
+        };
+        return cef_scheme_resource.createResourceHandler(lf_data, abspath) orelse {
+            std.heap.page_allocator.free(lf_data);
+            return null;
+        };
+    }
+
     // dist 경로 + 요청 경로 → 파일 시스템 경로
     const dist = getDistPath();
     if (dist.len == 0) return null;

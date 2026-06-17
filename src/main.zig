@@ -739,6 +739,9 @@ fn runDev(allocator: std.mem.Allocator) !void {
 
     std.debug.print("[suji] dev mode - {s} v{s}\n", .{ config.app.name, config.app.version });
 
+    // 로컬 파일(file://) 접근 옵션 — 렌더러(자식)가 OS env 를 상속하도록 cef_initialize 전 set.
+    if (config.app.allow_file_access) runtime.setEnv("SUJI_ALLOW_FILE_ACCESS", "1");
+
     try embed.init(allocator, runtime.io);
     defer embed.deinit();
     const registry = embed.registry(); // *BackendRegistry — setGlobal은 embed.init이 수행
@@ -935,6 +938,9 @@ fn runProd(allocator: std.mem.Allocator) !void {
     defer if (owned_csp) |csp| allocator.free(csp);
 
     std.debug.print("[suji] production mode - {s}\n", .{config.app.name});
+
+    // 로컬 파일(file://) 접근 옵션 — 렌더러(자식)가 OS env 를 상속하도록 cef_initialize 전 set.
+    if (config.app.allow_file_access) runtime.setEnv("SUJI_ALLOW_FILE_ACCESS", "1");
 
     try embed.init(allocator, runtime.io);
     defer embed.deinit();

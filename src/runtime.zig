@@ -3,6 +3,7 @@
 //! main 진입 초기에 `init(...)`으로 채워야 한다.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub var io: std.Io = undefined;
 pub var gpa: std.mem.Allocator = undefined;
@@ -25,4 +26,18 @@ pub fn init(v: struct {
 pub fn env(key: []const u8) ?[]const u8 {
     const m = environ_map orelse return null;
     return m.get(key);
+}
+
+/// 환경변수 설정 — OS 환경(서브프로세스 상속용)과 현재 프로세스 environ_map 둘 다.
+/// CEF 렌더러 등 자식 프로세스는 OS env 를 상속해 시작 시 파싱하므로, 부모가 여기서
+/// OS env 를 set 하면 자식 프로세스의 runtime.env() 에서도 보인다(POSIX). Windows 는
+/// 현재 프로세스 갱신만(자식 상속은 추후 _putenv).
+// libc setenv — Zig 0.16 std.c 에 미노출이라 직접 extern 선언(POSIX). 미참조 시 링크 제외.
+extern "c" fn setenv(name: [*:0]const u8, value: [*:0]const u8, overwrite: c_int) c_int;
+
+pub fn setEnv(key: [:0]const u8, value: [:0]const u8) void {
+    if (builtin.os.tag != .windows) {
+        _ = setenv(key.ptr, value.ptr, 1);
+    }
+    if (environ_map) |m| m.put(key, value) catch {};
 }

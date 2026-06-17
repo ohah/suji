@@ -182,8 +182,8 @@ pub fn initialize(config: CefConfig) !void {
     }
     std.debug.print("[suji] CEF initialized\n", .{});
 
-    // 커스텀 프로토콜 핸들러 등록 (dist 경로가 설정된 경우)
-    if (cef_scheme.hasDistPath()) {
-        cef_scheme.registerSchemeHandlerFactory();
-    }
+    // 커스텀 프로토콜 핸들러 등록 — 항상. 프로덕션의 dist 서빙(suji://app/*)뿐 아니라
+    // dev(vite http)에서도 suji://app/__localfile__ 로컬파일 라우트(QA 영상 등)를 처리해야
+    // 한다. dist 가 비어 있으면 dist 라우트만 비활성이고, __localfile__ 는 그와 무관하게 동작.
+    cef_scheme.registerSchemeHandlerFactory();
 }

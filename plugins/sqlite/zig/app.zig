@@ -173,6 +173,8 @@ fn sqlOpen(req: suji.Request, _: suji.InvokeEvent) suji.Response {
         if (db) |d| _ = c.sqlite3_close_v2(d);
         return req.err("open failed");
     }
+    // SQLITE_BUSY(lock 경합) 시 즉시 실패 대신 최대 5s 재시도 — WAL + 동시 접근에서 안정.
+    _ = c.sqlite3_busy_timeout(db.?, 5000);
 
     reg.mutex.lockUncancelable(pluginIo());
     defer reg.mutex.unlock(pluginIo());
@@ -255,6 +257,9 @@ fn sqlExecute(req: suji.Request, _: suji.InvokeEvent) suji.Response {
 }
 
 fn sqlQuery(req: suji.Request, _: suji.InvokeEvent) suji.Response {
+    // sqlite 가 SQLITE_THREADSAFE=1(serialized, 내부 단일 뮤텍스)이라 단일 연결에서는 step 을
+    // 뮤텍스 밖으로 빼도 내부 뮤텍스로 직렬화돼 병렬 이득이 없고 이중 락 오버헤드만 생긴다.
+    // → 전체를 글로벌 뮤텍스로 단순 보호한다(진짜 병렬은 connection-per-thread 가 필요).
     reg.mutex.lockUncancelable(pluginIo());
     defer reg.mutex.unlock(pluginIo());
 
