@@ -29,6 +29,12 @@ fn clearCefStr(s: *c.cef_string_t) void {
     s.* = .{};
 }
 
+/// cef_base_ref_counted_t.release 호출(소유 ref 반납). consume 전 에러 경로 전용 —
+/// set_dictionary/set_preference 로 consume 된 뒤엔 release 금지(double-free UAF).
+fn releaseRefCounted(base: *c.cef_base_ref_counted_t) void {
+    if (base.release) |rel| _ = rel(base);
+}
+
 fn dictSetStr(dict: *c.cef_dictionary_value_t, key: []const u8, val: []const u8) void {
     const set_string = dict.set_string orelse return;
     var k: c.cef_string_t = .{};
@@ -65,8 +71,17 @@ fn setProxyOnUi(mode: []const u8, proxy_rules: []const u8, bypass: []const u8, p
     if (bypass.len > 0) dictSetStr(dict, "bypass_list", bypass);
     if (pac_url.len > 0) dictSetStr(dict, "pac_url", pac_url);
 
-    const value = asPtr(c.cef_value_t, c.cef_value_create()) orelse return false;
-    const set_dict = value.set_dictionary orelse return false;
+    const value = asPtr(c.cef_value_t, c.cef_value_create()) orelse {
+        // value 생성 실패 — dict 는 아직 set_dict 로 consume 되지 않았으므로 우리가 소유.
+        // 해제하지 않으면 누수(set_dict 이후 release 는 금지지만 이 경로는 그 전이라 안전).
+        releaseRefCounted(&dict.base);
+        return false;
+    };
+    const set_dict = value.set_dictionary orelse {
+        releaseRefCounted(&value.base);
+        releaseRefCounted(&dict.base);
+        return false;
+    };
     _ = set_dict(value, dict); // dict ref 인수됨 — 이후 dict 접근 금지
 
     var name: c.cef_string_t = .{};

@@ -246,6 +246,10 @@ pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
     const count_fn: *const fn (?*anyopaque, ?*anyopaque) callconv(.c) usize = @ptrCast(&objc.objc_msgSend);
     const count = count_fn(types, @ptrCast(objc.sel_registerName("count")));
 
+    // 콤마는 루프 인덱스(i>0)가 아니라 "실제로 쓴 항목이 있는가"(wrote)로 찍는다 —
+    // 선행 type 이 skip(빈 이름/디코드 실패)되면 i>0 은 선행/이중 콤마(malformed JSON)를
+    // 만든다. 콤마는 escape 성공 후에만 찍어 escape 실패로 인한 trailing 콤마도 막는다.
+    var wrote = false;
     var i: usize = 0;
     while (i < count) : (i += 1) {
         const obj_fn: *const fn (?*anyopaque, ?*anyopaque, usize) callconv(.c) ?*anyopaque = @ptrCast(&objc.objc_msgSend);
@@ -253,12 +257,14 @@ pub fn clipboardAvailableFormats(out_buf: []u8) []const u8 {
         var name_buf: [256]u8 = undefined;
         const name = nsStringToUtf8Buf(type_obj, &name_buf);
         if (name.len == 0) continue;
-        if (i > 0) w.writeByte(',') catch return w.buffered();
         var esc_buf: [512]u8 = undefined;
         const esc_n = util.escapeJsonStrFull(name, &esc_buf) orelse continue;
-        w.print("\"{s}\"", .{esc_buf[0..esc_n]}) catch return w.buffered();
+        if (wrote) w.writeByte(',') catch break;
+        w.print("\"{s}\"", .{esc_buf[0..esc_n]}) catch break;
+        wrote = true;
     }
-    w.writeByte(']') catch return w.buffered();
+    // 오버플로로 loop 를 빠져나와도 닫는 ']' 를 best-effort 로 써 valid JSON 을 보존.
+    w.writeByte(']') catch {};
     return w.buffered();
 }
 

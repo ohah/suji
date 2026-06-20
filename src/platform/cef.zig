@@ -273,6 +273,7 @@ pub const nullTerminateOrTruncate = cef_public_api.nullTerminateOrTruncate;
 pub const asPtr = cef_public_api.asPtr;
 pub const zeroCefStruct = cef_public_api.zeroCefStruct;
 pub const setCefString = cef_public_api.setCefString;
+pub const clearCefString = cef_public_api.clearCefString;
 pub const setUrlOrBlank = cef_public_api.setUrlOrBlank;
 pub const isAboutBlankUrl = cef_public_api.isAboutBlankUrl;
 pub const getArgString = cef_public_api.getArgString;

@@ -197,3 +197,41 @@ test "host harness(run.sh): 모바일 python ping/echo CI 자동 검증 배선" 
     defer a.free(ci);
     try expectContains(ci, "Stage embedded CPython");
 }
+
+/// build.zig 의 `<marker>"<value>"` 에서 value 추출 (drift 가드용).
+fn extractQuoted(haystack: []const u8, marker: []const u8) ![]const u8 {
+    const start = std.mem.indexOf(u8, haystack, marker) orelse return error.MarkerNotFound;
+    const after = start + marker.len;
+    const end_rel = std.mem.indexOfScalar(u8, haystack[after..], '"') orelse return error.NoCloseQuote;
+    return haystack[after .. after + end_rel];
+}
+
+// bundle_macos.zig 의 libnode/libpython 버전이 build.zig 단일 출처와 동기인지 — 버전
+// bump 가 build.zig 만 바꾸고 bundle_macos 를 빠뜨리면 macOS .app 이 무음 파손되던
+// drift 를 CI 에서 잡는다(build.zig 에서 값을 추출해 bundle 이 그 값을 동반하는지 확인).
+test "bundle_macos 버전이 build.zig 단일 출처와 동기 (drift 가드)" {
+    const a = std.testing.allocator;
+    const build_zig = try slurp(a, "build.zig");
+    defer a.free(build_zig);
+    const bundle = try slurp(a, "src/bundle_macos.zig");
+    defer a.free(bundle);
+
+    // node: build.zig node_version 값을 bundle 이 경로에 동반.
+    const node_ver = try extractQuoted(build_zig, "node_version = \"");
+    try std.testing.expect(std.mem.indexOf(u8, bundle, node_ver) != null);
+
+    // python: build.zig python_version 의 major.minor("3.13")로 libpython<minor> 동반.
+    const py_ver = try extractQuoted(build_zig, "python_version = \"");
+    var dots: usize = 0;
+    var minor_end: usize = py_ver.len;
+    for (py_ver, 0..) |ch, i| if (ch == '.') {
+        dots += 1;
+        if (dots == 2) {
+            minor_end = i;
+            break;
+        }
+    };
+    const libpy = try std.fmt.allocPrint(a, "libpython{s}", .{py_ver[0..minor_end]});
+    defer a.free(libpy);
+    try std.testing.expect(std.mem.indexOf(u8, bundle, libpy) != null);
+}

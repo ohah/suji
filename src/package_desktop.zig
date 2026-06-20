@@ -261,11 +261,27 @@ pub fn packageLinux(
     defer allocator.free(desktop_path);
     try writeFile(desktop_path, desktop);
 
-    // packaged sentinel + backend/plugin dylib (Windows 동등 layout) —
-    // runtime 의 packagedExeDir 가 동일 probe 사용. backends/plugins root
-    // 가 stage 자체.
-    writePackagedSentinel(allocator, stage);
-    try stageBackendArtifacts(allocator, stage, backends, plugins);
+    // exe 가 사는 디렉토리(`stage/bin`) — sentinel/backends/CEF 런타임을 모두 여기 둔다.
+    const bin_root = try std.fmt.allocPrint(allocator, "{s}/bin", .{stage});
+    defer allocator.free(bin_root);
+
+    // CEF 런타임(libcef.so/libEGL/libGLESv2/swiftshader + .pak/icudtl.dat/locales 등)을
+    // exe 옆(stage/bin, rpath `$ORIGIN`)에 동반 — CEF 미설치 clean 머신에서도 실행되도록
+    // (Windows packageWindows 의 copyDirContents 패턴 미러). 빌드 산출(zig-out/bin)에
+    // addInstallCefRuntimeStep 이 배치한 런타임이 source exe 디렉토리에 있다.
+    // ⚠️ 런타임 실행 검증은 Linux 환경/CI 필요(macOS 로컬 불가) — 구조/복사만 로컬 검증.
+    if (std.fs.path.dirname(exe_path)) |src_exe_dir| {
+        copyDirContents(allocator, src_exe_dir, bin_root) catch |err| {
+            std.debug.print("[suji] linux CEF runtime copy failed: {s}\n", .{@errorName(err)});
+        };
+    }
+
+    // packaged sentinel + backend/plugin dylib. ⚠️ Linux 는 exe 를 `stage/bin/<name>`
+    // 에 두므로(stageCommon) runtime 의 packaged probe(`<exe_dir>/.suji-packaged`,
+    // `<exe_dir>/backends`)는 `stage/bin` 을 본다 — sentinel/backends 를 `stage` 루트에
+    // 두면 한 단계 위라 못 찾는다. exe 와 같은 `stage/bin` 에 배치한다.
+    writePackagedSentinel(allocator, bin_root);
+    try stageBackendArtifacts(allocator, bin_root, backends, plugins);
 
     const archive = try std.fmt.allocPrint(allocator, "{s}.tar.gz", .{stage});
     errdefer allocator.free(archive);

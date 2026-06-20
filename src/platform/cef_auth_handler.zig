@@ -233,12 +233,14 @@ pub fn onCertificateError(
     if (!certPush(id, cb)) return releaseCb(&cb.base);
     var url_buf: [2048]u8 = undefined;
     const url = if (request_url != null) cefStringToUtf8(request_url, &url_buf) else "";
-    var esc: [2100]u8 = undefined;
+    // escape 버퍼는 입력 최악(모든 문자 \uXXXX = 6배)을 수용해야 overflow→silent CEF 기본
+    // fallback(앱 핸들러 미발화)을 막는다. 2048*6=12288 < 12300.
+    var esc: [12300]u8 = undefined;
     const en = util.escapeJsonStrFull(url, &esc) orelse {
         _ = certTake(id);
         return releaseCb(&cb.base);
     };
-    var info: [2300]u8 = undefined;
+    var info: [12500]u8 = undefined;
     const json = std.fmt.bufPrint(&info, "{{\"id\":{d},\"url\":\"{s}\",\"errorCode\":{d}}}", .{ id, esc[0..en], @as(i64, cert_error) }) catch {
         _ = certTake(id);
         return releaseCb(&cb.base);
@@ -390,15 +392,17 @@ pub fn getAuthCredentials(
     const host_s = if (host != null) cefStringToUtf8(host, &hb) else "";
     const realm_s = if (realm != null) cefStringToUtf8(realm, &rb) else "";
     const scheme_s = if (scheme != null) cefStringToUtf8(scheme, &sb) else "";
-    var ue: [1100]u8 = undefined;
-    var he: [300]u8 = undefined;
-    var ree: [300]u8 = undefined;
-    var se: [100]u8 = undefined;
+    // escape 버퍼는 입력 최악(모든 문자 \uXXXX = 6배)을 수용해야 overflow→silent CEF
+    // 기본(auth 취소) fallback(앱 핸들러 미발화)을 막는다(ub*6/hb*6/rb*6/sb*6).
+    var ue: [6200]u8 = undefined;
+    var he: [1600]u8 = undefined;
+    var ree: [1600]u8 = undefined;
+    var se: [400]u8 = undefined;
     const un = util.escapeJsonStrFull(url, &ue) orelse return failAuth(id);
     const hn = util.escapeJsonStrFull(host_s, &he) orelse return failAuth(id);
     const rn = util.escapeJsonStrFull(realm_s, &ree) orelse return failAuth(id);
     const sn = util.escapeJsonStrFull(scheme_s, &se) orelse return failAuth(id);
-    var info: [3000]u8 = undefined;
+    var info: [10000]u8 = undefined;
     const json = std.fmt.bufPrint(&info, "{{\"id\":{d},\"url\":\"{s}\",\"isProxy\":{},\"host\":\"{s}\",\"port\":{d},\"realm\":\"{s}\",\"scheme\":\"{s}\"}}", .{ id, ue[0..un], is_proxy != 0, he[0..hn], port, ree[0..rn], se[0..sn] }) catch return failAuth(id);
     emitOnUi("app:login", json);
     return 1;
@@ -413,7 +417,7 @@ fn failAuth(id: u64) c_int {
 // ============================================================
 // select-client-certificate — cef_select_client_certificate_callback_t (select(cert))
 // ============================================================
-const MAX_CERTS: usize = 16;
+const MAX_CERTS: usize = 32;
 const PendingClientCert = struct {
     id: u64,
     cb: *c.cef_select_client_certificate_callback_t,
@@ -567,15 +571,18 @@ pub fn onSelectClientCertificate(
         return 0;
     }
     var hb: [256]u8 = undefined;
-    var he: [300]u8 = undefined;
+    // escape 버퍼는 입력 최악(모든 문자가 \uXXXX = 6배)을 수용해야 overflow→silent CEF
+    // 기본 fallback(이벤트 미발화)이 발생하지 않는다. 256*6=1536 < 1600.
+    var he: [1600]u8 = undefined;
     const host_s = if (host != null) cefStringToUtf8(host, &hb) else "";
-    var info: [512]u8 = undefined;
+    var info: [2048]u8 = undefined;
     const hn = util.escapeJsonStrFull(host_s, &he) orelse {
         _ = clientTake(p.id);
         clientReleaseOnly(p);
         return 0;
     };
-    const json = std.fmt.bufPrint(&info, "{{\"id\":{d},\"isProxy\":{},\"host\":\"{s}\",\"port\":{d},\"certCount\":{d}}}", .{ p.id, is_proxy != 0, he[0..hn], port, p.count }) catch {
+    // certCount=실제 emit 한(절단된) 수, totalCertCount=원본 수. 다르면 app 이 절단을 인지.
+    const json = std.fmt.bufPrint(&info, "{{\"id\":{d},\"isProxy\":{},\"host\":\"{s}\",\"port\":{d},\"certCount\":{d},\"totalCertCount\":{d}}}", .{ p.id, is_proxy != 0, he[0..hn], port, p.count, certificates_count }) catch {
         _ = clientTake(p.id);
         clientReleaseOnly(p);
         return 0;

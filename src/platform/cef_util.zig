@@ -45,6 +45,13 @@ pub fn setCefString(dest: *c.cef_string_t, src: []const u8) void {
     _ = c.cef_string_utf8_to_utf16(src.ptr, src.len, dest);
 }
 
+/// setCefString 이 할당한 UTF-16 버퍼를 cef_string_t.dtor 로 해제하고 구조체를 비운다.
+/// **요청마다 새로 만드는 동적 cef_string_t** 는 사용 후 반드시 호출(누수 방지).
+pub fn clearCefString(s: *c.cef_string_t) void {
+    if (s.dtor) |d| d(s.str);
+    s.* = .{};
+}
+
 /// CEF URL fallback — 빈 url은 페이지 로드 skip → OnLoadEnd/OnTitleChange 미발화로 이어져
 /// `window:ready-to-show` / `page-title-updated` 라이프사이클 이벤트가 안 옴. about:blank
 /// 로 강제해 일관 동작 보장. (`page-title-updated`가 "about:blank" 페이로드로 1회 발화 —

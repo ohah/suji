@@ -192,21 +192,40 @@ const EnabledRuntime = struct {
     // suji.handle(channel, fn) — 인바운드 핸들러 등록(lua handleRegistration 대응).
     // 인자 추출 헬퍼 — variadic PyArg_ParseTuple 은 zig C variadic 전달에서 깨지므로
     // (포인터가 어긋나 segfault) non-variadic PyTuple_GetItem + PyUnicode_AsUTF8 사용.
+    // PyTuple_GetItem(IndexError)/PyUnicode_AsUTF8(TypeError) 는 실패 시 예외를 set 한다.
+    // 호출자는 null 을 받으면 `orelse return pyNone()` 으로 유효 객체를 반환하는데, 예외가
+    // set 된 채 non-NULL 을 돌려주면 CPython 이 SystemError("result with exception set")를
+    // 던진다 — null 반환 전 예외를 정리해 호출자의 graceful 반환을 안전하게 한다.
     fn tupleStr(args: ?*c.PyObject, idx: c.Py_ssize_t) ?[*:0]const u8 {
         const args_c: [*c]c.PyObject = @ptrCast(args);
-        if (c.PyTuple_Size(args_c) <= idx) return null;
+        if (c.PyTuple_Size(args_c) <= idx) {
+            c.PyErr_Clear();
+            return null;
+        }
         const item = c.PyTuple_GetItem(args_c, idx);
-        if (item == null) return null;
+        if (item == null) {
+            c.PyErr_Clear();
+            return null;
+        }
         const s = c.PyUnicode_AsUTF8(item);
-        if (s == null) return null;
+        if (s == null) {
+            c.PyErr_Clear();
+            return null;
+        }
         return @ptrCast(s);
     }
 
     fn tupleObj(args: ?*c.PyObject, idx: c.Py_ssize_t) ?*c.PyObject {
         const args_c: [*c]c.PyObject = @ptrCast(args);
-        if (c.PyTuple_Size(args_c) <= idx) return null;
+        if (c.PyTuple_Size(args_c) <= idx) {
+            c.PyErr_Clear();
+            return null;
+        }
         const item = c.PyTuple_GetItem(args_c, idx);
-        if (item == null) return null;
+        if (item == null) {
+            c.PyErr_Clear();
+            return null;
+        }
         return @ptrCast(item);
     }
 
@@ -248,6 +267,12 @@ const EnabledRuntime = struct {
             const span = std.mem.span(@as([*:0]const u8, @ptrCast(resp)));
             const out = c.PyUnicode_FromStringAndSize(@ptrCast(span.ptr), @intCast(span.len));
             if (g_core_free) |ff| ff(resp);
+            // 응답이 유효 UTF-8 이 아니면 out==NULL+예외 set — 다른 에러 경로와 동일하게
+            // 에러 JSON 으로 폴백(무음 실패/SystemError 방지).
+            if (out == null) {
+                c.PyErr_Clear();
+                return pyStr("{\"error\":\"invoke: response is not valid UTF-8\"}");
+            }
             return out;
         }
         return pyStr("{}");
@@ -284,6 +309,14 @@ const EnabledRuntime = struct {
             return pyNone();
         };
         listener.id = on_fn(@ptrCast(ch_z), pyEventCallback, listener);
+        if (listener.id == 0) {
+            // 코어 등록 실패(id==0) — listener 를 보관하면 누수 + shutdown 시 off(0) 호출.
+            // 방금 append 한 항목을 롤백한다.
+            _ = self.event_listeners.pop();
+            c.Py_DecRef(callable);
+            self.allocator.destroy(listener);
+            return c.PyLong_FromUnsignedLongLong(0);
+        }
         return c.PyLong_FromUnsignedLongLong(listener.id);
     }
 

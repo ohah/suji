@@ -220,6 +220,10 @@ pub fn setTrayMenu(tray_id: u32, items: []const TrayMenuItem) bool {
     const menu = createTrayNSMenuFromItems("", tray_id, items, target) orelse return false;
 
     msgSendVoid1(entry_ptr.status_item, "setMenu:", menu);
+    // createMenu 는 alloc/init(+1 소유)이고 setMenu: 가 retain 하므로 우리 +1 을 반납한다.
+    // 안 하면 setTrayMenu 재호출/destroy 마다 이전 메뉴 트리가 통째로 누수된다(상태 아이템이
+    // 단독 소유 → 교체 시 이전 메뉴 dealloc). entry_ptr.menu 는 비소유 참조로 유지.
+    _ = msgSend(menu, "release");
     entry_ptr.menu = menu;
     return true;
 }

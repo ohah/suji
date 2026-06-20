@@ -321,6 +321,13 @@ const EnabledRuntime = struct {
             return 0;
         };
         listener.id = on_fn(ch_ptr, luaEventCallback, listener);
+        if (listener.id == 0) {
+            // 코어 등록 실패(id==0) — listener 를 보관하면 누수 + shutdown 시 off(0) 호출.
+            // 방금 append 한 항목과 registry ref 를 롤백한다.
+            _ = self.event_listeners.pop();
+            c.luaL_unref(state, c.LUA_REGISTRYINDEX, ref);
+            self.allocator.destroy(listener);
+        }
         _ = c.lua_pushinteger(state, @intCast(listener.id));
         return 1;
     }
