@@ -221,6 +221,11 @@ pub fn sanitizeSource(allocator: std.mem.Allocator, source: []const u8) ?[]u8 {
         out.append(allocator, if (ok) c else '_') catch return null;
     }
     if (out.items.len == 0) out.appendSlice(allocator, "plugin") catch return null;
+    // `/` 등 모든 비허용 문자를 `_` 로 접으면 서로 다른 source(`owner/repo` vs `owner_repo`,
+    // `a/b/c` vs `a/b_c`)가 같은 캐시 디렉토리로 충돌해 한 플러그인 캐시가 다른 플러그인에
+    // 제공된다 — 원본 source 의 64-bit 해시를 접미사로 붙여 충돌을 제거한다(가독성 유지).
+    const h = std.hash.Wyhash.hash(0, source);
+    out.print(allocator, "-{x:0>16}", .{h}) catch return null;
     return out.toOwnedSlice(allocator) catch null;
 }
 

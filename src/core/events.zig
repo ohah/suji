@@ -109,46 +109,56 @@ pub const EventBus = struct {
     }
 
     fn emitInternal(self: *EventBus, event_name: []const u8, data: []const u8, target: ?u32) void {
-        // 리스너 스냅샷 복사 (mutex 범위 최소화)
-        var snapshot: [64]Listener = undefined;
-        var snapshot_len: usize = 0;
-        var once_ids: [64]u64 = undefined;
-        var once_count: usize = 0;
+        // 리스너 스냅샷 (mutex 범위 최소화). 기본은 스택 버퍼(64), 리스너가 64 초과면
+        // 힙으로 폴백해 전부 발화한다 — 고정 [64] 절단은 65번째부터 영구 미발화였다.
+        var snapshot_stack: [64]Listener = undefined;
+        var snapshot_heap: ?[]Listener = null;
+        defer if (snapshot_heap) |h| self.allocator.free(h);
+        var snapshot: []Listener = snapshot_stack[0..0];
 
+        const prev_in_dispatch = in_dispatch;
         {
             self.mutex.lockUncancelable(self.io);
             defer self.mutex.unlock(self.io);
 
             if (self.listeners.getPtr(event_name)) |list| {
-                snapshot_len = @min(list.items.len, 64);
-                @memcpy(snapshot[0..snapshot_len], list.items[0..snapshot_len]);
-
-                // once 리스너 ID 수집 + 제거
-                var i: usize = list.items.len;
-                while (i > 0) {
-                    i -= 1;
-                    if (list.items[i].once) {
-                        if (once_count < 64) {
-                            once_ids[once_count] = list.items[i].id;
-                            once_count += 1;
-                        }
-                        _ = list.orderedRemove(i);
+                const n = list.items.len;
+                var dst: []Listener = snapshot_stack[0..];
+                if (n > snapshot_stack.len) {
+                    if (self.allocator.alloc(Listener, n)) |buf| {
+                        snapshot_heap = buf;
+                        dst = buf;
+                    } else |_| {
+                        // 힙 실패 → 스택 64 로 graceful degrade
                     }
                 }
-            }
-        }
+                const take = @min(n, dst.len);
+                @memcpy(dst[0..take], list.items[0..take]);
+                snapshot = dst[0..take];
 
-        // 콜백 실행 (mutex 밖 — 블로킹 안전). inflight 를 올려 off() 가 이 구간을
-        // 기다리게 한다(c_abi arg 수명 보호). in_dispatch 로 콜백-내-off 데드락 회피.
-        const prev_in_dispatch = in_dispatch;
-        in_dispatch = true;
-        _ = self.inflight.fetchAdd(1, .acq_rel);
+                // once 리스너 제거 — 이번에 발화될 스냅샷 범위(0..take)에 든 것만.
+                // 범위 밖(힙 폴백 실패로 잘린 65번째 이후)의 once 를 제거하면 발화 없이
+                // 영구 손실된다.
+                var i: usize = take;
+                while (i > 0) {
+                    i -= 1;
+                    if (list.items[i].once) _ = list.orderedRemove(i);
+                }
+            }
+
+            // inflight 배리어를 스냅샷과 동일한 mutex 구간에서 올린다 — mutex 해제 후
+            // 올리면 그 사이 off()+free 가 waitQuiescent(inflight==0)를 통과해 c_abi
+            // arg UAF(TOCTOU). off() 도 이 mutex 를 잡으므로 원자적으로 묶인다.
+            in_dispatch = true;
+            _ = self.inflight.fetchAdd(1, .acq_rel);
+        }
+        // 콜백은 mutex 밖에서 실행(블로킹 안전). in_dispatch 로 콜백-내-off 데드락 회피.
         defer {
             _ = self.inflight.fetchSub(1, .release);
             in_dispatch = prev_in_dispatch;
         }
 
-        for (snapshot[0..snapshot_len]) |listener| {
+        for (snapshot) |listener| {
             switch (listener.callback) {
                 .zig => |cb| {
                     var buf: [util.MAX_RESPONSE]u8 = undefined;

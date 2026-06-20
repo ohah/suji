@@ -150,7 +150,7 @@ pub fn unescapeJsonStr(src: []const u8, dst: []u8) ?usize {
         }
         if (next == 'u' and i + 5 < src.len) {
             const hex = src[i + 2 .. i + 6];
-            const code = std.fmt.parseInt(u16, hex, 16) catch {
+            const code = parseHex4(hex) orelse {
                 if (w >= dst.len) return null;
                 dst[w] = b;
                 w += 1;
@@ -172,7 +172,7 @@ pub fn unescapeJsonStr(src: []const u8, dst: []u8) ?usize {
             if (code >= 0xD800 and code <= 0xDBFF) {
                 // 뒤따르는 \uXXXX low surrogate 탐색(\uXXXX\uYYYY = 12바이트).
                 if (i + 11 < src.len and src[i + 6] == '\\' and src[i + 7] == 'u') {
-                    const lo = std.fmt.parseInt(u16, src[i + 8 .. i + 12], 16) catch 0;
+                    const lo = parseHex4(src[i + 8 .. i + 12]) orelse 0;
                     if (lo >= 0xDC00 and lo <= 0xDFFF) {
                         cp = 0x10000 + (@as(u21, code - 0xD800) << 10) + (lo - 0xDC00);
                         i += 6; // low surrogate \uYYYY 추가 소비(아래 i += 5 와 합쳐 11)
@@ -850,6 +850,31 @@ test "matchGlob: backtracking 정확성" {
     try std.testing.expect(!matchGlob("foo*bar*baz", "foobarbax"));
 }
 
+/// `\uXXXX` 의 정확히 4 hex 숫자만 파싱(std.json 패리티). std.fmt.parseInt 은 `+` 부호와
+/// `_` 구분자를 허용해 비표준 escape(`\u+02A`/`\u0_2A`)를 잘못 디코드하므로 직접 누적한다.
+/// 비-hex 가 하나라도 있으면 null.
+pub fn parseHex4(s: []const u8) ?u16 {
+    if (s.len != 4) return null;
+    var v: u16 = 0;
+    for (s) |c| {
+        const d: u16 = switch (c) {
+            '0'...'9' => c - '0',
+            'a'...'f' => @as(u16, c - 'a') + 10,
+            'A'...'F' => @as(u16, c - 'A') + 10,
+            else => return null,
+        };
+        v = v * 16 + d;
+    }
+    return v;
+}
+
+/// 플랫폼 경로 구분자. POSIX 는 `/` 만, Windows 는 `/`·`\` 둘 다. POSIX 에서 `\` 는
+/// 일반 파일명 문자라 separator 경계로 취급하면 형제 파일을 과허용한다.
+pub fn isPathSep(c: u8) bool {
+    if (@import("builtin").os.tag == .windows) return c == '/' or c == '\\';
+    return c == '/';
+}
+
 // ============================================
 // 권한 allowlist 매처 — CEF-free (데스크톱 main.zig + 모바일 embed.zig 공용).
 // cfg/empty 정책(fs default-deny vs shell/dialog opt-in)은 호출부가 결정.
@@ -870,14 +895,18 @@ pub fn hasParentTraversalSegment(path: []const u8) bool {
 pub fn pathHasRootBoundary(path: []const u8, prefix: []const u8) bool {
     if (!std.mem.startsWith(u8, path, prefix)) return false;
     if (path.len == prefix.len) return true;
-    if (prefix.len > 0 and (prefix[prefix.len - 1] == '/' or prefix[prefix.len - 1] == '\\')) return true;
-    const next = path[prefix.len];
-    return next == '/' or next == '\\';
+    // 경계는 플랫폼 separator 로만 — POSIX 에서 `\` 를 경계로 보면 `/foo/bar\x`(형제
+    // 파일 `bar\x`)가 root `/foo/bar` 안으로 잘못 매치된다(과허용).
+    if (prefix.len > 0 and isPathSep(prefix[prefix.len - 1])) return true;
+    return isPathSep(path[prefix.len]);
 }
 
 /// path 가 roots 중 하나에 prefix+boundary 매치하는지. `..` component 는 항상 거부,
 /// `*` element 는 무제한 escape hatch.
 pub fn pathAllowedInRoots(path: []const u8, roots: []const [:0]const u8) bool {
+    // NUL 바이트는 거부 — 게이트는 길이 기반 슬라이스로 전체를 보지만 OS 는 C-문자열로
+    // NUL 에서 절단해, `/safe/x\x00/../etc` 류의 게이트↔실파일 비대칭을 만든다.
+    if (std.mem.indexOfScalar(u8, path, 0) != null) return false;
     if (hasParentTraversalSegment(path)) return false;
     for (roots) |root| {
         if (std.mem.eql(u8, root, "*")) return true;
@@ -915,7 +944,13 @@ test "pathHasRootBoundary: separator boundary 가드 (prefix-extension 차단)" 
     try std.testing.expect(!pathHasRootBoundary("/foo/barX", "/foo/bar"));
     try std.testing.expect(!pathHasRootBoundary("/foo/bar_secret", "/foo/bar"));
     try std.testing.expect(!pathHasRootBoundary("/other", "/foo/bar"));
-    try std.testing.expect(pathHasRootBoundary("C:\\foo\\bar\\baz", "C:\\foo\\bar"));
+    // 경계는 플랫폼 separator 로만. Windows 는 `\` 도 경계, POSIX 는 `/` 만 —
+    // POSIX 에서 `\` 를 경계로 보면 `/foo/bar\x`(형제 파일)가 root 안으로 과허용된다.
+    if (@import("builtin").os.tag == .windows) {
+        try std.testing.expect(pathHasRootBoundary("C:\\foo\\bar\\baz", "C:\\foo\\bar"));
+    } else {
+        try std.testing.expect(!pathHasRootBoundary("/foo/bar\\baz", "/foo/bar"));
+    }
     try std.testing.expect(!pathHasRootBoundary("C:\\foo\\barX", "C:\\foo\\bar"));
 }
 
