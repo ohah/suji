@@ -58,9 +58,14 @@ fn ensurePdfCallback() void {
 
 pub fn printToPDF(host: *c.cef_browser_host_t, path: []const u8) void {
     var path_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
+    // ⚠️ deferred(cefDeferResponse)는 IPC 핸들러가 이 함수 *호출 후* 등록하므로(window_ipc
+    // handlePrintToPDF), 여기서 동기적으로 emit 해봤자 아직 슬롯이 없어 deferred 를 못 푼다
+    // — 그 극단 엣지(path 초과/미지원, CEF 표준에선 도달 불가)의 hang 을 제대로 막으려면
+    // vtable 에 "async 시작 여부" bool 을 전파해 핸들러가 즉시 실패 응답하게 해야 한다
+    // (docs/audit-windows-followups.md C 후속). 무효한 동기 emit 은 스퓨리어스 이벤트만
+    // 내므로 두지 않는다.
     const path_z = cef.nullTerminateOrTruncate(path, &path_buf) orelse {
         log.warn("print_to_pdf: path {d} bytes > {d} stack buf — dropped", .{ path.len, PDF_PATH_STACK_BUF });
-        emitPdfFinished(path, false); // deferred Promise hang 방지
         return;
     };
 
@@ -72,11 +77,7 @@ pub fn printToPDF(host: *c.cef_browser_host_t, path: []const u8) void {
     cef.zeroCefStruct(c.cef_pdf_print_settings_t, &settings);
 
     ensurePdfCallback();
-    const print = host.print_to_pdf orelse {
-        // print_to_pdf 미지원(CEF 표준에선 도달 불가) — deferred Promise hang 방지.
-        emitPdfFinished(path, false);
-        return;
-    };
+    const print = host.print_to_pdf orelse return;
     print(host, &cef_path, &settings, &g_pdf_callback);
 }
 
@@ -159,13 +160,14 @@ pub fn purgeCapturePendingForBrowser(handle: u64) void {
 /// CDP Page.captureScreenshot — 결과는 observer → window:page-captured.
 /// clip 지정 시 CDP `params.clip`{x,y,width,height,scale:1} 로 부분 영역만.
 pub fn capturePage(host: *c.cef_browser_host_t, devtools_reg: *?*c.cef_registration_t, handle: u64, path: []const u8, clip: ?window_mod.CaptureClip) void {
+    // ⚠️ deferred(cefDeferResponse)는 IPC 핸들러가 이 함수 *호출 후* 등록하므로(window_ipc
+    // handleCapturePage), 여기서 동기적으로 emitPageCaptured 해도 아직 슬롯이 없어 deferred
+    // 를 못 푼다(스퓨리어스 이벤트만). 극단 엣지(observer/send 미지원=CEF 표준 도달 불가,
+    // 풀 16 동시=비현실)의 hang 을 제대로 막으려면 vtable 에 "async 시작 여부"를 전파해야
+    // 한다(docs/audit-windows-followups.md C 후속). 풀-full 발화는 pre-existing(이미 무효).
     ensureDevToolsObserver();
     if (devtools_reg.* == null) {
-        const add = host.add_dev_tools_message_observer orelse {
-            // observer 등록 미지원(CEF 표준에선 도달 불가) — deferred Promise hang 방지.
-            emitPageCaptured(handle, path, false);
-            return;
-        };
+        const add = host.add_dev_tools_message_observer orelse return;
         devtools_reg.* = cef.asPtr(c.cef_registration_t, add(host, &g_devtools_observer));
     }
 
@@ -208,10 +210,9 @@ pub fn capturePage(host: *c.cef_browser_host_t, devtools_reg: *?*c.cef_registrat
             return;
         }
     }
-    // 메시지 빌드/전송 불가(CEF 표준에선 도달 불가) — 예약한 슬롯 회수 + 실패 발화로
-    // deferred Promise hang 과 슬롯 누수를 막는다.
+    // 메시지 빌드/전송 불가(CEF 표준에선 도달 불가) — 예약한 슬롯을 회수해 슬롯 누수를
+    // 막는다(동기 emit 은 deferred 등록 전이라 무효 → 생략, 위 주석 참조).
     sl.used = false;
-    emitPageCaptured(handle, path, false);
 }
 
 fn devtoolsObserverNoopMsg(_: [*c]c.cef_dev_tools_message_observer_t, _: [*c]c.cef_browser_t, _: ?*const anyopaque, _: usize) callconv(.c) c_int {

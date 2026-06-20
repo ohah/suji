@@ -327,6 +327,20 @@ export fn suji_core_permission_check(
     const pol = g_perm orelse return 1;
 
     if (std.mem.eql(u8, fam, "shell_open_external")) {
+        // file:// 은 로컬 파일 열기 — shell.allowedPaths 가 설정된 경우 PATH 게이트로 통제
+        // 하고, 미설정이면 URL 게이트로 폴백(file:// 는 URL glob 에 안 맞아 deny / 둘 다
+        // 미설정 시 legacy allow). 데스크톱 shellOpenExternalGate 동형 — 안 하면
+        // allowedExternalUrls 만 설정 시 file:// 가 URL 게이트만 거쳐 무제약 통과.
+        if (std.mem.startsWith(u8, val, "file://")) {
+            if (pol.shell_paths) |paths| {
+                var rest = val["file://".len..];
+                if (rest.len > 0 and rest[0] != '/') {
+                    rest = if (std.mem.indexOfScalar(u8, rest, '/')) |s| rest[s..] else "";
+                }
+                if (std.mem.indexOfScalar(u8, rest, '%') != null) return 0;
+                return if (util.pathAllowedInRoots(rest, paths)) 1 else 0;
+            }
+        }
         const list = pol.shell_urls orelse return 1;
         return if (util.urlAllowedInList(val, list)) 1 else 0;
     }
