@@ -195,9 +195,10 @@ test "BackendRegistry clearRoutesFor" {
     // zig 라우트만 제거
     reg.clearRoutesFor("zig");
 
-    // zig 채널은 빈 문자열 (자동 라우팅 차단)
-    try std.testing.expectEqualStrings("", reg.routes.get("ping").?);
-    try std.testing.expectEqualStrings("", reg.routes.get("greet").?);
+    // zig 채널은 엔트리 자체가 제거됨(null) — "" 센티널로 덮으면 coreRegister 충돌-가드가
+    // 핫 리로드 후 재등록을 차단해 자동 라우팅이 영구 비활성화됐다(회귀 가드).
+    try std.testing.expect(reg.routes.get("ping") == null);
+    try std.testing.expect(reg.routes.get("greet") == null);
     // rust 채널은 유지
     try std.testing.expectEqualStrings("rust", reg.routes.get("hello").?);
 }
@@ -316,7 +317,8 @@ test "BackendRegistry clearRoutesFor multiple calls safe" {
     reg.clearRoutesFor("backend");
     reg.clearRoutesFor("other");
 
-    try std.testing.expectEqualStrings("", reg.routes.get("test").?);
+    // 엔트리 제거됨(null) — 멱등 + 이중 free 없음 회귀 가드.
+    try std.testing.expect(reg.routes.get("test") == null);
 }
 
 // ============================================

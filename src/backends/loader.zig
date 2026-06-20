@@ -201,9 +201,16 @@ pub const BackendRegistry = struct {
             embed_runtimes = std.StringHashMap(EmbedRuntime).init(g.allocator);
             embed_runtimes_initialized = true;
         }
-        const owned = try g.allocator.dupe(u8, name);
-        errdefer g.allocator.free(owned);
-        try embed_runtimes.put(owned, rt);
+        // 동일 채널명 재등록 시 getOrPut 으로 기존 키를 재사용 — put 은 기존 키를
+        // 유지하므로 새 dupe 한 키가 그대로 누수된다(StringHashMap 계약).
+        const gop = try embed_runtimes.getOrPut(name);
+        if (!gop.found_existing) {
+            gop.key_ptr.* = g.allocator.dupe(u8, name) catch |e| {
+                _ = embed_runtimes.remove(name);
+                return e;
+            };
+        }
+        gop.value_ptr.* = rt;
     }
 
     /// CEF 경로(cefInvokeHandler) 임베드 디스패치 — name(target/route) 정확 매칭
@@ -312,7 +319,12 @@ pub const BackendRegistry = struct {
 
     pub fn invoke(self: *BackendRegistry, backend_name: []const u8, request: [*:0]const u8) ?[]const u8 {
         self.rw_lock.lockSharedUncancelable(self.io);
-        defer self.rw_lock.unlockShared(self.io);
+        const prev_held = registry_lock_held;
+        registry_lock_held = true;
+        defer {
+            registry_lock_held = prev_held;
+            self.rw_lock.unlockShared(self.io);
+        }
         const backend = self.get(backend_name) orelse return null;
         const prev = current_invoker;
         current_invoker = backend.name;
@@ -333,7 +345,14 @@ pub const BackendRegistry = struct {
 
         // 2. lock 획득 → 스왑
         self.rw_lock.lockUncancelable(self.io);
-        defer self.rw_lock.unlock(self.io);
+        // write lock 보유 중 backend.init 이 같은 스레드에서 coreInvoke 로 크로스콜하면
+        // coreInvoke 가 공유락을 재취득하려다 자기 write lock 과 데드락한다 — flag 로 차단.
+        const prev_held = registry_lock_held;
+        registry_lock_held = true;
+        defer {
+            registry_lock_held = prev_held;
+            self.rw_lock.unlock(self.io);
+        }
 
         // 기존 백엔드 언로드
         if (self.backends.getPtr(name)) |old| {
@@ -405,13 +424,25 @@ pub const BackendRegistry = struct {
         return false;
     }
 
-    /// 특정 백엔드의 라우팅 엔트리 제거
+    /// 특정 백엔드의 라우팅 엔트리를 완전히 제거(소유 키 free 포함).
+    /// 값을 ""로 덮으면 coreRegister 의 충돌-가드(`existing.len==0` early-return)가 핫
+    /// 리로드 후 합법적 재등록을 중복으로 오인해 차단 → 자동 라우팅이 영구 비활성화됐다.
+    /// 그래서 엔트리 자체를 삭제해 재등록이 putRoute 경로로 정상 진행되게 한다.
+    /// (route 테이블은 채널 수만큼이라 작음 — scan-remove-first 반복으로 iterator
+    ///  무효화를 피하고 추가 할당 없이 처리.)
     pub fn clearRoutesFor(self: *BackendRegistry, backend_name: []const u8) void {
-        var iter = self.routes.iterator();
-        while (iter.next()) |entry| {
-            if (std.mem.eql(u8, entry.value_ptr.*, backend_name)) {
-                entry.value_ptr.* = ""; // 자동 라우팅 차단
+        while (true) {
+            var found_key: ?[]const u8 = null;
+            var iter = self.routes.iterator();
+            while (iter.next()) |entry| {
+                if (std.mem.eql(u8, entry.value_ptr.*, backend_name)) {
+                    found_key = entry.key_ptr.*;
+                    break;
+                }
             }
+            const key = found_key orelse break;
+            _ = self.routes.remove(key);
+            self.allocator.free(key);
         }
     }
 
@@ -488,12 +519,12 @@ pub const BackendRegistry = struct {
 
     // C ABI 콜백: 백엔드에서 다른 백엔드 호출
     fn coreInvoke(backend_name: [*c]const u8, request: [*c]const u8) callconv(.c) [*c]const u8 {
-        const reg = global orelse return @ptrCast(@constCast(""));
+        const reg = global orelse return @ptrCast(RESP_EMPTY);
         const name = std.mem.span(@as([*:0]const u8, @ptrCast(backend_name)));
         const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
 
         if (!reg.canInvokeFrom(current_invoker, name, req_span)) {
-            const owned = dupeOwnedResponse(reg.allocator, "{\"error\":\"plugin permission denied\"}") orelse return @ptrCast(@constCast("{}"));
+            const owned = dupeOwnedResponse(reg.allocator, "{\"error\":\"plugin permission denied\"}") orelse return @ptrCast(RESP_EMPTY_OBJ);
             return @ptrCast(owned);
         }
 
@@ -505,22 +536,40 @@ pub const BackendRegistry = struct {
                 std.mem.eql(u8, name, CHANNEL_CHAIN))
             {
                 var resp_buf: [16384]u8 = undefined;
-                const out = dispatch(name, req_span, &resp_buf) orelse return @ptrCast(@constCast("{}"));
-                const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(@constCast("{}"));
+                const out = dispatch(name, req_span, &resp_buf) orelse return @ptrCast(RESP_EMPTY_OBJ);
+                const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(RESP_EMPTY_OBJ);
                 return @ptrCast(owned);
             }
         }
 
-        // dlopen 백엔드 경로
-        if (reg.get(name)) |backend| {
-            const raw = backend.invoke(@ptrCast(request));
-            if (raw) |r| {
-                const owned = dupeOwnedResponse(reg.allocator, r) orelse {
+        // dlopen 백엔드 경로 — 외부(독립) 스레드 호출이면 공유락으로 reload(dlclose)
+        // 와의 use-after-unmap race 를 막고, invoke 체인 내부 재진입이면 이미 보유 중인
+        // 락을 재사용한다(writer 대기 중 nested-shared 데드락 회피). 호출 직전
+        // current_invoker 를 대상 백엔드로 갱신해 중첩 크로스콜 권한이 호출자(B) 기준이
+        // 아닌 실제 발신자 기준으로 평가되게 한다(public invoke 와 동형).
+        {
+            const acquired = !registry_lock_held;
+            if (acquired) {
+                reg.rw_lock.lockSharedUncancelable(reg.io);
+                registry_lock_held = true;
+            }
+            defer if (acquired) {
+                registry_lock_held = false;
+                reg.rw_lock.unlockShared(reg.io);
+            };
+            if (reg.get(name)) |backend| {
+                const prev = current_invoker;
+                current_invoker = backend.name;
+                defer current_invoker = prev;
+                const raw = backend.invoke(@ptrCast(request));
+                if (raw) |r| {
+                    const owned = dupeOwnedResponse(reg.allocator, r) orelse {
+                        backend.freeResponse(r);
+                        return @ptrCast(RESP_EMPTY);
+                    };
                     backend.freeResponse(r);
-                    return @ptrCast(@constCast(""));
-                };
-                backend.freeResponse(r);
-                return @ptrCast(owned);
+                    return @ptrCast(owned);
+                }
             }
         }
 
@@ -542,7 +591,7 @@ pub const BackendRegistry = struct {
             }
         }
 
-        return @ptrCast(@constCast("{}"));
+        return @ptrCast(RESP_EMPTY_OBJ);
     }
 
     /// JSON 요청에서 "cmd" 문자열 필드 추출.
@@ -614,9 +663,10 @@ pub const BackendRegistry = struct {
         if (ptr == null) return;
         const reg = global orelse return;
         const c_ptr: [*:0]const u8 = @ptrCast(ptr);
-        // 정적 문자열("{}"/"")은 header가 없어 free 불가 — 간단 가드.
-        const body = std.mem.span(c_ptr);
-        if (body.len == 0 or std.mem.eql(u8, body, "{}")) return;
+        // 정적 리터럴(RESP_EMPTY/RESP_EMPTY_OBJ)은 소유권 헤더가 없어 free 불가 —
+        // 포인터 동일성으로 식별한다. content 비교는 본문이 "{}"/"" 인 힙 응답까지
+        // 건너뛰어 호출마다 누수시켰다.
+        if (c_ptr == RESP_EMPTY or c_ptr == RESP_EMPTY_OBJ) return;
         freeOwnedResponse(reg.allocator, c_ptr);
     }
 
@@ -648,20 +698,29 @@ pub const BackendRegistry = struct {
     }
 
     fn windowApiRequestJson(request: [*c]const u8) callconv(.c) [*c]const u8 {
-        const reg = global orelse return @ptrCast(@constCast(""));
-        const dispatch = special_dispatch orelse return @ptrCast(@constCast("{}"));
-        if (request == null) return @ptrCast(@constCast("{}"));
+        const reg = global orelse return @ptrCast(RESP_EMPTY);
+        const dispatch = special_dispatch orelse return @ptrCast(RESP_EMPTY_OBJ);
+        if (request == null) return @ptrCast(RESP_EMPTY_OBJ);
 
         const req_span = std.mem.span(@as([*:0]const u8, @ptrCast(request)));
         var resp_buf: [16384]u8 = undefined;
-        const out = dispatch(CHANNEL_CORE, req_span, &resp_buf) orelse return @ptrCast(@constCast("{}"));
-        const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(@constCast("{}"));
+        const out = dispatch(CHANNEL_CORE, req_span, &resp_buf) orelse return @ptrCast(RESP_EMPTY_OBJ);
+        const owned = dupeOwnedResponse(reg.allocator, out) orelse return @ptrCast(RESP_EMPTY_OBJ);
         return @ptrCast(owned);
     }
 };
 
 var quit_handler: ?*const fn () void = null;
 threadlocal var current_invoker: ?[]const u8 = null;
+/// 이 스레드가 이미 registry 공유락을 보유 중인가 — coreInvoke 가 invoke 체인 내부
+/// 재진입(이미 보유)과 외부(독립) 스레드 호출(미보유)을 구분한다. 전자는 락을
+/// 재취득하지 않아 writer(reload) 대기 중 nested-shared 데드락을 피하고, 후자만
+/// 공유락으로 reload(dlclose) 와의 use-after-unmap race 를 막는다.
+threadlocal var registry_lock_held: bool = false;
+/// 정적 응답 리터럴(소유권 헤더 없음). coreFree 가 포인터 동일성으로 식별해 free 를
+/// 건너뛴다 — content 비교는 본문이 "{}"/"" 인 힙 응답까지 누수시키기 때문.
+const RESP_EMPTY: [*:0]const u8 = "";
+const RESP_EMPTY_OBJ: [*:0]const u8 = "{}";
 
 fn freePermissionEntry(allocator: std.mem.Allocator, key: []const u8, permissions: []const []const u8) void {
     allocator.free(key);

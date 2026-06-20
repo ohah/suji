@@ -2344,7 +2344,7 @@ fn cefHandleCore(registry: *suji.BackendRegistry, data: []const u8, response_buf
         const ok = blk: {
             const n = util.unescapeJsonStr(raw, &unesc_buf) orelse break :blk false;
             const url = unesc_buf[0..n];
-            if (shellUrlGate(response_buf, "shell_open_external", url)) |e| return e;
+            if (shellOpenExternalGate(response_buf, url)) |e| return e;
             break :blk cef.shellOpenExternal(url);
         };
         return std.fmt.bufPrint(
@@ -4063,7 +4063,10 @@ fn handleAutoUpdaterQuitAndInstall(req_clean: []const u8, response_buf: []u8) ?[
         if (fsSandboxCheck(response_buf, "auto_updater_quit_and_install", helper)) |err| return err;
     }
 
-    if (expected.len > 0) {
+    // .app 은 디렉토리라 sha256File(단일 파일)로 해시할 수 없다 — 무결성은 다운로드된
+    // .zip/.dmg 단계에서 검증되고 .app 은 그 검증된 아카이브에서 추출된 산출물이라 재해시를
+    // 건너뛴다(과거엔 .app 에 sha256 을 주면 항상 "read" 에러로 설치가 막혔다).
+    if (expected.len > 0 and auto_updater.detectInstallFormat(source) != .app) {
         var actual_buf: [64]u8 = undefined;
         const actual = auto_updater.sha256File(runtime.io, source, &actual_buf) catch
             return coreError(response_buf, "auto_updater_quit_and_install", "read");
@@ -4157,14 +4160,17 @@ fn prepareWindowsZip(artifact: []const u8, stage_dir: []const u8) auto_updater.P
     std.Io.Dir.cwd().deleteTree(runtime.io, extract_dir) catch {};
     std.Io.Dir.cwd().createDirPath(runtime.io, extract_dir) catch return error.CommandFailed;
 
-    // PowerShell Expand-Archive — .zip → extract_dir.
-    const ps_cmd = std.fmt.allocPrint(
-        runtime.gpa,
-        "Expand-Archive -LiteralPath '{s}' -DestinationPath '{s}' -Force",
-        .{ artifact, extract_dir },
-    ) catch return error.OutOfMemory;
-    defer runtime.gpa.free(ps_cmd);
-    runCmd(runtime.gpa, &.{ "powershell", "-NoProfile", "-Command", ps_cmd }) catch
+    // PowerShell Expand-Archive — .zip → extract_dir. 경로의 single quote 를 doubling 으로
+    // 이스케이프해 single-quoted 리터럴 탈출(인젝션)을 차단한다(latent — 현재 경로는 app
+    // 제어이나 선제 하드닝). auto_updater.appendPwshSingleQuoted 단일 출처 재사용.
+    var ps = std.ArrayList(u8).empty;
+    defer ps.deinit(runtime.gpa);
+    ps.appendSlice(runtime.gpa, "Expand-Archive -LiteralPath '") catch return error.OutOfMemory;
+    auto_updater.appendPwshSingleQuoted(runtime.gpa, &ps, artifact) catch return error.OutOfMemory;
+    ps.appendSlice(runtime.gpa, "' -DestinationPath '") catch return error.OutOfMemory;
+    auto_updater.appendPwshSingleQuoted(runtime.gpa, &ps, extract_dir) catch return error.OutOfMemory;
+    ps.appendSlice(runtime.gpa, "' -Force") catch return error.OutOfMemory;
+    runCmd(runtime.gpa, &.{ "powershell", "-NoProfile", "-Command", ps.items }) catch
         return error.CommandFailed;
 
     // 압축 풀린 디렉토리 안의 single child 디렉토리를 찾는다 (suji packaging
@@ -4299,13 +4305,53 @@ pub fn setGlobalConfig(c: *const suji.Config) void {
 /// BackendRegistry __core__ 채널 핸들러가 set, frontend IPC origin은 false 유지.
 threadlocal var g_in_backend_invoke: bool = false;
 
+/// 경로를 realpath 로 정규화(symlink/`..`/`.` 해소). buf 에 써서 슬라이스 반환.
+/// 절대/상대 모두 지원. 실패(미존재/권한/특수파일)면 null.
+fn realPathInto(path: []const u8, buf: []u8) ?[]const u8 {
+    const n = if (std.fs.path.isAbsolute(path))
+        std.Io.Dir.realPathFileAbsolute(runtime.io, path, buf) catch return null
+    else
+        std.Io.Dir.cwd().realPathFile(runtime.io, path, buf) catch return null;
+    return buf[0..n];
+}
+
+/// realpath 정규화. 미존재(write 대상)면 부모 디렉토리를 정규화 후 basename 합산
+/// (파일은 아직 없어도 부모의 symlink 는 해소). 둘 다 불가면 null.
+fn canonicalizePath(path: []const u8, buf: []u8) ?[]const u8 {
+    if (realPathInto(path, buf)) |c| return c;
+    const dir = std.fs.path.dirname(path) orelse return null;
+    const base = std.fs.path.basename(path);
+    var dbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const rdir = realPathInto(dir, &dbuf) orelse return null;
+    return std.fmt.bufPrint(buf, "{s}/{s}", .{ rdir, base }) catch null;
+}
+
+/// lexical 게이트를 통과한 경로를 realpath 로 정규화해 roots 를 재검사 — allowedRoot
+/// 내부 symlink 가 바깥을 가리키는 confused-deputy 를 차단한다. macOS `/tmp`→
+/// `/private/tmp` 류 정규화 불일치로 정상 경로가 막히지 않도록 root 도 함께 정규화해
+/// canonical 끼리 비교한다. realpath 불가(미존재/권한)면 lexical 결과(이미 통과)를
+/// 유지한다(무회귀 — fail-to-lexical; 단위 테스트의 가상 경로도 이 경로로 통과).
+fn realPathWithinRoots(path: []const u8, roots: []const [:0]const u8) bool {
+    var pbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const canon_path = canonicalizePath(path, &pbuf) orelse return true;
+    for (roots) |root| {
+        if (std.mem.eql(u8, root, "*")) return true;
+        var rbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const canon_root = canonicalizePath(root, &rbuf) orelse root;
+        if (util.pathHasRootBoundary(canon_path, canon_root)) return true;
+    }
+    return false;
+}
+
 /// fs frontend sandbox — fs 는 **default-deny** (cfg null/roots empty → 차단).
-/// 공통 매처는 util.* (CEF-free, 모바일 embed 와 공용).
+/// 공통 매처는 util.* (CEF-free, 모바일 embed 와 공용). lexical 통과 후 realpath
+/// 재검사로 symlink confused-deputy 차단.
 fn isPathAllowedForFrontend(path: []const u8) bool {
     const cfg = g_config orelse return false;
     const roots = cfg.fs.allowed_roots;
     if (roots.len == 0) return false;
-    return util.pathAllowedInRoots(path, roots);
+    if (!util.pathAllowedInRoots(path, roots)) return false;
+    return realPathWithinRoots(path, roots);
 }
 
 /// 렌더러 경로 fs sandbox 허용 판정(공용 술어) — opt-in: backend 우회 /
@@ -4316,7 +4362,8 @@ fn rendererPathAllowed(path: []const u8) bool {
     if (g_in_backend_invoke) return true;
     const cfg = g_config orelse return true;
     if (cfg.fs.allowed_roots.len == 0) return true; // opt-in: 미설정=레거시 허용
-    return util.pathAllowedInRoots(path, cfg.fs.allowed_roots);
+    if (!util.pathAllowedInRoots(path, cfg.fs.allowed_roots)) return false;
+    return realPathWithinRoots(path, cfg.fs.allowed_roots); // symlink confused-deputy 차단
 }
 
 /// 렌더러-제어 파일경로 게이트 — fs.* 외에 path 를 받는 역사적-무제한 API 가
@@ -4538,6 +4585,25 @@ fn shellUrlGate(response_buf: []u8, cmd: []const u8, url: []const u8) ?[]const u
     const list = cfg.shell.allowed_external_urls orelse return null;
     if (util.urlAllowedInList(url, list)) return null;
     return coreError(response_buf, cmd, "forbidden");
+}
+/// shell.openExternal 게이트 — `file://` 은 로컬 파일 열기이므로 URL allowlist 가
+/// 아니라 PATH allowlist(shell.allowedPaths)로 통제한다. allowedExternalUrls 미설정 시
+/// file:// 가 ungated 로 로컬 파일을 열던 갭 보완. percent-encoding(`%2e%2e` 등)은
+/// 게이트(리터럴)↔OS(decode) 비대칭을 만들어 보수적으로 거부한다.
+fn shellOpenExternalGate(response_buf: []u8, url: []const u8) ?[]const u8 {
+    const prefix = "file://";
+    if (std.mem.startsWith(u8, url, prefix)) {
+        var rest = url[prefix.len..];
+        if (rest.len > 0 and rest[0] != '/') {
+            // file://host/path — host 부분 스킵
+            rest = if (std.mem.indexOfScalar(u8, rest, '/')) |s| rest[s..] else "";
+        }
+        if (std.mem.indexOfScalar(u8, rest, '%') != null) {
+            return coreError(response_buf, "shell_open_external", "forbidden");
+        }
+        return shellPathGate(response_buf, "shell_open_external", rest);
+    }
+    return shellUrlGate(response_buf, "shell_open_external", url);
 }
 /// dialog defaultPath 게이트 — 빈 defaultPath 는 무제약(다이얼로그 자체가 사용자 중재).
 fn dialogPathGate(response_buf: []u8, cmd: []const u8, path: []const u8) ?[]const u8 {

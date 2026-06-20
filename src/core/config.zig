@@ -209,7 +209,10 @@ pub const Config = struct {
     }
 
     fn dupeStr(a: std.mem.Allocator, s: []const u8) [:0]const u8 {
-        return a.dupeZ(u8, s) catch @ptrCast(s);
+        // OOM 시 `@ptrCast(s)` 는 비-sentinel 슬라이스를 `[:0]` 로 위장해 널종단 직전까지
+        // 읽기 오버런(UB)을 부른다. 빈 sentinel 문자열로 폴백해 불변식을 보존한다(config
+        // 파싱 중 OOM 은 사실상 치명적 — 빈 값 degradation 으로 충분).
+        return a.dupeZ(u8, s) catch "";
     }
 
     /// macOS 최소 배포 타겟을 CEF 프리빌트 floor(12.0) 이상으로 보정. 번들 CEF 프레임워크가
@@ -350,6 +353,9 @@ pub const Config = struct {
 
         const parsed = std.json.parseFromSlice(std.json.Value, a, owned, .{}) catch return error.JsonParseError;
 
+        // 최상위가 객체가 아닌 유효 JSON(`[]`, `"x"`, `42` 등)이면 `.object` 접근이
+        // 패닉(크래시)한다 — 명시적으로 거부한다.
+        if (parsed.value != .object) return error.JsonParseError;
         const root = parsed.value.object;
 
         if (root.get("app")) |app_val| {
@@ -482,7 +488,9 @@ pub const Config = struct {
                         .entry = dupeStr(a, entry),
                     }) catch continue;
                 }
-                config.backends = list.toOwnedSlice(a) catch null;
+                // 빈 backends(또는 전부 무효) 는 null 로 — non-null 빈 슬라이스면
+                // isMultiBackend()=true 가 되어 단일 backend 설정을 무음 폐기한다.
+                config.backends = if (list.items.len == 0) null else (list.toOwnedSlice(a) catch null);
             }
         }
 

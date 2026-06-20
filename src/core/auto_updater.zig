@@ -15,6 +15,7 @@ pub const DownloadError = error{
     InvalidDestination,
     DestinationTooLong,
     InvalidSha256,
+    Sha256Required,
     Read,
     Write,
     Download,
@@ -103,6 +104,7 @@ pub fn errorCode(err: anyerror) []const u8 {
         error.InvalidLatestVersion => "invalid_latest_version",
         error.InvalidUrl => "invalid_url",
         error.InvalidSha256 => "invalid_sha256",
+        error.Sha256Required => "sha256_required",
         error.InvalidDestination => "invalid_destination",
         error.DestinationTooLong => "destination_too_long",
         error.Read => "read",
@@ -351,6 +353,13 @@ pub fn downloadArtifact(
     if (!isSupportedUpdateUrl(url)) return error.InvalidUrl;
     if (!isValidDestinationPath(destination)) return error.InvalidDestination;
     if (!isValidSha256Hex(expected_sha256)) return error.InvalidSha256;
+    // 원격(http/https) 다운로드는 redirect 추종으로 최종 호스트·스킴이 바뀔 수 있다
+    // (GitHub 릴리스 등 정상 케이스 포함) — 무결성은 sha256 으로만 보장되므로 원격엔
+    // sha256 을 강제한다. 이로써 빈-sha256 무검증 우회와 https→http redirect 다운그레이드를
+    // 함께 닫는다(redirect 돼도 변조 artifact 는 sha256 검증 실패). file:// 로컬 복사는
+    // redirect 무관이라 면제.
+    const is_remote = std.mem.startsWith(u8, url, "http://") or std.mem.startsWith(u8, url, "https://");
+    if (is_remote and expected_sha256.len == 0) return error.Sha256Required;
 
     const temp_path = std.fmt.bufPrint(temp_path_buf, "{s}.download", .{destination}) catch
         return error.DestinationTooLong;
@@ -595,8 +604,14 @@ pub fn renderQuitAndInstallScript(
         \\BACKUP="${TARGET}.suji-update-backup-$$"
         \\cleanup() { rm -f "$0"; }
         \\trap cleanup EXIT
+        \\# PID 재사용 안전판: 앱 종료 후 OS 가 WAIT_PID 를 장수 프로세스에 재할당하면
+        \\# kill -0 가 영원히 참이 되어 업데이트가 무한 대기·미적용된다 — ~30s 상한 후
+        \\# 진행한다(상한 도달 시점이면 원래 앱은 종료됐을 가능성이 압도적).
+        \\WAITED=0
         \\while kill -0 "$WAIT_PID" 2>/dev/null; do
         \\  sleep 0.1
+        \\  WAITED=$((WAITED + 1))
+        \\  if [ "$WAITED" -ge 300 ]; then break; fi
         \\done
         \\if [ ! -e "$SOURCE" ]; then
         \\  exit 2
@@ -701,7 +716,7 @@ fn renderQuitAndInstallScriptWindows(
 
 /// PowerShell single-quoted literal escape — backtick 와 single quote 만 처리
 /// (PowerShell 의 single-quoted 는 backslash interpolation 없음).
-fn appendPwshSingleQuoted(allocator: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8) !void {
+pub fn appendPwshSingleQuoted(allocator: std.mem.Allocator, out: *std.ArrayList(u8), s: []const u8) !void {
     for (s) |c| {
         if (c == '\'') {
             try out.appendSlice(allocator, "''");

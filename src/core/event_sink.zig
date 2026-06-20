@@ -32,6 +32,11 @@ const Listener = struct {
     ctx: ?*anyopaque,
 };
 
+/// cancelable emit 콜백 루프 실행 중인 스레드면 true — 콜백 안에서 offCancelable 을
+/// 호출하면 자기 inflight 를 자기가 기다리는 데드락이 생기므로 quiescence 대기를
+/// 건너뛰게 한다(events.zig in_dispatch 동형).
+threadlocal var sink_in_dispatch: bool = false;
+
 pub const EventBusSink = struct {
     allocator: std.mem.Allocator,
     io: std.Io,
@@ -40,6 +45,10 @@ pub const EventBusSink = struct {
     cancelable: std.StringHashMap(std.ArrayList(Listener)),
     next_id: u64 = 1,
     mutex: std.Io.Mutex = .init,
+    /// mutex 밖 cancelable 콜백 실행 구간 동안 >0. offCancelable 이 0 될 때까지 대기해
+    /// in-flight snapshot 의 listener.ctx 가 freed 메모리를 가리키는 UAF 를 막는다
+    /// (events.zig EventBus.inflight 동형).
+    inflight: std.atomic.Value(u32) = .init(0),
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -105,19 +114,26 @@ pub const EventBusSink = struct {
     }
 
     pub fn offCancelable(self: *EventBusSink, listener_id: u64) void {
-        self.mutex.lockUncancelable(self.io);
-        defer self.mutex.unlock(self.io);
-
-        var it = self.cancelable.iterator();
-        while (it.next()) |entry| {
-            const list = entry.value_ptr;
-            var i: usize = 0;
-            while (i < list.items.len) : (i += 1) {
-                if (list.items[i].id == listener_id) {
-                    _ = list.orderedRemove(i);
-                    return;
+        {
+            self.mutex.lockUncancelable(self.io);
+            defer self.mutex.unlock(self.io);
+            var it = self.cancelable.iterator();
+            outer: while (it.next()) |entry| {
+                const list = entry.value_ptr;
+                var i: usize = 0;
+                while (i < list.items.len) : (i += 1) {
+                    if (list.items[i].id == listener_id) {
+                        _ = list.orderedRemove(i);
+                        break :outer;
+                    }
                 }
             }
+        }
+        // 진행 중인 cancelable 콜백이 끝날 때까지 대기 — caller 후속 ctx free 가
+        // in-flight snapshot 과 경합하지 않게(events.zig off() 동형). 콜백-내 호출은
+        // 자기 inflight 자기대기 데드락이라 건너뛴다.
+        if (!sink_in_dispatch) {
+            while (self.inflight.load(.acquire) != 0) std.atomic.spinLoopHint();
         }
     }
 
@@ -148,6 +164,7 @@ pub const EventBusSink = struct {
         // 64는 EventBus와 동일한 상한. window:close 등에 실제로 이 수준이 붙는 경우는 없음.
         var snapshot: [SNAPSHOT_MAX]Listener = undefined;
         var snapshot_len: usize = 0;
+        const prev_in_dispatch = sink_in_dispatch;
         {
             self.mutex.lockUncancelable(self.io);
             defer self.mutex.unlock(self.io);
@@ -156,6 +173,14 @@ pub const EventBusSink = struct {
                 snapshot_len = @min(list.items.len, SNAPSHOT_MAX);
                 @memcpy(snapshot[0..snapshot_len], list.items[0..snapshot_len]);
             }
+            // inflight 배리어를 스냅샷과 동일 mutex 구간에서 올린다 — mutex 해제 후
+            // 올리면 그 사이 offCancelable+free 가 quiescence 대기를 통과해 ctx UAF.
+            sink_in_dispatch = true;
+            _ = self.inflight.fetchAdd(1, .acq_rel);
+        }
+        defer {
+            _ = self.inflight.fetchSub(1, .release);
+            sink_in_dispatch = prev_in_dispatch;
         }
         for (snapshot[0..snapshot_len]) |listener| {
             listener.callback(data, ev, listener.ctx);
