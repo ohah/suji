@@ -60,49 +60,61 @@ pub fn printToPDF(host: *c.cef_browser_host_t, path: []const u8) void {
     var path_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
     const path_z = cef.nullTerminateOrTruncate(path, &path_buf) orelse {
         log.warn("print_to_pdf: path {d} bytes > {d} stack buf — dropped", .{ path.len, PDF_PATH_STACK_BUF });
+        emitPdfFinished(path, false); // deferred Promise hang 방지
         return;
     };
 
     var cef_path: c.cef_string_t = .{};
     cef.setCefString(&cef_path, path_z);
+    defer cef.clearCefString(&cef_path); // setCefString UTF-16 해제(성공/실패 모두 — 누수 방지)
 
     var settings: c.cef_pdf_print_settings_t = undefined;
     cef.zeroCefStruct(c.cef_pdf_print_settings_t, &settings);
 
     ensurePdfCallback();
-    const print = host.print_to_pdf orelse return;
+    const print = host.print_to_pdf orelse {
+        // print_to_pdf 미지원(CEF 표준에선 도달 불가) — deferred Promise hang 방지.
+        emitPdfFinished(path, false);
+        return;
+    };
     print(host, &cef_path, &settings, &g_pdf_callback);
+}
+
+/// PDF 인쇄 완료/실패 — deferred Promise resolve + `window:pdf-print-finished` emit.
+/// PDF 는 글로벌 stateless 콜백이라 완료 시 browser_handle 을 모름 → cefCompletePending
+/// 에 0 전달(= (kind,path) 매칭, 기존 동작 보존).
+fn emitPdfFinished(path: []const u8, ok: bool) void {
+    var escaped_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
+    const escaped_n = window_mod.escapeJsonChars(path, &escaped_buf);
+
+    // 1) deferred Promise resolve — print_to_pdf 호출자가 await invoke 로 받는 응답.
+    // `ok:true` 는 IPC dispatch 성공, `success` 는 실 PDF 작성 결과.
+    var resp_buf: [PDF_PATH_STACK_BUF + 160]u8 = undefined;
+    var rw = std.Io.Writer.fixed(&resp_buf);
+    rw.print(
+        "{{\"from\":\"zig-core\",\"cmd\":\"print_to_pdf\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
+        .{ escaped_buf[0..escaped_n], ok },
+    ) catch return;
+    _ = cef_browser_ipc.cefCompletePending(.print, 0, path, rw.buffered());
+
+    // 2) EventBus emit — 다른 SDK/백엔드 구독자 호환 보존.
+    const emit = cef_browser_ipc.emitCallback() orelse return;
+    var payload_buf: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
+    var w = std.Io.Writer.fixed(&payload_buf);
+    w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ escaped_buf[0..escaped_n], ok }) catch return;
+    emit(null, EVENT_PDF_PRINT_FINISHED, w.buffered());
 }
 
 /// CEF print_to_pdf 완료 콜백 — deferred Promise resolve + `window:pdf-print-finished` emit.
 fn onPdfPrintFinished(_: [*c]c.cef_pdf_print_callback_t, path: [*c]const c.cef_string_t, ok: c_int) callconv(.c) void {
     var path_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
     const path_str: []const u8 = if (path) |p| cef.cefStringToUtf8(p, &path_buf) else "";
-
-    var escaped_buf: [PDF_PATH_STACK_BUF]u8 = undefined;
-    const escaped_n = window_mod.escapeJsonChars(path_str, &escaped_buf);
-
-    // 1) deferred Promise resolve — print_to_pdf 호출자가 await invoke 로 받는 응답.
-    // `ok:true` 는 IPC dispatch 성공(여기 도달한 자체), `success` 는 실 PDF 작성 결과.
-    // 기존 ack 응답 (`{cmd,windowId,ok}`) 의 `ok` 필드 유지 — 호환.
-    var resp_buf: [PDF_PATH_STACK_BUF + 160]u8 = undefined;
-    var rw = std.Io.Writer.fixed(&resp_buf);
-    rw.print(
-        "{{\"from\":\"zig-core\",\"cmd\":\"print_to_pdf\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
-        .{ escaped_buf[0..escaped_n], ok != 0 },
-    ) catch return;
-    _ = cef_browser_ipc.cefCompletePending(.print, path_str, rw.buffered());
-
-    // 2) EventBus emit — 다른 SDK/백엔드 구독자 호환 보존.
-    const emit = cef_browser_ipc.emitCallback() orelse return;
-    var payload_buf: [PDF_PATH_STACK_BUF + 64]u8 = undefined;
-    var w = std.Io.Writer.fixed(&payload_buf);
-    w.print("{{\"path\":\"{s}\",\"success\":{}}}", .{ escaped_buf[0..escaped_n], ok != 0 }) catch return;
-    emit(null, EVENT_PDF_PRINT_FINISHED, w.buffered());
+    emitPdfFinished(path_str, ok != 0);
 }
 
 /// `window:page-captured`{path,success} 발화 + deferred Promise resolve.
-fn emitPageCaptured(path: []const u8, ok: bool) void {
+/// handle = 캡처를 요청한 창(0 이 아니면 완료 매칭에 사용 — cross-window 오라우팅 방지).
+fn emitPageCaptured(handle: u64, path: []const u8, ok: bool) void {
     var esc: [PDF_PATH_STACK_BUF]u8 = undefined;
     const en = window_mod.escapeJsonChars(path, &esc);
 
@@ -113,7 +125,7 @@ fn emitPageCaptured(path: []const u8, ok: bool) void {
         "{{\"from\":\"zig-core\",\"cmd\":\"capture_page\",\"ok\":true,\"path\":\"{s}\",\"success\":{}}}",
         .{ esc[0..en], ok },
     ) catch return;
-    _ = cef_browser_ipc.cefCompletePending(.capture, path, rw.buffered());
+    _ = cef_browser_ipc.cefCompletePending(.capture, handle, path, rw.buffered());
 
     // 2) EventBus emit.
     const emit = cef_browser_ipc.emitCallback() orelse return;
@@ -149,7 +161,11 @@ pub fn purgeCapturePendingForBrowser(handle: u64) void {
 pub fn capturePage(host: *c.cef_browser_host_t, devtools_reg: *?*c.cef_registration_t, handle: u64, path: []const u8, clip: ?window_mod.CaptureClip) void {
     ensureDevToolsObserver();
     if (devtools_reg.* == null) {
-        const add = host.add_dev_tools_message_observer orelse return;
+        const add = host.add_dev_tools_message_observer orelse {
+            // observer 등록 미지원(CEF 표준에선 도달 불가) — deferred Promise hang 방지.
+            emitPageCaptured(handle, path, false);
+            return;
+        };
         devtools_reg.* = cef.asPtr(c.cef_registration_t, add(host, &g_devtools_observer));
     }
 
@@ -166,7 +182,7 @@ pub fn capturePage(host: *c.cef_browser_host_t, devtools_reg: *?*c.cef_registrat
         }
     }
     const sl = slot orelse {
-        emitPageCaptured(path, false);
+        emitPageCaptured(handle, path, false);
         return;
     };
     const n = @min(path.len, sl.path_buf.len);
@@ -177,17 +193,25 @@ pub fn capturePage(host: *c.cef_browser_host_t, devtools_reg: *?*c.cef_registrat
     sl.used = true;
 
     var msg: [256]u8 = undefined;
-    const m = if (clip) |cl| std.fmt.bufPrint(
+    const m: ?[]u8 = if (clip) |cl| (std.fmt.bufPrint(
         &msg,
         "{{\"id\":{d},\"method\":\"Page.captureScreenshot\",\"params\":{{\"clip\":{{\"x\":{d},\"y\":{d},\"width\":{d},\"height\":{d},\"scale\":1}}}}}}",
         .{ id, cl.x, cl.y, cl.width, cl.height },
-    ) catch return else std.fmt.bufPrint(
+    ) catch null) else (std.fmt.bufPrint(
         &msg,
         "{{\"id\":{d},\"method\":\"Page.captureScreenshot\",\"params\":{{}}}}",
         .{id},
-    ) catch return;
-    const send = host.send_dev_tools_message orelse return;
-    _ = send(host, m.ptr, m.len);
+    ) catch null);
+    if (m) |built| {
+        if (host.send_dev_tools_message) |send| {
+            _ = send(host, built.ptr, built.len);
+            return;
+        }
+    }
+    // 메시지 빌드/전송 불가(CEF 표준에선 도달 불가) — 예약한 슬롯 회수 + 실패 발화로
+    // deferred Promise hang 과 슬롯 누수를 막는다.
+    sl.used = false;
+    emitPageCaptured(handle, path, false);
 }
 
 fn devtoolsObserverNoopMsg(_: [*c]c.cef_dev_tools_message_observer_t, _: [*c]c.cef_browser_t, _: ?*const anyopaque, _: usize) callconv(.c) c_int {
@@ -217,6 +241,7 @@ fn onDevToolsMethodResult(
     }
     const p = slot orelse return;
     defer p.used = false;
+    const capture_handle = p.browser_handle;
     const path = p.path_buf[0..p.path_len];
 
     const ok = blk: {
@@ -243,7 +268,7 @@ fn onDevToolsMethodResult(
         break :blk true;
     };
 
-    emitPageCaptured(path, ok);
+    emitPageCaptured(capture_handle, path, ok);
 }
 
 fn ensureDevToolsObserver() void {

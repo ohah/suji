@@ -83,6 +83,11 @@ pub const win_gs = if (builtin.os.tag == .windows) struct {
     const CAPACITY: usize = 64;
     pub var slots: [CAPACITY]Slot = [_]Slot{.{}} ** CAPACITY;
     var next_id: i32 = 1;
+    // ⚠️ 알려진 이슈(Windows env 에서 수정 예정 — docs/audit-windows-followups.md):
+    //    slots 는 IPC 스레드 write ↔ pump 스레드(WM_HOTKEY) read 가 무락 공유라 데이터
+    //    레이스. Linux 의 slots_lock spinlock 패턴을 미러링하되, submitSync(pump 대기)
+    //    구간엔 락을 잡지 않도록 write 블록만 보호 + pump read 보호. 로컬(macOS)에서
+    //    comptime-prune 되어 검증 불가하므로 Windows 환경에서 적용·테스트.
 
     /// "Cmd+Shift+F8" 같은 accelerator → (modifiers, vkey). parse 실패 시 null.
     fn parse(accel: []const u8) ?struct { mods: u32, vk: u32 } {

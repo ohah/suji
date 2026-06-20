@@ -124,10 +124,14 @@ pub fn cefDeferResponse(kind: window_ipc.DeferKind, path: []const u8) bool {
 /// CDP 콜백 등에서 호출: (kind, path) 매칭 pending 에 응답 송신.
 /// `result_json` 은 응답 본문. EventBus emit 은 호출자가 별도로 진행 — 이 함수는
 /// **deferred Promise resolve 만** 담당. kind 매칭으로 print↔capture 교차충돌 방지.
-pub fn cefCompletePending(kind: window_ipc.DeferKind, path: []const u8, result_json: []const u8) bool {
+pub fn cefCompletePending(kind: window_ipc.DeferKind, browser_handle: u64, path: []const u8, result_json: []const u8) bool {
     for (&g_pending_responses) |*slot| {
         if (!slot.in_use) continue;
         if (slot.kind != kind) continue;
+        // browser_handle != 0 이면 창까지 매칭해 동일 path 의 cross-window capture 응답이
+        // 엉뚱한 렌더러로 라우팅되는 것을 막는다. PDF 는 글로벌 콜백이라 완료 시 handle 을
+        // 모르므로 0 을 전달 → (kind,path) 만 매칭(기존 동작 보존).
+        if (browser_handle != 0 and slot.browser_handle != browser_handle) continue;
         const stored = slot.path_buf[0..slot.path_len];
         if (!std.mem.eql(u8, stored, path)) continue;
         sendInvokeResponse(slot.browser, slot.frame, slot.seq_id, true, result_json);

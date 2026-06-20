@@ -9,6 +9,7 @@ const c = cef.c;
 const asPtr = cef.asPtr;
 const zeroCefStruct = cef.zeroCefStruct;
 const setCefString = cef.setCefString;
+const clearCefString = cef.clearCefString;
 const cefStringToUtf8 = cef.cefStringToUtf8;
 const initBaseRefCounted = cef.initBaseRefCounted;
 
@@ -150,6 +151,13 @@ pub fn sessionSetCookie(
     cookie.priority = c.CEF_COOKIE_PRIORITY_MEDIUM;
 
     const ret = set_fn(mgr, &cef_url, &cookie, null);
+    // set_cookie 가 cef_string_t 내용을 내부 복사하므로 우리가 할당한 UTF-16 버퍼를
+    // 모두 해제한다(호출마다 누수 방지 — proxy 와 대칭).
+    clearCefString(&cef_url);
+    clearCefString(&cookie.name);
+    clearCefString(&cookie.value);
+    clearCefString(&cookie.domain);
+    clearCefString(&cookie.path);
     return ret != 0;
 }
 
@@ -166,6 +174,8 @@ pub fn sessionRemoveCookies(url: []const u8, name: []const u8) bool {
     if (url.len > 0) setCefString(&cef_url, url);
     if (name.len > 0) setCefString(&cef_name, name);
     const ret = delete_fn(mgr, &cef_url, &cef_name, null);
+    clearCefString(&cef_url); // 할당된 UTF-16 해제(미설정 zeroed 는 dtor null → no-op)
+    clearCefString(&cef_name);
     return ret != 0;
 }
 
@@ -189,9 +199,16 @@ const CookieVisitor = extern struct {
 
 var g_cookie_visitors: [COOKIE_VISITOR_POOL_SIZE]CookieVisitor = undefined;
 var g_cookie_visitors_initialized: bool = false;
+var g_cookie_visitors_init_lock: std.atomic.Value(bool) = .init(false);
 var g_cookie_request_id_counter: std.atomic.Value(u64) = .init(0);
 
 fn ensureCookieVisitorPool() void {
+    // double-checked locking: UI 스레드와 백엔드 워커가 첫 cookie fetch 를 동시에 하면
+    // 비원자 bool 체크/세트가 풀을 이중 초기화(데이터 레이스)할 수 있다. io 없는 경로라
+    // atomic spinlock(cef_auth_handler g_lock 동형)으로 init 을 직렬화한다.
+    if (@atomicLoad(bool, &g_cookie_visitors_initialized, .acquire)) return;
+    while (g_cookie_visitors_init_lock.swap(true, .acquire)) std.atomic.spinLoopHint();
+    defer g_cookie_visitors_init_lock.store(false, .release);
     if (g_cookie_visitors_initialized) return;
     for (&g_cookie_visitors) |*v| {
         zeroCefStruct(c.cef_cookie_visitor_t, &v.base);
@@ -202,7 +219,7 @@ fn ensureCookieVisitorPool() void {
         v.request_id = 0;
         v.truncated = 0;
     }
-    g_cookie_visitors_initialized = true;
+    @atomicStore(bool, &g_cookie_visitors_initialized, true, .release);
 }
 
 fn cookieVisitorVisit(
@@ -307,6 +324,7 @@ pub fn sessionGetCookies(url: []const u8, include_http_only: bool) u64 {
             var cef_url: c.cef_string_t = .{};
             setCefString(&cef_url, url);
             ok = visit_url(mgr, &cef_url, if (include_http_only) 1 else 0, &v.base) != 0;
+            clearCefString(&cef_url); // 할당된 UTF-16 해제(누수 방지)
         }
     } else {
         if (mgr.visit_all_cookies) |visit_all| {
