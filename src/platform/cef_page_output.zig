@@ -183,10 +183,9 @@ pub fn capturePage(host: *c.cef_browser_host_t, devtools_reg: *?*c.cef_registrat
             break;
         }
     }
-    const sl = slot orelse {
-        emitPageCaptured(handle, path, false);
-        return;
-    };
+    // 슬롯 풀(16 동시 미완료 — 비현실) — 동기 emit 은 deferred 등록 *전* 이라 무효
+    // (위 주석 참조)라 발화하지 않는다(C.1 후속에서 vtable bool 로 근본 해결).
+    const sl = slot orelse return;
     const n = @min(path.len, sl.path_buf.len);
     @memcpy(sl.path_buf[0..n], path[0..n]);
     sl.path_len = n;

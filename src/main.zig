@@ -4339,7 +4339,11 @@ fn realPathWithinRoots(path: []const u8, roots: []const [:0]const u8) bool {
     for (roots) |root| {
         if (std.mem.eql(u8, root, "*")) return true;
         var rbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-        const canon_root = canonicalizePath(root, &rbuf) orelse root;
+        // root 는 canonicalizePath(부모 폴백)가 아니라 realPathInto 만 쓴다 — root 가 미존재면
+        // 부모로 폴백해 canon_root 가 한 단계 얕아져(예: allowedRoot=~/Documents/myapp 미생성 시
+        // ~/Documents 로) 허용 범위가 넓어진다. 존재하면 canonical, 미존재면 lexical 원본 유지
+        // (이때 canon_path 도 미존재 체인이라 fail-to-lexical 로 빠져 불일치 없음).
+        const canon_root = realPathInto(root, &rbuf) orelse root;
         if (util.pathHasRootBoundary(canon_path, canon_root)) return true;
     }
     return false;
