@@ -329,8 +329,10 @@ export fn suji_core_permission_check(
     if (std.mem.eql(u8, fam, "shell_open_external")) {
         // file:// 은 로컬 파일 열기 — shell.allowedPaths 가 설정된 경우 PATH 게이트로 통제
         // 하고, 미설정이면 URL 게이트로 폴백(file:// 는 URL glob 에 안 맞아 deny / 둘 다
-        // 미설정 시 legacy allow). 데스크톱 shellOpenExternalGate 동형 — 안 하면
-        // allowedExternalUrls 만 설정 시 file:// 가 URL 게이트만 거쳐 무제약 통과.
+        // 미설정 시 legacy allow). 안 하면 allowedExternalUrls 만 설정 시 file:// 가 URL
+        // 게이트만 거쳐 무제약 통과. 데스크톱 shellOpenExternalGate 와 게이트 의미 동형 —
+        // 단 embed 는 모바일(iOS/Android, POSIX) 전용 런타임이라 데스크톱의 Windows 드라이브
+        // (`file:///C:/` → `C:/`) 보정은 불요(런타임에 Windows host 없음).
         if (std.mem.startsWith(u8, val, "file://")) {
             if (pol.shell_paths) |paths| {
                 var rest = val["file://".len..];
