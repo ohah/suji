@@ -320,15 +320,19 @@ const EnabledRuntime = struct {
             self.allocator.destroy(listener);
             return 0;
         };
-        listener.id = on_fn(ch_ptr, luaEventCallback, listener);
-        if (listener.id == 0) {
+        const lid = on_fn(ch_ptr, luaEventCallback, listener);
+        if (lid == 0) {
             // 코어 등록 실패(id==0) — listener 를 보관하면 누수 + shutdown 시 off(0) 호출.
-            // 방금 append 한 항목과 registry ref 를 롤백한다.
+            // 방금 append 한 항목과 registry ref 를 롤백한다. destroy 후 listener.id 를
+            // 읽으면 UAF 이므로 id 는 로컬 lid 로만 쓰고 여기서 0 을 푸시·반환한다.
             _ = self.event_listeners.pop();
             c.luaL_unref(state, c.LUA_REGISTRYINDEX, ref);
             self.allocator.destroy(listener);
+            _ = c.lua_pushinteger(state, 0);
+            return 1;
         }
-        _ = c.lua_pushinteger(state, @intCast(listener.id));
+        listener.id = lid;
+        _ = c.lua_pushinteger(state, @intCast(lid));
         return 1;
     }
 

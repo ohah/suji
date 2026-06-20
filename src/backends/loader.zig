@@ -581,6 +581,12 @@ pub const BackendRegistry = struct {
                 const len = @min(channel.len, ch_buf.len - 1);
                 @memcpy(ch_buf[0..len], channel[0..len]);
                 ch_buf[len] = 0;
+                // 임베드 런타임(Node/Lua/Python) 핸들러가 중첩 coreInvoke 로 크로스콜할 때
+                // 권한이 실제 발신자(이 런타임) 기준으로 평가되게 current_invoker 갱신
+                // (dlopen 경로 동형).
+                const prev = current_invoker;
+                current_invoker = name;
+                defer current_invoker = prev;
                 if (rt.invoke(@ptrCast(&ch_buf), @ptrCast(request))) |p| {
                     const raw_body = std.mem.span(p);
                     const owned = dupeOwnedResponse(reg.allocator, raw_body);

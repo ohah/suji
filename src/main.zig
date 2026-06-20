@@ -4315,15 +4315,17 @@ fn realPathInto(path: []const u8, buf: []u8) ?[]const u8 {
     return buf[0..n];
 }
 
-/// realpath 정규화. 미존재(write 대상)면 부모 디렉토리를 정규화 후 basename 합산
-/// (파일은 아직 없어도 부모의 symlink 는 해소). 둘 다 불가면 null.
+/// realpath 정규화. 미존재(write 대상)면 **부모 디렉토리의 canonical** 을 반환한다
+/// (파일은 아직 없어도 부모 체인의 symlink 는 해소됨). base 는 traversal 없는 단일
+/// 컴포넌트(pathAllowedInRoots 가 `..` 거부)라, 부모가 root 안이면 parent/base 도 안이다.
+/// parent+base 를 join 하지 않으므로 rdir 이 max_path_bytes 를 가득 채워도 bufPrint
+/// overflow(→ null → realPathWithinRoots 가 fail-to-lexical 로 symlink 검사 우회)가 없다.
+/// 부모마저 미존재(깊은 non-existent 체인)면 null → fail-to-lexical(그 체인엔 악용할
+/// symlink 가 없으므로 안전).
 fn canonicalizePath(path: []const u8, buf: []u8) ?[]const u8 {
     if (realPathInto(path, buf)) |c| return c;
     const dir = std.fs.path.dirname(path) orelse return null;
-    const base = std.fs.path.basename(path);
-    var dbuf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const rdir = realPathInto(dir, &dbuf) orelse return null;
-    return std.fmt.bufPrint(buf, "{s}/{s}", .{ rdir, base }) catch null;
+    return realPathInto(dir, buf);
 }
 
 /// lexical 게이트를 통과한 경로를 realpath 로 정규화해 roots 를 재검사 — allowedRoot
@@ -4586,17 +4588,24 @@ fn shellUrlGate(response_buf: []u8, cmd: []const u8, url: []const u8) ?[]const u
     if (util.urlAllowedInList(url, list)) return null;
     return coreError(response_buf, cmd, "forbidden");
 }
-/// shell.openExternal 게이트 — `file://` 은 로컬 파일 열기이므로 URL allowlist 가
-/// 아니라 PATH allowlist(shell.allowedPaths)로 통제한다. allowedExternalUrls 미설정 시
-/// file:// 가 ungated 로 로컬 파일을 열던 갭 보완. percent-encoding(`%2e%2e` 등)은
-/// 게이트(리터럴)↔OS(decode) 비대칭을 만들어 보수적으로 거부한다.
+/// shell.openExternal 게이트 — `file://` 은 로컬 파일 열기다. **shell.allowedPaths 가
+/// 설정된 경우에만** PATH allowlist 로 통제하고, 미설정이면 URL 게이트로 폴백한다.
+/// 폴백을 안 하면 allowedExternalUrls 만 설정한 사용자에게 file:// 가 path 게이트의 opt-in
+/// legacy-allow(allowedPaths 미설정=허용)로 새는 보안 회귀가 난다 — URL 게이트는 file://
+/// 가 URL glob 에 안 맞아 deny(allowedExternalUrls 설정 시) / legacy allow(둘 다 미설정).
+/// percent-encoding(`%2e%2e` 등)은 게이트(리터럴)↔OS(decode) 비대칭이라 보수적으로 거부.
 fn shellOpenExternalGate(response_buf: []u8, url: []const u8) ?[]const u8 {
     const prefix = "file://";
-    if (std.mem.startsWith(u8, url, prefix)) {
+    const path_gated = if (g_config) |cfg| cfg.shell.allowed_paths != null else false;
+    if (path_gated and std.mem.startsWith(u8, url, prefix)) {
         var rest = url[prefix.len..];
         if (rest.len > 0 and rest[0] != '/') {
             // file://host/path — host 부분 스킵
             rest = if (std.mem.indexOfScalar(u8, rest, '/')) |s| rest[s..] else "";
+        }
+        // Windows file:///C:/path → rest=/C:/path 의 선행 '/' 제거(드라이브 경로 복원).
+        if (builtin.os.tag == .windows and rest.len >= 3 and rest[0] == '/' and rest[2] == ':') {
+            rest = rest[1..];
         }
         if (std.mem.indexOfScalar(u8, rest, '%') != null) {
             return coreError(response_buf, "shell_open_external", "forbidden");
